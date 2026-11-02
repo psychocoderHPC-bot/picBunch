@@ -37,18 +37,30 @@
             kernel sampling rule, CPU cost model. CPU only, no GPU.},
 }
 
-@misc{F4,
-  title  = {The h$^{3}$ scaling defect, before and after the fix (F4)},
-  author = {F4 worker},
+@misc{SL1,
+  title  = {Mid-bunch 2-D slice figures, gamma 10 (SL1)},
+  author = {SL1 worker},
   year   = {2026},
-  note   = {Run pr24-20261102. F4/ directory. Per-h series in
-            f4\_per\_spacing\_after.csv and f4\_per\_spacing\_before.csv,
-            worst per-component relative error against indfield.py at fixed
-            physical separation, aspect 1 and 4, gamma 1, 10, 100,
-            rosi\_v100. Refine gate: after 9.13e-4 (pass), before 2.48e-1
-            (fail). At h=1 the pre- and post-fix validate files are
-            byte-identical (sha256 b6600ec0...). See F4/COMMANDS.txt.},
+  note   = {Run pr24-20261102. SL1/RESULTS.md, figs/SL1\_field\_error\_xy\_midz.pdf,
+             figs/SL1\_field\_error\_zy\_midx.pdf, data/slices\_g10.npz,
+             data/plane\_stats.csv. picBunch v0.1.5 (commit 5f1981e2) against the
+             independent exact TSC driver (branch experimental/neuralbunch-hang,
+             HEAD e79ddb389, tol 1e-4, driver max\_error 1.16e-3, 4664 of 98M pairs
+             not converged). N=1000, 32x32x16, cell 2e-7 m, rosi\_v100. Planes
+             x-y at z=1.60 um, z-y at x=3.20 um.},
 }
+
+@misc{SL2,
+  title  = {Mid-bunch 2-D slice figures, stationary gamma 1 (SL2)},
+  author = {SL2 worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. SL2/RESULTS.md, figs/SL2\_field\_error\_xy\_midz.pdf,
+             figs/SL2\_field\_error\_zy\_midx.pdf, data/slices\_g1.npz,
+             data/plane\_stats.csv. Same geometry and reference as SL1 (driver
+             max\_error 9.075e-4, 14 not converged). B identically zero;
+             electric components only.},
+}
+
 
 @misc{W7B,
   title  = {picBunch checkpoint acceptance on PIConGPU PR 24 (W7b)},
@@ -80,18 +92,6 @@
             bitwise equal to the source. Open-boundary restart
             (--periodic 0 0 1) exits 0, initialization 3.986 s. Periodic
             case: all six components bitwise, 0 ulp.},
-}
-
-@misc{V013,
-  title  = {picBunch v0.1.3 defaults-only LWFA checkpoint acceptance},
-  author = {PW worker},
-  year   = {2026},
-  note   = {Run pr24-20261102. Defaults-only restart on the real LWFA
-            checkpoint at tag v0.1.3
-            (da3cd4239926f5da31b5794a36f8184e0b3164da), only restart-step and
-            unit flags. 64x128x64 grid and origin 0 from the mesh. PIConGPU
-            --periodic 0 0 1, exit 0, initialization 4.303 s. Validation-only
-            solver=None: all six components bitwise, max ULP 0.},
 }
 
 @misc{indfield,
@@ -174,9 +174,20 @@
   author = {SB1 worker},
   year   = {2026},
   note   = {SB1/RESULTS.md and PF/data/coulomb.csv.
-            u = 0, one particle at a node, far nodes at d = 8, 16, 24, 32,
-            six axis directions. Worst relative error 4.88e-14
-            (max absolute 2.28e-25). Threshold 1e-12: PASS.},
+             u = 0, one particle at a node, far nodes at d = 8, 16, 24, 32,
+             six axis directions. Worst relative error 4.88e-14
+             (max absolute 2.28e-25). Threshold 1e-12: PASS.},
+}
+
+@misc{F4,
+  title  = {Per-h measurement series of the h$^{3}$ read-out scale (F4)},
+  author = {F4 worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. F4/ directory. Per-h worst per-component
+             relative error against indfield.py at fixed physical separation,
+             aspect 1 and 4, gamma 1, 10, 100, rosi\_v100; per-h runs at fixed
+             physical separation, not a scale-invariance demonstration.
+             See F4/COMMANDS.txt.},
 }
 
 @misc{W7t,
@@ -211,9 +222,11 @@
   author = {Orchestrator},
   year   = {2026},
   note   = {Run pr24-20261102. DECISIONS.md, D15.
-            psychocoderHPC-bot/picongpu PR \#25 (draft) adds restart metadata
-            validation, unitSI conversion, optional PML slabs, and a dtype
-            contract.},
+            psychocoderHPC-bot/picongpu PR \#25 (draft), base
+            issue-alpaka3-migration at 83e6d10e, head bced321c.
+            Restart metadata validation and unitSI conversion, optional PML
+            slabs, strict idProvider checks, explicit dtype contract;
+            verified by real restarts including a factor-2 unitSI case.},
 }
 
 @misc{D3,

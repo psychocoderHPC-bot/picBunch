@@ -9,9 +9,8 @@ restart transport. Neither is a truth comparison.
 
 The reference is the TSC-convolved field (Section~\ref{sec:accuracy}), produced
 by the same header-only kernel PIConGPU calls with
-\texttt{fieldInitializer=referenceOnly} \citep{W7t}. The measured binary is
-\texttt{339ca7ad}; its field path is unchanged through the shipped v0.1.3
-(\texttt{da3cd423}), and \texttt{ctest} passes 10/10 at that measured commit
+\texttt{fieldInitializer=referenceOnly} \citep{W7t}. picBunch is at
+\texttt{339ca7ad} (\texttt{experimental/mvp}); \texttt{ctest} passes 10/10
 \citep{W7r}. Both sides use identical Yee offsets, grid, and origin; the
 reference staggered point maps to a picBunch node by index with zero snap
 deviation \citep{W7r}.
@@ -88,14 +87,6 @@ differences against a genuine PIConGPU checkpoint are non-blocking metadata
 Field arrival is bitwise. A validation-only build with the field solver set to
 \texttt{None} loads the checkpoint and writes step 1; all six components are
 bitwise-equal, max ULP $0$ \citep{W7B}.
-
-The shipped v0.1.3 defaults were also checked on the real LWFA checkpoint with
-only the restart-step and unit flags: picBunch took the $64\times128\times64$
-extent and the origin $0$ from the mesh, and PIConGPU restarted the result with
-\texttt{--periodic 0 0 1}, exit $0$, initialization time $4.303$\,s. In a
-validation-only build all six components arrived bitwise equal, max ULP $0$
-\citep{V013}. This is a solver=\texttt{None} round-trip: it checks transport,
-geometry, and units, not the field solver.
 
 \subsection{PML passthrough, the LWFA open-boundary limit, and the restart fixes}
 

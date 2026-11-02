@@ -39,7 +39,7 @@ is built once, unnormalized, and reused for all thirteen transforms: one
 forward for $\rho$, six forwards for the kernels, and six inverse
 transformations \citep{S1-spec}. The unnormalized round trip is scaled by
 $M^3$; the code divides by $h^3 M^3$ in the read-out
-\citep{S1-spec,F4}.
+\citep{S1-spec}.
 
 \paragraph{Padding.}
 The grid must be zero-padded to $\mathrm{pad}\ge 2$. With $\mathrm{pad}=1$ the
@@ -59,12 +59,11 @@ Hermitian-paired, not real \citep{N1b}. The R2C/C2R path matches the C2C path
 to $1.665\times10^{-16}$ over all six components \citep{N1b}.
 
 \paragraph{The $h^3$ factor.}
-The delivered mesh applied only the $1/M^3$ scale, which equals the correct
-value only at $h=1$. For general $h$ the field must be multiplied by $h^3$
-\citep{S1-spec}. Missing it leaves the field $1/h^3$ too large: at $h=1/2$ by
-a factor of $8$, at $h=1/4$ by a factor of $64$ \citep{S1-spec,F4}.
-Section~\ref{sec:accuracy} gives the measured per-$h$ series and the
-refinement gate \citep{F4}.
+The sampled convolution evaluates the continuum integral of
+Eq.~\eqref{eq:Fc} by a Riemann sum whose nodes are spaced $h$ cells apart, so
+each sample covers a physical volume $h^3$ (in cell units); the read-out
+therefore applies the factor
+$h_x h_y h_z/(M_x M_y M_z)$ \citep{S1-spec}.
 
 \subsection{Read-out}
 \label{sec:readout}
