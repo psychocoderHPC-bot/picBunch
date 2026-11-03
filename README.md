@@ -13,6 +13,12 @@ single shared velocity; an input with a momentum spread exits non-zero. `--toler
 the only accuracy knob. The physics validation gates, the near-source limitation and their
 provenance are recorded in [docs/algorithm.md](docs/algorithm.md).
 
+## Documentation
+
+- **Paper:** [docs/paper/paper.pdf](docs/paper/paper.pdf) covers the method,
+  measured cost and accuracy, and PIConGPU checkpoint cross-validation at
+  v0.1.3.
+
 ## Layout
 
 ```
@@ -171,7 +177,8 @@ records from the input instead of recomputing them. See
 - **hal, Radeon RX 7900 XTX, gfx1100:** 10/10 passed at
   `339ca7ad3903249ebf3859f5e106d63db4dc3df5` on 2026-11-03. The two newest tests
   (`picBunch.ScalarRecordSample` and `picBunch.IoScalarRecord`) were added in `bed4344`;
-  they have run on rosi only, so the HIP result is 10/10, not 12/12, at the final commit.
+  they have run on rosi only, so the HIP result is 10/10, not 12/12, at that commit.
+  The v0.1.1 to v0.1.3 geometry changes have not been re-run on HIP.
 
 The 12 rosi entries are `smoke`, `Deposit`, `Kernel`, `Fft`, `Io`, `Physics`, `Padding`,
 `Restart`, `OpenPMDVerify`, `PicOnGPUVerify`, `ScalarRecordSample`, `IoScalarRecord`.
@@ -228,7 +235,8 @@ and 4. The only geometric knob is the physical distance measured in cells.
 The reference is the same exact TSC-convolved quadrature as PIConGPU
 `fieldInitializer=referenceOnly`, evaluated by the standalone driver in
 `~/pr24/b1-20261102`. picBunch was run at `339ca7ad3903249ebf3859f5e106d63db4dc3df5`
-(the field path is unchanged after that commit), tolerance `1e-3`, on `rosi_v100`.
+(the field path is unchanged through v0.1.3, `da3cd4239926f5da31b5794a36f8184e0b3164da`),
+tolerance `1e-3`, on `rosi_v100`.
 The metric here is the absolute-normalised `|ref-mesh|/(1+max(|ref|,|mesh|))`; it is
 not the per-component relative error of the Accuracy section and is not a crossover
 claim.

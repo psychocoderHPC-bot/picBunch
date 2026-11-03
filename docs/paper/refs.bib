@@ -1,0 +1,255 @@
+% Internal measurement artifacts from run pr24-20261102.
+% Cited as internal records with their identifiers, not as journal articles.
+
+@misc{S1-spec,
+  title  = {picBunch portable algorithm specification (S1)},
+  author = {S1 extraction worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. S1-algorithm-spec.md.
+            Exact field definition and discrete recipe with path:line provenance.
+            meshconv.cu on branch fee89ed75; ExactShapeField.hpp on 2baa2566.},
+}
+
+@misc{SB1,
+  title  = {Measured scaling of the picBunch field pipeline (SB1)},
+  author = {SB1 worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. SB1/RESULTS.md.
+            V100 timing matrix, Coulomb limit, distance sweep.
+            Commit dc69c16a21f1dc330746365e3409560cb2399ed9.},
+}
+
+@misc{N2b,
+  title  = {picBunch mesh path vs the TSC-convolved continuum and the point field (N2b)},
+  author = {N2b worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. N2b/RESULTS.md.
+            Reference-separated accuracy, scale invariance, crossover table.
+            Arbiter: indfield.py sha256 a135598041a3dbe134667585631ea53fc6bdb7cf7a84419b5a8d762202599519.},
+}
+
+@misc{N1b,
+  title  = {picBunch mesh convolution measurements, CPU (N1b)},
+  author = {N1b worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. N1b/RESULTS.md.
+            Wraparound control, R2C/C2R vs C2C, padding vs distance,
+            kernel sampling rule, CPU cost model. CPU only, no GPU.},
+}
+
+@misc{F4,
+  title  = {The h$^{3}$ scaling defect, before and after the fix (F4)},
+  author = {F4 worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. F4/ directory. Per-h series in
+            f4\_per\_spacing\_after.csv and f4\_per\_spacing\_before.csv,
+            worst per-component relative error against indfield.py at fixed
+            physical separation, aspect 1 and 4, gamma 1, 10, 100,
+            rosi\_v100. Refine gate: after 9.13e-4 (pass), before 2.48e-1
+            (fail). At h=1 the pre- and post-fix validate files are
+            byte-identical (sha256 b6600ec0...). See F4/COMMANDS.txt.},
+}
+
+@misc{W7B,
+  title  = {picBunch checkpoint acceptance on PIConGPU PR 24 (W7b)},
+  author = {W7b worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. W7B/RESULTS.md.
+            Early acceptance state: 16-particle periodic deck restarts with
+            exit 0 and all six components bitwise (0 ulp) through a
+            solver=None validation load; initialization 1.8 s vs the
+            ~116 s neuralBunch path. The larger LWFA deck (64x128x64, 96
+            Convolutional PML records) did not restart with open boundaries
+            at this commit because picBunch did not yet write the PML records
+            (Key 'Convolutional PML E xneg' does not exist); periodic
+            restart of the same checkpoint exited 0.
+            picBunch fix commit 0c9427dee82e01c832c42a8358033b701386f37e.},
+}
+
+@misc{W7fix,
+  title  = {picBunch checkpoint restart with PML passthrough (fix run)},
+  author = {W7 fix-run worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. Later fix run on branch experimental/mvp at
+            bed4344c45c46a5ec77529b652631d75f7d5bb5b (parent of the v0.1
+            tag e702002), with the PML-copy writer (W3f). Recorded in
+            docs/picongpu-restart.md of the W3f tree. 638,976 particles read
+            directly from the real LWFA checkpoint
+            (w7b-20261102/lwfa/gt-run/checkpoints/out 000002 h5); the writer
+            copies the eight Convolutional PML groups, 48 datasets, float32,
+            bitwise equal to the source. Open-boundary restart
+            (--periodic 0 0 1) exits 0, initialization 3.986 s. Periodic
+            case: all six components bitwise, 0 ulp.},
+}
+
+@misc{V013,
+  title  = {picBunch v0.1.3 defaults-only LWFA checkpoint acceptance},
+  author = {PW worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. Defaults-only restart on the real LWFA
+            checkpoint at tag v0.1.3
+            (da3cd4239926f5da31b5794a36f8184e0b3164da), only restart-step and
+            unit flags. 64x128x64 grid and origin 0 from the mesh. PIConGPU
+            --periodic 0 0 1, exit 0, initialization 4.303 s. Validation-only
+            solver=None: all six components bitwise, max ULP 0.},
+}
+
+@misc{indfield,
+  title  = {indfield.py: independent TSC-convolved continuum reference},
+  author = {pr24w53-ref},
+  year   = {2026},
+  note   = {sha256 a135598041a3dbe134667585631ea53fc6bdb7cf7a84419b5a8d762202599519.
+            Tensor Gauss-Legendre with TSC-knot split and singularity-cancelling power map.
+            The independent truth against which the mesh is validated.},
+}
+
+@misc{D10,
+  title  = {Decision D10: mesh path accuracy is scale-invariant in h at fixed distance-in-cells},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D10.
+            Kernel homogeneous of degree $-2$, TSC width equals node spacing.
+            Measured identical errors at h = 1, 1/2, 1/4, 1/8.},
+}
+
+@misc{D11,
+  title  = {Decision D11: v0.1 accuracy scope},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D11.
+            Not defensible: gamma <= 10 meets 1e-3.
+            Defensible: gamma <= 1 aspect 1; gamma <= 10 axial only;
+            gamma 100 axial only.},
+}
+
+@misc{D12,
+  title  = {Decision D12: SB1's gamma-10 floor was a reference artefact},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D12.
+            T-P = 1.48e-2; M-T = 2.6e-4.
+            All accuracy statements must name the reference.},
+}
+
+@misc{D4,
+  title  = {Decision D4: near-table route closed},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D4.
+            First real measurement: 1.9e-2 to 3.3e-1 on all six tables;
+            does not meet the 3e-4 target.},
+}
+
+@misc{D8,
+  title  = {Decision D8: gamma-100 outside-band 9.43e-2 is unresolved},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D8.
+            Pre-existing 9.43e-2 at 1.6 to 6 cells, gamma 100 axial,
+            outside the near box.},
+}
+
+@misc{D13,
+  title  = {Decision D13: cross-validation against PIConGPU does not show agreement at the reference floor},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D13.
+            3.66e-2 (gamma 1), 5.16e-1 (gamma 10 E/y) vs floor
+            1.19e-6 (E), 1.43e-6 (B).
+            No claim that picBunch agrees with PIConGPU.},
+}
+
+@misc{D14,
+  title  = {Decision D14: checkpoint acceptance is proven, including PML and scalar records},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D14.
+            638,976 particles; 48 PML bitwise; restart exit 0;
+            initialization 3.986 s; periodic case 0 ulp.
+            Limitation: PML copied from same input file.},
+}
+
+@misc{coulomb,
+  title  = {Coulomb-limit control (SB1)},
+  author = {SB1 worker},
+  year   = {2026},
+  note   = {SB1/RESULTS.md and PF/data/coulomb.csv.
+            u = 0, one particle at a node, far nodes at d = 8, 16, 24, 32,
+            six axis directions. Worst relative error 4.88e-14
+            (max absolute 2.28e-25). Threshold 1e-12: PASS.},
+}
+
+@misc{W7t,
+  title  = {Reference-quantity identification and particle-count scaling (W7t)},
+  author = {W7t worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. W7t/RESULTS.md (mirror of
+            /home/ubuntu/pr24/w7s-20261102/RESULTS.md).
+            The exact-quadrature reference is the TSC-convolved field, the same
+            quantity picBunch computes (exact\_field\_driver.cpp:123,127;
+            ReferenceKernel.hpp:625,131,142,281,428,522,596;
+            ExactShapeField.hpp:589,157,222,472).
+            N-count scaling: disagreement is per-source, not superposition;
+            B identically zero for the stationary bunch.},
+}
+
+@misc{W7r,
+  title  = {picBunch cross-validation against PIConGPU's exact field reference (W7/W7r)},
+  author = {W7r worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. W7r/RESULTS.md (re-verification of W7/RESULTS.md).
+            picBunch @ 339ca7ad3903249ebf3859f5e106d63db4dc3df5.
+            318 staggered points (64x64x32, cell 1e-7 m) and whole-field
+            (N=1000, 32x32x16, cell 2e-7 m). Groups are distance-from-centroid
+            (caveat D13). picBunch does not agree with the reference at the
+            reference floor (3.66e-2 gamma 1; 5.16e-1 gamma 10 E/y vs floor
+            1.19e-6 E / 1.43e-6 B).},
+}
+
+@misc{D15,
+  title  = {Decision D15: PIConGPU fixes PR \#25 (restart path)},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D15.
+            psychocoderHPC-bot/picongpu PR \#25 (draft) adds restart metadata
+            validation, unitSI conversion, optional PML slabs, and a dtype
+            contract.},
+}
+
+@misc{D3,
+  title  = {Decision D3: the near-band per-pair time is provisional; the near band is ~99\% of runtime},
+  author = {Orchestrator},
+  year   = {2026},
+  note   = {Run pr24-20261102. DECISIONS.md, D3.
+            21.8 ms/pair is harness-dependent and not an absolute; the robust
+            claim is the near band is ~99\% of runtime (1.17\% of pairs,
+            essentially all the time).},
+}
+
+@misc{W4b,
+  title  = {Independent validation of picBunch at the v0.1 pipeline tip (W4/W4b)},
+  author = {W4b worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. W4b/RESULTS.md (mirror of W4/).
+            picBunch at bfaa1e26 (experimental/mvp), rosi\_v100. ctest 8/8.
+            Accuracy: shipped CLI vs indfield.py order 12 refine 3, relative
+            per-component error per d = 2 to 32 cells, gamma 1 and 10, aspect
+            1 and 4, single and 3-particle cloud. Relative 3e-4 crossover:
+            d=12 (gamma 1 aspect 1), d=32 (gamma 1 aspect 4), none within 32
+            for gamma 10 (plateau 6e-3). Judge metric is absolute-dominated:
+            d=2 for every case. End-to-end timings with writer (20-cell box,
+            gamma 10, 3 repeats): 1e4 total 22.00 ms; 1e6 total 47.15 ms.
+            Determinism: md5 d3641d64, 15092736 bytes, bit-identical.
+            gridUnitSI applied twice: 1e-6 grid gives 1e-12 m cell, aborts
+            with max\_size exception. Fixed in v0.1.1 with an end-to-end test.},
+}
+
+@misc{DATA-PROV,
+  title  = {Figure data provenance (PF)},
+  author = {PF worker},
+  year   = {2026},
+  note   = {Run pr24-20261102. PF/DATA-PROVENANCE.md.
+            Maps each plotted quantity to its measurement file and column;
+            F\_e is hand-transcribed from N1b section 1a; F\_f carries two
+            documented anchors, not a measured per-h series.},
+}

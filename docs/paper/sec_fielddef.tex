@@ -1,0 +1,73 @@
+\section{Field definition}
+\label{sec:fielddef}
+
+The target quantity is a single linear integral. For a bunch of source charges
+at positions $\mathbf{x}_p$ with signed charge $q_p$, and a shared
+dimensionless velocity $\mathbf{u}=\mathbf{p}/(mc)$, the field at a staggered
+observation point $\mathbf{x}_{\mathrm{obs}}$ is the TSC-convolved
+uniformly-moving point-charge field
+\begin{equation}
+\label{eq:Fc}
+F_c(\mathbf{x}_{\mathrm{obs}})
+=
+\sum_p q_p \int_{[-1.5,1.5]^3}
+W(\mathbf{s})\,
+K_{\mathrm{point},c}\!\bigl(\mathbf{x}_{\mathrm{obs}}
+- \mathbf{x}_p - \mathbf{s}\,\mathbf{cell},\ \mathbf{u}\bigr)
+\,d\mathbf{s}^3 ,
+\end{equation}
+where $W(\mathbf{s})=W_x(s_x)W_y(s_y)W_z(s_z)$ is the separable TSC shape
+(Section~\ref{sec:method}) and $K_{\mathrm{point}}$ is the per-unit-charge
+field of one uniformly moving charge. Because the integral is linear in the
+source charge, the sum over particles is exact; the whole design is a fast
+evaluation of this one integral.
+
+\subsection{The moving point kernel}
+
+The kernel is the present-time Li\'enard--Wiechert field of a uniformly moving
+charge \citep{S1-spec}. For constant velocity the field points to the
+instantaneous position. In the lab frame, with
+$\mathbf{R}=\mathbf{x}_{\mathrm{obs}}-\mathbf{x}_{\mathrm{src}}$,
+\begin{align}
+\gamma &= \sqrt{1+|\mathbf{u}|^2}, &
+\boldsymbol{\beta} &= \mathbf{u}/\gamma, &
+\mathrm{invg}^2 &= 1/(1+|\mathbf{u}|^2) = 1-\beta^2,\\
+D &= |\mathbf{R}|^2\,\mathrm{invg}^2 + (\mathbf{R}\!\cdot\!\boldsymbol{\beta})^2,\\
+\mathbf{E}_n &= \mathrm{invg}^2\,\mathbf{R}/D^{3/2}, &
+\mathbf{B}_n &= \boldsymbol{\beta}\times \mathbf{E}_n .
+\end{align}
+For $\mathbf{u}=\mathbf{0}$ exactly, $\mathbf{E}_n=\mathbf{R}/|\mathbf{R}|^3$
+and $\mathbf{B}_n=\mathbf{0}$; no $\varepsilon$ is added to any denominator.
+The kernel is homogeneous of degree $-2$ in $\mathbf{R}$. A bunch with a
+velocity spread needs one convolution per velocity class; the validated scope
+is a single shared $\mathbf{u}$.
+
+\subsection{The unit chain}
+
+The reference normalizes the per-unit-charge field as
+$E_n = 4\pi\varepsilon_0\,E/q$ and $B_n = 4\pi\varepsilon_0 c\,B/q$, so
+$B_n=\boldsymbol{\beta}\times E_n$ \citep{S1-spec}. The mesh produces the
+per-unit-charge field with $\mathbf{R}$ in metres, already summed over the
+deposited charge $q_p$ in coulombs. The chain to physical SI is
+\begin{equation}
+E_{\mathrm{SI}}[c] = F_c[c]\,h^3/(4\pi\varepsilon_0),\quad
+B_{\mathrm{SI}}[c] = F_c[c]\,h^3/(4\pi\varepsilon_0 c),
+\end{equation}
+with $\varepsilon_0=8.8541878128\times10^{-12}$ F/m and
+$c=299792458$ m/s. The factor $h^3$ (Section~\ref{sec:method}) is missing from
+the original delivered mesh and is the single most important porting fix
+\citep{S1-spec,F4}.
+
+\subsection{The TSC shape}
+
+$W$ is the quadratic B-spline, with argument in cell units, support
+$[-1.5,1.5]$ per axis, and unit integral per axis
+\citep{S1-spec}:
+\begin{equation}
+W(x) =
+\begin{cases}
+3/4 - x^2 & |x|<1/2,\\
+\frac{1}{2}(3/2-|x|)^2 & 1/2\le |x|<3/2,\\
+0 & \text{otherwise.}
+\end{cases}
+\end{equation}

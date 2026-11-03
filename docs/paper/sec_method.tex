@@ -1,0 +1,100 @@
+\section{Method}
+\label{sec:method}
+
+The mesh evaluates Eq.~\eqref{eq:Fc} by a discrete deposit, a sampled kernel,
+and a free-space FFT convolution. Let $N$ be the bunch-box nodes per axis,
+$M=\mathrm{pad}\cdot N$ the padded FFT grid per axis, $h$ the node spacing in
+cell units (node $i$ sits at $i h\,\mathbf{cell}$), and $\mathbf{cell}=(dx,dy,dz)$.
+All precision-critical work is in double \citep{SB1,S1-spec}.
+
+\subsection{Deposit}
+
+Each source charge is deposited onto the zero-padded $M^3$ grid with the TSC
+shape, at the cell-unit spline argument $W((\mathbf{x}_i-\mathbf{x}_p)/\mathbf{cell})$,
+which is correct for any $h$ \citep{S1-spec}. The result
+$\rho[i]=\sum_p q_p\,W(i h-\mathbf{p}_{\mathrm{cell}})$ lives in the $N^3$
+sub-box of the padded grid, indexed with $M$-stride; the rest is zero. A
+fixed reduction order is required for MPI-layout invariance; the single-rank
+path uses \texttt{atomicAdd} \citep{S1-spec}.
+
+\subsection{Kernel sampling}
+
+The six TSC-convolved kernels are sampled on the same padded $M^3$ grid, one
+thread per FFT point, with the centered (negative-wrapped) index
+$d_a = a$ for $a<M/2$ else $a-M$. For each of the six components $c$, the
+kernel is evaluated at the physical separation
+\begin{equation}
+\mathbf{R} = (d_a\,h + \delta_{c,a})\,\mathbf{cell},
+\end{equation}
+where $\delta_c$ is the Yee staggered offset (Section~\ref{sec:readout}). The
+kernel is therefore sampled at the same node spacing $h$ as the deposit, with
+the shape one grid cell of its own axis wide
+\citep{N2b}. Non-finite samples are set to zero to avoid $0\times\infty$ in
+the FFT \citep{S1-spec}.
+
+\subsection{FFT convolution and normalization}
+
+The convolution is a free-space, zero-padded FFT convolution. The vendor plan
+is built once, unnormalized, and reused for all thirteen transforms: one
+forward for $\rho$, six forwards for the kernels, and six inverse
+transformations \citep{S1-spec}. The unnormalized round trip is scaled by
+$M^3$; the code divides by $h^3 M^3$ in the read-out
+\citep{S1-spec,F4}.
+
+\paragraph{Padding.}
+The grid must be zero-padded to $\mathrm{pad}\ge 2$. With $\mathrm{pad}=1$ the
+cyclic convolution wraps and a $9.275\times10^{-3}$ periodic-image artefact
+appears for a single stationary particle in a $20^3$ box
+\citep{N1b}. At $\mathrm{pad}=2$ the result agrees with $\mathrm{pad}=3$ to
+$8.4\times10^{-16}$ and with a direct non-cyclic sum to $2.8\times10^{-17}$
+\citep{N1b,SB1}. At $\mathrm{pad}\ge2$ the error is at machine precision
+($\le 10^{-15}$) \citep{N1b}. The artefact grows for beamed sources: at
+$\mathrm{pad}=1$ the $100$-source $\gamma=10$ cloud shows a
+$7.5\times10^{-1}$ worst-component error \citep{N1b}.
+
+\paragraph{DC and Nyquist.}
+For the R2C/C2R half-spectra the DC bin and the seven self-conjugate even
+Nyquist corners must be exactly real; the intermediate Nyquist planes are
+Hermitian-paired, not real \citep{N1b}. The R2C/C2R path matches the C2C path
+to $1.665\times10^{-16}$ over all six components \citep{N1b}.
+
+\paragraph{The $h^3$ factor.}
+The delivered mesh applied only the $1/M^3$ scale, which equals the correct
+value only at $h=1$. For general $h$ the field must be multiplied by $h^3$
+\citep{S1-spec}. Missing it leaves the field $1/h^3$ too large: at $h=1/2$ by
+a factor of $8$, at $h=1/4$ by a factor of $64$ \citep{S1-spec,F4}.
+Section~\ref{sec:accuracy} gives the measured per-$h$ series and the
+refinement gate \citep{F4}.
+
+\subsection{Read-out}
+\label{sec:readout}
+
+The six field components live at the staggered Yee positions, in cell units
+\citep{S1-spec}:
+\begin{equation}
+\begin{array}{llllll}
+E_x & (0.5,0,0) & E_y & (0,0.5,0) & E_z & (0,0,0.5)\\
+B_x & (0,0.5,0.5) & B_y & (0.5,0,0.5) & B_z & (0.5,0.5,0).
+\end{array}
+\end{equation}
+The kernel is sampled at these offsets, so the convolution is already
+evaluated on the Yee grid. The read-out compacts the $M^3$ FFT result to the
+$N^3$ bunch box and applies the $h^3/M^3$ scale and the SI factor
+(Section~\ref{sec:fielddef}). No further interpolation is needed
+\citep{S1-spec}.
+
+\subsection{Scale invariance}
+\label{sec:scaleinvariance}
+
+The kernel is homogeneous of degree $-2$, the deposit shape width equals the
+node spacing, and the Yee offsets are in cell units, so every relative metric
+depends only on $r/h$, the distance in cell units \citep{N2b}. At a fixed
+distance in cells the error is therefore independent of $h$: refining $h$
+with the distance held in cells changes nothing, and the measured relative
+errors at $h=1,\,1/2,\,1/4,\,1/8$ are identical to machine precision for
+$\gamma\in\{1,10,100\}$, aspect 1 and 4 \citep{N2b}. At a fixed physical
+distance $r$, refining $h$ increases $r/h$ and does reduce the error, at the
+cost of $M^{3}$ FFT work in $1/h$. The only knob is $r/h$: reaching $10^{-3}$
+perpendicular at $\gamma=10$ for $r=8$ cells needs $h\approx1/29$,
+$2.4\times10^{4}$ times the $M^{3}$ nodes of the $h=1$ run
+\citep{N2b,D10}.
