@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,15 @@ namespace picBunch
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
+        /*! Explicit output-grid overrides (metres / node counts).
+
+         * Unset values keep the automatic derivation from the bunch bounding box.
+         * When set they are used verbatim: an explicit ``--grid`` or ``--origin``
+         * never blends with the derived value.  Grid node counts must be even and
+         * positive so the R2C transform keeps its even last extent.
+         */
+        std::optional<std::array<std::size_t, 3>> gridSize;
+        std::optional<std::array<double, 3>> gridOrigin;
     };
 
     //! openPMD record names and component order: E then B.

@@ -49,4 +49,68 @@ namespace picBunch
         std::string const& fileName,
         FieldWriteOptions const& options = FieldWriteOptions{});
 
+
+    /** Configuration of a PIConGPU checkpoint-restart writer.
+
+     * Everything physical is explicit; the writer never infers a unit.  The
+     * target layout is the one PIConGPU's ``RestartFieldLoader`` consumes: an
+     * HDF5 openPMD 1.1 file-based iteration, float32 fields in PIConGPU internal
+     * units, and the input particle species copied with its attributes intact.
+     */
+    struct PicOnGPUWriteOptions
+    {
+        //! Checkpoint step; also the iteration index and the file name suffix.
+        std::uint64_t step = 0;
+        //! Directory that receives ``<prefix>_<step:06d>.h5`` and ``checkpoints.txt``.
+        std::string directory = "checkpoints";
+        //! File prefix; the iterationFormat is ``<prefix>_%06T``.
+        std::string prefix = "checkpoint";
+        //! openPMD series or concrete HDF5 file the particles are copied from.
+        std::string inputFile;
+        //! Iteration index used to locate the source particle group.
+        std::uint64_t inputIteration = 0;
+        /*! Particle species group name.  Empty selects the only species of the
+         * input iteration; multiple species then require an explicit name.
+         */
+        std::string species;
+        double time = 0.0;
+        double timeUnitSI = 1.0;
+        //! Stored ``dt`` attribute in units of ``timeUnitSI`` (not converted).
+        double dt = 0.0;
+        //! PIConGPU length unit in metres (``sim.unit.length()``).
+        double unitLength = 1.0;
+        //! PIConGPU electric-field unit in V/m (``sim.unit.eField()``).
+        double unitEField = 1.0;
+        //! PIConGPU magnetic-field unit in T (``sim.unit.bField()``).
+        double unitBField = 1.0;
+        //! Value stored in ``fields/picongpu_idProvider/nextId``.
+        std::uint64_t nextId = 0;
+    };
+
+    /** Write one PIConGPU checkpoint-restart iteration.
+
+     * Emitted tree (all verified against a real PIConGPU checkpoint):
+     *  - ``<directory>/<prefix>_<step:06d>.h5`` and ``<directory>/checkpoints.txt``;
+     *  - series attributes ``openPMD``, ``iterationEncoding=fileBased``,
+     *    ``iterationFormat=<prefix>_%06T``, ``meshesPath=fields/`` and
+     *    ``picongpuIOVersionMajor=5`` / ``Minor=0``;
+     *  - ``data/<step>/{iteration,sim_slides,dt,time,timeUnitSI}``;
+     *  - ``fields/E/{x,y,z}`` and ``fields/B/{x,y,z}`` as float32 with extent
+     *    ``(Nz,Ny,Nx)``, stored as ``field/unit`` in PIConGPU internal units;
+     *  - ``gridSpacing*gridUnitSI`` recover metres, with both written in the
+     *    ``z,y,x`` storage order;
+     *  - ``fields/picongpu_idProvider/{startId,nextId}`` uint64;
+     *  - ``particles/<species>`` copied byte-for-byte from the input group,
+     *    including ``particlePatches`` when present.
+
+     * The particle copy is a raw HDF5 object copy, so record attributes and
+     * datasets survive unchanged.  Missing patch metadata is reported through a
+     * ``picBunchRestartWarning`` root attribute and a message on ``stderr``;
+     * PIConGPU may then reject the restart.
+
+     * @throws std::runtime_error or std::invalid_argument on missing units,
+     *         a missing input particle group, or an HDF5 failure.
+     */
+    void writePicOnGPUCheckpoint(Field const& field, PicOnGPUWriteOptions const& options);
+
 } // namespace picBunch

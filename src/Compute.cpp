@@ -251,6 +251,31 @@ namespace picBunch
         }
     } // namespace
 
+    std::array<double, 3> resolveCellSize(
+        std::optional<std::array<double, 3>> const& explicitCellSize,
+        std::optional<std::array<double, 3>> const& meshCellSize)
+    {
+        auto validate = [](std::array<double, 3> const& value, char const* source) {
+            for(double c : value)
+                if(!(c > 0.0) || !std::isfinite(c))
+                    throw std::invalid_argument(
+                        std::string("resolveCellSize: ") + source + " cell size must be finite and positive");
+        };
+        if(explicitCellSize)
+        {
+            validate(*explicitCellSize, "--cell-size");
+            return *explicitCellSize;
+        }
+        if(meshCellSize)
+        {
+            validate(*meshCellSize, "mesh-derived");
+            return *meshCellSize;
+        }
+        throw std::runtime_error(
+            "no cell size available: the input has no usable mesh geometry and --cell-size was not given; "
+            "pass --cell-size <dx>[,<dy>,<dz>] in metres");
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
@@ -285,6 +310,31 @@ namespace picBunch
             grid.n[a] = nodes;
             grid.spacing[a] = spacing;
             grid.origin[a] = low;
+        }
+        // Explicit CLI geometry overrides the derivation from the bunch bounds.
+        // Values are used verbatim and never blended with the derived grid.
+        if(options.gridSize)
+        {
+            for(int a = 0; a < 3; ++a)
+            {
+                std::size_t const n = (*options.gridSize)[a];
+                if(n == 0u || n % 2u != 0u)
+                    throw std::invalid_argument(
+                        "makeGrid: --grid values must be even and positive; got "
+                        + std::to_string((*options.gridSize)[0]) + ","
+                        + std::to_string((*options.gridSize)[1]) + ","
+                        + std::to_string((*options.gridSize)[2]));
+                grid.n[a] = n;
+            }
+        }
+        if(options.gridOrigin)
+        {
+            for(int a = 0; a < 3; ++a)
+            {
+                if(!std::isfinite((*options.gridOrigin)[a]))
+                    throw std::invalid_argument("makeGrid: --origin values must be finite");
+                grid.origin[a] = (*options.gridOrigin)[a];
+            }
         }
         return grid;
     }

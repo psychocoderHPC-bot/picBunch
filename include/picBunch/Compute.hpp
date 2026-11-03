@@ -4,8 +4,22 @@
 
 #include "picBunch/Types.hpp"
 
+#include <array>
+#include <optional>
+
 namespace picBunch
 {
+    /** Resolve the physical cell size from an explicit command-line value and a mesh-derived value.
+
+     * An explicit value always wins over the mesh-derived one.  Both are in metres;
+     * nothing is inferred or rescaled.  Throws ``std::invalid_argument`` when the
+     * explicit value is not finite and positive, and ``std::runtime_error`` when
+     * neither source is available.
+     */
+    std::array<double, 3> resolveCellSize(
+        std::optional<std::array<double, 3>> const& explicitCellSize,
+        std::optional<std::array<double, 3>> const& meshCellSize);
+
     /** Derive the output grid that covers the bunch bounding box plus a shell margin.
      *
      * The node spacing is ``kRefinement * options.cellSize`` and ``n`` is rounded up

@@ -30,6 +30,8 @@ docs/               algorithm and validation notes
 | alpaka | `7b92361468d3280c260200198081ae7e98f0bc56` (reports 3.0.0) | fetched by CMake `FetchContent` |
 | alpakaVendor | `af24cc7b2bd125056e9889e270d3af7bdf972c6f` | fetched by CMake `FetchContent`; FFT via cuFFT/rocFFT/FFTW |
 | openPMD-api | system install | HDF5 backend required; configure fails without it |
+| HDF5 C API | system install | checkpoint writer; the parallel build matching openPMD is preferred |
+| MPI | system install | only when HDF5 is parallel, for the HDF5 headers |
 | FFTW 3 | system (`fftw3`, `fftw3f`) | host FFT backend |
 | GoogleTest | system first, `FetchContent` fallback | only when `PICBUNCH_BUILD_GTESTS=ON` |
 
@@ -61,8 +63,15 @@ Other presets: `hip-gfx1100`, `cpu-debug`. Every preset builds into
 picBunch --input <openPMD file/series> [--species <name|index>] \
          [--output <openPMD file>] [--input-iteration N] \
          [--output-iteration N] [--tolerance 1e-3] \
-         [--backend auto|cuda|hip|cpu]
+         [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
+         [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu]
 ```
+
+For a particle-only input without mesh metadata the grid must be given on the
+command line.  `--cell-size` (metres), `--grid` (even node counts) and
+`--origin` (metres) are explicit overrides; an explicit `--cell-size` always
+wins over the mesh-derived value, and the run fails with a clear message when
+neither source exists.  Nothing is assumed or rescaled.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the
 delivered free-space convolution: padding 2 is used for targets at or above the
@@ -78,10 +87,32 @@ exposed.
 physical cell size is taken from the input mesh (`E`) as
 `gridSpacing * gridUnitSI` when the input has a mesh with a positive
 `gridUnitSI`; a missing or non-positive `gridUnitSI` is an error. Without a
-readable mesh the tool falls back to 1 m and prints a notice. The tool prints
-the physical grid and a per-stage timing table, never the internal FFT padding
-or padded grid. Unsupported input (for example a momentum spread in v0.1) exits
-non-zero with a message.
+readable mesh, `--cell-size` is required. The tool prints the physical grid and
+a per-stage timing table, never the internal FFT padding or padded grid.
+Unsupported input (for example a momentum spread in v0.1) exits non-zero with a
+message.
+
+### PIConGPU checkpoint output
+
+`--restart-format picongpu` writes a checkpoint that PIConGPU's
+`RestartFieldLoader` can consume instead of the standard SI openPMD series:
+
+```bash
+picBunch --input bunch_%T.h5 --species electrons \
+         --restart-format picongpu --output-dir checkpoints \
+         --picongpu-step 0 --picongpu-unit-length 5.7735e-8 \
+         --picongpu-unit-e 8.850761452125e12 --picongpu-unit-b 29522.962355927582
+```
+
+The writer emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`.
+Fields are float32 with extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU
+internal units; `gridSpacing` is in internal length units and
+`gridSpacing*gridUnitSI` recovers metres. All three unit factors are mandatory;
+a missing one is an error, never a default. The input particle species is
+copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
+If the input has no patch metadata the writer warns and records
+`picBunchRestartWarning`; PIConGPU may then reject the restart. The actual
+PIConGPU restart is not exercised by this repository's tests.
 
 Example:
 
@@ -97,7 +128,7 @@ and the openPMD version with its HDF5 status. It is registered with CTest as
 `picBunch.smoke`.
 
 The GoogleTest suite is built when `PICBUNCH_BUILD_GTESTS=ON` (the default).
-CTest registers six groups plus an independent HDF5 consumer check:
+CTest registers seven groups plus two independent HDF5 consumer checks:
 
 | test | what it proves |
 | --- | --- |
@@ -107,7 +138,9 @@ CTest registers six groups plus an independent HDF5 consumer check:
 | `picBunch.Io` | openPMD write/read values and all mesh metadata; non-unit `gridUnitSI`; rejection of missing `gridUnitSI` and of mismatched components |
 | `picBunch.Physics` | one and three particles vs independent high-order references |
 | `picBunch.Padding` | no-padding wraparound vs an independent non-cyclic sum; padding convergence; tolerance -> padding policy |
+| `picBunch.Restart` | geometry overrides and the PIConGPU checkpoint layout, dtypes, positions, normalization, `checkpoints.txt` and the particle copy |
 | `picBunch.OpenPMDVerify` | the written file read by `h5py` alone: layout, attributes, units and values |
+| `picBunch.PicOnGPUVerify` | the restart checkpoint read by `h5py` alone: series/iteration attributes, float32 extents, Yee positions, unit normalization and `checkpoints.txt` |
 
 `tools/verify/check_openpmd.py` needs `python3` with `h5py`. When those are
 missing, CMake prints the manual command instead of registering the test.

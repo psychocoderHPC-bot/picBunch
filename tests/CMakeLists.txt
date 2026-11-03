@@ -30,6 +30,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_io.cpp
         test_physics.cpp
         test_padding.cpp
+        test_restart.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -43,7 +44,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Kernel Fft Io Physics Padding)
+    foreach(group Deposit Kernel Fft Io Physics Padding Restart)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -61,6 +62,13 @@ target_link_libraries(
 )
 alpaka_finalize(picBunchWriteSample)
 
+add_executable(picBunchWriteRestartSample write_restart_sample.cpp)
+target_link_libraries(
+    picBunchWriteRestartSample
+    PRIVATE picBunch::picBunch picBunch::openPMD
+)
+alpaka_finalize(picBunchWriteRestartSample)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     execute_process(
@@ -76,6 +84,14 @@ if(Python3_Interpreter_FOUND)
                 ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/verify/check_openpmd.py
                 --writer $<TARGET_FILE:picBunchWriteSample>
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        add_test(
+            NAME picBunch.PicOnGPUVerify
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/verify/check_picongpu_restart.py
+                --writer $<TARGET_FILE:picBunchWriteRestartSample>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
         )
     else()

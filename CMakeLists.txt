@@ -124,6 +124,16 @@ FetchContent_MakeAvailable(alpakaVendor)
 # ---------------------------------------------------------------------------
 # openPMD-api (system install).  The reader/writer stages need the HDF5 backend.
 # ---------------------------------------------------------------------------
+# HDF5 C API for the PIConGPU checkpoint writer.  Prefer the parallel build so the
+# process loads the same libhdf5 as openPMD's HDF5 backend (mixing two HDF5
+# libraries would interpose their symbols).  Serial file access works without
+# MPI_Init; the MPI target is needed only for the headers when HDF5 is parallel.
+set(HDF5_PREFER_PARALLEL TRUE)
+find_package(HDF5 REQUIRED COMPONENTS C)
+if(HDF5_IS_PARALLEL)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+endif()
+
 find_package(openPMD CONFIG QUIET)
 if(NOT openPMD_FOUND)
     message(
@@ -204,7 +214,11 @@ target_include_directories(
     picBunchOpenPMD
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(picBunchOpenPMD PUBLIC openPMD::openPMD)
+target_link_libraries(picBunchOpenPMD PUBLIC openPMD::openPMD HDF5::HDF5)
+if(HDF5_IS_PARALLEL)
+    target_compile_definitions(picBunchOpenPMD PUBLIC OMPI_SKIP_MPICXX=1)
+    target_link_libraries(picBunchOpenPMD PUBLIC MPI::MPI_CXX)
+endif()
 
 # ---------------------------------------------------------------------------
 # Command line tool
