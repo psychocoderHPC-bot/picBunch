@@ -1,7 +1,8 @@
 # Algorithm
 
 This document names the pipeline stages and records what each stage must prove.
-Numbers are deliberately absent until they are measured in validation.
+Numbers are recorded only where they have been measured in validation; geometry
+and build conditions are stated with them.
 
 ## Stages
 
