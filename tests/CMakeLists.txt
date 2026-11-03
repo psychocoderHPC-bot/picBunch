@@ -94,6 +94,27 @@ if(Python3_Interpreter_FOUND)
                 --writer $<TARGET_FILE:picBunchWriteRestartSample>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
         )
+        # h5py builds the openPMD 2.0 scalar-record layout; the C++ test then
+        # reads it through picBunch::readBunch.
+        set(PICBUNCH_SCALAR_RECORD_FILE ${CMAKE_CURRENT_BINARY_DIR}/scalar_record_sample.h5)
+        add_test(
+            NAME picBunch.ScalarRecordSample
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/make_scalar_record_sample.py
+                ${PICBUNCH_SCALAR_RECORD_FILE}
+        )
+        set_tests_properties(picBunch.ScalarRecordSample PROPERTIES FIXTURES_SETUP ScalarRecordSample)
+        add_test(
+            NAME picBunch.IoScalarRecord
+            COMMAND picBunchUnitTests --gtest_filter=Io.ReaderAcceptsOpenPMD2ScalarRecords
+        )
+        set_tests_properties(
+            picBunch.IoScalarRecord
+            PROPERTIES
+                FIXTURES_REQUIRED ScalarRecordSample
+                ENVIRONMENT "PICBUNCH_SCALAR_RECORD_FILE=${PICBUNCH_SCALAR_RECORD_FILE}"
+        )
     else()
         message(
             STATUS

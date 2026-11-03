@@ -9,7 +9,10 @@ and build conditions are stated with them.
 1. **Reader** - open an openPMD particle series and load one species: positions,
    dimensionless momenta, weights, charge. Position convention is the openPMD
    standard `x = position * unitSI + positionOffset * unitSI_offset`. Momentum is
-   converted with `u = p * unitSI / (m c)`. Mesh geometry follows the same rule:
+   converted with `u = p * unitSI / (m c)`. Scalar records are accepted in both
+   openPMD 1.x plain-dataset form and openPMD 2.0 group form (child `value` or a
+   child named after the record, attributes on the group or the child). Mesh
+   geometry follows the same rule:
    the physical spacing is `gridSpacing * gridUnitSI`, and the physical offset is
    `gridGlobalOffset * gridUnitSI`. A mesh without a positive `gridUnitSI` is
    rejected instead of being silently rescaled. TODO: numbers from validation
@@ -53,6 +56,13 @@ and build conditions are stated with them.
    series is written under a temporary name in the destination directory and
    renamed only after a successful flush, so a failed write leaves no partial
    output file.
+
+   **PIConGPU restart:** `--restart-format picongpu` writes float32 internal-unit
+   fields and copies the input checkpoint's `Convolutional PML ...` records
+   verbatim, converting only a non-float32 slab. With no PML records in the
+   input it writes none and an open-boundary restart cannot proceed. The
+   verified restart and field-arrival numbers are in
+   [picongpu-restart.md](picongpu-restart.md).
 
    **PIConGPU restart defect:** PIConGPU restart currently ignores the mesh
    `unitSI` attribute (verified defect), so a PIConGPU consumer of these files

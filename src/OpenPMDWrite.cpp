@@ -15,6 +15,7 @@
 
 #include <hdf5.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -708,6 +709,153 @@ namespace picBunch
                 checked(H5Ldelete(file, path.c_str(), H5P_DEFAULT), "H5Ldelete");
         }
 
+        std::vector<std::string> groupNames(hid_t group)
+        {
+            std::vector<std::string> names;
+            struct Context
+            {
+                std::vector<std::string>* names;
+            } context{&names};
+            auto collect = [](hid_t, char const* name, H5L_info_t const*, void* data) -> herr_t {
+                static_cast<Context*>(data)->names->emplace_back(name);
+                return 0;
+            };
+            hsize_t index = 0;
+            checked(H5Literate(group, H5_INDEX_NAME, H5_ITER_INC, &index, collect, &context), "H5Literate");
+            return names;
+        }
+
+        bool startsWith(std::string const& value, std::string const& prefix)
+        {
+            return value.size() >= prefix.size()
+                && value.compare(0, prefix.size(), prefix) == 0;
+        }
+
+        //! Names of the ``Convolutional PML ...`` records in the source iteration.
+        std::vector<std::string> pmlRecordNames(hid_t source, std::uint64_t iteration)
+        {
+            std::string const path = "data/" + std::to_string(iteration) + "/fields";
+            if(!linkExists(source, path))
+                return {};
+            hid_t group = checked(H5Gopen2(source, path.c_str(), H5P_DEFAULT), "H5Gopen2");
+            auto names = groupNames(group);
+            closeQuietly(group);
+            names.erase(
+                std::remove_if(
+                    names.begin(),
+                    names.end(),
+                    [](std::string const& name) { return !startsWith(name, "Convolutional PML "); }),
+                names.end());
+            return names;
+        }
+
+        void removeAttributeIfPresent(hid_t object, char const* name)
+        {
+            if(H5Aexists(object, name) > 0)
+                checked(H5Adelete(object, name), "H5Adelete");
+        }
+
+        //! PIConGPU restart reads float_X; convert a non-float32 component once.
+        void ensureFloat32Components(hid_t file, std::string const& recordPath)
+        {
+            hid_t group = checked(H5Gopen2(file, recordPath.c_str(), H5P_DEFAULT), "H5Gopen2");
+            auto const names = groupNames(group);
+            for(auto const& name : names)
+            {
+                std::string const childPath = recordPath + "/" + name;
+                hid_t dataset = checked(H5Dopen2(file, childPath.c_str(), H5P_DEFAULT), "H5Dopen2");
+                hid_t type = checked(H5Dget_type(dataset), "H5Dget_type");
+                bool const isFloat32 = H5Tget_class(type) == H5T_FLOAT && H5Tget_size(type) == 4u;
+                closeQuietly(type);
+                closeQuietly(dataset);
+                if(!isFloat32)
+                    rewriteDataset<float>(file, childPath, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
+            }
+            closeQuietly(group);
+        }
+
+        /*! Copy the source checkpoint's PML records without recomputing them.
+         *
+         * The values and their per-component ``position``/``unitSI`` attributes
+         * come from the source, so the PML state stays exactly what PIConGPU
+         * wrote.  The record geometry is replaced with the main-field geometry
+         * so the slabs describe the same grid as E and B.
+         */
+        void copyPmlRecords(
+            hid_t file,
+            hid_t source,
+            hid_t destinationFields,
+            std::string const& sourceIterationPath,
+            std::string const& destinationIterationPath,
+            std::vector<std::string> const& names,
+            Field const& field,
+            PicOnGPUWriteOptions const& options)
+        {
+            std::array<double, 3> const spacing{
+                field.grid.spacing[2] / options.unitLength,
+                field.grid.spacing[1] / options.unitLength,
+                field.grid.spacing[0] / options.unitLength};
+            std::array<double, 3> const origin{
+                field.grid.origin[2] / options.unitLength,
+                field.grid.origin[1] / options.unitLength,
+                field.grid.origin[0] / options.unitLength};
+            hsize_t const expected[3] = {
+                static_cast<hsize_t>(field.grid.n[2]),
+                static_cast<hsize_t>(field.grid.n[1]),
+                static_cast<hsize_t>(field.grid.n[0])};
+            for(auto const& name : names)
+            {
+                std::string const sourcePath = sourceIterationPath + "/fields/" + name;
+                checked(
+                    H5Ocopy(
+                        source,
+                        sourcePath.c_str(),
+                        destinationFields,
+                        name.c_str(),
+                        H5P_DEFAULT,
+                        H5P_DEFAULT),
+                    "H5Ocopy");
+                std::string const destinationPath = destinationIterationPath + "/fields/" + name;
+                hid_t record = checked(H5Gopen2(file, destinationPath.c_str(), H5P_DEFAULT), "H5Gopen2");
+                auto const components = groupNames(record);
+                for(auto const& component : components)
+                {
+                    std::string const componentPath = destinationPath + "/" + component;
+                    hid_t dataset = checked(H5Dopen2(file, componentPath.c_str(), H5P_DEFAULT), "H5Dopen2");
+                    hid_t space = checked(H5Dget_space(dataset), "H5Dget_space");
+                    hsize_t dimensions[3] = {0, 0, 0};
+                    int const rank = H5Sget_simple_extent_dims(space, dimensions, nullptr);
+                    closeQuietly(space);
+                    closeQuietly(dataset);
+                    if(rank != 3 || dimensions[0] != expected[0] || dimensions[1] != expected[1]
+                       || dimensions[2] != expected[2])
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: PML record '" + name + "' component '"
+                            + component + "' does not match the output grid; refusing to copy "
+                            "a slab with a different extent");
+                }
+                closeQuietly(record);
+                ensureFloat32Components(file, destinationPath);
+
+                record = checked(H5Gopen2(file, destinationPath.c_str(), H5P_DEFAULT), "H5Gopen2");
+                for(char const* attribute : {
+                        "axisLabels",
+                        "dataOrder",
+                        "geometry",
+                        "gridSpacing",
+                        "gridGlobalOffset",
+                        "gridUnitSI"})
+                    removeAttributeIfPresent(record, attribute);
+                setStringArrayAttribute(record, "axisLabels", {"z", "y", "x"});
+                setStringAttribute(record, "dataOrder", "C");
+                setStringAttribute(record, "geometry", "cartesian");
+                setDoubleArrayAttribute(record, "gridSpacing", spacing);
+                setDoubleArrayAttribute(record, "gridGlobalOffset", origin);
+                setScalarAttribute(record, "gridUnitSI", H5T_NATIVE_DOUBLE, options.unitLength);
+                closeQuietly(record);
+            }
+        }
+
         void setDoubleVectorAttribute(
             hid_t object,
             char const* name,
@@ -906,6 +1054,25 @@ namespace picBunch
                 // species extents homogeneous for the openPMD reader.
                 for(char const* record : {"charge", "mass", "id"})
                     removeRecordIfPresent(file, particlePath + "/" + record);
+
+                // PML state is part of a PIConGPU checkpoint and is loaded
+                // unconditionally by an open-boundary restart.  Copy it from the
+                // input checkpoint; never synthesize it when the input has none.
+                auto const pmlNames = pmlRecordNames(source, options.inputIteration);
+                if(!pmlNames.empty())
+                {
+                    copyPmlRecords(
+                        file,
+                        source,
+                        fields,
+                        "data/" + std::to_string(options.inputIteration),
+                        iterationPath,
+                        pmlNames,
+                        field,
+                        options);
+                    std::cerr << "picBunch: copied " << pmlNames.size()
+                              << " Convolutional PML records from the input checkpoint\n";
+                }
 
                 closeQuietly(fields);
                 closeQuietly(iteration);

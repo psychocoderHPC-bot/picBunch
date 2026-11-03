@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -74,8 +75,121 @@ namespace
         H5Tclose(type);
     }
 
+    void writeStringArrayAttribute(hid_t object, char const* name, std::vector<std::string> const& values)
+    {
+        hid_t type = H5Tcopy(H5T_C_S1);
+        H5Tset_size(type, H5T_VARIABLE);
+        hsize_t dimensions[1] = {static_cast<hsize_t>(values.size())};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(object, name, type, space, H5P_DEFAULT, H5P_DEFAULT);
+        std::vector<char const*> pointers;
+        pointers.reserve(values.size());
+        for(auto const& value : values)
+            pointers.push_back(value.c_str());
+        H5Awrite(attribute, type, pointers.data());
+        H5Aclose(attribute);
+        H5Sclose(space);
+        H5Tclose(type);
+    }
+
+    void writeDoubleArrayAttribute(hid_t object, char const* name, std::array<double, 3> const& values)
+    {
+        hsize_t dimensions[1] = {3};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data());
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUnitDimension(hid_t object, std::array<double, 7> const& values)
+    {
+        hsize_t dimensions[1] = {7};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(object, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data());
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeDoubleComponent(hid_t parent, char const* name, double value)
+    {
+        hid_t dataset = create(parent, name, H5T_IEEE_F64LE, {1});
+        H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &value);
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        double const unit = 1.0;
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+        H5Aclose(attribute);
+        H5Sclose(space);
+        H5Dclose(dataset);
+    }
+
+    //! One PML slab record with the six cross components PIConGPU stores.
+    void writePmlRecord(hid_t fields, char const* name, bool electric, float seed)
+    {
+        hid_t record = H5Gcreate2(fields, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringArrayAttribute(record, "axisLabels", {"z", "y", "x"});
+        writeStringAttribute(record, "dataOrder", "C");
+        writeStringAttribute(record, "geometry", "cartesian");
+        writeStringAttribute(record, "fieldSmoothing", "none");
+        writeDoubleArrayAttribute(record, "gridSpacing", {2.5, 1.5, 0.5});
+        writeDoubleArrayAttribute(record, "gridGlobalOffset", {3.0, 2.0, 1.0});
+        double const gridUnit = 1.0;
+        hid_t scalarSpace = H5Screate(H5S_SCALAR);
+        hid_t unitAttribute = H5Acreate2(
+            record, "gridUnitSI", H5T_NATIVE_DOUBLE, scalarSpace, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(unitAttribute, H5T_NATIVE_DOUBLE, &gridUnit);
+        H5Aclose(unitAttribute);
+        float const timeOffset = 0.0f;
+        hid_t timeAttribute = H5Acreate2(
+            record, "timeOffset", H5T_NATIVE_FLOAT, scalarSpace, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(timeAttribute, H5T_NATIVE_FLOAT, &timeOffset);
+        H5Aclose(timeAttribute);
+        H5Sclose(scalarSpace);
+        std::array<double, 7> const dimension
+            = electric ? std::array<double, 7>{1, 1, -3, -1, 0, 0, 0}
+                       : std::array<double, 7>{0, 1, -2, -1, 0, 0, 0};
+        writeUnitDimension(record, dimension);
+
+        char const* const components[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
+        double const positions[6][3] = {
+            {0.5, 0.0, 0.0},
+            {0.5, 0.0, 0.0},
+            {0.0, 0.5, 0.0},
+            {0.0, 0.5, 0.0},
+            {0.0, 0.0, 0.5},
+            {0.0, 0.0, 0.5}};
+        std::vector<float> values(6 * 5 * 4);
+        for(std::size_t i = 0; i < values.size(); ++i)
+            values[i] = seed + static_cast<float>(i) * 1.0e-3f;
+        for(std::size_t c = 0; c < 6; ++c)
+        {
+            hid_t dataset = create(record, components[c], H5T_IEEE_F32LE, {6, 5, 4});
+            H5Dwrite(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
+            double const position[3] = {positions[c][0], positions[c][1], positions[c][2]};
+            hid_t space = H5Screate_simple(1, std::array<hsize_t, 1>{3}.data(), nullptr);
+            hid_t attribute = H5Acreate2(dataset, "position", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+            H5Awrite(attribute, H5T_NATIVE_DOUBLE, position);
+            H5Aclose(attribute);
+            H5Sclose(space);
+            double const unit = electric ? 1.5 : 2.5;
+            space = H5Screate(H5S_SCALAR);
+            attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+            H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+            H5Aclose(attribute);
+            H5Sclose(space);
+            H5Dclose(dataset);
+        }
+        H5Gclose(record);
+    }
+
     //! Minimal openPMD/HDF5 particle input with (optionally) patch metadata.
-    void writeParticleInput(std::filesystem::path const& path, bool withPatches)
+    void writeParticleInput(
+        std::filesystem::path const& path,
+        bool withPatches,
+        bool withPml = false,
+        bool doubleParticles = false)
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         H5Gcreate2(file, "data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -92,17 +206,44 @@ namespace
         for(int a = 0; a < 3; ++a)
         {
             std::string const axis(1, axes[a]);
-            writeFloatComponent(position, axis.c_str(), 0.25f + 0.1f * static_cast<float>(a));
-            writeFloatComponent(momentum, axis.c_str(), 0.0f);
-            hid_t dataset = create(offset, axis.c_str(), H5T_STD_I32LE, {1});
-            int32_t const stored = a;
-            H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
-            H5Dclose(dataset);
+            if(doubleParticles)
+            {
+                writeDoubleComponent(position, axis.c_str(), 0.25 + 0.1 * static_cast<double>(a));
+                writeDoubleComponent(momentum, axis.c_str(), 0.0);
+                hid_t dataset = create(offset, axis.c_str(), H5T_IEEE_F64LE, {1});
+                double const stored = static_cast<double>(a);
+                H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                H5Dclose(dataset);
+            }
+            else
+            {
+                writeFloatComponent(position, axis.c_str(), 0.25f + 0.1f * static_cast<float>(a));
+                writeFloatComponent(momentum, axis.c_str(), 0.0f);
+                hid_t dataset = create(offset, axis.c_str(), H5T_STD_I32LE, {1});
+                int32_t const stored = a;
+                H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                H5Dclose(dataset);
+            }
         }
         H5Gclose(position);
         H5Gclose(momentum);
         H5Gclose(offset);
-        writeFloatComponent(species, "weighting", 1.0f);
+        if(doubleParticles)
+        {
+            hid_t weighting = H5Gcreate2(species, "weighting", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writeDoubleComponent(weighting, "weighting", 1.0);
+            H5Gclose(weighting);
+        }
+        else
+            writeFloatComponent(species, "weighting", 1.0f);
+
+        if(withPml)
+        {
+            hid_t fields = H5Gcreate2(iteration, "fields", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writePmlRecord(fields, "Convolutional PML E_xneg", true, 0.5f);
+            writePmlRecord(fields, "Convolutional PML B_ypos", false, 1.5f);
+            H5Gclose(fields);
+        }
 
         if(withPatches)
         {
@@ -392,6 +533,8 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     ASSERT_GE(species, 0);
     EXPECT_EQ(readStringAttribute(species, "sourceMarker"), "preserved");
     EXPECT_EQ(H5Lexists(species, "particlePatches", H5P_DEFAULT), 1);
+    // The input has no PML records, so none may be synthesized.
+    EXPECT_EQ(H5Lexists(fields, "Convolutional PML E_xneg", H5P_DEFAULT), 0);
     H5Gclose(species);
     H5Gclose(particles);
 
@@ -442,4 +585,146 @@ TEST(Restart, WriterRejectsMissingUnits)
     options.unitEField = 1.0;
     options.unitBField = -1.0;
     EXPECT_THROW(picBunch::writePicOnGPUCheckpoint(field, options), std::invalid_argument);
+}
+
+TEST(Restart, WriterCopiesPmlRecordsVerbatim)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_pml";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_pml.h5";
+    writeParticleInput(input, true, true);
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.time = 2.5e-13;
+    options.timeUnitSI = 1.0;
+    options.dt = 1.0e-15;
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    options.nextId = 1;
+    picBunch::writePicOnGPUCheckpoint(field, options);
+
+    auto const path = directory / "checkpoint_000002.h5";
+    hid_t sourceFile = H5Fopen(input.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(sourceFile, 0);
+    ASSERT_GE(file, 0);
+    char const* const records[2] = {"Convolutional PML E_xneg", "Convolutional PML B_ypos"};
+    char const* const components[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
+    for(char const* recordName : records)
+    {
+        std::string const sourceRecord = std::string("data/0/fields/") + recordName;
+        std::string const outputRecord = std::string("data/2/fields/") + recordName;
+        hid_t sourceGroup = H5Gopen2(sourceFile, sourceRecord.c_str(), H5P_DEFAULT);
+        hid_t outputGroup = H5Gopen2(file, outputRecord.c_str(), H5P_DEFAULT);
+        ASSERT_GE(sourceGroup, 0) << sourceRecord;
+        ASSERT_GE(outputGroup, 0) << outputRecord;
+        // The copied record adopts the main-field geometry.
+        EXPECT_EQ(
+            readDoubleArrayAttribute(outputGroup, "gridSpacing"),
+            (std::vector<double>{
+                field.grid.spacing[2], field.grid.spacing[1], field.grid.spacing[0]}));
+        EXPECT_EQ(
+            readDoubleArrayAttribute(outputGroup, "gridGlobalOffset"),
+            (std::vector<double>{
+                field.grid.origin[2], field.grid.origin[1], field.grid.origin[0]}));
+        EXPECT_DOUBLE_EQ(
+            readScalarAttribute<double>(outputGroup, "gridUnitSI", H5T_NATIVE_DOUBLE), 1.0);
+        H5Gclose(sourceGroup);
+        H5Gclose(outputGroup);
+
+        for(char const* component : components)
+        {
+            std::string const sourcePath = sourceRecord + "/" + component;
+            std::string const outputPath = outputRecord + "/" + component;
+            auto const expected = readFloatDataset(sourceFile, sourcePath.c_str());
+            auto const actual = readFloatDataset(file, outputPath.c_str());
+            ASSERT_EQ(actual.size(), expected.size());
+            EXPECT_TRUE(std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)) == 0)
+                << recordName << "/" << component;
+
+            hid_t dataset = H5Dopen2(file, outputPath.c_str(), H5P_DEFAULT);
+            ASSERT_GE(dataset, 0);
+            hid_t type = H5Dget_type(dataset);
+            EXPECT_EQ(H5Tget_class(type), H5T_FLOAT);
+            EXPECT_EQ(H5Tget_size(type), 4u);
+            H5Tclose(type);
+            EXPECT_EQ(
+                readDoubleArrayAttribute(dataset, "position").size(), 3u);
+            H5Dclose(dataset);
+        }
+    }
+    // RNG state is optional and is not copied with the PML slabs.
+    EXPECT_EQ(H5Lexists(file, "data/2/fields/RNGProvider3XorMin", H5P_DEFAULT), 0);
+    H5Fclose(sourceFile);
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, WriterPinsFloat32ParticleDtypes)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_dtypes";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_double.h5";
+    writeParticleInput(input, true, false, true);
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    options.nextId = 1;
+    picBunch::writePicOnGPUCheckpoint(field, options);
+
+    auto const path = directory / "checkpoint_000002.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    char const* const axes[3] = {"x", "y", "z"};
+    for(char const* record : {"position", "momentum"})
+        for(char const* axis : axes)
+        {
+            std::string const datasetPath
+                = std::string("data/2/particles/electrons/") + record + "/" + axis;
+            hid_t dataset = H5Dopen2(file, datasetPath.c_str(), H5P_DEFAULT);
+            ASSERT_GE(dataset, 0) << datasetPath;
+            hid_t type = H5Dget_type(dataset);
+            EXPECT_EQ(H5Tget_class(type), H5T_FLOAT) << datasetPath;
+            EXPECT_EQ(H5Tget_size(type), 4u) << datasetPath;
+            H5Tclose(type);
+            H5Dclose(dataset);
+        }
+    for(char const* axis : axes)
+    {
+        std::string const datasetPath
+            = std::string("data/2/particles/electrons/positionOffset/") + axis;
+        hid_t dataset = H5Dopen2(file, datasetPath.c_str(), H5P_DEFAULT);
+        ASSERT_GE(dataset, 0) << datasetPath;
+        hid_t type = H5Dget_type(dataset);
+        EXPECT_EQ(H5Tget_class(type), H5T_INTEGER) << datasetPath;
+        EXPECT_EQ(H5Tget_size(type), 4u) << datasetPath;
+        H5Tclose(type);
+        H5Dclose(dataset);
+    }
+    hid_t weighting = H5Dopen2(file, "data/2/particles/electrons/weighting", H5P_DEFAULT);
+    ASSERT_GE(weighting, 0);
+    hid_t weightingType = H5Dget_type(weighting);
+    EXPECT_EQ(H5Tget_class(weightingType), H5T_FLOAT);
+    EXPECT_EQ(H5Tget_size(weightingType), 4u);
+    H5Tclose(weightingType);
+    H5Dclose(weighting);
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
 }

@@ -43,20 +43,88 @@ namespace picBunch
                 fail(where + ": required component '" + name + "' is missing");
         }
 
-        double checkedUnitSI(RecordComponent const& component, std::string const& path)
+        /*! Read unitSI from a component, with an optional record-level fallback.
+         *
+         * openPMD 2.0 scalar records put the attributes on the record group and
+         * the values in a child dataset; either location may carry unitSI.  The
+         * openPMD 1.x form stores both on the dataset itself.
+         */
+        double checkedUnitSI(
+            RecordComponent const& component,
+            std::string const& path,
+            Record const* recordFallback = nullptr)
         {
-            double unit = 1.0;
+            std::optional<double> unit;
             try
             {
                 unit = component.unitSI();
             }
             catch(std::exception const&)
             {
-                unit = 1.0;
             }
-            if(!std::isfinite(unit) || !(unit > 0.0))
+            if(!unit && recordFallback != nullptr)
+            {
+                try
+                {
+                    unit = recordFallback->unitSI();
+                }
+                catch(std::exception const&)
+                {
+                }
+            }
+            double const value = unit.value_or(1.0);
+            if(!std::isfinite(value) || !(value > 0.0))
                 fail(path + ": unitSI must be finite and > 0");
-            return unit;
+            return value;
+        }
+
+        /*! The component that holds the values of a possibly scalar record.
+         *
+         * openPMD 2.0 writes a scalar record as a group with a single child
+         * dataset.  The standard child name is ``value``; PIConGPU's files use
+         * the record name itself.  A plain openPMD 1.x scalar record is a bare
+         * dataset and is returned unchanged.
+         */
+        RecordComponent& scalarComponent(Record& record, std::string const& path)
+        {
+            // A plain openPMD 1.x scalar record is itself the dataset.
+            if(record.getDatatype() != Datatype::UNDEFINED)
+                return record;
+            if(record.contains("value"))
+                return record["value"];
+            auto it = record.begin();
+            if(it == record.end())
+                return record;
+            RecordComponent& first = it->second;
+            ++it;
+            if(it != record.end())
+                fail(path + ": scalar record holds more than one dataset");
+            return first;
+        }
+
+        std::vector<double> loadValues(
+            Series& series,
+            RecordComponent& component,
+            std::size_t count,
+            std::string const& path);
+
+        //! Read a scalar record in either the plain-dataset or 2.0 group form.
+        std::vector<double> loadScalarValues(
+            Series& series,
+            Record& record,
+            std::size_t count,
+            std::string const& path)
+        {
+            // A constant scalar record may carry a ``value`` attribute instead of
+            // a dataset.  Prefer a real ``value`` child when both exist.
+            if(!record.contains("value") && record.containsAttribute("value"))
+                return std::vector<double>(count, record.getAttribute("value").get<double>());
+            return loadValues(series, scalarComponent(record, path), count, path);
+        }
+
+        double scalarUnitSI(Record& record, std::string const& path)
+        {
+            return checkedUnitSI(scalarComponent(record, path), path, &record);
         }
 
         void checkUnitDimension(
@@ -155,7 +223,7 @@ namespace picBunch
                 std::string const componentName = std::string(1, static_cast<char>('x' + a));
                 std::string const path = prefix + "/" + componentName;
                 requireRecord(record, componentName, prefix);
-                units[a] = checkedUnitSI(record[componentName], path);
+                units[a] = checkedUnitSI(record[componentName], path, &record);
             }
             return units;
         }
@@ -319,9 +387,8 @@ namespace picBunch
             fail("species '" + speciesName + "' has no 'weighting' record");
         Record& weightingRecord = species["weighting"];
         checkUnitDimension(weightingRecord, "weighting", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-        RecordComponent& weightingComponent = weightingRecord;
-        double const weightUnitSI = checkedUnitSI(weightingComponent, "weighting");
-        auto const rawWeight = loadValues(series, weightingComponent, count, "weighting");
+        double const weightUnitSI = scalarUnitSI(weightingRecord, "weighting");
+        auto const rawWeight = loadScalarValues(series, weightingRecord, count, "weighting");
 
         std::vector<double> chargePerParticle;
         bool const chargeDefaulted = !species.contains("charge");
@@ -333,9 +400,8 @@ namespace picBunch
         {
             Record& chargeRecord = species["charge"];
             checkUnitDimension(chargeRecord, "charge", {0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0});
-            RecordComponent& chargeComponent = chargeRecord;
-            double const chargeUnitSI = checkedUnitSI(chargeComponent, "charge");
-            auto const rawCharge = loadValues(series, chargeComponent, count, "charge");
+            double const chargeUnitSI = scalarUnitSI(chargeRecord, "charge");
+            auto const rawCharge = loadScalarValues(series, chargeRecord, count, "charge");
             chargePerParticle.resize(count);
             for(std::size_t p = 0; p < count; ++p)
                 chargePerParticle[p] = rawCharge[p] * chargeUnitSI;
@@ -346,9 +412,8 @@ namespace picBunch
         {
             Record& massRecord = species["mass"];
             checkUnitDimension(massRecord, "mass", {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-            RecordComponent& massComponent = massRecord;
-            double const massUnitSI = checkedUnitSI(massComponent, "mass");
-            auto const rawMass = loadValues(series, massComponent, count, "mass");
+            double const massUnitSI = scalarUnitSI(massRecord, "mass");
+            auto const rawMass = loadScalarValues(series, massRecord, count, "mass");
             restMass.resize(count);
             for(std::size_t p = 0; p < count; ++p)
                 restMass[p] = rawMass[p] * massUnitSI;

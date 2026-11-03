@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -320,4 +321,31 @@ TEST(Io, WriterPublishesIterationPatternAtomically)
     }
     EXPECT_EQ(files, 1u);
     std::filesystem::remove_all(directory);
+}
+
+TEST(Io, ReaderAcceptsOpenPMD2ScalarRecords)
+{
+    // The file is produced by tests/make_scalar_record_sample.py with h5py,
+    // because openPMD-api 0.17 cannot create the 2.0 scalar-record layout on
+    // demand.  Both group forms are present: ``value`` and record-named child.
+    char const* file = std::getenv("PICBUNCH_SCALAR_RECORD_FILE");
+    if(file == nullptr)
+        GTEST_SKIP() << "PICBUNCH_SCALAR_RECORD_FILE is not set";
+
+    auto const data = picBunch::readBunch(file, std::size_t{0});
+    ASSERT_EQ(data.bunch.size(), 2u);
+    EXPECT_DOUBLE_EQ(data.bunch.weight[0], 2.0);
+    EXPECT_DOUBLE_EQ(data.bunch.weight[1], 3.0);
+    EXPECT_DOUBLE_EQ(data.bunch.x[0], 1.0e-6 + 7.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.x[1], 2.0e-6 + 8.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.y[0], 3.0e-6 + 9.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.y[1], 4.0e-6 + 10.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.z[0], 5.0e-6 + 11.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.z[1], 6.0e-6 + 12.0e-7);
+    EXPECT_DOUBLE_EQ(data.bunch.ux[0], 0.0);
+    EXPECT_DOUBLE_EQ(data.bunch.uy[0], 0.0);
+    EXPECT_DOUBLE_EQ(data.bunch.uz[0], 1.0);
+    EXPECT_DOUBLE_EQ(data.bunch.uz[1], 2.0);
+    EXPECT_DOUBLE_EQ(data.bunch.charge[0], -2.0e-19);
+    EXPECT_DOUBLE_EQ(data.bunch.charge[1], -3.0e-19);
 }

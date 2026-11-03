@@ -138,8 +138,16 @@ internal units; `gridSpacing` is in internal length units and
 a missing one is an error, never a default. The input particle species is
 copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
 If the input has no patch metadata the writer warns and records
-`picBunchRestartWarning`; PIConGPU may then reject the restart. The actual
-PIConGPU restart is not exercised by this repository's tests.
+`picBunchRestartWarning`; PIConGPU may then reject the restart.
+
+When the input checkpoint contains `Convolutional PML ...` records, the writer
+copies those records from the input instead of recomputing them. The values and
+`position`/`unitSI` attributes survive; a non-float32 slab is converted to
+float32 and the record adopts the main-field geometry. With no PML records in
+the input the writer emits none, so an open-boundary deck cannot restart from
+that file. The verified restart result, the field-arrival numbers and the
+remaining non-blocking metadata differences are recorded in
+[docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 Example:
 
@@ -155,7 +163,8 @@ and the openPMD version with its HDF5 status. It is registered with CTest as
 `picBunch.smoke`.
 
 The GoogleTest suite is built when `PICBUNCH_BUILD_GTESTS=ON` (the default).
-CTest registers seven groups plus two independent HDF5 consumer checks:
+CTest registers seven groups, two independent HDF5 consumer checks, and two
+openPMD 2.0 scalar-record reader tests:
 
 | test | what it proves |
 | --- | --- |
@@ -165,9 +174,11 @@ CTest registers seven groups plus two independent HDF5 consumer checks:
 | `picBunch.Io` | openPMD write/read values and all mesh metadata; non-unit `gridUnitSI`; rejection of missing `gridUnitSI` and of mismatched components |
 | `picBunch.Physics` | one and three particles vs independent high-order references |
 | `picBunch.Padding` | no-padding wraparound vs an independent non-cyclic sum; padding convergence; tolerance -> padding policy |
-| `picBunch.Restart` | geometry overrides and the PIConGPU checkpoint layout, dtypes, positions, normalization, `checkpoints.txt` and the particle copy |
+| `picBunch.Restart` | geometry overrides, the PIConGPU checkpoint layout, float32 particle dtypes, positions, normalization, `checkpoints.txt`, particle copy and verbatim PML copy |
 | `picBunch.OpenPMDVerify` | the written file read by `h5py` alone: layout, attributes, units and values |
 | `picBunch.PicOnGPUVerify` | the restart checkpoint read by `h5py` alone: series/iteration attributes, float32 extents, Yee positions, unit normalization and `checkpoints.txt` |
+| `picBunch.ScalarRecordSample` | builds an openPMD 2.0 scalar-record file with h5py |
+| `picBunch.IoScalarRecord` | reads that file through `readBunch`, covering `value` and record-named child datasets |
 
 `tools/verify/check_openpmd.py` needs `python3` with `h5py`. When those are
 missing, CMake prints the manual command instead of registering the test.
