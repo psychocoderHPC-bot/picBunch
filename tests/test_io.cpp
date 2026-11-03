@@ -169,21 +169,25 @@ TEST(Io, MissingMacroWeightedUsesStandardDefault)
     std::filesystem::remove(path);
     double const massC = picBunch::kElectronMass * picBunch::kSpeedOfLight;
     double const weightValue = 3.0;
+    // The chunk buffers must outlive openPMD's deferred flush.
+    std::array<double, 3> const positions{4.0, 4.0, 5.0};
+    std::array<double, 3> const momenta{0.0, 0.0, 1.0};
+    double const storedWeight = weightValue;
     {
         openPMD::Series series(path.string(), openPMD::Access::CREATE);
         auto& iteration = series.iterations[0];
         auto& species = iteration.particles["electrons"];
         char const* const names = "xyz";
-        auto setScalar = [](openPMD::RecordComponent& component, double value, double unitSI) {
+        auto bind = [](openPMD::RecordComponent& component, double const* value, double unitSI) {
             component.resetDataset(
                 openPMD::Dataset(openPMD::determineDatatype<double>(), openPMD::Extent{1}));
-            component.storeChunkRaw(&value, openPMD::Offset{0}, openPMD::Extent{1});
+            component.storeChunkRaw(value, openPMD::Offset{0}, openPMD::Extent{1});
             component.setUnitSI(unitSI);
         };
         auto& position = species["position"];
         position.setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
         for(int a = 0; a < 3; ++a)
-            setScalar(position[std::string(1, names[a])], (a == 2) ? 5.0 : 4.0, 1.0);
+            bind(position[std::string(1, names[a])], &positions[a], 1.0);
 
         auto& momentum = species["momentum"];
         momentum.setUnitDimension(
@@ -191,11 +195,11 @@ TEST(Io, MissingMacroWeightedUsesStandardDefault)
              {openPMD::UnitDimension::M, 1.0},
              {openPMD::UnitDimension::T, -1.0}});
         for(int a = 0; a < 3; ++a)
-            setScalar(momentum[std::string(1, names[a])], (a == 2) ? 1.0 : 0.0, massC);
+            bind(momentum[std::string(1, names[a])], &momenta[a], massC);
         momentum.setAttribute("weightingPower", 2.0);
         // macroWeighted is deliberately absent -> standard default false.
 
-        setScalar(species["weighting"], weightValue, 1.0);
+        bind(species["weighting"], &storedWeight, 1.0);
         series.flush();
     }
 
