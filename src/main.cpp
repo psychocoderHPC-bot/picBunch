@@ -52,7 +52,8 @@ namespace
             "                        physical cell size in metres (overrides the\n"
             "                        input mesh; required when there is no mesh)\n"
             "  --grid <nx>[,<ny>[,<nz>]]  explicit output node counts (even)\n"
-            "  --origin <x>[,<y>[,<z>]]   explicit output grid origin in metres\n"
+            "  --origin <x>[,<y>[,<z>]]   output grid origin in metres (overrides the\n"
+            "                        input mesh gridGlobalOffset)\n"
             "  --restart-format <name>    standard|picongpu (default: standard)\n"
             "  --output-dir <dir>    PIConGPU checkpoint directory (default: checkpoints)\n"
             "  --picongpu-unit-length <m>   length unit for the restart writer\n"
@@ -368,6 +369,7 @@ int main(int argc, char** argv)
         picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
         std::optional<std::array<double, 3>> meshCellSize;
+        std::optional<std::array<double, 3>> meshGridOrigin;
         try
         {
             auto const geometry = picBunch::readMeshGeometry(args.input);
@@ -376,6 +378,7 @@ int main(int argc, char** argv)
             // gridUnitSI again here is the v0.1 regression; the reader owns the
             // conversion and this helper only validates the result.
             meshCellSize = picBunch::physicalCellSize(geometry);
+            meshGridOrigin = picBunch::physicalGridOrigin(geometry);
             if(meshCellSize)
                 std::printf(
                     "cellSize from input mesh E: gridSpacing=(%.6g,%.6g,%.6g) x "
@@ -387,6 +390,13 @@ int main(int argc, char** argv)
                     (*meshCellSize)[0], (*meshCellSize)[1], (*meshCellSize)[2]);
             else
                 std::printf("cellSize: input mesh geometry is unusable\n");
+            if(meshGridOrigin)
+                std::printf(
+                    "origin: input mesh gridGlobalOffset x gridUnitSI = "
+                    "(%.6g,%.6g,%.6g) m\n",
+                    (*meshGridOrigin)[0], (*meshGridOrigin)[1], (*meshGridOrigin)[2]);
+            else
+                std::printf("origin: input mesh gridGlobalOffset is unusable\n");
         }
         catch(picBunch::MeshUnavailable const&)
         {
@@ -404,13 +414,17 @@ int main(int argc, char** argv)
                 "grid: --grid override (%zu,%zu,%zu) nodes\n",
                 (*args.grid)[0], (*args.grid)[1], (*args.grid)[2]);
         }
+        // The mesh origin is the default; --origin is an explicit override.  With
+        // neither, makeGrid keeps the bunch-bounding-box-minus-margin origin.
+        options.gridOrigin = args.origin ? args.origin : meshGridOrigin;
         if(args.origin)
-        {
-            options.gridOrigin = args.origin;
             std::printf(
                 "origin: --origin override (%.6g,%.6g,%.6g) m\n",
                 (*args.origin)[0], (*args.origin)[1], (*args.origin)[2]);
-        }
+        else if(meshGridOrigin)
+            std::printf(
+                "origin: input mesh default (%.6g,%.6g,%.6g) m\n",
+                (*meshGridOrigin)[0], (*meshGridOrigin)[1], (*meshGridOrigin)[2]);
 
         // --------------------------------------------------------------- compute
         picBunch::Field const field = picBunch::computeField(bunchData.bunch, options, &times);

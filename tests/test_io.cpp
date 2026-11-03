@@ -17,8 +17,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -245,6 +247,70 @@ namespace
         component.storeChunkRaw(values.data(), openPMD::Offset{0, 0, 0}, openPMD::Extent{6, 5, 4});
         series.flush();
     }
+
+    //! One particle plus an ``E`` mesh whose physical geometry is given in x,y,z.
+    void writeCliOriginSample(
+        std::filesystem::path const& path,
+        std::array<double, 3> const& offset,
+        std::array<double, 3> const& spacing,
+        double gridUnitSI)
+    {
+        std::array<double, 3> const position{offset[0], offset[1], offset[2]};
+        std::array<double, 3> const momentum{0.0, 0.0, 1.0};
+        std::array<double, 1> const weight{1.0};
+        std::array<double, 1> const charge{-picBunch::kElementaryCharge};
+        std::array<double, 6 * 5 * 4> const meshValues{};
+
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& iteration = series.iterations[0];
+
+        auto& mesh = iteration.meshes["E"];
+        mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
+        mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
+        mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
+        mesh.setGridSpacing(
+            std::vector<double>{spacing[2] / gridUnitSI, spacing[1] / gridUnitSI, spacing[0] / gridUnitSI});
+        mesh.setGridGlobalOffset(
+            std::vector<double>{offset[2] / gridUnitSI, offset[1] / gridUnitSI, offset[0] / gridUnitSI});
+        mesh.setGridUnitSI(gridUnitSI);
+        auto& meshComponent = mesh["x"];
+        meshComponent.resetDataset(openPMD::Dataset(
+            openPMD::determineDatatype<double>(),
+            openPMD::Extent{4, 5, 6}));
+        meshComponent.storeChunkRaw(
+            meshValues.data(),
+            openPMD::Offset{0, 0, 0},
+            openPMD::Extent{4, 5, 6});
+
+        auto bindScalar = [](openPMD::RecordComponent& component, double const* value, double unitSI) {
+            component.resetDataset(
+                openPMD::Dataset(openPMD::determineDatatype<double>(), openPMD::Extent{1}));
+            component.storeChunkRaw(value, openPMD::Offset{0}, openPMD::Extent{1});
+            component.setUnitSI(unitSI);
+        };
+
+        auto& species = iteration.particles["electrons"];
+        species["position"].setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
+        species["momentum"].setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
+        species["charge"].setUnitDimension(
+            {{openPMD::UnitDimension::T, 1.0},
+             {openPMD::UnitDimension::I, 1.0}});
+        char const* const names = "xyz";
+        for(int a = 0; a < 3; ++a)
+        {
+            bindScalar(species["position"][std::string(1, names[a])], &position[a], 1.0);
+            bindScalar(
+                species["momentum"][std::string(1, names[a])],
+                &momentum[a],
+                picBunch::kElectronMass * picBunch::kSpeedOfLight);
+        }
+        bindScalar(species["weighting"], weight.data(), 1.0);
+        bindScalar(species["charge"], charge.data(), 1.0);
+        series.flush();
+    }
 } // namespace
 
 TEST(Io, ReaderAppliesGridUnitSIToPhysicalSpacing)
@@ -350,6 +416,62 @@ TEST(Io, CliMeshGeometryIsConvertedExactlyOnce)
         EXPECT_NE(std::string(error.what()).find("infeasible"), std::string::npos)
             << error.what();
     }
+    std::filesystem::remove(path);
+}
+
+TEST(Io, CliUsesMeshGridGlobalOffsetAsOrigin)
+{
+    // End-to-end through the production executable: the reader converts the mesh
+    // gridGlobalOffset to physical metres, the CLI adopts it as the default grid
+    // origin, and --origin still overrides it.  The raw offset is stored in z,y,x
+    // units of gridUnitSI, so a second unit conversion would give 1e-12 m.
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    std::array<double, 3> const offset{1.0e-6, 2.0e-6, 3.0e-6};
+    std::array<double, 3> const spacing{1.0e-6, 1.0e-6, 1.0e-6};
+    writeCliOriginSample(path, offset, spacing, 1.0e-6);
+
+    auto run = [&](std::string const& extra) {
+        std::string const command = std::string{"\""} + PICBUNCH_APP_PATH + "\" --input \""
+            + path.string() + "\" " + extra + " 2>&1";
+        FILE* pipe = ::popen(command.c_str(), "r");
+        EXPECT_NE(pipe, nullptr);
+        std::string output;
+        if(pipe != nullptr)
+        {
+            std::array<char, 4096> buffer{};
+            while(std::fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+                output += buffer.data();
+            int const status = ::pclose(pipe);
+            EXPECT_EQ(status, 0) << output;
+        }
+        return output;
+    };
+    auto parseOrigin = [](std::string const& output) {
+        std::array<double, 3> origin{
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN()};
+        auto const at = output.find("origin=(");
+        if(at != std::string::npos)
+            std::sscanf(
+                output.c_str() + at,
+                "origin=(%lf,%lf,%lf)",
+                &origin[0],
+                &origin[1],
+                &origin[2]);
+        return origin;
+    };
+
+    auto const defaults = parseOrigin(run(""));
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(defaults[a], offset[a], 1.0e-12) << "mesh-default origin axis " << a;
+
+    std::array<double, 3> const overrideOrigin{7.0e-7, 8.0e-7, 9.0e-7};
+    auto const overridden = parseOrigin(run("--origin 7e-7,8e-7,9e-7"));
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(overridden[a], overrideOrigin[a], 1.0e-12) << "--origin axis " << a;
+
     std::filesystem::remove(path);
 }
 

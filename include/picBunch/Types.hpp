@@ -125,8 +125,10 @@ namespace picBunch
 
          * Unset values keep the automatic derivation from the bunch bounding box.
          * When set they are used verbatim: an explicit ``--grid`` or ``--origin``
-         * never blends with the derived value.  Grid node counts must be even and
-         * positive so the R2C transform keeps its even last extent.
+         * never blends with the derived value.  The CLI supplies ``gridOrigin``
+         * from ``--origin`` when given, otherwise from the input mesh
+         * ``gridGlobalOffset``.  Grid node counts must be even and positive so the
+         * R2C transform keeps its even last extent.
          */
         std::optional<std::array<std::size_t, 3>> gridSize;
         std::optional<std::array<double, 3>> gridOrigin;

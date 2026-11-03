@@ -297,6 +297,16 @@ namespace picBunch
         return geometry.gridSpacing;
     }
 
+    std::optional<std::array<double, 3>> physicalGridOrigin(MeshGeometry const& geometry)
+    {
+        // Same ownership rule as the spacing: readMeshGeometry already multiplied
+        // gridGlobalOffset by gridUnitSI, so the CLI must not apply it again.
+        for(double offset : geometry.gridGlobalOffset)
+            if(!std::isfinite(offset))
+                return std::nullopt;
+        return geometry.gridGlobalOffset;
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)

@@ -30,6 +30,15 @@ namespace picBunch
      */
     std::optional<std::array<double, 3>> physicalCellSize(picBunch::MeshGeometry const& geometry);
 
+    /** Physical grid origin from mesh metadata, or ``std::nullopt`` when unusable.
+     *
+     * ``readMeshGeometry`` already converted ``gridGlobalOffset`` to physical SI
+     * metres, exactly as it did for ``gridSpacing``.  This helper returns the
+     * offset verbatim and applies ``gridUnitSI`` nowhere.  Non-finite offsets are
+     * rejected so the caller can fall back to the bunch bounding box.
+     */
+    std::optional<std::array<double, 3>> physicalGridOrigin(picBunch::MeshGeometry const& geometry);
+
     /** Derive the output grid that covers the bunch bounding box plus a shell margin.
      *
      * The node spacing is ``kRefinement * options.cellSize`` and ``n`` is rounded up

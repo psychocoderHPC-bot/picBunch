@@ -35,12 +35,15 @@ if(PICBUNCH_BUILD_GTESTS)
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
         picBunchUnitTests
-        PRIVATE PICBUNCH_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+        PRIVATE
+            PICBUNCH_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+            PICBUNCH_APP_PATH="$<TARGET_FILE:picBunchApp>"
     )
     target_link_libraries(
         picBunchUnitTests
         PRIVATE picBunch::picBunch picBunch::openPMD GTest::gtest_main GTest::gtest
     )
+    add_dependencies(picBunchUnitTests picBunchApp)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
