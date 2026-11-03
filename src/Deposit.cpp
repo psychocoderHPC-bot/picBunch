@@ -97,6 +97,63 @@ namespace picBunch
         return rho;
     }
 
+    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement)
+    {
+        if(refinement <= 0.0)
+            throw std::invalid_argument("depositTSCPaddedHost: refinement must be positive");
+        std::size_t const nx = grid.n[0];
+        std::size_t const ny = grid.n[1];
+        std::size_t const nz = grid.n[2];
+        std::size_t const M = nx * grid.fftPadding;
+        double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
+        double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+        double const support = 1.5 / refinement;
+        std::vector<double> rho(M * M * M, 0.0);
+
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+            double const q = bunch.weight[p] * bunch.charge[p];
+            double t[3];
+            long lo[3];
+            long hi[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                t[a] = (pos[a] - org[a]) / sp[a];
+                lo[a] = static_cast<long>(std::ceil(t[a] - support));
+                hi[a] = static_cast<long>(std::floor(t[a] + support));
+            }
+            for(long ia = lo[0]; ia <= hi[0]; ++ia)
+            {
+                if(ia < 0 || ia >= static_cast<long>(nx))
+                    continue;
+                double const wa = tscShape(refinement * (static_cast<double>(ia) - t[0]));
+                if(wa == 0.0)
+                    continue;
+                for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                {
+                    if(ib < 0 || ib >= static_cast<long>(ny))
+                        continue;
+                    double const wb = wa * tscShape(refinement * (static_cast<double>(ib) - t[1]));
+                    if(wb == 0.0)
+                        continue;
+                    for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                    {
+                        if(ic < 0 || ic >= static_cast<long>(nz))
+                            continue;
+                        double const wc = wb * tscShape(refinement * (static_cast<double>(ic) - t[2]));
+                        if(wc == 0.0)
+                            continue;
+                        rho[static_cast<std::size_t>(ia)
+                            + M * (static_cast<std::size_t>(ib) + M * static_cast<std::size_t>(ic))]
+                            += wc * q;
+                    }
+                }
+            }
+        }
+        return rho;
+    }
+
     bool allParticlesInside(Bunch const& bunch, Grid const& grid)
     {
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
