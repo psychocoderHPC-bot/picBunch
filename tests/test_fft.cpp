@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace
 {
@@ -251,6 +252,12 @@ TEST(Fft, R2cMatchesC2cAndPackedPlanesMustBePreserved)
             }
             // This is the empirical verdict: zeroing the packed planes is wrong
             // by an O(1) fraction of the field, preserving them is exact.
+            std::printf(
+                "R2C vs C2C: preserved=%.3e (relative %.3e), zeroed=%.3e (relative %.3e)\n",
+                maxPreserved,
+                maxPreserved / (scale + 1.0e-30),
+                maxZeroed,
+                maxZeroed / (scale + 1.0e-30));
             EXPECT_GT(maxZeroed, 1.0e-2 * (scale + 1.0e-30))
                 << "zeroing the DC/Nyquist imaginary planes must change the result";
         });

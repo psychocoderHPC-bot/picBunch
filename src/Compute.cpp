@@ -159,7 +159,7 @@ namespace picBunch
                     double field[6];
                     pointFieldNormalized(Rx, Ry, Rz, ux, uy, uz, field);
                     double value = field[component];
-                    if(!::isfinite(value))
+                    if(!std::isfinite(value))
                         value = 0.0;
                     auto const flat = static_cast<std::size_t>(i)
                         + static_cast<std::size_t>(Mx)
