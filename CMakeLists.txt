@@ -193,10 +193,7 @@ if(PICBUNCH_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-install(TARGETS picBunch picBunchOpenPMD EXPORT picBunchTargets)
+# Installation stays limited to the libraries and headers; the pinned dependency
+# targets are fetched into the build tree and are not exported in this skeleton.
+install(TARGETS picBunch picBunchOpenPMD)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(
-    EXPORT picBunchTargets
-    NAMESPACE picBunch::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/picBunch
-)
