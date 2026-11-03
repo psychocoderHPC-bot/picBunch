@@ -9,7 +9,10 @@ and build conditions are stated with them.
 1. **Reader** - open an openPMD particle series and load one species: positions,
    dimensionless momenta, weights, charge. Position convention is the openPMD
    standard `x = position * unitSI + positionOffset * unitSI_offset`. Momentum is
-   converted with `u = p * unitSI / (m c)`. TODO: numbers from validation
+   converted with `u = p * unitSI / (m c)`. Mesh geometry follows the same rule:
+   the physical spacing is `gridSpacing * gridUnitSI`, and the physical offset is
+   `gridGlobalOffset * gridUnitSI`. A mesh without a positive `gridUnitSI` is
+   rejected instead of being silently rescaled. TODO: numbers from validation
    (species size, units round-trip error).
 
 2. **Deposit** - TSC assignment of `weight * charge` onto the uniform output grid.
@@ -38,20 +41,46 @@ and build conditions are stated with them.
    V/m and B is in T. TODO: numbers from validation (staggering check, divergence
    and curl residuals).
 
-6. **Writer** - write `E` and `B` as openPMD mesh records with components
+6. **Writer** - validate all six components before any store, write `E` and `B`
+   as openPMD mesh records with components
    `x,y,z`, stored C-order with axis labels `z,y,x` (x fastest), `geometry =
    cartesian`, `gridSpacing` in metres, `gridUnitSI = 1.0`, `gridGlobalOffset`
    from the grid origin, `timeOffset = 0`, and a configurable iteration number.
    Each component carries its Yee staggering through the `position` attribute:
    `Ex(.5,0,0) Ey(0,.5,0) Ez(0,0,.5) Bx(0,.5,.5) By(.5,0,.5) Bz(.5,.5,0)`.
    Values are written in SI (V/m for E, T for B) with `unitSI = 1.0`, and the
-   `unitDimension` exponents are E = (1,1,-3,-1) and B = (0,1,-2,-1).
+   `unitDimension` exponents are E = (1,1,-3,-1) and B = (0,1,-2,-1). The
+   series is written under a temporary name in the destination directory and
+   renamed only after a successful flush, so a failed write leaves no partial
+   output file.
 
    **PIConGPU restart defect:** PIConGPU restart currently ignores the mesh
    `unitSI` attribute (verified defect), so a PIConGPU consumer of these files
    must convert with `sim.unit.eField()` / `sim.unit.bField()`. The writer does
    not silently switch to internal PIConGPU units; it writes SI and says so
    here.
+
+## Tolerance contract
+
+`--tolerance` is the only user-facing accuracy knob. It is a relative target for
+the delivered *discrete free-space TSC convolution*, i.e. the discrete sum the
+pipeline is designed to evaluate. It is not a target for the continuum Coulomb
+field near the source; the difference there comes from the fixed TSC deposit at
+`kRefinement = 1` and no tolerance value can reduce it.
+
+The target controls exactly one implementation choice: the FFT zero-padding
+factor. It does not change the interpolation order (fixed at TSC), the deposit
+scheme, the node spacing, or the refinement. The mapping is a measured
+error-vs-padding model:
+
+| requested tolerance | padding | basis |
+| --- | --- | --- |
+| `>= 1e-12` | 2 | measured padding-2 self-convergence is at most `8.37e-16` (toy) / `4.15e-16` (500-particle cloud), below the conservative bound `1e-12` |
+| `1e-14 .. 1e-12` | 3 | tighter than the padding-2 bound, so the next padding is used |
+| `< 1e-14` | rejected (non-zero exit) | below the measured double-precision floor; refusing is better than silently under-delivering |
+
+Padding 1 is never selected by the policy. It is a diagnostic override used by
+the padding test only.
 
 ## Padding
 
@@ -62,15 +91,25 @@ add a spurious periodic image; the unit test reproduces this artefact. With
 free-space discrete TSC sum (no images). `fftPadding = 1` is therefore a
 diagnostic/test option only, never a production choice.
 
-The wraparound artefact is geometry- and box-dependent; quote it only together
-with the geometry. Measured values:
+The unit test now evaluates a direct, non-cyclic sum with its own TSC shape and
+its own Coulomb field at probe nodes where the periodic image is closest. The
+padded result matches that reference to better than `1e-10` relative; the
+unpadded result disagrees by more than `1e-3`. This is what the test proves, not
+merely that two padded runs agree with each other.
 
-- W3 toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
+The wraparound artefact is geometry- and box-dependent; quote it only together
+with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
+
+- toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
   `marginCells = 6`, `cellSize = 1 m`): `max|pad1-pad2| / max|field| =
   3.994542e-02`, interior (two nodes skipped per axis) `2.130691e-02`.
 - the production bunch documented in next.md: `8.947e-3`.
-- for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`,
-  i.e. padding 2 is converged to roundoff.
+- for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`, i.e.
+  padding 2 is converged to roundoff.
+- for a 500-particle, `cellSize = 1e-6 m` cloud on an `n = (18,18,18)` box,
+  `padding=2` versus `padding=3` agrees to `4.15e-16`; the code policy uses the
+  conservative bound `1e-12` so that this number does not need to be re-measured
+  for every geometry.
 
 ## Known limitation of v0.1
 
@@ -103,8 +142,9 @@ build recipe with `-DPICBUNCH_SANITIZE=address` gives AddressSanitizer.
 ## Open items
 
 - No production accuracy gate has been run for this standalone tool yet.
-- The FFT padding factor still needs a cost/error trade-off at production size
-  (the measured artefact and padding-2 convergence are recorded above).
+- The FFT padding policy uses a conservative measured bound rather than a
+  runtime error estimate, so it never pays for a second transform. Production
+  cost/error measurements are recorded above.
 - A refinement policy that improves the near-source accuracy is deferred; v0.1
   is fixed at `kRefinement = 1`.
 - File I/O is implemented: the writer is covered by the I/O round-trip test and

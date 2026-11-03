@@ -47,6 +47,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 #include <array>
 #include <cmath>
@@ -126,4 +129,79 @@ TEST(Physics, OneParticleAgainstIndependentReference)
                 << ") component " << c << " expected " << point.expected[c] << " got " << actual;
         }
     }
+}
+
+// Multi-particle reference.  The values in
+// tests/data/physics_multiparticle.csv are a sum over three electrons that
+// share u = (0,0,5):
+//   (4.0,4.0,4.0), (4.7,5.1,4.3), (6.2,5.8,6.1) m, q = -e, weight = 1.
+// They were produced by the independent quadrature in
+// ~/pr24/pr24w53-ref/indfield.py on rosi_v100:
+//   cd ~/pr24/pr24w53-ref && env -u LD_PRELOAD PYTHONPATH=. python3 \
+//     /tmp/gen_one.py <i> <j> <k> <component>
+// with integrate_point(x_obs, x_src, u, 1, 1, 1, order=12, refine=3) and the
+// same k*q conversion as the single-particle reference.  The reference file is
+// not a git checkout; its SHA-256 is
+//   a135598041a3dbe134667585631ea53fc6bdb7cf7a84419b5a8d762202599519.
+// The CSV holds numbers only: i,j,k, Ex,Ey,Ez,Bx,By,Bz, relative tolerance.
+// makeGrid gives n = (12,12,12) and origin (0,0,0) for this bunch.
+TEST(Physics, MultiParticleAgainstIndependentReference)
+{
+    picBunch::Bunch bunch;
+    std::array<std::array<double, 3>, 3> const positions{{
+        {4.0, 4.0, 4.0},
+        {4.7, 5.1, 4.3},
+        {6.2, 5.8, 6.1},
+    }};
+    for(auto const& p : positions)
+    {
+        std::size_t const i = bunch.size();
+        bunch.resize(i + 1);
+        bunch.x[i] = p[0];
+        bunch.y[i] = p[1];
+        bunch.z[i] = p[2];
+        bunch.ux[i] = 0.0;
+        bunch.uy[i] = 0.0;
+        bunch.uz[i] = 5.0;
+        bunch.weight[i] = 1.0;
+        bunch.charge[i] = -picBunch::kElementaryCharge;
+    }
+
+    picBunch::ComputeOptions options;
+    options.tolerance = 1e-3;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.marginCells = 4.0;
+
+    picBunch::Field const field = picBunch::computeField(bunch, options);
+    EXPECT_EQ(field.grid.n, (std::array<std::size_t, 3>{12, 12, 12}));
+    EXPECT_EQ(field.grid.origin, (std::array<double, 3>{0.0, 0.0, 0.0}));
+    EXPECT_EQ(field.grid.fftPadding, 2u);
+
+    std::ifstream input(std::string(PICBUNCH_TEST_DATA_DIR) + "/physics_multiparticle.csv");
+    ASSERT_TRUE(input.good()) << "cannot open the multi-particle reference CSV";
+    double const scale = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
+    std::string line;
+    std::size_t rows = 0;
+    while(std::getline(input, line))
+    {
+        if(line.empty())
+            continue;
+        std::istringstream stream(line);
+        std::string token;
+        std::vector<double> values;
+        while(std::getline(stream, token, ','))
+            values.push_back(std::stod(token));
+        ASSERT_EQ(values.size(), 10u) << "bad CSV row: " << line;
+        std::size_t const i = static_cast<std::size_t>(values[0]);
+        std::size_t const j = static_cast<std::size_t>(values[1]);
+        std::size_t const k = static_cast<std::size_t>(values[2]);
+        std::size_t const flat = i + field.grid.n[0] * (j + field.grid.n[1] * k);
+        double const relativeTolerance = values[9];
+        for(int c = 0; c < 6; ++c)
+            EXPECT_LE(std::abs(field.data[c][flat] - values[3 + c]), relativeTolerance * scale)
+                << "node (" << i << "," << j << "," << k << ") component " << c
+                << " expected " << values[3 + c] << " got " << field.data[c][flat];
+        ++rows;
+    }
+    EXPECT_EQ(rows, 3u);
 }

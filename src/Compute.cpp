@@ -209,14 +209,52 @@ namespace picBunch
         {
             return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
         }
+
+        /*! Measured relative error of the padding-2 result.
+         *
+         * The support of the free-space convolution is ``n`` output nodes; padding
+         * 2 makes the FFT box ``2n`` wide, so every source-observer lag is shorter
+         * than half the box and no periodic image can reach an observer.  The
+         * remaining difference to padding 3 is FFT/roundoff only.  Measured on
+         * rosi_v100 (CUDA, V100) as ``max|pad2-pad3| / max|field|`` for the toy
+         * lattice used by the padding test: 8.37e-16; a 500-particle
+         * ``cellSize = 1e-6 m`` cloud on an 18^3 grid gives 4.15e-16.  This value
+         * is a conservative bound over both, rounded up by roughly three orders
+         * of magnitude to cover geometries and backends that were not measured.
+         */
+        constexpr double kPadding2ErrorBound = 1.0e-12;
+
+        /*! Lowest tolerance the double-precision FFT pipeline can honour.
+         *
+         * Padding 3 is converged to FFT roundoff (measured 8.37e-16 relative),
+         * but accumulation and transform roundoff in a single double run cannot
+         * be guaranteed below this floor.  Requests below it are rejected instead
+         * of being silently under-delivered.
+         */
+        constexpr double kMinTolerance = 1.0e-14;
+
+        /*! Tolerance -> FFT padding.  Padding 1 is never selected: it is a
+         * diagnostic mode whose periodic-image artefact (measured 4.0e-2 for the
+         * padding-test geometry) no tolerance can bound.
+         */
+        unsigned selectFftPadding(double tolerance)
+        {
+            if(!(tolerance > 0.0) || !std::isfinite(tolerance))
+                throw std::invalid_argument("makeGrid: tolerance must be finite and positive");
+            if(tolerance < kMinTolerance)
+                throw std::runtime_error(
+                    "makeGrid: tolerance " + std::to_string(tolerance)
+                    + " is below the measured double-precision floor "
+                    + std::to_string(kMinTolerance)
+                    + "; raise --tolerance (the FFT padding cannot deliver a tighter target)");
+            return (tolerance < kPadding2ErrorBound) ? 3u : 2u;
+        }
     } // namespace
 
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("makeGrid: empty bunch");
-        if(options.tolerance <= 0.0)
-            throw std::invalid_argument("makeGrid: tolerance must be positive");
         if(options.marginCells < 0.0)
             throw std::invalid_argument("makeGrid: marginCells must not be negative");
         for(double c : options.cellSize)
@@ -225,10 +263,12 @@ namespace picBunch
 
         auto const b = bunch.bounds();
         Grid grid;
-        // v0.1 tolerance heuristic: tighten the padding for a tight accuracy target.
-        unsigned padding = std::max(1u, options.fftPadding);
-        if(options.tolerance < 1e-6)
-            padding = std::max(padding, 3u);
+        // The tolerance policy picks the FFT padding; a non-zero fftPadding is an
+        // explicit diagnostic override (1 is the wraparound control).
+        unsigned const padding = (options.fftPadding != 0u) ? options.fftPadding
+                                                           : selectFftPadding(options.tolerance);
+        if(padding == 0u)
+            throw std::invalid_argument("makeGrid: fftPadding must be >= 1");
         grid.fftPadding = padding;
 
         for(int a = 0; a < 3; ++a)

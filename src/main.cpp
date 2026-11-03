@@ -44,8 +44,10 @@ namespace
             "  --input <path>        openPMD particle series (required)\n"
             "  --species <name|idx>  particle species (default: first)\n"
             "  --output <path>       write E/B as an openPMD series\n"
-            "  --iteration <N>       output iteration index (default: 0)\n"
-            "  --tolerance <value>   accuracy target (default: 1e-3)\n"
+            "  --input-iteration <N> input iteration index (default: first)\n"
+            "  --output-iteration <N> output iteration index (default: 0)\n"
+            "  --tolerance <value>   relative accuracy target of the free-space\n"
+            "                        convolution (default: 1e-3; floor 1e-14)\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -58,10 +60,62 @@ namespace
         std::string input;
         std::optional<std::string> species;
         std::optional<std::string> output;
-        std::uint64_t iteration = 0;
+        std::optional<std::uint64_t> inputIteration;
+        std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
         std::string backend = "auto";
     };
+
+    bool isInteger(std::string const& text)
+    {
+        if(text.empty())
+            return false;
+        std::size_t start = (text[0] == '+') ? 1 : 0;
+        if(start == text.size())
+            return false;
+        for(std::size_t i = start; i < text.size(); ++i)
+            if(text[i] < '0' || text[i] > '9')
+                return false;
+        return true;
+    }
+
+    //! Strict non-negative integer parse: reject trailing junk such as "12abc".
+    std::uint64_t parseIteration(std::string const& text, char const* option)
+    {
+        if(!isInteger(text))
+            throw std::invalid_argument(
+                std::string("invalid value '") + text + "' for " + option
+                + ": expected a non-negative decimal integer");
+        try
+        {
+            return std::stoull(text);
+        }
+        catch(std::exception const&)
+        {
+            throw std::invalid_argument(
+                std::string("value '") + text + "' for " + option + " is out of range");
+        }
+    }
+
+    //! Strict floating-point parse: reject trailing junk such as "1e-3abc".
+    double parseTolerance(std::string const& text)
+    {
+        std::size_t consumed = 0;
+        double value = 0.0;
+        try
+        {
+            value = std::stod(text, &consumed);
+        }
+        catch(std::exception const&)
+        {
+            throw std::invalid_argument(
+                "invalid value '" + text + "' for --tolerance: expected a number");
+        }
+        if(consumed != text.size())
+            throw std::invalid_argument(
+                "invalid value '" + text + "' for --tolerance: trailing characters");
+        return value;
+    }
 
     Arguments parseArguments(int argc, char** argv)
     {
@@ -80,10 +134,12 @@ namespace
                 args.species = value("--species");
             else if(option == "--output")
                 args.output = value("--output");
-            else if(option == "--iteration")
-                args.iteration = std::stoull(value("--iteration"));
+            else if(option == "--input-iteration")
+                args.inputIteration = parseIteration(value("--input-iteration"), "--input-iteration");
+            else if(option == "--output-iteration")
+                args.outputIteration = parseIteration(value("--output-iteration"), "--output-iteration");
             else if(option == "--tolerance")
-                args.tolerance = std::stod(value("--tolerance"));
+                args.tolerance = parseTolerance(value("--tolerance"));
             else if(option == "--backend")
                 args.backend = value("--backend");
             else if(option == "--help" || option == "-h")
@@ -104,27 +160,13 @@ namespace
         return args;
     }
 
-    bool isInteger(std::string const& text)
-    {
-        if(text.empty())
-            return false;
-        std::size_t start = (text[0] == '+') ? 1 : 0;
-        if(start == text.size())
-            return false;
-        for(std::size_t i = start; i < text.size(); ++i)
-            if(text[i] < '0' || text[i] > '9')
-                return false;
-        return true;
-    }
-
     void printGrid(picBunch::Grid const& grid)
     {
         std::printf("grid: n=(%zu,%zu,%zu)  spacing=(%.6g,%.6g,%.6g) m\n",
                     grid.n[0], grid.n[1], grid.n[2],
                     grid.spacing[0], grid.spacing[1], grid.spacing[2]);
-        std::printf("      origin=(%.6g,%.6g,%.6g) m  fftPadding=%u  fftGrid=(%zu,%zu,%zu)\n",
-                    grid.origin[0], grid.origin[1], grid.origin[2], grid.fftPadding,
-                    grid.paddedSize()[0], grid.paddedSize()[1], grid.paddedSize()[2]);
+        std::printf("      origin=(%.6g,%.6g,%.6g) m\n",
+                    grid.origin[0], grid.origin[1], grid.origin[2]);
     }
 
     void printTimings(picBunch::StageTimes const& times)
@@ -169,11 +211,12 @@ int main(int argc, char** argv)
         // ---------------------------------------------------------------- reader
         auto const readerStart = Clock::now();
         picBunch::BunchSelection selection;
-        selection.iteration = args.iteration;
+        selection.iteration = args.inputIteration;
         if(args.species)
         {
             if(isInteger(*args.species))
-                selection.speciesIndex = static_cast<std::size_t>(std::stoull(*args.species));
+                selection.speciesIndex = static_cast<std::size_t>(
+                    parseIteration(*args.species, "--species index"));
             else
                 selection.speciesName = *args.species;
         }
@@ -195,18 +238,25 @@ int main(int argc, char** argv)
             bool usable = true;
             for(int a = 0; a < 3; ++a)
                 usable = usable && geometry.gridSpacing[a] > 0.0
-                    && std::isfinite(geometry.gridSpacing[a]);
+                    && std::isfinite(geometry.gridSpacing[a]) && geometry.gridUnitSI[a] > 0.0
+                    && std::isfinite(geometry.gridUnitSI[a]);
             if(usable)
             {
-                options.cellSize = geometry.gridSpacing;
+                // openPMD stores gridSpacing in units of gridUnitSI.  The physical
+                // spacing is their product; PIConGPU writes gridUnitSI != 1.
+                for(int a = 0; a < 3; ++a)
+                    options.cellSize[a] = geometry.gridSpacing[a] * geometry.gridUnitSI[a];
                 std::printf(
-                    "cellSize from input mesh E: (%.6g,%.6g,%.6g) m\n",
+                    "cellSize from input mesh E: gridSpacing=(%.6g,%.6g,%.6g) x "
+                    "gridUnitSI=(%.6g,%.6g,%.6g) -> (%.6g,%.6g,%.6g) m\n",
+                    geometry.gridSpacing[0], geometry.gridSpacing[1], geometry.gridSpacing[2],
+                    geometry.gridUnitSI[0], geometry.gridUnitSI[1], geometry.gridUnitSI[2],
                     options.cellSize[0], options.cellSize[1], options.cellSize[2]);
             }
             else
                 std::printf("cellSize: input mesh geometry is unusable, using 1 m\n");
         }
-        catch(std::exception const&)
+        catch(picBunch::MeshUnavailable const&)
         {
             std::printf("cellSize: input has no readable mesh, using 1 m\n");
         }
@@ -231,7 +281,7 @@ int main(int argc, char** argv)
         if(args.output)
         {
             picBunch::FieldWriteOptions writeOptions;
-            writeOptions.iteration = args.iteration;
+            writeOptions.iteration = args.outputIteration;
             writeOptions.time = bunchData.time;
             writeOptions.timeUnitSI = bunchData.timeUnitSI;
             auto const writerStart = Clock::now();
@@ -240,7 +290,7 @@ int main(int argc, char** argv)
             std::printf(
                 "wrote %s (iteration %llu)\n",
                 args.output->c_str(),
-                static_cast<unsigned long long>(args.iteration));
+                static_cast<unsigned long long>(args.outputIteration));
         }
         else
             std::printf("no --output given; field was computed but not written\n");

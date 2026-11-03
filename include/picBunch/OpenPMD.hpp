@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace picBunch
@@ -23,6 +24,19 @@ namespace picBunch
     };
 
     OpenPMDInfo openPMDInfo();
+
+    /** The input has no usable mesh record to read geometry from.
+     *
+     * Thrown only for "there is no mesh here" (empty mesh container or an
+     * out-of-range mesh index).  A mesh that exists but carries invalid
+     * metadata, such as a missing gridUnitSI, throws std::runtime_error so the
+     * caller cannot mistake it for a benign absence.
+     */
+    class MeshUnavailable : public std::runtime_error
+    {
+    public:
+        using std::runtime_error::runtime_error;
+    };
 
     /** Read one particle species of the first iteration of an openPMD series.
      *
@@ -65,12 +79,16 @@ namespace picBunch
      * Reads grid spacing, ``gridUnitSI``, ``gridGlobalOffset``, axis labels,
      * geometry, data order, and the iteration time/``timeUnitSI``.  The returned
      * vectors are in ``x, y, z`` order and the shape is the dataset extent mapped
-     * to ``x, y, z`` from the stored axis-label order.
+     * to ``x, y, z`` from the stored axis-label order.  ``gridSpacing`` and
+     * ``gridGlobalOffset`` are converted to physical SI by multiplying with
+     * ``gridUnitSI``; the raw ``gridUnitSI`` values are returned alongside.
+     * A missing or non-positive ``gridUnitSI`` is an error.
      *
      * @param fileName openPMD series path
      * @param meshName mesh record name, ``"E"`` by default (PIConGPU convention)
      * @param meshIndex zero-based index used when the requested name is absent
-     * @throws std::runtime_error if the iteration has no mesh record
+     * @throws MeshUnavailable if the iteration has no mesh record
+     * @throws std::runtime_error if a mesh exists but its metadata is invalid
      */
     MeshGeometry readMeshGeometry(
         std::string const& fileName,

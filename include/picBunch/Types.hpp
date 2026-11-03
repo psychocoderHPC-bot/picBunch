@@ -24,7 +24,8 @@ namespace picBunch
      * ``origin + (i,j,k) * spacing``.  ``spacing`` is the physical node spacing, i.e.
      * ``kRefinement`` PIC cells.  ``fftPadding`` is the zero-padding factor of the
      * free-space convolution: the FFT grid has ``M = fftPadding * n`` nodes per axis.
-     * It must be >= 1; 1 disables zero padding and is a test/diagnostic option.
+     * It is normally selected from ``ComputeOptions::tolerance`` (never below 2);
+     * a value of 1 disables zero padding and is a test/diagnostic override only.
      */
     struct Grid
     {
@@ -95,17 +96,28 @@ namespace picBunch
      *
      * The user sets an accuracy target, the physical cell size, and the empty
      * shell margin.  Bin counts, interpolation orders and FFT sizes are never
-     * user input: ``tolerance`` selects padding/refinement heuristics and the
-     * remaining values are constants of the implementation.
+     * user input: ``tolerance`` selects the only tunable discretisation choice,
+     * the FFT zero padding, and the remaining values are constants of the
+     * implementation.
      */
     struct ComputeOptions
     {
-        //! Accuracy target. v0.1 uses it only to select padding/refinement heuristics.
+        /*! Relative accuracy target of the delivered free-space convolution.
+         *
+         * The target refers to the discrete free-space TSC convolution, not to
+         * the continuum Coulomb field near the source.  It selects the FFT
+         * padding (see ``makeGrid``): padding 2 for targets that are at or above
+         * the measured padding-2 error bound, padding 3 for tighter targets.
+         * A target below the measured double-precision floor is rejected.
+         */
         double tolerance = 1e-3;
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
         std::array<double, 3> cellSize{1.0, 1.0, 1.0};
-        //! FFT zero-padding factor per axis; must be >= 1 (1 = no padding, diagnostic).
-        unsigned fftPadding = 2;
+        /*! Diagnostic override of the FFT zero-padding factor; 0 selects the
+         * tolerance policy.  A non-zero value (including 1 for the wraparound
+         * test) bypasses the policy and must be >= 1.
+         */
+        unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
     };
@@ -146,8 +158,8 @@ namespace picBunch
     {
         std::array<std::size_t, 3> shape{0, 0, 0};       //!< nodes per x, y, z
         std::array<double, 3> gridSpacing{1.0, 1.0, 1.0}; //!< physical spacing per axis
-        std::array<double, 3> gridGlobalOffset{0.0, 0.0, 0.0};
-        std::array<double, 3> gridUnitSI{1.0, 1.0, 1.0};
+        std::array<double, 3> gridGlobalOffset{0.0, 0.0, 0.0}; //!< physical offset per axis
+        std::array<double, 3> gridUnitSI{1.0, 1.0, 1.0}; //!< raw gridUnitSI per axis
         std::array<std::string, 3> axisLabels{"x", "y", "z"};
         std::string geometry{"cartesian"};
         std::string dataOrder{"C"};

@@ -32,6 +32,10 @@ if(PICBUNCH_BUILD_GTESTS)
         test_padding.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(
+        picBunchUnitTests
+        PRIVATE PICBUNCH_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+    )
     target_link_libraries(
         picBunchUnitTests
         PRIVATE picBunch::picBunch picBunch::openPMD GTest::gtest_main GTest::gtest
@@ -45,4 +49,39 @@ if(PICBUNCH_BUILD_GTESTS)
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
         )
     endforeach()
+endif()
+
+# Independent openPMD/HDF5 consumer check: a small writer plus a Python reader
+# that uses h5py only (no openPMD binding).  Registered when python3 + h5py are
+# available; otherwise configure prints the manual command.
+add_executable(picBunchWriteSample write_sample.cpp)
+target_link_libraries(
+    picBunchWriteSample
+    PRIVATE picBunch::picBunch picBunch::openPMD
+)
+alpaka_finalize(picBunchWriteSample)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import h5py"
+        RESULT_VARIABLE PICBUNCH_H5PY_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if(PICBUNCH_H5PY_RESULT EQUAL 0)
+        add_test(
+            NAME picBunch.OpenPMDVerify
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/verify/check_openpmd.py
+                --writer $<TARGET_FILE:picBunchWriteSample>
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}
+        )
+    else()
+        message(
+            STATUS
+            "h5py not found: run tools/verify/check_openpmd.py --writer build/.../picBunchWriteSample --workdir /tmp manually"
+        )
+    endif()
 endif()

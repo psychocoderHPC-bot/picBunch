@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -213,4 +214,110 @@ TEST(Io, MissingMacroWeightedUsesStandardDefault)
     EXPECT_DOUBLE_EQ(data.bunch.charge[0], -picBunch::kElementaryCharge);
 
     std::filesystem::remove(path);
+}
+
+namespace
+{
+    //! Write a tiny mesh whose grid metadata is stored in ``z,y,x`` order.
+    void writeGeometryMesh(
+        std::filesystem::path const& path,
+        double gridUnitSI,
+        bool setUnitSI,
+        std::array<double, 3> const& spacingZYX = {0.5, 1.5, 2.5},
+        std::array<double, 3> const& offsetZYX = {3.0, 2.0, 1.0})
+    {
+        std::array<double, 4 * 5 * 6> const values{};
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& mesh = series.iterations[0].meshes["E"];
+        mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
+        mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
+        mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
+        mesh.setGridSpacing(std::vector<double>(spacingZYX.begin(), spacingZYX.end()));
+        mesh.setGridGlobalOffset(std::vector<double>(offsetZYX.begin(), offsetZYX.end()));
+        if(setUnitSI)
+            mesh.setGridUnitSI(gridUnitSI);
+        auto& component = mesh["x"];
+        component.resetDataset(openPMD::Dataset(
+            openPMD::determineDatatype<double>(),
+            openPMD::Extent{6, 5, 4}));
+        component.storeChunkRaw(values.data(), openPMD::Offset{0, 0, 0}, openPMD::Extent{6, 5, 4});
+        series.flush();
+    }
+} // namespace
+
+TEST(Io, ReaderAppliesGridUnitSIToPhysicalSpacing)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    // 1e-6 is the PIConGPU convention; 8.85e12 exercises a large SI-style scale.
+    for(double const unit : {1.0e-6, 8.85e12})
+    {
+        writeGeometryMesh(path, unit, true);
+        auto const geometry = picBunch::readMeshGeometry(path.string());
+        EXPECT_EQ(geometry.shape, (std::array<std::size_t, 3>{4, 5, 6}));
+        EXPECT_EQ(geometry.axisLabels, (std::array<std::string, 3>{"x", "y", "z"}));
+        // Stored z,y,x spacing/offset reversed to x,y,z and multiplied by unit.
+        EXPECT_DOUBLE_EQ(geometry.gridUnitSI[0], unit);
+        EXPECT_DOUBLE_EQ(geometry.gridUnitSI[1], unit);
+        EXPECT_DOUBLE_EQ(geometry.gridUnitSI[2], unit);
+        // Stored z,y,x = (0.5,1.5,2.5) becomes x,y,z = (2.5,1.5,0.5).
+        EXPECT_DOUBLE_EQ(geometry.gridSpacing[0], 2.5 * unit);
+        EXPECT_DOUBLE_EQ(geometry.gridSpacing[1], 1.5 * unit);
+        EXPECT_DOUBLE_EQ(geometry.gridSpacing[2], 0.5 * unit);
+        // Stored z,y,x = (3,2,1) becomes x,y,z = (1,2,3).
+        EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[0], 1.0 * unit);
+        EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[1], 2.0 * unit);
+        EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[2], 3.0 * unit);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST(Io, ReaderRejectsNonPositiveGridUnitSI)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    writeGeometryMesh(path, -1.0, true);
+    EXPECT_THROW(picBunch::readMeshGeometry(path.string()), std::runtime_error);
+    std::filesystem::remove(path);
+}
+
+TEST(Io, WriterRejectsMismatchedComponentsBeforeCreatingFile)
+{
+    auto const field = makeField();
+    auto broken = field;
+    broken.data[5].pop_back();
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    EXPECT_THROW(picBunch::writeField(broken, path.string()), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(path));
+    std::filesystem::remove(path);
+}
+
+TEST(Io, WriterPublishesIterationPatternAtomically)
+{
+    auto const directory = std::filesystem::temp_directory_path()
+        / ("picbunch_pattern_" + std::to_string(static_cast<long long>(getpid())));
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+
+    auto const field = makeField();
+    picBunch::FieldWriteOptions options;
+    options.iteration = 7u;
+    options.time = 2.5e-13;
+    picBunch::writeField(field, (directory / "field_%T.h5").string(), options);
+
+    std::size_t files = 0;
+    for(auto const& entry : std::filesystem::directory_iterator(directory))
+    {
+        std::string const name = entry.path().filename().string();
+        EXPECT_EQ(name.find(".picbunch-tmp-"), std::string::npos) << "temporary file left behind";
+        if(name.rfind("field_", 0) == 0 && entry.path().extension() == ".h5")
+        {
+            ++files;
+            auto const geometry = picBunch::readMeshGeometry(entry.path().string(), "E", 0, 7u);
+            EXPECT_EQ(geometry.shape, (std::array<std::size_t, 3>{4, 5, 6}));
+        }
+    }
+    EXPECT_EQ(files, 1u);
+    std::filesystem::remove_all(directory);
 }

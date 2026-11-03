@@ -417,7 +417,7 @@ namespace picBunch
 
         auto& meshes = iteration.meshes;
         if(meshes.empty())
-            fail("the first iteration contains no mesh records");
+            throw MeshUnavailable("the first iteration contains no mesh records");
         Mesh* selected = nullptr;
         if(meshes.contains(meshName))
             selected = &meshes.at(meshName);
@@ -427,7 +427,8 @@ namespace picBunch
             for(std::size_t i = 0; i < meshIndex && it != meshes.end(); ++i)
                 ++it;
             if(it == meshes.end())
-                fail("mesh record '" + meshName + "' is absent and mesh index is out of range");
+                throw MeshUnavailable(
+                    "mesh record '" + meshName + "' is absent and mesh index is out of range");
             selected = &it->second;
         }
 
@@ -456,7 +457,6 @@ namespace picBunch
 
         std::vector<double> spacing;
         std::vector<double> globalOffset;
-        std::vector<double> gridUnitSI;
         try
         {
             spacing = selected->gridSpacing<double>();
@@ -473,17 +473,38 @@ namespace picBunch
         {
             globalOffset.clear();
         }
+
+        // gridUnitSI is mandatory for a physical mesh.  Silently assuming 1 is what
+        // made a PIConGPU mesh (gridUnitSI = 1e-6) rescale the whole grid.
+        if(!selected->containsAttribute("gridUnitSI"))
+            fail("mesh '" + meshName + "': required attribute 'gridUnitSI' is missing");
+        std::vector<double> gridUnitSI;
         try
         {
             gridUnitSI = selected->gridUnitSIPerDimension();
         }
         catch(std::exception const&)
         {
-            gridUnitSI.clear();
+            fail("mesh '" + meshName + "': cannot read the gridUnitSI attribute");
         }
-        geometry.gridSpacing = meshGeometryVector(labelIndex, spacing, {1.0, 1.0, 1.0});
-        geometry.gridGlobalOffset = meshGeometryVector(labelIndex, globalOffset, {0.0, 0.0, 0.0});
+        if(gridUnitSI.size() == 1u)
+            gridUnitSI = {gridUnitSI[0], gridUnitSI[0], gridUnitSI[0]};
+        if(gridUnitSI.size() != 3u)
+            fail("mesh '" + meshName + "': gridUnitSI must be a scalar or a 3-vector");
+        for(double unit : gridUnitSI)
+            if(!std::isfinite(unit) || !(unit > 0.0))
+                fail("mesh '" + meshName + "': every gridUnitSI entry must be finite and > 0");
+
+        auto const rawSpacing = meshGeometryVector(labelIndex, spacing, {1.0, 1.0, 1.0});
         geometry.gridUnitSI = meshGeometryVector(labelIndex, gridUnitSI, {1.0, 1.0, 1.0});
+        // openPMD defines gridSpacing and gridGlobalOffset in units of gridUnitSI.
+        // MeshGeometry is documented in physical SI units, so convert here.
+        auto const rawOffset = meshGeometryVector(labelIndex, globalOffset, {0.0, 0.0, 0.0});
+        for(std::size_t a = 0; a < 3; ++a)
+        {
+            geometry.gridSpacing[a] = rawSpacing[a] * geometry.gridUnitSI[a];
+            geometry.gridGlobalOffset[a] = rawOffset[a] * geometry.gridUnitSI[a];
+        }
         try
         {
             geometry.geometry = selected->geometryString();
