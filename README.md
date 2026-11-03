@@ -1,17 +1,17 @@
 # picBunch
 
-Standalone bunch-field initializer: reads an openPMD particle series, computes the
-free-space electric and magnetic field of the bunch on a uniform grid, and writes the
-six Yee-staggered components back as an openPMD series.
+Standalone bunch-field initializer. It reads an openPMD particle series, computes the
+free-space electric and magnetic field of the bunch on a uniform grid, and writes the six
+Yee-staggered components back as an openPMD series. A PIConGPU-restart-compatible
+checkpoint is an optional output mode.
 
-The pipeline (openPMD reader, TSC deposit, moving point kernel, padded FFT
-convolution, Yee read-out, openPMD writer) is implemented. The reader and the
-writer are both available from the CLI. All written values are SI: E in V/m and
-B in T, with `unitSI = 1.0` and the matching `unitDimension`. v0.1 supports
-only a single shared velocity: an input with a momentum spread exits non-zero.
-`--tolerance` is the only accuracy knob. The physics validation gates, the
-near-source limitation and their provenance are recorded in
-[docs/algorithm.md](docs/algorithm.md).
+The pipeline is openPMD particles in, free-space hybrid field out, openPMD field written
+back. The reader, TSC deposit, moving point kernel, padded FFT convolution, Yee read-out,
+openPMD writer, and PIConGPU restart writer are implemented. Written field values are SI:
+E in V/m and B in T, with `unitSI = 1.0` and the matching `unitDimension`. v0.1 supports a
+single shared velocity; an input with a momentum spread exits non-zero. `--tolerance` is
+the only accuracy knob. The physics validation gates, the near-source limitation and their
+provenance are recorded in [docs/algorithm.md](docs/algorithm.md).
 
 ## Layout
 
@@ -19,7 +19,7 @@ near-source limitation and their provenance are recorded in
 include/picBunch/   public headers (types, TSC deposit, point-field kernel, FFT self test)
 src/                host implementation, per-backend device sources under src/cuda, src/hip
 tests/              smoke test (CTest), GoogleTest unit tests and reference CSVs
-tools/verify/       independent HDF5 consumer check (h5py, no openPMD binding)
+tools/verify/       independent HDF5 consumer checks (h5py, no openPMD binding)
 docs/               algorithm and validation notes
 ```
 
@@ -36,36 +36,35 @@ docs/               algorithm and validation notes
 | GoogleTest | system first, `FetchContent` fallback | only when `PICBUNCH_BUILD_GTESTS=ON` |
 
 CMake 3.25+ and a C++20 compiler are required. The CUDA build needs CUDA 12.x, the HIP
-build needs ROCm with rocFFT.
+build needs ROCm with rocFFT. The field pipeline is double precision. A float32 build is
+not supported and its accuracy is not claimed.
 
 ## Build
 
-`openPMD_DIR` points at the openPMD-api package directory (the install prefix or its
-`lib/cmake/openPMD` subdirectory):
+### CUDA, Tesla V100 (sm_70)
+
+The `cuda-v100` preset sets `PICBUNCH_ENABLE_CUDA=ON`, `PICBUNCH_ARCH=70`, and
+`CMAKE_BUILD_TYPE=Release`. The validated install is openPMD 0.17.1 with the HDF5
+backend at `/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD`:
 
 ```bash
-cmake --preset cuda-v100 -DopenPMD_DIR=/path/to/openpmd/lib/cmake/openPMD
-cmake --build --preset cuda-v100
-ctest --preset cuda-v100
+export PATH=/usr/local/cuda/bin:$PATH
+env -u LD_PRELOAD cmake --preset cuda-v100 \
+  -DopenPMD_DIR=/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD
+env -u LD_PRELOAD cmake --build --preset cuda-v100 -j 8
+env -u LD_PRELOAD ctest --preset cuda-v100
 ```
 
-`PICBUNCH_ARCH` is the default for `CMAKE_CUDA_ARCHITECTURES` (CUDA) or
-`CMAKE_HIP_ARCHITECTURES` (HIP). An explicit `-DCMAKE_CUDA_ARCHITECTURES=...` takes
-precedence. Device sources are picked up only from `src/cuda/*.cu` (CUDA build) or
-`src/hip/*.hip` (HIP build); the same sources are never compiled by both languages.
+`nvcc` must be on `PATH`. An explicit `-DCMAKE_CUDA_ARCHITECTURES=...` takes precedence
+over `PICBUNCH_ARCH`. Device sources are picked up only from `src/cuda/*.cu`.
 
-Other presets: `hip-gfx1100`, `cpu-debug`. Every preset builds into
-`build/<preset>/`, which is gitignored. The presets set only the backend and
-architecture; pass the compiler and dependency paths below on the command line.
+### HIP, Radeon RX 7900 (gfx1100)
 
-### HIP (AMD)
-
-CMake 3.28 rejects the `hipcc` wrapper as `CMAKE_HIP_COMPILER`, so point both
-compiler variables at the ROCm compiler driver. `CMAKE_HIP_ARCHITECTURES` and
+CMake 3.28 rejects the `hipcc` wrapper as `CMAKE_HIP_COMPILER`, so point both compiler
+variables at the ROCm compiler driver. `CMAKE_HIP_ARCHITECTURES` and
 `CMAKE_PREFIX_PATH` select the device architecture and the ROCm install, and
-`openPMD_DIR` names the exact openPMD package used. This is the complete
-invocation; no extra `-Dalpaka_DEP_OMP=OFF` or C-language flag is needed,
-CMakeLists.txt sets those for the alpaka/openPMD constraints:
+`openPMD_DIR` names the exact openPMD package. This is the complete invocation on the
+validated `hal` host (ROCm under `/opt/rocm`, openPMD 0.17.0):
 
 ```bash
 cmake -S . -B build/hip -G Ninja \
@@ -80,9 +79,22 @@ cmake --build build/hip -j 8
 ctest --test-dir build/hip --output-on-failure
 ```
 
-Pin a free device before running, for example `HIP_VISIBLE_DEVICES=0`. The
-validated result on `hal` (shared host, RX 7900 XTX) is recorded in
-[docs/algorithm.md](docs/algorithm.md#hip-validation-on-hal).
+Two build traps are handled by `CMakeLists.txt`; no extra flags are needed:
+
+- **OpenMP with HIP.** alpaka's HIP backend rejects OpenMP when the C++ compiler is not
+  Clang. The default C++ compiler on many hosts is GNU, so the project forces
+  `alpaka_DEP_OMP=OFF` for the HIP build unless the user defines it. Passing
+  `-Dalpaka_DEP_OMP=ON` still reaches alpaka's error, by design.
+- **C language for an ADIOS2-enabled openPMD.** openPMD's ADIOS2 MPI target links
+  `MPI::MPI_C`, and CMake's `FindMPI` only creates per-language MPI targets for languages
+  enabled by `project()`. The project enables C before `find_package(openPMD)` so that
+  target exists.
+
+Pin a free device before running, for example `HIP_VISIBLE_DEVICES=0`.
+
+Other presets: `hip-gfx1100`, `cpu-debug`. Every preset builds into `build/<preset>/`,
+which is gitignored. The presets set only the backend and architecture; pass compiler and
+dependency paths on the command line.
 
 ## Run
 
@@ -94,94 +106,219 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu]
 ```
 
-For a particle-only input without mesh metadata the grid must be given on the
-command line.  `--cell-size` (metres), `--grid` (even node counts) and
-`--origin` (metres) are explicit overrides; an explicit `--cell-size` always
-wins over the mesh-derived value, and the run fails with a clear message when
-neither source exists.  Nothing is assumed or rescaled.
+Example with mesh metadata in the input:
 
-`--tolerance` is the only accuracy knob. It is a relative target for the
-delivered free-space convolution: padding 2 is used for targets at or above the
-measured padding-2 bound (`1e-12`), padding 3 for targets between that bound and
-the measured double-precision floor (`1e-14`), and smaller targets are rejected
-with a non-zero exit. It does not change the interpolation order, the deposit
-scheme or the node refinement; the near-source limitation is stated in
-[docs/algorithm.md](docs/algorithm.md). Bin counts and FFT sizes are not
-exposed.
+```bash
+picBunch --input bunch_%T.h5 --species electrons --output field_%T.h5 \
+         --input-iteration 0 --output-iteration 0 --tolerance 1e-3
+```
 
-`--input-iteration` selects the input iteration (default: the first iteration).
-`--output-iteration` selects the written iteration index (default: `0`). The
-physical cell size is taken from the input mesh (`E`) as
-`gridSpacing * gridUnitSI` when the input has a mesh with a positive
-`gridUnitSI`; a missing or non-positive `gridUnitSI` is an error. Without a
-readable mesh, `--cell-size` is required. The tool prints the physical grid and
-a per-stage timing table, never the internal FFT padding or padded grid.
-Unsupported input (for example a momentum spread in v0.1) exits non-zero with a
-message.
+For a particle-only input without mesh metadata, give the geometry explicitly in metres.
+`--grid` takes even node counts; `--origin` is the physical position of node `(0,0,0)`:
 
-### PIConGPU checkpoint output
+```bash
+picBunch --input bunch.h5 --species electrons --output field.h5 \
+         --cell-size 1e-7,1e-7,1e-7 --grid 64,64,32 --origin 0,0,0 \
+         --tolerance 1e-3
+```
 
-`--restart-format picongpu` writes a checkpoint that PIConGPU's
-`RestartFieldLoader` can consume instead of the standard SI openPMD series:
+An explicit `--cell-size` always wins over the mesh-derived value, and the run fails with a
+clear message when neither source exists. Nothing is assumed or rescaled. The physical cell
+size is taken from the input mesh (`E`) as `gridSpacing * gridUnitSI` when the input has a
+mesh with a positive `gridUnitSI`; a missing or non-positive `gridUnitSI` is an error.
+
+`--tolerance` is the only accuracy knob. It is a relative target for the delivered
+free-space convolution: padding 2 is used for targets at or above the measured padding-2
+bound (`1e-12`), padding 3 for targets between that bound and the measured double-precision
+floor (`1e-14`), and smaller targets are rejected with a non-zero exit. It does not change
+the interpolation order, the deposit scheme or the node refinement.
+
+### PIConGPU restart checkpoint
+
+`--restart-format picongpu` writes a checkpoint that PIConGPU's `RestartFieldLoader` can
+consume instead of the standard SI openPMD series:
 
 ```bash
 picBunch --input bunch_%T.h5 --species electrons \
          --restart-format picongpu --output-dir checkpoints \
-         --picongpu-step 0 --picongpu-unit-length 5.7735e-8 \
-         --picongpu-unit-e 8.850761452125e12 --picongpu-unit-b 29522.962355927582
+         --picongpu-step 0 \
+         --picongpu-unit-length 5.773502691896257e-08 \
+         --picongpu-unit-e 8850761452125.0 \
+         --picongpu-unit-b 29522.962355927582
 ```
 
-The writer emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`.
-Fields are float32 with extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU
-internal units; `gridSpacing` is in internal length units and
-`gridSpacing*gridUnitSI` recovers metres. All three unit factors are mandatory;
-a missing one is an error, never a default. The input particle species is
-copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
-If the input has no patch metadata the writer warns and records
-`picBunchRestartWarning`; PIConGPU may then reject the restart.
-
-When the input checkpoint contains `Convolutional PML ...` records, the writer
-copies those records from the input instead of recomputing them. The values and
-`position`/`unitSI` attributes survive; a non-float32 slab is converted to
-float32 and the record adopts the main-field geometry. With no PML records in
-the input the writer emits none, so an open-boundary deck cannot restart from
-that file. The verified restart result, the field-arrival numbers and the
-remaining non-blocking metadata differences are recorded in
+All three unit flags are mandatory; a missing one is an error, never a default. The writer
+emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`. Fields are float32 with
+extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. The input particle
+species is copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
+`--picongpu-species` overrides the copied species and `--picongpu-dt` sets the stored `dt`.
+When the input checkpoint contains `Convolutional PML ...` records, the writer copies those
+records from the input instead of recomputing them. See
 [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
-Example:
+## Test status
+
+- **rosi_v100, Tesla V100-SXM2-32GB, CUDA 12.6, sm_70:** 12/12 CTest entries passed at
+  `bed4344c45c46a5ec77529b652631d75f7d5bb5b` on 2026-11-04. GPU 0 was idle before and after
+  the run, and all four GPUs reported 0% and 0 MiB.
+- **hal, Radeon RX 7900 XTX, gfx1100:** 10/10 passed at
+  `339ca7ad3903249ebf3859f5e106d63db4dc3df5` on 2026-11-03. The two newest tests
+  (`picBunch.ScalarRecordSample` and `picBunch.IoScalarRecord`) were added in `bed4344`;
+  they have run on rosi only, so the HIP result is 10/10, not 12/12, at the final commit.
+
+The 12 rosi entries are `smoke`, `Deposit`, `Kernel`, `Fft`, `Io`, `Physics`, `Padding`,
+`Restart`, `OpenPMDVerify`, `PicOnGPUVerify`, `ScalarRecordSample`, `IoScalarRecord`.
+`OpenPMDVerify` and `PicOnGPUVerify` read the written files with h5py alone. The last two
+build and read an openPMD 2.0 scalar-record file.
+
+## Accuracy
+
+All numbers are worst relative error per component, never pooled. The reference is
+`~/pr24/pr24w53-ref/indfield.py` (order 12, refine 3 at singular points), unless stated
+otherwise. Host: `rosi_v100`, CPU runs, `kRefinement = 1`, one source on a node.
+
+**Coulomb limit.** One stationary particle at a node, far nodes at `d = 8,16,24,32` along
+all six axis directions. The mesh field against the direct TSC stencil sum of the analytic
+Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
+threshold. This is the zero-padded FFT convolution checked against the discrete sum.
+
+**Single-particle far field against the TSC-convolved continuum.** Aspect 1, `h = 1`,
+distance `d = 48` cells:
+
+| gamma | worst relative error at d=48 | reference |
+| --- | --- | --- |
+| 1 | **1.38e-7** (1.4e-7) | TSC-convolved continuum |
+| 10 | **2.65e-4** (2.6e-4) | TSC-convolved continuum |
+
+The `3e-4` crossover is **8 cells** for gamma 1 at aspect 1 (all three axis directions).
+For gamma 10 at aspect 1 it is **6 cells on the beam axis**, but the perpendicular
+direction does not cross inside 48 cells: the measured perpendicular error is **1.46e-2**
+(1.5e-2) at 48 cells. Reaching `1e-3` perpendicular at `r = 8` cells would need
+**h ~ 1/29**, about `2.4e4` times the FFT work. Gamma 100 does not converge in the
+perpendicular direction: the mesh-to-continuum error is `3.75e-1` at 48 cells.
+
+**Error depends on `r/h` only. Refining `h` at fixed cell-distance does not help.** The
+kernel is homogeneous of degree -2, the TSC shape is one node spacing wide, and the Yee
+offsets are in cell units. Measured at `h = 1, 1/2, 1/4, 1/8`, the relative errors are
+unchanged to machine precision (`max rel change 0.0`) at gamma 1, 10 and 100 and aspect 1
+and 4. The only geometric knob is the physical distance measured in cells.
+
+## Cross-validation against PIConGPU's exact reference
+
+The reference is the same exact TSC-convolved quadrature as PIConGPU
+`fieldInitializer=referenceOnly`, evaluated by the standalone driver in
+`~/pr24/b1-20261102`. picBunch was run at `339ca7ad3903249ebf3859f5e106d63db4dc3df5`
+(the field path is unchanged after that commit), tolerance `1e-3`, on `rosi_v100`.
+
+**318 staggered points**, 64x64x32 grid, cell 1e-7 m, N=1e4, identical Yee offsets
+(snap deviation 0):
+
+| case | worst relative error |
+| --- | --- |
+| gamma 1, stationary | E/x 3.66e-2, E/y 4.19e-2, E/z 4.86e-2; B identically 0 |
+| gamma 10, drift +x | E/x 6.08e-2, E/y 5.16e-1, E/z 6.20e-1, B/y 1.23e-1, B/z 1.51e-1 |
+
+**Whole field**, N=1000, 32x32x16 grid, cell 2e-7 m:
+
+| case | worst relative error |
+| --- | --- |
+| gamma 1 | E/x 1.48e-1, E/y 1.49e-1, E/z 1.22e-1 |
+| gamma 10 | E/x 1.36e-1, E/y 1.98, E/z 1.93, B/y 4.42e-1, B/z 4.63e-1 |
+
+The bulk agrees much better: median per-node relative error is 0.4% to 3.3%. The
+reference's own floor is 5.0e-7 to 2.7e-6 (float32 dump limit), so picBunch is the limiting
+side.
+
+Caveat: the 318-point groups were **distance from the bunch centroid** (inside `d <= 1.6`,
+face `1.6 < d <= 8`, outside `d > 8`), not a per-source support test. The sample set is
+clustered at those radii. A separate N-sweep on the same 318 points shows the disagreement
+is **per-source and flat in N**, not a superposition defect: outside the TSC support the
+worst error stays at about `1e-3` to `3e-2` from N=1 to N=1000. The O(1) values at N >= 10
+appear only when the global worst sample is inside a particle's TSC support, within
+0.42 to 0.65 cells of a source; that is the known near-source regime. The disagreement is
+localised to the TSC support and does not grow with particle count.
+
+## PIConGPU checkpoint transport
+
+A picBunch checkpoint restarts PIConGPU with all six field components bitwise identical:
+`E/x E/y E/z B/x B/y B/z` have `max|diff| = 0`, `worst_rel_SI = 0`, `max_ulp = 0`. The
+verified run is a 16-particle periodic case on `rosi_v100` with PIConGPU PR #24 at
+`2baa2566`, a validation-only `maxwellSolver::None` build that dumps the loaded state at
+step 1. The restart skipped the deck initializer and exited 0.
+
+For the open-boundary LWFA case, picBunch copies all eight `Convolutional PML` groups
+(48 datasets) from the input checkpoint. The values and `position`/`unitSI` attributes
+survive, and the copied float32 datasets are bitwise equal to the source. The reduced
+64x128x64 LWFA geometry (`--periodic 0 0 1`) then restarts PIConGPU: exit 0,
+`initialization time: 3.986 sec`, `full simulation time: 4.031 sec`.
+
+Limit: **PML is copied from the same input file.** A particle-only input has no PML records,
+so the writer emits none and cannot restart an open-boundary deck. Use an input checkpoint
+that already contains PML state, or restart with periodic boundaries.
+
+## Performance on V100
+
+Measured with the synthetic benchmark on `rosi_v100`, node `gv002`, GPU 0, CUDA 12.6,
+Release, double, padding 2. GPU 0 was idle before the sweep (0%, 0 MiB, 135 MHz) and all
+runs used `CUDA_VISIBLE_DEVICES=0`. Each configuration ran one untimed warm-up plus one
+device warm-up and **3 timed repeats**; the table gives medians. Benchmark code:
+`experimental/bench` at `3d05752`, tested picBunch source `dc69c16`.
+
+| N | box (cells) | total (ms) | deposit | kernel | FFT | read-out | device (MiB) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1e6 | 20 | 61.92 | 53.61 | 0.53 | 4.31 | 3.45 | 38.9 |
+| 2e6 | 20 | 64.76 | 56.51 | 0.43 | 3.80 | 3.69 | 69.4 |
+| 2e6 | 50 | 85.67 | 52.82 | 2.85 | 13.89 | 15.20 | 127.4 |
+| 2e6 | 100 | 232.97 | 51.89 | 22.66 | 75.97 | 82.40 | 468.7 |
+
+The pipeline is deposit-dominated at large N (about 52 to 57 ms at N=2e6 on every box) and
+FFT-dominated at large box (kernel 0.43 to 22.66 ms and FFT 3.80 to 75.97 ms from box 20 to
+100). Peak exact device use is **69.4 MiB** at N=2e6/20-cell and **468.7 MiB** at
+N=2e6/100-cell. No configuration approached the 32 GB device limit. The four independent
+N=2e6/20-cell repeats span 60.35 to 64.81 ms, about 7% scatter.
+
+## Known gaps in v0.1
+
+- **Near shell not implemented.** The mesh path has no analytic near-source correction.
+  Its accuracy below the crossovers above is a stated limitation, not a tuning target.
+- **Single shared velocity.** A momentum spread exits non-zero; per-particle velocity is
+  not supported.
+- **Double precision required.** The field pipeline and its accuracy claims are double.
+- **Padding required.** With `fftPadding = 1` the FFT box equals the output box and
+  source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
+  (single stationary source, 20^3 box, worst component Ey). The production policy never
+  selects 1.
+- **Free-space truncation outside the box.** Fields are computed only on the requested
+  grid; there is no extrapolation beyond it.
+- **No multi-GPU.** One device, one allocation, one node.
+
+## Reproduce
+
+Build and test commands are in [Build](#build). The exact test run for the 12/12 result is:
 
 ```bash
-picBunch --input bunch_%T.bp5 --species electrons --output field_%T.h5 \
-         --input-iteration 0 --output-iteration 0 --tolerance 1e-3
+cd ~/pr24/w6-20261102/picBunch
+export PATH=/usr/local/cuda/bin:$PATH
+env -u LD_PRELOAD cmake --preset cuda-v100 \
+  -DopenPMD_DIR=/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD
+env -u LD_PRELOAD cmake --build --preset cuda-v100 -j 8
+env -u LD_PRELOAD ctest --preset cuda-v100
 ```
 
-## Test
+Accuracy and cross-validation use the independent judge
+`~/pr24/pr24w53-ref/indfield.py` on `rosi_v100`. The mesh sweep is
+`~/pr24/n2-20261102/n2b.py` (`s1` distance, `s2` spacing, `s3` smoothing, `s4`
+scale invariance). The cross-validation scripts are in `~/pr24/w7-20261102/`
+(`compare_points.py`, `compare_field.py`, `tiny3way.py`) against the reference in
+`~/pr24/b1-20261102/`. Checkpoint acceptance artifacts are in
+`~/pr24/w7b-20261102/` and `~/pr24/w7c-20261102/`. The performance sweep is
+`~/pr24/sb1-20261102/` (`matrix.csv`, `coulomb.csv`, `dsweep.csv`).
 
-`picBunchSmoke` prints the alpaka device name, the FFT backend and plan build status,
-and the openPMD version with its HDF5 status. It is registered with CTest as
-`picBunch.smoke`.
-
-The GoogleTest suite is built when `PICBUNCH_BUILD_GTESTS=ON` (the default).
-CTest registers seven groups, two independent HDF5 consumer checks, and two
-openPMD 2.0 scalar-record reader tests:
-
-| test | what it proves |
-| --- | --- |
-| `picBunch.Deposit` | TSC partition of unity, support (+-1.5 cells), single-particle weight |
-| `picBunch.Kernel` | kernel symmetry/antisymmetry, stationary Coulomb + TSC limit |
-| `picBunch.Fft` | round-trip, convolution vs direct, R2C/C2R vs C2C packed-plane handling |
-| `picBunch.Io` | openPMD write/read values and all mesh metadata; non-unit `gridUnitSI`; rejection of missing `gridUnitSI` and of mismatched components |
-| `picBunch.Physics` | one and three particles vs independent high-order references |
-| `picBunch.Padding` | no-padding wraparound vs an independent non-cyclic sum; padding convergence; tolerance -> padding policy |
-| `picBunch.Restart` | geometry overrides, the PIConGPU checkpoint layout, float32 particle dtypes, positions, normalization, `checkpoints.txt`, particle copy and verbatim PML copy |
-| `picBunch.OpenPMDVerify` | the written file read by `h5py` alone: layout, attributes, units and values |
-| `picBunch.PicOnGPUVerify` | the restart checkpoint read by `h5py` alone: series/iteration attributes, float32 extents, Yee positions, unit normalization and `checkpoints.txt` |
-| `picBunch.ScalarRecordSample` | builds an openPMD 2.0 scalar-record file with h5py |
-| `picBunch.IoScalarRecord` | reads that file through `readBunch`, covering `value` and record-named child datasets |
-
-`tools/verify/check_openpmd.py` needs `python3` with `h5py`. When those are
-missing, CMake prints the manual command instead of registering the test.
+Artifacts are mirrored on the Terok container under
+`/tmp/alpaka-orchestration/pr24-20261102/`: `W6/` for the final build and CTest logs,
+`SB1/` for performance, `N2b/` for the accuracy sweeps, `W7/` and `W7r/` for
+cross-validation, `W7b/` and `W7B/` for checkpoint transport, and `B1/` for the exact
+reference driver.
 
 ## License
 

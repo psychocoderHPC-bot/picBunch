@@ -113,7 +113,8 @@ with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
 - toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
   `marginCells = 6`, `cellSize = 1 m`): `max|pad1-pad2| / max|field| =
   3.994542e-02`, interior (two nodes skipped per axis) `2.130691e-02`.
-- the production bunch documented in next.md: `8.947e-3`.
+- a single stationary source on a `20^3` box: `9.275e-3` (worst component Ey);
+  the exact geometry and per-component split are in the N1b artifact.
 - for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`, i.e.
   padding 2 is converged to roundoff.
 - for a 500-particle, `cellSize = 1e-6 m` cloud on an `n = (18,18,18)` box,
@@ -187,7 +188,9 @@ performance claim about `hal`.
 
 ## Open items
 
-- No production accuracy gate has been run for this standalone tool yet.
+- No near-shell correction is implemented. The measured mesh-path accuracy, its
+  crossovers and the `r/h` invariance are recorded in the README; values below those
+  crossovers are a stated limitation.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
   cost/error measurements are recorded above.
