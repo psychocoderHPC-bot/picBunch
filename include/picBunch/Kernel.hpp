@@ -5,7 +5,7 @@
 #include <cmath>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#    define PICBUNCH_HD __host__ __device__
+#    define PICBUNCH_HD __host__ __device__ inline
 #else
 #    define PICBUNCH_HD inline
 #endif
@@ -13,7 +13,7 @@
 namespace picBunch
 {
     /** TSC assignment function, argument in cell units. */
-    PICBUNCH_HD inline double tscShape(double x)
+    PICBUNCH_HD double tscShape(double x)
     {
         double const ax = fabs(x);
         if(ax < 0.5)
@@ -35,7 +35,7 @@ namespace picBunch
      * This is the algebraic form of the independently validated reference.
      * E is odd in ``R``; B is odd in ``R`` and odd in ``u``.
      */
-    PICBUNCH_HD inline void pointFieldNormalized(
+    PICBUNCH_HD void pointFieldNormalized(
         double Rx,
         double Ry,
         double Rz,

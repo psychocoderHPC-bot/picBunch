@@ -166,7 +166,13 @@ namespace picBunch
             }
         };
 
-        //! Multiply two packed half-spectra and clear the DC/Nyquist imaginary residue.
+        //! Multiply two packed half-spectra.
+        //!
+        //! The product of two half-spectra of real arrays is the half-spectrum of a real
+        //! array, so the packed planes are already consistent for C2R.  Do not zero the
+        //! imaginary part of the last-axis DC/Nyquist planes: in 3-D R2C those planes are
+        //! a complex 2-D transform, not a real 1-D transform, and zeroing them injects a
+        //! constant field error that grows with the kernel's dynamic range.
         struct MultiplySpectrumKernel
         {
             template<typename TAcc>
@@ -174,8 +180,7 @@ namespace picBunch
                 TAcc const& acc,
                 double* a,
                 double const* b,
-                std::uint32_t count,
-                std::uint32_t packedLast) const
+                std::uint32_t count) const
             {
                 for(auto [l] : alpaka::onAcc::makeIdxMap(
                         acc,
@@ -189,9 +194,6 @@ namespace picBunch
                     double const bi = b[off + 1u];
                     double re = ar * br - ai * bi;
                     double im = ar * bi + ai * br;
-                    std::uint32_t const k = static_cast<std::uint32_t>(l % packedLast);
-                    if(k == 0u || k == packedLast - 1u)
-                        im = 0.0;
                     a[off] = re;
                     a[off + 1u] = im;
                 }
@@ -396,8 +398,7 @@ namespace picBunch
                 MultiplySpectrumKernel{},
                 reinterpret_cast<double*>(kernelSpec.data()),
                 reinterpret_cast<double const*>(rhoSpec.data()),
-                spectrumCount,
-                CP);
+                spectrumCount);
             alpaka::onHost::wait(queue);
             alpaka::fft::onHost::executeBackward(queue, c2rPlan, kernelSpec, outReal);
             alpaka::onHost::wait(queue);
