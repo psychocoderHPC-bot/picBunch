@@ -54,7 +54,8 @@ namespace picBunch
                 double const* pq,
                 std::uint32_t numParticles,
                 double* rho,
-                std::uint32_t M,
+                std::uint32_t Mx,
+                std::uint32_t My,
                 std::uint32_t nx,
                 std::uint32_t ny,
                 std::uint32_t nz,
@@ -107,9 +108,9 @@ namespace picBunch
                                 if(wc == 0.0)
                                     continue;
                                 auto const idx = static_cast<std::size_t>(ia)
-                                    + static_cast<std::size_t>(M)
-                                        * (static_cast<std::size_t>(ib) + static_cast<std::size_t>(M)
-                                           * static_cast<std::size_t>(ic));
+                                    + static_cast<std::size_t>(Mx)
+                                        * (static_cast<std::size_t>(ib)
+                                           + static_cast<std::size_t>(My) * static_cast<std::size_t>(ic));
                                 alpaka::onAcc::atomicAdd(acc, &rho[idx], wc * q);
                             }
                         }
@@ -125,7 +126,9 @@ namespace picBunch
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 double* kernel,
-                std::uint32_t M,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz,
                 int component,
                 double dx,
                 double dy,
@@ -141,14 +144,14 @@ namespace picBunch
                 for(auto const& idx : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
-                        alpaka::IdxRange{Extents3::fill(M)}))
+                        alpaka::IdxRange{Extents3{Mx, My, Mz}}))
                 {
                     auto const i = static_cast<std::uint32_t>(idx[0]);
                     auto const j = static_cast<std::uint32_t>(idx[1]);
                     auto const k = static_cast<std::uint32_t>(idx[2]);
-                    int const di = (i < M / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(M);
-                    int const dj = (j < M / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(M);
-                    int const dk = (k < M / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(M);
+                    int const di = (i < Mx / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(Mx);
+                    int const dj = (j < My / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
+                    int const dk = (k < Mz / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
                     // R = (d*h + yee_delta) * cell
                     double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
                     double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
@@ -159,8 +162,9 @@ namespace picBunch
                     if(!::isfinite(value))
                         value = 0.0;
                     auto const flat = static_cast<std::size_t>(i)
-                        + static_cast<std::size_t>(M)
-                            * (static_cast<std::size_t>(j) + static_cast<std::size_t>(M) * static_cast<std::size_t>(k));
+                        + static_cast<std::size_t>(Mx)
+                            * (static_cast<std::size_t>(j)
+                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
                     kernel[flat] = value;
                 }
             }
@@ -282,13 +286,16 @@ namespace picBunch
         auto device = selector.makeDevice(0);
         auto queue = device.makeQueue();
 
-        std::uint32_t const M = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
-        if(grid.n[0] * grid.fftPadding != M || grid.n[1] * grid.fftPadding != M
-           || grid.n[2] * grid.fftPadding != M)
-            throw std::runtime_error("computeField: only cubic padded boxes are supported in v0.1");
-        std::uint32_t const CP = M / 2u + 1u;
-        Extents3 const realExt{M, M, M};
-        Extents3 const specExt{M, M, CP};
+        std::uint32_t const Mx = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
+        std::uint32_t const My = static_cast<std::uint32_t>(grid.n[1] * grid.fftPadding);
+        std::uint32_t const Mz = static_cast<std::uint32_t>(grid.n[2] * grid.fftPadding);
+        if(Mx % 2u != 0u)
+            throw std::runtime_error("computeField: padded x extent must be even for R2C");
+        std::uint32_t const CP = Mx / 2u + 1u;
+        // Flat layout is x fastest, then y, then z.  The plan's last dimension is x,
+        // so the plan extents are (z, y, x) and the packed spectrum is (z, y, CP).
+        Extents3 const realExt{Mz, My, Mx};
+        Extents3 const specExt{Mz, My, CP};
 
         auto const cell = std::array<double, 3>{
             grid.spacing[0] / kRefinement,
@@ -331,7 +338,8 @@ namespace picBunch
                 charge.data(),
                 numParticles,
                 rhoReal.data(),
-                M,
+                Mx,
+                My,
                 static_cast<std::uint32_t>(grid.n[0]),
                 static_cast<std::uint32_t>(grid.n[1]),
                 static_cast<std::uint32_t>(grid.n[2]),
@@ -358,21 +366,25 @@ namespace picBunch
         times.fftMs += elapsedMs(fftStart);
 
         double const scale = (kRefinement * kRefinement * kRefinement)
-            / (static_cast<double>(M) * static_cast<double>(M) * static_cast<double>(M));
+            / (static_cast<double>(Mx) * static_cast<double>(My) * static_cast<double>(Mz));
         double const eFactor = kCoulombConstant;
         double const bFactor = kCoulombConstant / kSpeedOfLight;
 
-        std::uint32_t const spectrumCount = M * M * CP;
+        std::uint32_t const spectrumCount = Mz * My * CP;
 
         for(int c = 0; c < 6; ++c)
         {
             // ------------------------------------------------------------ kernel
             auto const kernelStart = Clock::now();
             queue.enqueue(
-                alpaka::onHost::FrameSpec{ceilDivVec(Extents3::fill(M), Extents3::fill(4u)), Extents3::fill(4u)},
+                alpaka::onHost::FrameSpec{
+                    ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
+                    Extents3::fill(4u)},
                 KernelBuildKernel{},
                 kernelReal.data(),
-                M,
+                Mx,
+                My,
+                Mz,
                 c,
                 kYeeOffset[c][0],
                 kYeeOffset[c][1],
@@ -412,9 +424,9 @@ namespace picBunch
                     for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
                     {
                         auto const in = static_cast<std::size_t>(i)
-                            + static_cast<std::size_t>(M)
+                            + static_cast<std::size_t>(Mx)
                                 * (static_cast<std::size_t>(j)
-                                   + static_cast<std::size_t>(M) * static_cast<std::size_t>(k));
+                                   + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
                         auto const out = static_cast<std::size_t>(i)
                             + static_cast<std::size_t>(grid.n[0])
                                 * (static_cast<std::size_t>(j)
