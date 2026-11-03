@@ -205,3 +205,25 @@ endif()
 # targets are fetched into the build tree and are not exported in this skeleton.
 install(TARGETS picBunch picBunchOpenPMD picBunchApp)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# ---------------------------------------------------------------------------
+# Synthetic scaling benchmark (additive, opt-in)
+#
+# Times picBunch::computeField() on in-memory bunches; no openPMD input, no
+# change to the library, the CLI, or any public API.
+# ---------------------------------------------------------------------------
+if(PICBUNCH_BUILD_BENCH)
+    option(PICBUNCH_BUILD_BENCH "Build the synthetic scaling benchmark (picBunchBench)." ON)
+    find_package(Threads REQUIRED)
+    add_executable(picBunchBench tools/bench/bench.cpp)
+    target_link_libraries(picBunchBench PRIVATE picBunch::picBunch Threads::Threads)
+    if(PICBUNCH_ENABLE_CUDA)
+        find_package(CUDAToolkit QUIET)
+        if(CUDAToolkit_FOUND)
+            target_link_libraries(picBunchBench PRIVATE CUDA::cudart)
+            target_compile_definitions(picBunchBench PRIVATE PICBUNCH_BENCH_HAVE_CUDA=1)
+        endif()
+    endif()
+    alpaka_finalize(picBunchBench)
+    install(TARGETS picBunchBench)
+endif()
