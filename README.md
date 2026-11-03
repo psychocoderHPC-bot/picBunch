@@ -55,7 +55,34 @@ precedence. Device sources are picked up only from `src/cuda/*.cu` (CUDA build) 
 `src/hip/*.hip` (HIP build); the same sources are never compiled by both languages.
 
 Other presets: `hip-gfx1100`, `cpu-debug`. Every preset builds into
-`build/<preset>/`, which is gitignored.
+`build/<preset>/`, which is gitignored. The presets set only the backend and
+architecture; pass the compiler and dependency paths below on the command line.
+
+### HIP (AMD)
+
+CMake 3.28 rejects the `hipcc` wrapper as `CMAKE_HIP_COMPILER`, so point both
+compiler variables at the ROCm compiler driver. `CMAKE_HIP_ARCHITECTURES` and
+`CMAKE_PREFIX_PATH` select the device architecture and the ROCm install, and
+`openPMD_DIR` names the exact openPMD package used. This is the complete
+invocation; no extra `-Dalpaka_DEP_OMP=OFF` or C-language flag is needed,
+CMakeLists.txt sets those for the alpaka/openPMD constraints:
+
+```bash
+cmake -S . -B build/hip -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPICBUNCH_ENABLE_HIP=ON \
+      -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DCMAKE_HIP_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DCMAKE_HIP_ARCHITECTURES=gfx1100 \
+      -DCMAKE_PREFIX_PATH=/opt/rocm \
+      -DopenPMD_DIR=/opt/openpmd/0.17.0/lib/cmake/openPMD
+cmake --build build/hip -j 8
+ctest --test-dir build/hip --output-on-failure
+```
+
+Pin a free device before running, for example `HIP_VISIBLE_DEVICES=0`. The
+validated result on `hal` (shared host, RX 7900 XTX) is recorded in
+[docs/algorithm.md](docs/algorithm.md#hip-validation-on-hal).
 
 ## Run
 

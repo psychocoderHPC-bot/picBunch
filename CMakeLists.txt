@@ -93,6 +93,14 @@ set(alpaka_HEADERCHECKS OFF CACHE BOOL "alpaka header checks" FORCE)
 set(alpaka_CLANG_TIDY OFF CACHE BOOL "alpaka clang-tidy" FORCE)
 set(alpaka_DEP_CUDA ${PICBUNCH_ENABLE_CUDA} CACHE BOOL "alpaka CUDA backend" FORCE)
 set(alpaka_DEP_HIP ${PICBUNCH_ENABLE_HIP} CACHE BOOL "alpaka HIP backend" FORCE)
+# alpaka's HIP backend rejects OpenMP with a non-Clang CXX compiler
+# (alpaka/cmake/alpakaHip.cmake: the CXX and HIP compilers must share a
+# compatible OpenMP runtime).  The default CXX compiler on many hosts is GNU,
+# so disable alpaka's OpenMP backend for HIP unless the user asked for it
+# explicitly; with -Dalpaka_DEP_OMP=ON alpaka still reports its own error.
+if(PICBUNCH_ENABLE_HIP AND NOT DEFINED alpaka_DEP_OMP)
+    set(alpaka_DEP_OMP OFF CACHE BOOL "alpaka OpenMP backend (forced off for HIP; alpaka limitation)" FORCE)
+endif()
 
 FetchContent_Declare(
     alpaka
@@ -134,6 +142,14 @@ if(HDF5_IS_PARALLEL)
     find_package(MPI REQUIRED COMPONENTS CXX)
 endif()
 
+# openPMD's ADIOS2 MPI target (adios2::cxx11_mpi) links MPI::MPI_C.  The openPMD
+# config reaches CMake's FindMPI through ADIOS2's find_dependency(MPI), and
+# FindMPI only creates per-language targets for languages enabled by project().
+# This project enables CXX only, so MPI::MPI_C would be missing and generation
+# fails for an MPI/ADIOS2-enabled openPMD install.  Enable C before finding
+# openPMD so the C MPI target exists; the C compiler is already a dependency of
+# the HDF5 C API above.
+enable_language(C)
 find_package(openPMD CONFIG QUIET)
 if(NOT openPMD_FOUND)
     message(

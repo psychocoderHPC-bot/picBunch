@@ -139,6 +139,42 @@ also exist in the baseline; they are out of scope here and are not claimed fixed
 Without it, the deposit path must report no `heap-use-after-free`. The same
 build recipe with `-DPICBUNCH_SANITIZE=address` gives AddressSanitizer.
 
+## HIP validation on hal
+
+The HIP backend was built and validated on `hal`, a **shared** host (AMD Radeon
+RX 7900 XTX, `gfx1100`, ROCm 7.2.0, rocFFT). Because other jobs may run on the
+same host, no timing or throughput numbers are claimed from this run; only
+correctness and warning counts are recorded.
+
+Build invocation (CMake 3.28, no manual workarounds; see README for why
+`amdclang++` instead of the `hipcc` wrapper and why C is enabled):
+
+```bash
+cmake -S . -B build/hip -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DPICBUNCH_ENABLE_HIP=ON \
+      -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DCMAKE_HIP_COMPILER=/opt/rocm/bin/amdclang++ \
+      -DCMAKE_HIP_ARCHITECTURES=gfx1100 \
+      -DCMAKE_PREFIX_PATH=/opt/rocm \
+      -DopenPMD_DIR=/opt/openpmd/0.17.0/lib/cmake/openPMD
+cmake --build build/hip -j 8
+ctest --test-dir build/hip --output-on-failure
+```
+
+Results on that host:
+
+- The original HIP validation passed 8/8 CTest entries registered there (the
+  h5py-only consumer checks were not registered). Re-running this configuration
+  with the h5py checks available passes 10/10.
+- The build reports zero compiler warnings.
+- Moving bunch at `gamma ~= 10`, worst relative error per field component:
+  `Ex = 1.0e-3`, `Ey = 1.6e-4`, `Ez = 8.1e-5` at the near test point; the far
+  test point is at most `1.6e-7`.
+- R2C versus C2C transform agreement: `7.1e-15`.
+
+These numbers are properties of the code on this device; they are not a
+performance claim about `hal`.
+
 ## Open items
 
 - No production accuracy gate has been run for this standalone tool yet.
