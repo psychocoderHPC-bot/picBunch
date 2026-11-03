@@ -28,9 +28,13 @@ namespace picBunch
      *
      * Positions use the openPMD convention ``x = position*unitSI + offset*unitSI_offset``
      * with no inference from unit equality.  Momenta become ``u = p/(m c)``; weights
-     * carry ``macroWeighted``/``weightingPower``; the charge is read in SI Coulomb.
-     * If the file has no ``charge`` record the frozen contract ``q_p = -w_p e`` is
-     * applied.  If it has no ``mass`` record the electron mass is used.
+     * carry ``macroWeighted``/``weightingPower`` (the openPMD standard default of
+     * an absent ``macroWeighted`` is ``false``); the charge is read in SI Coulomb.
+     * If the file has no ``charge`` record the frozen contract ``q_p = -e`` (per
+     * macro particle) is applied and a warning naming the species is written to
+     * ``stderr``.  A missing ``weightingPower`` with ``macroWeighted = true``
+     * warns similarly and applies the standard default ``0``.  If it has no
+     * ``mass`` record the electron mass is used.
      *
      * Missing required records (``position``, ``momentum``, ``weighting``) raise
      * ``std::runtime_error`` with the record path in the message.

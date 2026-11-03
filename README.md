@@ -5,8 +5,12 @@ free-space electric and magnetic field of the bunch on a uniform grid, and write
 six Yee-staggered components back as an openPMD series.
 
 The pipeline (openPMD reader, TSC deposit, moving point kernel, padded FFT
-convolution, Yee read-out, openPMD writer) is implemented. The physics
-validation gates and their provenance are recorded in
+convolution, Yee read-out, openPMD writer) is implemented. The reader and the
+writer are both available from the CLI. All written values are SI: E in V/m and
+B in T, with `unitSI = 1.0` and the matching `unitDimension`. v0.1 supports
+only a single shared velocity: an input with a momentum spread exits non-zero.
+`--tolerance` is the only accuracy knob. The physics validation gates, the
+near-source limitation and their provenance are recorded in
 [docs/algorithm.md](docs/algorithm.md).
 
 ## Layout

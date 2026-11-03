@@ -158,3 +158,50 @@ TEST(Io, FieldRoundTripPreservesValuesAndMetadata)
 
     std::filesystem::remove(path);
 }
+
+TEST(Io, MissingMacroWeightedUsesStandardDefault)
+{
+    // openPMD standard default is macroWeighted=false.  With weightingPower set
+    // but macroWeighted absent, the momentum must remain a per-particle value:
+    // the weightingPower must not be applied.  The pre-fix fallback of true
+    // would divide u by weight^2.
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    double const massC = picBunch::kElectronMass * picBunch::kSpeedOfLight;
+    double const weightValue = 3.0;
+    {
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& iteration = series.iterations[0];
+        auto& species = iteration.particles["electrons"];
+        char const* const names = "xyz";
+        auto setScalar = [](openPMD::RecordComponent& component, double value, double unitSI) {
+            component.resetDataset(
+                openPMD::Dataset(openPMD::determineDatatype<double>(), openPMD::Extent{1}));
+            component.storeChunkRaw(&value, openPMD::Offset{0}, openPMD::Extent{1});
+            component.setUnitSI(unitSI);
+        };
+        auto& position = species["position"];
+        for(int a = 0; a < 3; ++a)
+            setScalar(position[std::string(1, names[a])], (a == 2) ? 5.0 : 4.0, 1.0);
+
+        auto& momentum = species["momentum"];
+        for(int a = 0; a < 3; ++a)
+            setScalar(momentum[std::string(1, names[a])], (a == 2) ? 1.0 : 0.0, massC);
+        momentum.setAttribute("weightingPower", 2.0);
+        // macroWeighted is deliberately absent -> standard default false.
+
+        setScalar(species["weighting"], weightValue, 1.0);
+        series.flush();
+    }
+
+    auto const data = picBunch::readBunch(path.string(), std::size_t{0});
+    ASSERT_EQ(data.bunch.size(), 1u);
+    EXPECT_DOUBLE_EQ(data.bunch.weight[0], weightValue);
+    EXPECT_DOUBLE_EQ(data.bunch.ux[0], 0.0);
+    EXPECT_DOUBLE_EQ(data.bunch.uy[0], 0.0);
+    EXPECT_DOUBLE_EQ(data.bunch.uz[0], 1.0);
+    // No charge record: documented default -e (a warning is emitted on stderr).
+    EXPECT_DOUBLE_EQ(data.bunch.charge[0], -picBunch::kElementaryCharge);
+
+    std::filesystem::remove(path);
+}

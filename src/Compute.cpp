@@ -64,10 +64,9 @@ namespace picBunch
                 double oz,
                 double sx,
                 double sy,
-                double sz,
-                double refinement) const
+                double sz) const
             {
-                double const support = 1.5 / refinement;
+                double const support = 1.5;
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
@@ -90,21 +89,21 @@ namespace picBunch
                     {
                         if(ia < 0 || ia >= static_cast<long>(nx))
                             continue;
-                        double const wa = tscShape(refinement * (static_cast<double>(ia) - t[0]));
+                        double const wa = tscShape(static_cast<double>(ia) - t[0]);
                         if(wa == 0.0)
                             continue;
                         for(long ib = lo[1]; ib <= hi[1]; ++ib)
                         {
                             if(ib < 0 || ib >= static_cast<long>(ny))
                                 continue;
-                            double const wb = wa * tscShape(refinement * (static_cast<double>(ib) - t[1]));
+                            double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
                             if(wb == 0.0)
                                 continue;
                             for(long ic = lo[2]; ic <= hi[2]; ++ic)
                             {
                                 if(ic < 0 || ic >= static_cast<long>(nz))
                                     continue;
-                                double const wc = wb * tscShape(refinement * (static_cast<double>(ic) - t[2]));
+                                double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
                                 if(wc == 0.0)
                                     continue;
                                 auto const idx = static_cast<std::size_t>(ia)
@@ -348,10 +347,12 @@ namespace picBunch
                 grid.origin[2],
                 grid.spacing[0],
                 grid.spacing[1],
-                grid.spacing[2],
-                kRefinement);
+                grid.spacing[2]);
+            // The host queue is non-blocking (a CallbackThread worker runs the
+            // kernel), so the particle buffers must stay alive until the wait.
+            // Keep this wait inside the block that owns posX/posY/posZ/charge.
+            alpaka::onHost::wait(queue);
         }
-        alpaka::onHost::wait(queue);
         times.depositMs += elapsedMs(depositStart);
 
         // ---------------------------------------------------------------- FFT

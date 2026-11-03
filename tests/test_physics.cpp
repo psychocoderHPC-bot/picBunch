@@ -35,9 +35,11 @@
 //
 // The reference is free space.  With fftPadding = 2 every source-observer lag
 // fits inside the FFT box, so the discrete result equals the free-space TSC
-// sum (no periodic images).  The residual difference at P2 is the coarseness
-// of the kRefinement = 1 TSC quadrature near the source, not an FFT error; P1
-// is far enough that it is 1.6e-7.
+// sum (no periodic images).  P1 is far enough from the source that the
+// discrete TSC result matches at 1.6e-7 and is asserted at 1e-6.  P2 is close
+// to the source: the kRefinement = 1 TSC assignment quadrature is too coarse
+// there, and the measured residual is 1.4e-2.  That is a known limitation of
+// the v0.1 deposit kernel, not an FFT error; it is asserted at 2e-2.
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Types.hpp"
@@ -71,7 +73,7 @@ namespace
               1.49564992178825176e-22,
               -1.49564992178824000e-22,
               0.0},
-             1.0e-3},
+             1.0e-6}, // far field: measured 1.6e-7
             {{9, 4, 5},
              {-1.02519670526764164e-10,
               -1.09195348836882690e-11,
@@ -79,7 +81,7 @@ namespace
               1.14360184508520855e-20,
               -1.15885229998238335e-19,
               0.0},
-             2.0e-2},
+             2.0e-2}, // near field: measured 1.4e-2, coarse TSC quadrature at kRefinement=1
         };
     }
 } // namespace

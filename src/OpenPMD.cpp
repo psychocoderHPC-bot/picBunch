@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <stdexcept>
 #include <utility>
@@ -305,8 +306,14 @@ namespace picBunch
         checkUnitDimension(momentum, "momentum", {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0});
         auto const momentumValues = readVectorSeries(series, momentum, count, "momentum");
         auto const momentumUnits = readComponentUnits(momentum, "momentum");
-        bool const momentumMacro = isMacroWeighted(momentum, true);
+        // openPMD standard default for macroWeighted is false; the momentum is
+        // then a per-particle value and the weightingPower must not be applied.
+        bool const momentumMacro = isMacroWeighted(momentum, false);
         double const momentumPower = weightingPower(momentum, 0.0);
+        if(momentumMacro && !momentum.containsAttribute("weightingPower"))
+            std::cerr << "picBunch openPMD reader: species '" << speciesName
+                      << "': momentum has macroWeighted=true but no 'weightingPower';"
+                      << " applying the standard default weightingPower=0\n";
 
         if(!species.contains("weighting"))
             fail("species '" + speciesName + "' has no 'weighting' record");
@@ -317,7 +324,12 @@ namespace picBunch
         auto const rawWeight = loadValues(series, weightingComponent, count, "weighting");
 
         std::vector<double> chargePerParticle;
-        if(species.contains("charge"))
+        bool const chargeDefaulted = !species.contains("charge");
+        if(chargeDefaulted)
+            std::cerr << "picBunch openPMD reader: species '" << speciesName
+                      << "' has no 'charge' record; applying the default q = -e ("
+                      << -kElementaryCharge << " C) per macro particle\n";
+        if(!chargeDefaulted)
         {
             Record& chargeRecord = species["charge"];
             checkUnitDimension(chargeRecord, "charge", {0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0});

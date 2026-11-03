@@ -17,10 +17,15 @@ Numbers are deliberately absent until they are measured in validation.
    versus reference).
 
 3. **Kernel** - evaluate the free-space field of the bunch as a convolution of the
-   deposited source with the shape-weighted, uniformly moving point-charge kernel,
-   including the near-field quadrature where the point kernel is unresolved.
-   TODO: numbers from validation (relative field error per band, moving-bunch
-   gamma cases).
+   deposited source with the shape-weighted, uniformly moving point-charge kernel.
+   There is no separate near-field quadrature: the smoothing comes from the
+   deposit-convolved-with-kernel composition, which is O(s^2) in the assignment
+   shape width. The `D = 0` guard in the analytic point-field kernel never fires
+   for the six Yee components, because each component's half-cell staggering
+   keeps |R| > 0 at every grid node. Near the source the remaining error is the
+   coarseness of the v0.1 TSC assignment at `kRefinement = 1`; see the known
+   limitation below. TODO: numbers from validation (relative field error per
+   band, moving-bunch gamma cases).
 
 4. **FFT** - transform the zero-padded source and kernel, multiply in Fourier
    space, and transform back. The FFT is reached through the alpakaVendor portable
@@ -56,10 +61,52 @@ add a spurious periodic image; the unit test reproduces this artefact. With
 free-space discrete TSC sum (no images). `fftPadding = 1` is therefore a
 diagnostic/test option only, never a production choice.
 
+The wraparound artefact is geometry- and box-dependent; quote it only together
+with the geometry. Measured values:
+
+- W3 toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
+  `marginCells = 6`, `cellSize = 1 m`): `max|pad1-pad2| / max|field| =
+  3.994542e-02`, interior (two nodes skipped per axis) `2.130691e-02`.
+- the production bunch documented in next.md: `8.947e-3`.
+- for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`,
+  i.e. padding 2 is converged to roundoff.
+
+## Known limitation of v0.1
+
+The single-particle physics test matches an independent high-order free-space
+reference at `1.6e-7` in the far field but only at `1.4e-2` for the near-source
+point P2, asserted at `2e-2`. The cause is the coarse `kRefinement = 1` TSC
+assignment quadrature near the source, not an FFT error. v0.1 exposes no
+refinement knob, so this near-source accuracy is a stated limitation, not a
+tuning target.
+
+## Sanitizers
+
+`-DPICBUNCH_SANITIZE=thread` or `-DPICBUNCH_SANITIZE=address` instruments only
+picBunch's own targets; the fetched alpaka/alpakaVendor targets stay
+uninstrumented. Use the CPU backend. Exact ThreadSanitizer reproduction:
+
+```bash
+cmake -S . -B build/tsan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DPICBUNCH_SANITIZE=thread -DopenPMD_DIR=/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD
+cmake --build build/tsan -j 8
+OMP_NUM_THREADS=1 TSAN_OPTIONS=halt_on_error=1 \
+      ./build/tsan/tests/picBunchUnitTests --gtest_filter=Physics.*
+```
+
+`OMP_NUM_THREADS=1` avoids the unrelated alpaka host-queue/OmpBlocks races that
+also exist in the baseline; they are out of scope here and are not claimed fixed.
+Without it, the deposit path must report no `heap-use-after-free`. The same
+build recipe with `-DPICBUNCH_SANITIZE=address` gives AddressSanitizer.
+
 ## Open items
 
-- No accuracy gate has been run for this standalone tool yet.
-- The near-field band policy and the FFT padding factor still need a measured
-  trade-off between cost and error.
-- The writer is implemented and covered by the I/O round-trip test; the reader
-  is covered by the CLI and the physics test.
+- No production accuracy gate has been run for this standalone tool yet.
+- The FFT padding factor still needs a cost/error trade-off at production size
+  (the measured artefact and padding-2 convergence are recorded above).
+- A refinement policy that improves the near-source accuracy is deferred; v0.1
+  is fixed at `kRefinement = 1`.
+- File I/O is implemented: the writer is covered by the I/O round-trip test and
+  the reader by the CLI, the physics test, and the reader-default test. The v0.1
+  reader emits a `std::cerr` warning when it applies the `-e` charge default or
+  the `weightingPower = 0` default for `macroWeighted = true`.

@@ -107,7 +107,9 @@ namespace picBunch
         std::size_t const M = nx * grid.fftPadding;
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
-        double const support = 1.5 / refinement;
+        // The TSC shape is sampled in node units: grid.spacing already carries the
+        // refinement, so no extra refinement factor belongs in the argument.
+        double const support = 1.5;
         std::vector<double> rho(M * M * M, 0.0);
 
         for(std::size_t p = 0; p < bunch.size(); ++p)
@@ -127,21 +129,21 @@ namespace picBunch
             {
                 if(ia < 0 || ia >= static_cast<long>(nx))
                     continue;
-                double const wa = tscShape(refinement * (static_cast<double>(ia) - t[0]));
+                double const wa = tscShape(static_cast<double>(ia) - t[0]);
                 if(wa == 0.0)
                     continue;
                 for(long ib = lo[1]; ib <= hi[1]; ++ib)
                 {
                     if(ib < 0 || ib >= static_cast<long>(ny))
                         continue;
-                    double const wb = wa * tscShape(refinement * (static_cast<double>(ib) - t[1]));
+                    double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
                     if(wb == 0.0)
                         continue;
                     for(long ic = lo[2]; ic <= hi[2]; ++ic)
                     {
                         if(ic < 0 || ic >= static_cast<long>(nz))
                             continue;
-                        double const wc = wb * tscShape(refinement * (static_cast<double>(ic) - t[2]));
+                        double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
                         if(wc == 0.0)
                             continue;
                         rho[static_cast<std::size_t>(ia)

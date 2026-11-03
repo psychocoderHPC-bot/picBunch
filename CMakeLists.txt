@@ -41,6 +41,14 @@ set(
     "Directory containing openPMDConfig.cmake (the openPMD-api install prefix or its lib/cmake/openPMD subdirectory)."
 )
 
+set(
+    PICBUNCH_SANITIZE
+    "off"
+    CACHE STRING
+    "Instrument picBunch's own targets: 'thread' (ThreadSanitizer), 'address' (AddressSanitizer), or 'off'."
+)
+set_property(CACHE PICBUNCH_SANITIZE PROPERTY STRINGS off thread address)
+
 if(PICBUNCH_ENABLE_CUDA AND PICBUNCH_ENABLE_HIP)
     message(FATAL_ERROR "PICBUNCH_ENABLE_CUDA and PICBUNCH_ENABLE_HIP are mutually exclusive.")
 endif()
@@ -134,6 +142,23 @@ if(NOT openPMD_HAVE_HDF5)
     )
 endif()
 message(STATUS "picBunch: openPMD-api ${openPMD_VERSION} (HDF5 backend: yes)")
+
+# ---------------------------------------------------------------------------
+# Sanitizers
+#
+# Applied after the pinned dependencies have been added so that the fetched
+# alpaka/alpakaVendor targets stay uninstrumented; only picBunch's own library,
+# app and tests are compiled with the sanitizer.  Use the CPU backend for the
+# thread sanitizer (device code is not instrumented by the host compiler).
+# ---------------------------------------------------------------------------
+if(NOT PICBUNCH_SANITIZE STREQUAL "off")
+    if(NOT PICBUNCH_SANITIZE MATCHES "^(thread|address)$")
+        message(FATAL_ERROR "PICBUNCH_SANITIZE must be one of: off, thread, address")
+    endif()
+    message(STATUS "picBunch: ${PICBUNCH_SANITIZE} sanitizer enabled for picBunch targets")
+    add_compile_options(-fsanitize=${PICBUNCH_SANITIZE} -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=${PICBUNCH_SANITIZE})
+endif()
 
 # ---------------------------------------------------------------------------
 # Library

@@ -23,9 +23,11 @@ namespace picBunch
      *
      * Same recipe as the device deposit used by ``computeField``: deposited
      * charge lands in the ``n^3`` sub-box starting at node zero, the remainder
-     * of the ``M = fftPadding*n`` box stays zero.  ``refinement`` is the
-     * number of nodes per PIC cell (``kRefinement``).  Kept on the host so
-     * unit tests can compare the accelerator deposit node for node.
+     * of the ``M = fftPadding*n`` box stays zero.  The TSC shape is sampled in
+     * node units, so ``refinement`` does not scale the weights: ``grid.spacing``
+     * already contains the number of nodes per PIC cell (``kRefinement``).  The
+     * argument is validated and kept for API/testing compatibility.  Kept on the
+     * host so unit tests can compare the accelerator deposit node for node.
      */
     std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement);
 

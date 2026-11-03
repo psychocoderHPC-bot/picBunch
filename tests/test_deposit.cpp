@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 #include <numeric>
 
@@ -103,4 +104,44 @@ TEST(Deposit, WeightAndChargeScaleLinearly)
     bunch.charge[0] = -3.0;
 
     EXPECT_NEAR(total(bunch, grid), -7.5, 1.0e-13);
+}
+
+TEST(Deposit, PaddedDepositConservesChargeForRefinement)
+{
+    // Regression for the padded host deposit: the TSC shape is sampled in node
+    // units, so the total deposited charge must be exactly the particle charge
+    // for every refinement value.  Before the fix the weights were evaluated as
+    // tscShape(refinement*(ia-t)) with support 1.5/refinement while the grid
+    // spacing already contained the refinement; refinement=2 then summed to
+    // 0.421875 on a node instead of 1.  The assertion below is the one that
+    // fails on that pre-fix code.
+    picBunch::Grid grid;
+    grid.n = {16, 16, 16};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    grid.fftPadding = 2;
+
+    std::array<std::array<double, 3>, 3> const positions{{
+        {8.0, 8.0, 8.0},   // on a node
+        {8.5, 8.5, 8.5},   // cell centre
+        {8.3, 7.7, 8.9},   // sub-cell
+    }};
+    char const* const label[3] = {"node", "cell-centre", "sub-cell"};
+
+    for(double refinement : {1.0, 2.0, 3.0})
+        for(std::size_t p = 0; p < positions.size(); ++p)
+        {
+            picBunch::Bunch bunch;
+            bunch.resize(1);
+            bunch.x[0] = positions[p][0];
+            bunch.y[0] = positions[p][1];
+            bunch.z[0] = positions[p][2];
+            bunch.weight[0] = 1.0;
+            bunch.charge[0] = 1.0;
+
+            auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, refinement);
+            double const sum = std::accumulate(rho.begin(), rho.end(), 0.0);
+            EXPECT_NEAR(sum, 1.0, 1.0e-12)
+                << "refinement=" << refinement << " position=" << label[p];
+        }
 }
