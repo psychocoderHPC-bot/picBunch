@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -549,6 +550,179 @@ namespace picBunch
             }
         }
 
+        void copyAttributes(hid_t source, hid_t destination, bool skipExisting = false)
+        {
+            H5O_info_t info;
+            checked(H5Oget_info(source, &info), "H5Oget_info");
+            for(hsize_t index = 0; index < info.num_attrs; ++index)
+            {
+                hid_t attribute = checked(
+                    H5Aopen_by_idx(
+                        source, ".", H5_INDEX_NAME, H5_ITER_INC, index, H5P_DEFAULT, H5P_DEFAULT),
+                    "H5Aopen_by_idx");
+                char name[256];
+                ssize_t const length = H5Aget_name(attribute, sizeof(name), name);
+                if(length < 0 || static_cast<std::size_t>(length) >= sizeof(name))
+                {
+                    closeQuietly(attribute);
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: cannot read an attribute name");
+                }
+                if(skipExisting && H5Aexists(destination, name) > 0)
+                {
+                    closeQuietly(attribute);
+                    continue;
+                }
+                hid_t type = checked(H5Aget_type(attribute), "H5Aget_type");
+                hid_t space = checked(H5Aget_space(attribute), "H5Aget_space");
+                hssize_t const points = H5Sget_simple_extent_npoints(space);
+                std::size_t const elementSize = H5Tget_size(type);
+                std::vector<char> buffer(static_cast<std::size_t>(points) * elementSize + 1u);
+                checked(H5Aread(attribute, type, buffer.data()), "H5Aread");
+                hid_t created = checked(
+                    H5Acreate2(destination, name, type, space, H5P_DEFAULT, H5P_DEFAULT),
+                    "H5Acreate2");
+                checked(H5Awrite(created, type, buffer.data()), "H5Awrite");
+                closeQuietly(created);
+                closeQuietly(space);
+                closeQuietly(type);
+                closeQuietly(attribute);
+            }
+        }
+
+        template<typename T>
+        void rewriteDataset(hid_t file, std::string const& path, hid_t memoryType, hid_t fileType)
+        {
+            if(H5Lexists(file, path.c_str(), H5P_DEFAULT) <= 0)
+                return;
+            H5O_info_t info;
+            checked(
+                H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+            if(info.type != H5O_TYPE_DATASET)
+                return;
+            hid_t dataset = checked(H5Dopen2(file, path.c_str(), H5P_DEFAULT), "H5Dopen2");
+            hid_t space = checked(H5Dget_space(dataset), "H5Dget_space");
+            int const rank = H5Sget_simple_extent_ndims(space);
+            std::array<hsize_t, 8> dimensions{};
+            checked(
+                H5Sget_simple_extent_dims(space, dimensions.data(), nullptr),
+                "H5Sget_simple_extent_dims");
+            hssize_t const points = H5Sget_simple_extent_npoints(space);
+            std::vector<T> buffer(static_cast<std::size_t>(points));
+            checked(
+                H5Dread(dataset, memoryType, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                "H5Dread");
+            std::string const temporary = path + ".picbunch-convert";
+            hid_t newSpace = checked(
+                H5Screate_simple(rank, dimensions.data(), nullptr), "H5Screate_simple");
+            hid_t newDataset = checked(
+                H5Dcreate2(
+                    file, temporary.c_str(), fileType, newSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Dcreate2");
+            checked(
+                H5Dwrite(newDataset, memoryType, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                "H5Dwrite");
+            copyAttributes(dataset, newDataset);
+            closeQuietly(newDataset);
+            closeQuietly(newSpace);
+            closeQuietly(space);
+            closeQuietly(dataset);
+            checked(H5Ldelete(file, path.c_str(), H5P_DEFAULT), "H5Ldelete");
+            checked(
+                H5Lmove(file, temporary.c_str(), file, path.c_str(), H5P_DEFAULT, H5P_DEFAULT),
+                "H5Lmove");
+        }
+
+        void flattenScalarRecordToFloat(hid_t file, std::string const& path)
+        {
+            if(H5Lexists(file, path.c_str(), H5P_DEFAULT) <= 0)
+                return;
+            H5O_info_t info;
+            checked(
+                H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+            if(info.type == H5O_TYPE_DATASET)
+            {
+                rewriteDataset<float>(file, path, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
+                return;
+            }
+            hid_t group = checked(H5Gopen2(file, path.c_str(), H5P_DEFAULT), "H5Gopen2");
+            std::vector<std::string> names;
+            struct Context
+            {
+                std::vector<std::string>* names;
+            } context{&names};
+            auto collect = [](hid_t, char const* name, H5L_info_t const*, void* data) -> herr_t {
+                static_cast<Context*>(data)->names->emplace_back(name);
+                return 0;
+            };
+            hsize_t index = 0;
+            H5Literate(group, H5_INDEX_NAME, H5_ITER_INC, &index, collect, &context);
+            if(names.size() != 1u)
+            {
+                closeQuietly(group);
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: scalar record '" + path
+                    + "' must contain exactly one dataset");
+            }
+            std::string const child = path + "/" + names.front();
+            hid_t dataset = checked(H5Dopen2(file, child.c_str(), H5P_DEFAULT), "H5Dopen2");
+            hid_t space = checked(H5Dget_space(dataset), "H5Dget_space");
+            int const rank = H5Sget_simple_extent_ndims(space);
+            std::array<hsize_t, 8> dimensions{};
+            checked(
+                H5Sget_simple_extent_dims(space, dimensions.data(), nullptr),
+                "H5Sget_simple_extent_dims");
+            hssize_t const points = H5Sget_simple_extent_npoints(space);
+            std::vector<float> buffer(static_cast<std::size_t>(points));
+            checked(
+                H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                "H5Dread");
+            std::string const temporary = path + ".picbunch-convert";
+            hid_t newSpace = checked(
+                H5Screate_simple(rank, dimensions.data(), nullptr), "H5Screate_simple");
+            hid_t newDataset = checked(
+                H5Dcreate2(
+                    file, temporary.c_str(), H5T_IEEE_F32LE, newSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Dcreate2");
+            checked(
+                H5Dwrite(newDataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                "H5Dwrite");
+            copyAttributes(group, newDataset);
+            copyAttributes(dataset, newDataset, true);
+            closeQuietly(newDataset);
+            closeQuietly(newSpace);
+            closeQuietly(space);
+            closeQuietly(dataset);
+            closeQuietly(group);
+            checked(H5Ldelete(file, path.c_str(), H5P_DEFAULT), "H5Ldelete");
+            checked(
+                H5Lmove(file, temporary.c_str(), file, path.c_str(), H5P_DEFAULT, H5P_DEFAULT),
+                "H5Lmove");
+        }
+
+        void removeRecordIfPresent(hid_t file, std::string const& path)
+        {
+            if(H5Lexists(file, path.c_str(), H5P_DEFAULT) > 0)
+                checked(H5Ldelete(file, path.c_str(), H5P_DEFAULT), "H5Ldelete");
+        }
+
+        void setDoubleVectorAttribute(
+            hid_t object,
+            char const* name,
+            std::vector<double> const& values)
+        {
+            hsize_t const dimensions[1] = {static_cast<hsize_t>(values.size())};
+            hid_t space = checked(H5Screate_simple(1, dimensions, nullptr), "H5Screate_simple");
+            hid_t attribute = checked(
+                H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Acreate2");
+            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data()), "H5Awrite");
+            closeQuietly(attribute);
+            closeQuietly(space);
+        }
+
         void publishPicOnGPU(
             Field const& field,
             PicOnGPUWriteOptions const& options,
@@ -664,6 +838,14 @@ namespace picBunch
                 hid_t idProvider = checked(
                     H5Gcreate2(fields, "picongpu_idProvider", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
                     "H5Gcreate2");
+                setStringArrayAttribute(idProvider, "axisLabels", {"x"});
+                setStringAttribute(idProvider, "dataOrder", "C");
+                setStringAttribute(idProvider, "geometry", "cartesian");
+                setDoubleVectorAttribute(idProvider, "gridGlobalOffset", {0.0});
+                setDoubleVectorAttribute(idProvider, "gridSpacing", {1.0});
+                setScalarAttribute(idProvider, "gridUnitSI", H5T_NATIVE_DOUBLE, 1.0);
+                setScalarAttribute(idProvider, "timeOffset", H5T_NATIVE_FLOAT, 0.0f);
+                setUnitDimension(idProvider, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
                 hsize_t const idDimensions[3] = {1, 1, 1};
                 hid_t idSpace = checked(H5Screate_simple(3, idDimensions, nullptr), "H5Screate_simple");
                 std::uint64_t const startId = 0;
@@ -674,18 +856,23 @@ namespace picBunch
                     "H5Dcreate2");
                 checked(H5Dwrite(startDataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &startId), "H5Dwrite");
                 setScalarAttribute(startDataset, "maxNumProc", H5T_NATIVE_UINT64, std::uint64_t{1});
+                setDoubleVectorAttribute(startDataset, "position", {0.0});
+                setScalarAttribute(startDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
                 hid_t nextDataset = checked(
                     H5Dcreate2(
                         idProvider, "nextId", H5T_STD_U64LE, idSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
                     "H5Dcreate2");
                 checked(H5Dwrite(nextDataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &nextId), "H5Dwrite");
+                setDoubleVectorAttribute(nextDataset, "position", {0.0});
+                setScalarAttribute(nextDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
                 closeQuietly(startDataset);
                 closeQuietly(nextDataset);
                 closeQuietly(idSpace);
                 closeQuietly(idProvider);
 
-                // Copy the source particle group as an HDF5 object so every
-                // attribute and dataset (including particlePatches) survives.
+                // Copy the source particle group, then normalize it to the
+                // layout and dtypes PIConGPU's particle loader expects:
+                // float32 position/momentum/weighting and int32 positionOffset.
                 hid_t particles = checked(
                     H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
                 checked(
@@ -698,6 +885,27 @@ namespace picBunch
                         H5P_DEFAULT),
                     "H5Ocopy");
                 closeQuietly(particles);
+
+                std::string const particlePath = iterationPath + "/particles/" + species;
+                for(char const* record : {"position", "momentum"})
+                    for(char const* component : {"x", "y", "z"})
+                        rewriteDataset<float>(
+                            file,
+                            particlePath + "/" + record + "/" + component,
+                            H5T_NATIVE_FLOAT,
+                            H5T_IEEE_F32LE);
+                for(char const* component : {"x", "y", "z"})
+                    rewriteDataset<std::int32_t>(
+                        file,
+                        particlePath + "/positionOffset/" + component,
+                        H5T_NATIVE_INT32,
+                        H5T_STD_I32LE);
+                flattenScalarRecordToFloat(file, particlePath + "/weighting");
+                // PIConGPU derives charge and mass from the species flags and
+                // ignores these records; dropping them keeps the particle
+                // species extents homogeneous for the openPMD reader.
+                for(char const* record : {"charge", "mass", "id"})
+                    removeRecordIfPresent(file, particlePath + "/" + record);
 
                 closeQuietly(fields);
                 closeQuietly(iteration);
