@@ -67,7 +67,7 @@ namespace picBunch
         auto spectrum = alpaka::onHost::allocUnified<Complex>(device, extents);
         auto out = alpaka::onHost::allocUnified<Complex>(device, extents);
 
-        auto plan = alpaka::fft::onHost::PlanBuilder<Complex>{extents}.c2c().build(device);
+        auto plan = alpaka::fft::onHost::PlanBuilder<Complex, Extents>{extents}.c2c().build(device);
         result.planBuilt = true;
 
         // delta pulse at the origin: the forward transform is exactly all ones

@@ -27,13 +27,9 @@ namespace picBunch
     {
         if(size() == 0)
             throw std::runtime_error("Bunch::bounds: empty bunch");
-        std::array<std::array<double, 3>, 2> b{
-            {{std::numeric_limits<double>::max(),
-              std::numeric_limits<double>::max(),
-              std::numeric_limits<double>::max()}},
-            {{-std::numeric_limits<double>::max(),
-              -std::numeric_limits<double>::max(),
-              -std::numeric_limits<double>::max()}}};
+        std::array<std::array<double, 3>, 2> b{};
+        b[0].fill(std::numeric_limits<double>::max());
+        b[1].fill(-std::numeric_limits<double>::max());
         for(std::size_t p = 0; p < size(); ++p)
         {
             double const v[3] = {x[p], y[p], z[p]};
