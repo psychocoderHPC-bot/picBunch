@@ -109,15 +109,13 @@ TEST(Physics, OneParticleAgainstIndependentReference)
     EXPECT_EQ(field.grid.origin, (std::array<double, 3>{1.0, 1.0, 1.0}));
     EXPECT_EQ(field.grid.fftPadding, 2u);
 
+    // Normalize against the reference point-field scale q/(4 pi eps0) / (1 m)^2,
+    // the scale the expected-value provenance quotes (not the component maximum,
+    // which would hide the far-field agreement behind a much smaller number).
+    double const scale = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
+    ASSERT_GT(scale, 0.0);
     for(auto const& point : referencePoints())
     {
-        double const scale = [&] {
-            double s = 0.0;
-            for(double value : point.expected)
-                s = std::max(s, std::abs(value));
-            return s;
-        }();
-        ASSERT_GT(scale, 0.0);
         std::size_t const flat = point.node[0]
             + field.grid.n[0] * (point.node[1] + field.grid.n[1] * point.node[2]);
         for(int c = 0; c < 6; ++c)

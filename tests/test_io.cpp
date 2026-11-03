@@ -181,10 +181,15 @@ TEST(Io, MissingMacroWeightedUsesStandardDefault)
             component.setUnitSI(unitSI);
         };
         auto& position = species["position"];
+        position.setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
         for(int a = 0; a < 3; ++a)
             setScalar(position[std::string(1, names[a])], (a == 2) ? 5.0 : 4.0, 1.0);
 
         auto& momentum = species["momentum"];
+        momentum.setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
         for(int a = 0; a < 3; ++a)
             setScalar(momentum[std::string(1, names[a])], (a == 2) ? 1.0 : 0.0, massC);
         momentum.setAttribute("weightingPower", 2.0);
