@@ -144,7 +144,6 @@ message(STATUS "picBunch: openPMD-api ${openPMD_VERSION} (HDF5 backend: yes)")
 # ---------------------------------------------------------------------------
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
-    src/Fft.cpp
 )
 
 if(PICBUNCH_ENABLE_CUDA)

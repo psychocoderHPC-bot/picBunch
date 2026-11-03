@@ -16,11 +16,13 @@
 #include <cmath>
 #include <cstdio>
 #include <numeric>
+#include <string>
 #include <vector>
 
 namespace
 {
-    int run(alpaka::onHost::Device& device, alpaka::onHost::Queue& queue)
+    template<typename T_Device, typename T_Queue>
+    int run(T_Device& device, T_Queue& queue)
     {
         std::printf("picBunch smoke test\n");
         std::printf("  alpaka        : %d.%d.%d\n", ALPAKA_VERSION_MAJOR, ALPAKA_VERSION_MINOR, ALPAKA_VERSION_PATCH);
