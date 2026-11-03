@@ -177,10 +177,19 @@ namespace picBunch
             return result;
         }
 
-        std::pair<Iteration&, std::uint64_t> firstIteration(Series& series)
+        std::pair<Iteration&, std::uint64_t> selectIteration(
+            Series& series,
+            std::optional<std::uint64_t> wanted)
         {
             if(series.iterations.empty())
                 fail("the series contains no iterations");
+            if(wanted)
+            {
+                auto it = series.iterations.find(*wanted);
+                if(it == series.iterations.end())
+                    fail("the series has no iteration " + std::to_string(*wanted));
+                return {it->second, *wanted};
+            }
             auto it = series.iterations.begin();
             return {it->second, static_cast<std::uint64_t>(it->first)};
         }
@@ -211,11 +220,13 @@ namespace picBunch
         return info;
     }
 
-    BunchData readBunch(std::string const& fileName, std::size_t speciesIndex)
+    namespace
     {
+        BunchData readBunchImpl(std::string const& fileName, BunchSelection const& selection)
+        {
         BunchData result;
         Series series(fileName, openPMD::Access::READ_ONLY);
-        auto [iteration, iterationIndex] = firstIteration(series);
+        auto [iteration, iterationIndex] = selectIteration(series, selection.iteration);
         result.iteration = iterationIndex;
         try
         {
@@ -236,14 +247,29 @@ namespace picBunch
 
         auto& particles = iteration.particles;
         if(particles.empty())
-            fail("the first iteration contains no particle species");
-        auto speciesIt = particles.begin();
-        for(std::size_t i = 0; i < speciesIndex && speciesIt != particles.end(); ++i)
-            ++speciesIt;
-        if(speciesIt == particles.end())
-            fail("particle species index " + std::to_string(speciesIndex) + " is out of range");
-        ParticleSpecies& species = speciesIt->second;
-        std::string const speciesName = speciesIt->first;
+            fail("the selected iteration contains no particle species");
+        ParticleSpecies* speciesPtr = nullptr;
+        std::string speciesName;
+        if(selection.speciesName)
+        {
+            auto it = particles.find(*selection.speciesName);
+            if(it == particles.end())
+                fail("particle species '" + *selection.speciesName + "' is absent");
+            speciesPtr = &it->second;
+            speciesName = it->first;
+        }
+        else
+        {
+            std::size_t const speciesIndex = selection.speciesIndex.value_or(0);
+            auto speciesIt = particles.begin();
+            for(std::size_t i = 0; i < speciesIndex && speciesIt != particles.end(); ++i)
+                ++speciesIt;
+            if(speciesIt == particles.end())
+                fail("particle species index " + std::to_string(speciesIndex) + " is out of range");
+            speciesPtr = &speciesIt->second;
+            speciesName = speciesIt->first;
+        }
+        ParticleSpecies& species = *speciesPtr;
 
         if(!species.contains("position"))
             fail("species '" + speciesName + "' has no 'position' record");
@@ -335,14 +361,31 @@ namespace picBunch
             bunch.charge[p] = chargePerParticle.empty() ? -kElementaryCharge : chargePerParticle[p];
         }
         return result;
+        }
+    } // namespace
+
+    BunchData readBunch(std::string const& fileName, std::size_t speciesIndex)
+    {
+        BunchSelection selection;
+        selection.speciesIndex = speciesIndex;
+        return readBunchImpl(fileName, selection);
     }
 
-    MeshGeometry readMeshGeometry(std::string const& fileName, std::string const& meshName, std::size_t meshIndex)
+    BunchData readBunch(std::string const& fileName, BunchSelection const& selection)
+    {
+        return readBunchImpl(fileName, selection);
+    }
+
+    MeshGeometry readMeshGeometry(
+        std::string const& fileName,
+        std::string const& meshName,
+        std::size_t meshIndex,
+        std::optional<std::uint64_t> iterationIndex)
     {
         MeshGeometry geometry;
         Series series(fileName, openPMD::Access::READ_ONLY);
-        auto [iteration, iterationIndex] = firstIteration(series);
-        geometry.iteration = iterationIndex;
+        auto [iteration, iterationIndexResolved] = selectIteration(series, iterationIndex);
+        geometry.iteration = iterationIndexResolved;
         try
         {
             geometry.time = iteration.time<double>();

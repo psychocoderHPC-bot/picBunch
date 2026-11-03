@@ -24,7 +24,7 @@ include(FetchContent)
 option(PICBUNCH_BUILD_TESTS "Build the picBunch smoke test and CTest tests." ON)
 option(PICBUNCH_ENABLE_CUDA "Compile the CUDA backend through alpaka (NVIDIA GPUs)." OFF)
 option(PICBUNCH_ENABLE_HIP "Compile the HIP backend through alpaka (AMD GPUs)." OFF)
-option(PICBUNCH_BUILD_GTESTS "Build GoogleTest-based unit tests (adds a dependency)." OFF)
+option(PICBUNCH_BUILD_GTESTS "Build the GoogleTest unit tests (system package or FetchContent)." ON)
 
 set(
     PICBUNCH_ARCH
@@ -173,13 +173,21 @@ alpaka_finalize(picBunch)
 
 # Host-only openPMD layer, kept out of the device compilation unit so nvcc/hipcc
 # never has to parse the HDF5 headers.
-add_library(picBunchOpenPMD src/OpenPMD.cpp)
+add_library(picBunchOpenPMD src/OpenPMD.cpp src/OpenPMDWrite.cpp)
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
 target_include_directories(
     picBunchOpenPMD
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(picBunchOpenPMD PUBLIC openPMD::openPMD)
+
+# ---------------------------------------------------------------------------
+# Command line tool
+# ---------------------------------------------------------------------------
+add_executable(picBunchApp src/main.cpp)
+set_target_properties(picBunchApp PROPERTIES OUTPUT_NAME picBunch)
+target_link_libraries(picBunchApp PRIVATE picBunch::picBunch picBunch::openPMD)
+alpaka_finalize(picBunchApp)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -195,5 +203,5 @@ endif()
 
 # Installation stays limited to the libraries and headers; the pinned dependency
 # targets are fetched into the build tree and are not exported in this skeleton.
-install(TARGETS picBunch picBunchOpenPMD)
+install(TARGETS picBunch picBunchOpenPMD picBunchApp)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

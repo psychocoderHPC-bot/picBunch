@@ -227,7 +227,7 @@ namespace picBunch
         auto const b = bunch.bounds();
         Grid grid;
         // v0.1 tolerance heuristic: tighten the padding for a tight accuracy target.
-        unsigned padding = std::max(2u, options.fftPadding);
+        unsigned padding = std::max(1u, options.fftPadding);
         if(options.tolerance < 1e-6)
             padding = std::max(padding, 3u);
         grid.fftPadding = padding;

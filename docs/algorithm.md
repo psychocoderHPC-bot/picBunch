@@ -32,15 +32,34 @@ Numbers are deliberately absent until they are measured in validation.
    V/m and B is in T. TODO: numbers from validation (staggering check, divergence
    and curl residuals).
 
-6. **Writer** - write `E_x, E_y, E_z, B_x, B_y, B_z` as openPMD scalar mesh records
-   with axis labels, grid spacing, global offset, grid unit SI, time offset, time
-   unit SI, and the `position` attribute describing each component's staggering.
-   TODO: numbers from validation (reader/writer round-trip error, file size).
+6. **Writer** - write `E` and `B` as openPMD mesh records with components
+   `x,y,z`, stored C-order with axis labels `z,y,x` (x fastest), `geometry =
+   cartesian`, `gridSpacing` in metres, `gridUnitSI = 1.0`, `gridGlobalOffset`
+   from the grid origin, `timeOffset = 0`, and a configurable iteration number.
+   Each component carries its Yee staggering through the `position` attribute:
+   `Ex(.5,0,0) Ey(0,.5,0) Ez(0,0,.5) Bx(0,.5,.5) By(.5,0,.5) Bz(.5,.5,0)`.
+   Values are written in SI (V/m for E, T for B) with `unitSI = 1.0`, and the
+   `unitDimension` exponents are E = (1,1,-3,-1) and B = (0,1,-2,-1).
+
+   **PIConGPU restart defect:** PIConGPU restart currently ignores the mesh
+   `unitSI` attribute (verified defect), so a PIConGPU consumer of these files
+   must convert with `sim.unit.eField()` / `sim.unit.bField()`. The writer does
+   not silently switch to internal PIConGPU units; it writes SI and says so
+   here.
+
+## Padding
+
+The free-space convolution needs zero padding. With `fftPadding = 1` the FFT
+box equals the output box, so source-observer lags beyond half the box wrap and
+add a spurious periodic image; the unit test reproduces this artefact. With
+`fftPadding >= 2` every lag fits inside the box and the FFT result equals the
+free-space discrete TSC sum (no images). `fftPadding = 1` is therefore a
+diagnostic/test option only, never a production choice.
 
 ## Open items
 
 - No accuracy gate has been run for this standalone tool yet.
 - The near-field band policy and the FFT padding factor still need a measured
   trade-off between cost and error.
-- The reader and writer stages currently only expose the openPMD build information;
-  the file I/O itself is not implemented.
+- The writer is implemented and covered by the I/O round-trip test; the reader
+  is covered by the CLI and the physics test.

@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace picBunch
@@ -39,6 +40,22 @@ namespace picBunch
      */
     BunchData readBunch(std::string const& fileName, std::size_t speciesIndex = 0);
 
+    /** Selector for :func:`readBunch`.
+     *
+     * Unset fields keep the defaults of the index-based overload (first
+     * species, first iteration).  ``speciesName`` takes precedence over
+     * ``speciesIndex`` when both are set.
+     */
+    struct BunchSelection
+    {
+        std::optional<std::size_t> speciesIndex;
+        std::optional<std::string> speciesName;
+        std::optional<std::uint64_t> iteration;
+    };
+
+    /** Read one particle species of a selected iteration by name or index. */
+    BunchData readBunch(std::string const& fileName, BunchSelection const& selection);
+
     /** Read the geometry metadata of a mesh record of the first iteration.
      *
      * Reads grid spacing, ``gridUnitSI``, ``gridGlobalOffset``, axis labels,
@@ -54,6 +71,7 @@ namespace picBunch
     MeshGeometry readMeshGeometry(
         std::string const& fileName,
         std::string const& meshName = "E",
-        std::size_t meshIndex = 0);
+        std::size_t meshIndex = 0,
+        std::optional<std::uint64_t> iterationIndex = std::nullopt);
 
 } // namespace picBunch

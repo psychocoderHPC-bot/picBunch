@@ -24,7 +24,7 @@ namespace picBunch
      * ``origin + (i,j,k) * spacing``.  ``spacing`` is the physical node spacing, i.e.
      * ``kRefinement`` PIC cells.  ``fftPadding`` is the zero-padding factor of the
      * free-space convolution: the FFT grid has ``M = fftPadding * n`` nodes per axis.
-     * It must be >= 2.
+     * It must be >= 1; 1 disables zero padding and is a test/diagnostic option.
      */
     struct Grid
     {
@@ -104,7 +104,7 @@ namespace picBunch
         double tolerance = 1e-3;
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
         std::array<double, 3> cellSize{1.0, 1.0, 1.0};
-        //! FFT zero-padding factor per axis; must be >= 2.
+        //! FFT zero-padding factor per axis; must be >= 1 (1 = no padding, diagnostic).
         unsigned fftPadding = 2;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
