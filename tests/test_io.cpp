@@ -6,6 +6,7 @@
 // gridSpacing, gridGlobalOffset, axis labels, dataOrder, geometry,
 // unitDimension and the iteration index.
 
+#include "picBunch/Compute.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 
@@ -269,6 +270,85 @@ TEST(Io, ReaderAppliesGridUnitSIToPhysicalSpacing)
         EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[0], 1.0 * unit);
         EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[1], 2.0 * unit);
         EXPECT_DOUBLE_EQ(geometry.gridGlobalOffset[2], 3.0 * unit);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST(Io, CliMeshGeometryIsConvertedExactlyOnce)
+{
+    // End-to-end through the same reader + geometry helper the CLI uses, then
+    // through makeGrid, the geometry stage computeField consumes.  The v0.1 CLI
+    // multiplied gridUnitSI a second time after readMeshGeometry had already
+    // converted the spacing, so a physical 1e-6 m cell became 1e-12 m.
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+
+    auto const checkCase = [&](double unit, std::array<double, 3> const& expected) {
+        // Expected x,y,z = (2.5, 1.5, 0.5) * unit.  The raw z,y,x vector is
+        // therefore (0.5, 1.5, 2.5) in units of gridUnitSI.
+        writeGeometryMesh(
+            path,
+            unit,
+            true,
+            {expected[2] / unit, expected[1] / unit, expected[0] / unit},
+            {3.0 / unit, 2.0 / unit, 1.0 / unit});
+
+        auto const geometry = picBunch::readMeshGeometry(path.string());
+        auto const cell = picBunch::physicalCellSize(geometry);
+        ASSERT_TRUE(cell.has_value());
+        for(int a = 0; a < 3; ++a)
+            EXPECT_DOUBLE_EQ((*cell)[a], expected[a]);
+
+        picBunch::Bunch bunch;
+        bunch.x = {0.0};
+        bunch.y = {0.0};
+        bunch.z = {0.0};
+        bunch.ux = {0.0};
+        bunch.uy = {0.0};
+        bunch.uz = {0.0};
+        bunch.weight = {1.0};
+        bunch.charge = {-picBunch::kElementaryCharge};
+
+        picBunch::ComputeOptions options;
+        options.cellSize = picBunch::resolveCellSize(std::nullopt, cell);
+        auto const grid = picBunch::makeGrid(bunch, options);
+        for(int a = 0; a < 3; ++a)
+            EXPECT_DOUBLE_EQ(grid.spacing[a], expected[a]);
+    };
+
+    // Small unit: the PIConGPU convention.  A second multiplication would give
+    // 1e-12 m instead of 1e-6 m.
+    checkCase(1.0e-6, {2.5e-6, 1.5e-6, 0.5e-6});
+    // Large unit: 8.85e12-style SI scale; a second multiplication would give
+    // 2.2e13 m instead of 2.5 m.
+    checkCase(8.85e12, {2.5, 1.5, 0.5});
+
+    // The old double-converted value must fail as a clear runtime error, not as
+    // std::vector's max_size/bad_alloc message.  Two particles span 1 m.
+    picBunch::Bunch spread;
+    spread.x = {0.0, 1.0};
+    spread.y = {0.0, 0.0};
+    spread.z = {0.0, 0.0};
+    spread.ux = {0.0, 0.0};
+    spread.uy = {0.0, 0.0};
+    spread.uz = {0.0, 0.0};
+    spread.weight = {1.0, 1.0};
+    spread.charge = {-picBunch::kElementaryCharge, -picBunch::kElementaryCharge};
+    picBunch::ComputeOptions infeasible;
+    infeasible.cellSize = {2.5e-12, 1.5e-12, 0.5e-12}; // 2.5e-6 m * 1e-6, the v0.1 bug
+    try
+    {
+        (void) picBunch::makeGrid(spread, infeasible);
+        FAIL() << "an infeasible grid was accepted";
+    }
+    catch(std::bad_alloc const&)
+    {
+        FAIL() << "infeasible grid surfaced as std::bad_alloc";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("infeasible"), std::string::npos)
+            << error.what();
     }
     std::filesystem::remove(path);
 }

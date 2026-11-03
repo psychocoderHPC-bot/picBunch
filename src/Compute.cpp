@@ -233,6 +233,16 @@ namespace picBunch
          */
         constexpr double kMinTolerance = 1.0e-14;
 
+        /*! Hard limits used to turn an infeasible input into a clear error.
+         *
+         * The v0.1 double conversion made a 1e-6 m cell look like 1e-12 m and
+         * the node count ran into ``std::vector``'s max_size, surfacing as a
+         * ``bad_alloc``-style message.  A grid beyond these bounds cannot be
+         * allocated by the pipeline, so reject it before any allocation.
+         */
+        constexpr std::size_t kMaxNodesPerAxis = 1u << 20;
+        constexpr std::size_t kMaxPaddedNodes = 1u << 28;
+
         /*! Tolerance -> FFT padding.  Padding 1 is never selected: it is a
          * diagnostic mode whose periodic-image artefact (measured 4.0e-2 for the
          * padding-test geometry) no tolerance can bound.
@@ -276,6 +286,17 @@ namespace picBunch
             "pass --cell-size <dx>[,<dy>,<dz>] in metres");
     }
 
+    std::optional<std::array<double, 3>> physicalCellSize(MeshGeometry const& geometry)
+    {
+        // readMeshGeometry returns physical SI spacing and offset.  Do not
+        // multiply by geometry.gridUnitSI here: the reader already did it, and
+        // the CLI did it again in v0.1 (physical 1e-6 m became 1e-12 m).
+        for(double spacing : geometry.gridSpacing)
+            if(!(spacing > 0.0) || !std::isfinite(spacing))
+                return std::nullopt;
+        return geometry.gridSpacing;
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
@@ -302,7 +323,14 @@ namespace picBunch
             double const margin = options.marginCells * options.cellSize[a];
             double const low = b[0][a] - margin;
             double const high = b[1][a] + margin;
-            std::size_t nodes = static_cast<std::size_t>(std::ceil((high - low) / spacing)) + 1u;
+            double const span = (high - low) / spacing;
+            if(!std::isfinite(span) || span > static_cast<double>(kMaxNodesPerAxis))
+                throw std::runtime_error(
+                    "makeGrid: the physical cell size produces " + std::to_string(span)
+                    + " nodes on one axis, which is infeasible (limit "
+                    + std::to_string(kMaxNodesPerAxis)
+                    + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
+            std::size_t nodes = static_cast<std::size_t>(std::ceil(span)) + 1u;
             // even node count keeps M = padding*nodes even for the R2C transform
             if(nodes % 2u)
                 ++nodes;
@@ -335,6 +363,29 @@ namespace picBunch
                     throw std::invalid_argument("makeGrid: --origin values must be finite");
                 grid.origin[a] = (*options.gridOrigin)[a];
             }
+        }
+
+        // Reject an infeasible grid before the first allocation.  Both the
+        // per-axis and the padded total are checked; the product is formed in
+        // 64-bit with an explicit overflow guard.
+        std::uint64_t padded = 1u;
+        for(int a = 0; a < 3; ++a)
+        {
+            if(grid.n[a] > kMaxNodesPerAxis)
+                throw std::runtime_error(
+                    "makeGrid: output grid " + std::to_string(grid.n[0]) + "x"
+                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
+                    + " is infeasible (per-axis limit " + std::to_string(kMaxNodesPerAxis)
+                    + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
+            std::uint64_t const axisPadded = static_cast<std::uint64_t>(grid.n[a]) * padding;
+            if(axisPadded != 0u && padded > static_cast<std::uint64_t>(kMaxPaddedNodes) / axisPadded)
+                throw std::runtime_error(
+                    "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
+                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
+                    + " with padding " + std::to_string(padding)
+                    + " is infeasible (limit " + std::to_string(kMaxPaddedNodes)
+                    + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
+            padded *= axisPadded;
         }
         return grid;
     }

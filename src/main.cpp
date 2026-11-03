@@ -371,26 +371,20 @@ int main(int argc, char** argv)
         try
         {
             auto const geometry = picBunch::readMeshGeometry(args.input);
-            bool usable = true;
-            for(int a = 0; a < 3; ++a)
-                usable = usable && geometry.gridSpacing[a] > 0.0
-                    && std::isfinite(geometry.gridSpacing[a]) && geometry.gridUnitSI[a] > 0.0
-                    && std::isfinite(geometry.gridUnitSI[a]);
-            if(usable)
-            {
-                // openPMD stores gridSpacing in units of gridUnitSI.  The physical
-                // spacing is their product; PIConGPU writes gridUnitSI != 1.
-                std::array<double, 3> mesh{};
-                for(int a = 0; a < 3; ++a)
-                    mesh[a] = geometry.gridSpacing[a] * geometry.gridUnitSI[a];
+            // readMeshGeometry already returns physical SI spacing and offset
+            // (raw gridSpacing/gridGlobalOffset times gridUnitSI).  Applying
+            // gridUnitSI again here is the v0.1 regression; the reader owns the
+            // conversion and this helper only validates the result.
+            meshCellSize = picBunch::physicalCellSize(geometry);
+            if(meshCellSize)
                 std::printf(
                     "cellSize from input mesh E: gridSpacing=(%.6g,%.6g,%.6g) x "
                     "gridUnitSI=(%.6g,%.6g,%.6g) -> (%.6g,%.6g,%.6g) m\n",
-                    geometry.gridSpacing[0], geometry.gridSpacing[1], geometry.gridSpacing[2],
+                    geometry.gridSpacing[0] / geometry.gridUnitSI[0],
+                    geometry.gridSpacing[1] / geometry.gridUnitSI[1],
+                    geometry.gridSpacing[2] / geometry.gridUnitSI[2],
                     geometry.gridUnitSI[0], geometry.gridUnitSI[1], geometry.gridUnitSI[2],
-                    mesh[0], mesh[1], mesh[2]);
-                meshCellSize = mesh;
-            }
+                    (*meshCellSize)[0], (*meshCellSize)[1], (*meshCellSize)[2]);
             else
                 std::printf("cellSize: input mesh geometry is unusable\n");
         }

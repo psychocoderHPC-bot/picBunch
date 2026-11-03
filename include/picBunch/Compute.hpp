@@ -20,6 +20,16 @@ namespace picBunch
         std::optional<std::array<double, 3>> const& explicitCellSize,
         std::optional<std::array<double, 3>> const& meshCellSize);
 
+    /** Physical cell size from mesh metadata, or ``std::nullopt`` when unusable.
+     *
+     * ``readMeshGeometry`` already returns ``gridSpacing`` and
+     * ``gridGlobalOffset`` in physical SI units.  This helper therefore copies
+     * the spacing verbatim and applies ``gridUnitSI`` nowhere; applying it a
+     * second time in the CLI was the v0.1 regression.  It rejects non-finite or
+     * non-positive spacing so the caller can fall back to ``--cell-size``.
+     */
+    std::optional<std::array<double, 3>> physicalCellSize(picBunch::MeshGeometry const& geometry);
+
     /** Derive the output grid that covers the bunch bounding box plus a shell margin.
      *
      * The node spacing is ``kRefinement * options.cellSize`` and ``n`` is rounded up

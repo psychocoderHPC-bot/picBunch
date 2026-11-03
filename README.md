@@ -125,7 +125,9 @@ picBunch --input bunch.h5 --species electrons --output field.h5 \
 An explicit `--cell-size` always wins over the mesh-derived value, and the run fails with a
 clear message when neither source exists. Nothing is assumed or rescaled. The physical cell
 size is taken from the input mesh (`E`) as `gridSpacing * gridUnitSI` when the input has a
-mesh with a positive `gridUnitSI`; a missing or non-positive `gridUnitSI` is an error.
+mesh with a positive `gridUnitSI`; a missing or non-positive `gridUnitSI` is an error. The
+reader applies that conversion once and returns physical SI spacing and offset; the CLI does
+not apply `gridUnitSI` again.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -173,29 +175,42 @@ build and read an openPMD 2.0 scalar-record file.
 
 ## Accuracy
 
-All numbers are worst relative error per component, never pooled. The reference is
-`~/pr24/pr24w53-ref/indfield.py` (order 12, refine 3 at singular points), unless stated
-otherwise. Host: `rosi_v100`, CPU runs, `kRefinement = 1`, one source on a node.
+The headline metric is per-component relative error against the TSC-convolved
+continuum reference, never pooled. It was measured with the `picBunch` executable itself
+on `rosi_v100` (V100, CUDA), `kRefinement = 1`, one source on a node, against the
+independent `~/pr24/pr24w53-ref/indfield.py` (order 12, refine 3). A separate
+absolute-normalised metric `|ref-mesh|/(1+max(|ref|,|mesh|))` was used by an earlier
+campaign; it is labelled where it appears and is not the basis of the crossover claim.
 
 **Coulomb limit.** One stationary particle at a node, far nodes at `d = 8,16,24,32` along
 all six axis directions. The mesh field against the direct TSC stencil sum of the analytic
 Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
 threshold. This is the zero-padded FFT convolution checked against the discrete sum.
 
-**Single-particle far field against the TSC-convolved continuum.** Aspect 1, `h = 1`,
-distance `d = 48` cells:
+**Single-particle far field against the TSC-convolved continuum.** The metric is
+per-component relative error, never pooled, measured with the `picBunch` executable
+itself on `rosi_v100` (V100, CUDA), `kRefinement = 1`, one source on a node, against the
+independent `indfield.py` (order 12, refine 3). Aspect 1 and aspect 4 are the beam aspect
+ratios of that campaign. The `3e-4` relative crossover:
+
+| case | 3e-4 relative crossover |
+| --- | --- |
+| gamma 1, aspect 1 | **d = 12 cells** |
+| gamma 1, aspect 4 | **d = 32 cells** |
+| gamma 10, aspect 1 | **not reached within d = 32**; 6.3e-3 at d = 32 |
+
+Inside the TSC support (`|s| < 1.5` cells) this metric is untested; no claim is made
+there.
+
+At `d = 48` cells, aspect 1, `h = 1`, the same relative metric gives:
 
 | gamma | worst relative error at d=48 | reference |
 | --- | --- | --- |
 | 1 | **1.38e-7** (1.4e-7) | TSC-convolved continuum |
 | 10 | **2.65e-4** (2.6e-4) | TSC-convolved continuum |
 
-The `3e-4` crossover is **8 cells** for gamma 1 at aspect 1 (all three axis directions).
-For gamma 10 at aspect 1 it is **6 cells on the beam axis**, but the perpendicular
-direction does not cross inside 48 cells: the measured perpendicular error is **1.46e-2**
-(1.5e-2) at 48 cells. Reaching `1e-3` perpendicular at `r = 8` cells would need
-**h ~ 1/29**, about `2.4e4` times the FFT work. Gamma 100 does not converge in the
-perpendicular direction: the mesh-to-continuum error is `3.75e-1` at 48 cells.
+Gamma 100 does not converge in the perpendicular direction: the mesh-to-continuum error
+is `3.75e-1` at 48 cells.
 
 **Error depends on `r/h` only. Refining `h` at fixed cell-distance does not help.** The
 kernel is homogeneous of degree -2, the TSC shape is one node spacing wide, and the Yee
@@ -209,6 +224,9 @@ The reference is the same exact TSC-convolved quadrature as PIConGPU
 `fieldInitializer=referenceOnly`, evaluated by the standalone driver in
 `~/pr24/b1-20261102`. picBunch was run at `339ca7ad3903249ebf3859f5e106d63db4dc3df5`
 (the field path is unchanged after that commit), tolerance `1e-3`, on `rosi_v100`.
+The metric here is the absolute-normalised `|ref-mesh|/(1+max(|ref|,|mesh|))`; it is
+not the per-component relative error of the Accuracy section and is not a crossover
+claim.
 
 **318 staggered points**, 64x64x32 grid, cell 1e-7 m, N=1e4, identical Yee offsets
 (snap deviation 0):
@@ -276,6 +294,13 @@ FFT-dominated at large box (kernel 0.43 to 22.66 ms and FFT 3.80 to 75.97 ms fro
 100). Peak exact device use is **69.4 MiB** at N=2e6/20-cell and **468.7 MiB** at
 N=2e6/100-cell. No configuration approached the 32 GB device limit. The four independent
 N=2e6/20-cell repeats span 60.35 to 64.81 ms, about 7% scatter.
+
+## Changelog
+
+- **v0.1.1** fixes v0.1 mishandling non-unit `gridUnitSI`. The reader already returned
+  physical SI spacing and the CLI multiplied by `gridUnitSI` again, so a 1e-6 m input
+  cell became 1e-12 m. The reader now owns the single conversion, and an infeasible
+  resulting grid exits with a clear error instead of a `bad_alloc`-style message.
 
 ## Known gaps in v0.1
 
