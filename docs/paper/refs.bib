@@ -12,7 +12,7 @@
 
 @misc{SB1,
   title  = {Measured scaling of the picBunch field pipeline (SB1)},
-  author = {SB1 worker},
+  author = {SB1 scaling worker},
   year   = {2026},
     note   = {Run pr24-20261102. SB1/RESULTS.md. V100 timing matrix, Coulomb
              limit, distance sweep. Commit dc69c16a.},
@@ -37,7 +37,7 @@
 
 @misc{SL1,
   title  = {Mid-bunch 2-D slice figures, gamma 10 (SL1)},
-  author = {SL1 worker},
+  author = {SL1 slice worker},
   year   = {2026},
    note   = {Run pr24-20261102. SL1/RESULTS.md, data/slices\_g10.npz.
               picBunch v0.1.5 (5f1981e2) vs the independent exact TSC driver
@@ -47,7 +47,7 @@
 
 @misc{SL2,
   title  = {Mid-bunch 2-D slice figures, stationary gamma 1 (SL2)},
-  author = {SL2 worker},
+  author = {SL2 slice worker},
   year   = {2026},
    note   = {Run pr24-20261102. SL2/RESULTS.md, data/slices\_g1.npz. Same
               geometry and reference as SL1 (driver max error 9.075e-4, 14 not
@@ -57,23 +57,12 @@
 
 @misc{W7B,
   title  = {picBunch checkpoint acceptance on PIConGPU PR 24 (W7b)},
-  author = {W7b worker},
+  author = {W7B acceptance worker},
   year   = {2026},
    note   = {Run pr24-20261102. W7B/RESULTS.md. Early acceptance state:
             16-particle periodic deck restarts exit 0, six components bitwise
             (0 ulp) via a solver=None load; init 1.8 s vs ~116 s. Fix commit
             0c9427dee82e01c832c42a8358033b701386f37e.},
-}
-
-@misc{W7fix,
-  title  = {picBunch checkpoint restart with PML passthrough (fix run)},
-  author = {W7 fix-run worker},
-  year   = {2026},
-   note   = {Run pr24-20261102. Later fix run on branch experimental/mvp at
-            bed4344c45c46a5ec77529b652631d75f7d5bb5b, with the PML-copy
-            writer (W3f). 638,976 particles from the real LWFA checkpoint;
-            copies the eight Convolutional PML groups (48 datasets), bitwise
-            equal; open-boundary restart exits 0.},
 }
 
 @misc{indfield,
@@ -149,7 +138,7 @@
 
 @misc{coulomb,
   title  = {Coulomb-limit control (SB1)},
-  author = {SB1 worker},
+  author = {SB1 scaling worker},
   year   = {2026},
    note   = {SB1/RESULTS.md and PF/data/coulomb.csv. u = 0, one particle at a
               node, far nodes at d = 8, 16, 24, 32, six axis directions. Worst
@@ -159,7 +148,7 @@
 
 @misc{F4,
   title  = {Per-h measurement series of the h$^{3}$ read-out scale (F4)},
-  author = {F4 worker},
+  author = {F4 per-h worker},
   year   = {2026},
   note   = {Run pr24-20261102. F4/ directory. Per-h worst per-component
              relative error against indfield.py at fixed physical separation,
@@ -218,7 +207,7 @@
 
 @misc{NS2,
   title  = {picBunch exact per-pair near shell (NS2)},
-  author = {NS2 worker},
+  author = {NS2 near-shell worker},
   year   = {2026},
    note   = {Run pr24-20261102. NS2/RESULTS.md. F = F\_mesh(all) -
              F\_mesh(near) + F\_exact(near), opt-in --near-shell exact,
@@ -228,7 +217,7 @@
 
 @misc{SL3,
   title  = {Mid-bunch slices and near-shell acceptance (SL3)},
-  author = {SL3 worker},
+  author = {SL3 slice worker},
   year   = {2026},
    note   = {Run pr24-20261102. SL3/RESULTS.md. N=1000, 32x32x16, cell
              2e-7 m, rosi\_v100, v0.4.0 (bc0037c5). Default-mesh and
@@ -239,7 +228,7 @@
 
 @misc{M1,
   title  = {picBunch global-domain output and MPI (M1)},
-  author = {M1 worker},
+  author = {M1 mpi worker},
   year   = {2026},
   note   = {Run pr24-20261102. M1/RESULTS.md. --global-grid/--global-origin,
             chunked writer, PICBUNCH\_ENABLE\_MPI. 512 cubed bitwise equality
@@ -258,7 +247,7 @@
 
 @misc{FIX1,
   title  = {picBunch v0.4.1 release: near-shell CLI and far-tail margin (FIX1)},
-  author = {FIX1 worker},
+  author = {FIX1 far-tail worker},
   year   = {2026},
     note   = {Run pr24-20261102. FIX1/RESULTS.md, margin\_table.txt. v0.4.1,
              commit 02d2d06e, tag 9e4fd7dc. Near-shell CLI parsed; quadrupole
@@ -270,7 +259,7 @@
 
 @misc{INT1,
   title  = {picBunch v0.4.0 integration release (INT1)},
-  author = {INT1 worker},
+  author = {INT1 integration worker},
   year   = {2026},
     note   = {Run pr24-20261102. INT1/RESULTS.md. Integration commit
              bc0037c5, tag v0.4.0; checkpoint writer copies every species, MPI
@@ -311,7 +300,7 @@
 
 @misc{INT2,
   title  = {picBunch v0.5.0 release: placement interface (INT2)},
-  author = {INT2 worker},
+  author = {INT2 placement worker},
   year   = {2026},
    note   = {Run pr24-20261102. INT2/RESULTS.md. v0.5.0, commit 7b4f1766,
              tag 3e083fef. TOML interface, charge-weighted centring,
@@ -322,7 +311,7 @@
 
 @misc{IMPL3,
   title  = {Uniform checkpoint precision and stock-PIConGPU restart (IMPL3)},
-  author = {IMPL3 worker},
+  author = {IMPL3 precision worker},
   year   = {2026},
    note   = {Run pr24-20261102. IMPL3/RESULTS.md. precision = float32
              default for every field and particle record; float64 uniform
@@ -334,14 +323,139 @@
 
 @misc{K3,
   title  = {In-support evaluator port and per-pair cost ladder (K3)},
-  author = {K3 worker},
+  author = {K3 evaluator worker},
   year   = {2026},
-   note   = {Run pr24-20261102. K3/RESULTS.md. O(1) asinh box verified
-             against a converged trapezoid reference (-2.6333 vs -2.6348);
-             octant-split remainder; power-transform quadrature the validated
-             moving path (1.000000/1.000000/1.000001/1.000040 at gamma
-             1/2/10/100, 1.5e-6 at box order 32); no validated closed form
-             for the moving case. Per-pair costs, rosi\_v100 single thread:
-             ported box8/rem8 5.4e-5 s; accurate moving 3.1e-4 s out of /
-             6.9e-3 s in support; upstream adaptive (1.07e9 nodes) 1.62 s.},
-}
+    note   = {Run pr24-20261102. K3/RESULTS.md. O(1) asinh box verified
+              against a converged trapezoid reference (-2.6333 vs -2.6348);
+              octant-split remainder; power-transform quadrature the validated
+              moving path (1.000000/1.000000/1.000001/1.000040 at gamma
+              1/2/10/100, 1.5e-6 at box order 32); no validated closed form
+              for the moving case. Per-pair costs, rosi\_v100 single thread:
+              ported box8/rem8 5.4e-5 s; accurate moving 3.1e-4 s out of /
+              6.9e-3 s in support; upstream adaptive (1.07e9 nodes) 1.62 s.},
+ }
+
+@misc{CFPORT,
+  title  = {Fast closed-form near-field evaluator in picBunch (CFPORT)},
+  author = {CFPORT fast-near worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. CFPORT/RESULTS.md. --near-shell fast:
+              eight-term asinh box (O(1)) plus plain Gauss-Legendre on the
+              subtracted integrand (S-W*)K over the TSC knot panels, order 5
+              (8000 nodes) in-support; moving axial gamma-stretched box;
+              moving oblique rest-frame octant order 8 (4096 nodes). Accuracy
+              vs indfield: stationary interior 7.99e-4, face 1.96e-5, outside
+              1.57e-7; moving axial interior 1.69e-4 (order 8); moving oblique
+              interior 8.15e-2 (order 5, the limit). Seam 2.03e-10; mesh-only
+              bitwise identical between fast and exact. Branch
+              experimental/fast-near 9a7e574a, from v0.5.0.},
+ }
+
+@misc{CF1,
+  title  = {Closed-form in-support field and pair counts (CF1)},
+  author = {CF1 closed-form worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. CF1/RESULTS.md. Eight-term asinh box
+              re-verified; 2e6 pair counts: support 1.7e8, 3-cell 1.7e9,
+              4-cell 3.4e9 (85/850/1700 neighbours per source); H100 rate
+              1.837e7 pairs/s order 5, 3.983e6 order 8 axial.},
+ }
+
+@misc{ER1b,
+  title  = {Single-particle TSC field error landscape, gamma 10 to 100 (ER1b)},
+  author = {ER1b worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. ER1b/RESULTS.md. 96-cell box, cell 1e-7 m,
+              aspect 1, axial and oblique 45 deg, h=1 and h=1/4, jureca\_h100.
+              absn at d=8, h=1: 4.4e-2 (g10), 1.05 (g50), 5.47 (g100); h=1/4:
+              6.9e-5, 5.6e-2, 0.82. Slope p 1.85 (g10) to ~1.0 (g>=50).
+              Beaming cone width d/gamma sub-cell at g>=50; 1e-2 needs h<=0.002
+              at g50, h<=0.001 at g100; shell radius ~O(gamma) cells.},
+ }
+
+@misc{INT3,
+  title  = {picBunch v0.6.0: rank-parallel compute and release (INT3)},
+  author = {INT3 mpi worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. INT3/RESULTS.md. v0.6.0, commit e4c7325d.
+              Component-parallel mesh and tile-parallel near shell with
+              all-reduce; bitwise 1/2/4-rank equality. Clean rosi\_v100
+              scaling: near shell 1.24x/1.34x, mesh 1.20x/1.20x, write
+              1.71x/0.48x at 2/4 ranks. Multi-patch restart: 256 particles,
+              four patches, bitwise. Release tag df7de342.},
+ }
+
+@misc{INT4,
+  title  = {picBunch v0.7.0: fast near shell and release (INT4)},
+  author = {INT4 release worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. INT4/RESULTS.md. v0.7.0, commit a152c518,
+              tag 25d6ca8b. Merges fast-near 9a7e574a and hip-teardown
+              833b6275. 18/18 ctest, zero warnings, on rosi\_v100 sm\_70,
+              jureca\_h100 sm\_90, hal gfx1100 HIP. H100 2e6/20-cell: mesh
+              0.052 s; near 1.8466e7 pairs/s stationary o5, 3.9977e6 moving
+              axial o8; support-only 9.26 s at 7.99e-4, 3-cell 92.1 s,
+              4-cell 184.2 s, moving axial 42.6 s at 1.69e-4. Seam 2.03e-10;
+              mesh-only md5 identical between backends.},
+ }
+
+@misc{MPI2,
+  title  = {Rank-parallel compute and multi-rank patches (MPI2)},
+  author = {MPI2 rank-parallel worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. MPI2/RESULTS.md. Component-parallel mesh
+              (replicated deposit and rho FFT) and tile-parallel near shell
+              (one all-reduce each); bitwise 1/2/4-rank equality. Multi-rank
+              patches: patch\_count=4, cumulative disjoint
+              numParticlesOffset. jureca\_h100 sm\_90, branch
+              experimental/mpi-compute 79fa8f26.},
+ }
+
+@misc{LARGE1,
+  title  = {Large-domain slice figures, 128x128x64 (LARGE1)},
+  author = {LARGE1 large-domain worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. LARGE1/RESULTS.md. 128x128x64, cell 2e-7 m,
+              N=100, jureca\_h100, reference tol 1e-3 (max error 1e-3).
+              Edge field at most 0.103 of peak (gamma10 z-y Ez); core error
+              gamma10 9.27, gamma1 0.759 (method error).},
+ }
+
+@misc{W7fix,
+  title  = {LWFA open-boundary restart with PML passthrough (W7fix)},
+  author = {W7 fix-run worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. Real LWFA checkpoint, 638976 electrons, eight
+              Convolutional PML groups (48 datasets), 64x128x64, periodic 0 0 1,
+              rosi\_v100. picBunch copies all eight PML groups bitwise
+              (float32); restart exit 0, initialization 3.986 s. Branch
+              experimental/mvp bed4344c, W3f tree.},
+ }
+
+@misc{MV2,
+  title  = {Binned multi-velocity binning: measured binning error and model calibration (MV2)},
+  author = {MV2 multi-velocity worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. MV2/RESULTS.md. Branch experimental/multivel at
+              02891fe6bd9c34eea5479e91ecebbd54a44a47f7 (parent 2c736df),
+              jureca\_h100 jrc0880, H100 PCIe, CUDA 13.4, sm\_90. $48^3$ grid,
+              512 sources, seed 100 (energy) and 103 (angular). Four defect
+              fixes (dangling pointer, parse\_bands, model floor, unit-test
+              build); comparison-artefact diagnosis; single-velocity bitwise
+              sanity; Tb-T binning error and total error with fast shell
+              R=3 vs bin count; model calibration C=1.09 (energy, predicts to
+              10--55\%) vs C=124 non-monotonic (angular); runtime mesh-only
+              5.26/5.62 s at 1e6/2e6 in $48^3$ with 64 bins, 184 s for the
+              4-cell fast shell at 2e6 in a 20-cell bunch. ctest 19/19.},
+ }
+
+@misc{SCHEM1,
+  title  = {Algorithm-region schematic of the field evaluation (SCHEM1)},
+  author = {SCHEM1 schematic worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. SCHEM1/figs, make\_schematic.py. Two panels:
+              TSC support / near shell / mesh regions with the tolerance-driven
+              shell radii (3e-4 crossover, 11.8 nodes gamma1, 8.8 gamma10, h=1,
+              aspect 1) and the measured per-component error vs distance
+              (dsweep.csv, SB1).},
+ }

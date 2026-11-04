@@ -4,20 +4,25 @@
 \subsection{The operator interface}
 \label{sec:interface}
 
-\texttt{v0.5.0} (commit \texttt{7b4f1766}, tag \texttt{3e083fef}) is driven
-by \texttt{picBunch --input bunch.h5 --destination <checkpoint> --config
-params.toml}, with every unit and conversion parameter in the TOML file
-\citep{INT2}. The \texttt{[picongpu]} section carries
-\texttt{unit\_length}, \texttt{unit\_e}, \texttt{unit\_b}, \texttt{dt},
-\texttt{step}, \texttt{precision} and \texttt{species}; \texttt{[domain]}
-carries \texttt{cells}, \texttt{cell\_size} and \texttt{origin};
-\texttt{[placement]} carries \texttt{offset\_unit} and the
-\texttt{left}/\texttt{front}/\texttt{top} fractions; \texttt{[accuracy]}
-carries the \texttt{tolerance} and the near-shell settings. A missing
-conversion key is a clear failure, not a silent default. The input bunch is
-centred by its charge-weighted centroid and placed at the requested offset
-from the domain origin; a placement that leaves the bunch outside the domain
-is rejected, never clipped.
+ \texttt{v0.7.0} (commit \texttt{a152c518}, tag \texttt{25d6ca8b}) is driven by
+ \texttt{picBunch --input bunch.h5} \texttt{--destination <checkpoint>}
+ \texttt{--config params.toml}, with every unit and conversion parameter in the
+ TOML file \citep{INT2}. The \texttt{[picongpu]} section carries
+ \texttt{unit\_length}, \texttt{unit\_e}, \texttt{unit\_b}, \texttt{dt},
+ \texttt{step}, \texttt{precision}, \texttt{species}; \texttt{[domain]}
+ carries \texttt{cells}, \texttt{cell\_size}, \texttt{origin};
+ \texttt{[placement]} carries \texttt{offset\_unit} and the
+ \texttt{left}/\texttt{front}/\texttt{top} frac-\linebreak tions; \texttt{[accuracy]}
+ carries \texttt{tolerance} and the near-shell settings,
+ \texttt{near\_shell} \texttt{none}/\texttt{exact}/\texttt{fast} plus
+ \texttt{near\_shell\_radius} and \texttt{near\_shell\_tile}. A missing
+  conversion key causes a clear error at start-up. The input bunch is centred
+  by its charge-weighted centroid and placed at the requested offset from the
+  domain origin; a placement leaving the bunch outside the domain is rejected
+  at start-up. \texttt{patch\_count} in \texttt{[placement]} splits
+ the species into one particle patch per output rank, with cumulative,
+ disjoint \texttt{numParticlesOffset} ranges, for multi-rank restarts
+ (Section~\ref{sec:comparison}) \citep{INT2,INT3}.
 
 The default \texttt{precision} is uniform \texttt{float32} for every field and
 particle record, and such a checkpoint restarts under a stock
@@ -71,9 +76,10 @@ $M^3$; the code divides by $h^3 M^3$ in the read-out
 The grid must be zero-padded to $\mathrm{pad}\ge 2$. With $\mathrm{pad}=1$ the
 cyclic convolution wraps and a $9.275\times10^{-3}$ periodic-image artefact
 appears for a single stationary particle in a $20^3$ box
-\citep{N1b}. At $\mathrm{pad}=2$ the result agrees with $\mathrm{pad}=3$ to
-$8.4\times10^{-16}$ and with a direct non-cyclic sum to $2.8\times10^{-17}$
-\citep{N1b,SB1}. At $\mathrm{pad}\ge2$ the error is at machine precision
+\citep{N1b}. For a single stationary particle the $\mathrm{pad}=2$ result
+agrees with the direct non-cyclic sum to $3.811\times10^{-16}$ and the
+$\mathrm{pad}=3$ result to $1.905\times10^{-16}$ \citep{N1b}. At
+$\mathrm{pad}\ge2$ the error is at machine precision
 ($\le 10^{-15}$) \citep{N1b}. The artefact grows for beamed sources: at
 $\mathrm{pad}=1$ the $100$-source $\gamma=10$ cloud shows a
 $7.5\times10^{-1}$ worst-component error \citep{N1b}.
@@ -112,33 +118,76 @@ $N^3$ bunch box and applies the $h^3/M^3$ scale and the SI factor
 \label{sec:scaleinvariance}
 
 The kernel is homogeneous of degree $-2$, the deposit shape width equals the
-node spacing, and the Yee offsets are in cell units, so every relative metric
-depends only on $r/h$, the distance in cell units \citep{N2b}. At a fixed
-distance in cells the error is therefore independent of $h$: refining $h$
-with the distance held in cells changes nothing, and the measured relative
-errors at $h=1,\,1/2,\,1/4,\,1/8$ are identical to machine precision for
-$\gamma\in\{1,10,100\}$, aspect 1 and 4 \citep{N2b}. At a fixed physical
-distance $r$, refining $h$ increases $r/h$ and does reduce the error, at the
-cost of $M^{3}$ FFT work in $1/h$. The only knob is $r/h$: reaching $10^{-3}$
-perpendicular at $\gamma=10$ for $r=8$ cells needs $h\approx1/29$,
-$2.4\times10^{4}$ times the $M^{3}$ nodes of the $h=1$ run
-\citep{N2b,D10}.
+ node spacing, and the Yee offsets are in cell units, so every relative metric
+ depends only on $r/h$, the distance in cell units \citep{N2b}. At a fixed
+ distance in cells the error is therefore independent of $h$: refining $h$
+ with the distance held in cells changes nothing, and the measured relative
+ errors at $h=1,\,1/2,\,1/4,\,1/8$ are identical to machine precision for
+ $\gamma\in\{1,10,100\}$, aspect 1 and 4 \citep{N2b}. At a fixed physical
+ distance $r$, refining $h$ increases $r/h$ and does reduce the error, at the
+ cost of $M^{3}$ FFT work in $1/h$. The controlling length for a beamed source
+ is the beaming cone width $d/\gamma$: where that width is sub-cell, the error
+ is set by the cone, not by the mesh, and refinement stops paying off
+ (Section~\ref{sec:gamma-landscape}) \citep{ER1b}.
 
-\subsection{The exact near shell}
+\subsection{The near shell and the fast evaluator}
 \label{sec:nearsheet}
 
-The default mesh is the whole field. \texttt{v0.5.0} carries an opt-in exact
-near shell (\texttt{[accuracy]} in the TOML config, Section~\ref{sec:interface}),
-with a radius and a tile \citep{NS2,FIX1}. It computes
+The default mesh is the whole field. \texttt{v0.7.0} carries an opt-in near
+shell (\texttt{[accuracy]} in the TOML config,
+Section~\ref{sec:interface}), with a radius and a tile
+\citep{NS2,FIX1,CFPORT}. It computes
 \begin{equation}
+\label{eq:nearshell}
 F = F_{\mathrm{mesh}}(\mathrm{all}) - F_{\mathrm{mesh}}(\mathrm{near})
-    + F_{\mathrm{exact}}(\mathrm{near}),
+    + F_{\mathrm{near}}(\mathrm{near}),
 \end{equation}
 where the subtraction uses a per-tile local zero-padded FFT of the near sources
-(padding 2) and the exact term is a vendored FP64 TSC-convolution reference
-evaluated per (source, node, component) \citep{NS2}. The default remains
-\texttt{none}; the radius is in mesh nodes of the compute grid, and the envelope
-it must cover depends on $h$ (Section~\ref{sec:slices}).
+(padding 2) and the near term is evaluated per (source, node, component) by one
+of two backends selected by \texttt{near\_shell}: \texttt{exact}, a vendored
+adaptive FP64 TSC-convolution quadrature \citep{NS2}, or \texttt{fast}, the
+closed-form evaluator below. The default remains \texttt{none}; the radius is in
+mesh nodes of the compute grid, and the envelope it must cover depends on
+$h$ (Section~\ref{sec:slices}). The fast backend is the recommended one: its
+measured accuracy and cost are in Sections~\ref{sec:accuracy} and
+\ref{sec:cost} \citep{CFPORT}.
+
+The fast evaluator splits the in-support integral of
+Eq.~\eqref{eq:Fc} into a singular part and a smooth remainder. The singular
+part is the eight-term \texttt{asinh} box of the kernel's divergence,
+$\mathrm{O}(1)$ per pair, built from the double integral
+\begin{equation}
+\label{eq:Tprimitive}
+\begin{split}
+T(A,B,u)&=\int_0^A\!\int_0^B\frac{\mathrm{d}X\,\mathrm{d}Y}
+{\sqrt{u^2+X^2+Y^2}}\\
+&=\begin{cases}
+A\,\mathrm{asinh}(B/A)+B\,\mathrm{asinh}(A/B), & |u|<10^{-300},\\[2pt]
+A\,\mathrm{asinh}\!\bigl(B/\sqrt{u^2+A^2}\bigr)
++B\,\mathrm{asinh}\!\bigl(A/\sqrt{u^2+B^2}\bigr)\\
+\qquad
+-u\,\mathrm{atan}\!\bigl(AB/(u\sqrt{A^2+u^2+B^2})\bigr), & \text{otherwise.}
+\end{cases}
+\end{split}
+\end{equation}
+with $A,B>0$ (each box face has $8$ corners, $24$ such calls per component,
+so the eight-term box is $\mathrm{O}(1)$ per pair). The form is even in $u$,
+so the $|u|\to0$ branch must fire on $|u|$, not $u$ (a negative $u$ is a field
+point beyond a box face) \citep{CFPORT}. Verified against a converged
+midpoint trapezoid reference ($-2.6348$ converged; the naive trapezoid
+$-2.6333$ is $1.5\times10^{-3}$ low, a trapezoid singularity artefact
+\citep{CFPORT}). The primitive is implemented in the fast evaluator header
+\texttt{include/picBunch/detail/FastNear.hpp} and the device reference
+\texttt{tools/closed-form/gpu\allowbreak \_extract.cu} at picongpu
+\texttt{b3699df} \citep{CFPORT,CF1}. The remainder is a plain tensor
+Gauss--Legendre quadrature on the subtracted integrand
+$(S-W^\ast)K$ over the TSC knot panels, each axis split at the TSC knots and at
+the anchor point $s^\ast$; the default order is $5$, $8000$ nodes per
+in-support pair \citep{CFPORT,K3}. For a moving bunch the box is
+$\gamma$-stretched for the axial direction, and the oblique direction uses a
+rest-frame octant quadrature of the singular box at order $8$, $4096$ nodes,
+plus the same remainder. Host and device use the same algebra
+\citep{CFPORT}.
 
 \paragraph{The assembly is exact.} Single-source tests at a tile centre and a
 tile boundary give an assembly residual of $2\!\times\!10^{-12}$ to
@@ -149,32 +198,50 @@ accounting shows the same near set feeding the exact sum and the subtracted
 mesh (field identity $3.6\!\times\!10^{-13}$). A direct reproduction with
 $100$ particles at radius $3$ gives an assembled field exact to
 $4.6\!\times\!10^{-13}$ over the whole grid, while the plain mesh on the same
-plane is wrong by $5.6\!\times\!10^{-1}$. A plane error of
-$1.36\!\times\!10^{-1}$ is a mesh-outside-the-shell number, not an assembly
-error; the tile subtraction is not the limiting term
-\citep{NS4b}.
+plane is wrong by $5.6\!\times\!10^{-1}$ \citep{NS4b}.
 
-\subsection{MPI chunked output}
+The fast backend changes no far number: the mesh-only field from the fast and
+the exact backends is bitwise identical (same md5), and the total field outside
+the near tiles is bitwise equal, so the tile subtraction stays intact
+\citep{CFPORT}. The seam jump excess at the fast/exact crossing, on a $16^3$
+grid, $R=3$ cells, tile $4$, cells $10^{-7}$\,m, is $2.03\!\times\!10^{-10}$
+per component for a stationary single particle ($2.02\!\times\!10^{-10}$ on
+$E_x$/$E_y$/$E_z$, zero on $B$) and $2.8\!\times\!10^{-10}$ for the
+$64$-source cloud \citep{CFPORT,INT4}.
+
+\subsection{MPI parallelism}
 \label{sec:mpi}
 
-\texttt{v0.5.0} writes a global output domain larger than the compute box
-\citep{M1,FIX1}. The written extent is set by \texttt{--global-grid} and
+\texttt{v0.7.0} writes a global output domain larger than the compute box
+\citep{M1,FIX1}, and computes the field in parallel across ranks
+\citep{MPI2}. The written extent is set by \texttt{--global-grid} and
 \texttt{--global-origin}. The global array is never allocated: each rank owns
 a contiguous $z$-slab split into tiles of about $128$ MiB, zero-filled, then
 filled with the compute-box overlap, the rest exact $0.0$. All ranks open one
 openPMD series with \texttt{MPI\_COMM\_WORLD} and write disjoint
 \texttt{storeChunk} regions with collective flushes, so the output is a single
-dataset, not per-rank files. The FFT is not domain-decomposed: only rank 0
-computes the padded bunch box, and the write is decomposed. A
-\texttt{--deterministic-deposit} flag gives a serial host deposit for bitwise
-comparisons \citep{M1}.
+dataset, not per-rank files. A \texttt{--deterministic-deposit} flag gives a
+serial host deposit for bitwise comparisons \citep{M1}.
+
+The compute is parallel in two ways, neither of which is a domain-decomposed
+FFT \citep{MPI2}. The mesh runs six independent component convolutions: every
+rank deposits and transforms the same $\rho$ spectrum (replicated), rank $r$
+evaluates the components $c$ with $c \bmod \mathrm{size} = r$, and one
+\texttt{MPI\_Allreduce} sums the six arrays. The near shell partitions the
+output tiles by linear tile index; each rank builds its own near-source list
+and local subtraction FFT for its tiles and writes only those corrections, and
+one \texttt{MPI\_Allreduce} sums the correction arrays. The bunch is read once
+on rank $0$ and broadcast, not redistributed. Because the mesh components are
+disjoint and each near correction element is owned by exactly one rank, the
+all-reduce order cannot change a value: the outputs are bitwise identical at
+$1$, $2$ and $4$ ranks (Section~\ref{sec:mpi-scale}) \citep{MPI2,INT3}.
 
 \subsection{The far-tail margin}
 \label{sec:margin}
 
-For a global domain that extends beyond the compute box, the zero fill must not
-start until the field is below tolerance. \texttt{v0.5.0} places that boundary at
-the smallest centre distance $d$ where
+ For a global domain that extends beyond the compute box, the zero fill must not
+ start until the field is below tolerance. \texttt{v0.7.0} places that boundary at
+ the smallest centre distance $d$ where
 \begin{equation}
 \label{eq:tail}
 E_{\mathrm{tail}}(d)
@@ -191,8 +258,8 @@ switch radius the writer instead evaluates the multipole field directly
 (\texttt{FarTail.hpp}), so the shipped file has no interior zero fill
 \citep{FIX1}. The margin is reported at run time as a bound in V/m.
 
-For the documented 20-cell, 4096-electron bunch (source radius $R=16.85$
-cells, peak $45722.5$ V/m, target $45.72$ V/m), the quadrupole margin is
+ For the documented 20-cell, 4096-electron bunch (source radius $R=16.85$
+cells, peak $45722.5$ V/m, tolerance level $45.72$ V/m), the quadrupole margin is
 $350$ cells, which exceeds the $2^{28}$ padded-node cap, so the code falls
 back to the measured far-tail switch. Table~\ref{tab:margin} gives the
 switch error: the worst per-component
@@ -203,17 +270,18 @@ independent direct charge sum in $13$ directions \citep{FIX1}.
 \centering
 \small
 \caption{Far-tail switch validation, 20-cell 4096-electron bunch,
-$R=16.85$ cells, target $45.72$ V/m ($10^{-3}$ of the peak $45722.5$ V/m).
-Worst per-component $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$
+$R=16.85$ cells, tolerance level $45.72$ V/m ($10^{-3}$ of the peak
+$45722.5$ V/m). Worst per-component
+$|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$
 against an independent direct charge sum over $13$ directions
 \citep{FIX1}. The switch at $6R$ is the one shipped: the error is
-$1.87\times10^{-3}$ of the target.}
+$1.87\times10^{-3}$ of the tolerance level.}
 \label{tab:margin}
 \begin{tabular}{lrr}
 \toprule
-switch radius & worst err (V/m) & / target \\
+switch radius & worst err (V/m) & / tolerance level \\
 \midrule
-$2R$ ($33.7$ cells) & $4.80\times10^{1}$ & $1.05$ (fails) \\
+$2R$ ($33.7$ cells) & $4.80\times10^{1}$ & $1.05$ \\
 $4R$ ($67.4$ cells) & $8.77\times10^{-1}$ & $1.92\times10^{-2}$ \\
 $6R$ ($101.1$ cells) & $8.53\times10^{-2}$ & $1.87\times10^{-3}$ \\
 $8R$ ($134.8$ cells) & $1.66\times10^{-2}$ & $3.63\times10^{-4}$ \\
@@ -221,20 +289,8 @@ $8R$ ($134.8$ cells) & $1.66\times10^{-2}$ & $3.63\times10^{-4}$ \\
 \end{tabular}
 \end{table}
 
-A shipped $512^{3}$ output sampled outside the compute box confirms the
+ A shipped $512^{3}$ output sampled outside the compute box confirms the
 switch in practice: $36$ nodes including corners, worst
 $|\mathbf{E}_{\mathrm{file}}-\mathbf{E}_{\mathrm{direct}}| = 2.8\times10^{-3}$
-V/m against the $45.7$ V/m target ($6.1\times10^{-5}$ of it), and every sample
-nonzero, i.e. no interior zero fill \citep{FIX1}.
-
-\paragraph{The in-support field.}
-\label{sec:insupport}
-Inside the TSC support the singular part of the exact term is analytic: the
-eight \texttt{asinh} face integrals of the kernel's divergence, $O(1)$,
-verified against a converged trapezoid reference ($-2.6333$ versus
-$-2.6348$); the smooth remainder is integrated by octant split. For a moving
-bunch the power-transform quadrature is the validated path, device against
-reference $1.000000$--$1.000040$ at $\gamma=1/2/10/100$ (exact to the six
-digits shown at $\gamma=1$ and $2$), converging to
-$1.5\!\times\!10^{-6}$ at box order $32$ \citep{K3,indfield}; there is no
-validated closed form for the moving case.
+ V/m against the $45.7$ V/m tolerance level ($6.1\times10^{-5}$ of it), and
+ every sample nonzero, i.e. no interior zero fill \citep{FIX1}.

@@ -12,6 +12,18 @@ ms row is the $\gamma=100$ run \citep{SB1}. These
 compute-only totals exclude the checkpoint writer; the end-to-end totals with
 the writer are in Table~\ref{tab:e2e}, a different measurement path.
 
+\paragraph{Reproducibility of Table~\ref{tab:matrix}.} The matrix is the
+\texttt{picBunchBench} sweep of picBunch branch
+\seqsplit{experimental/bench} at
+\seqsplit{3d05752a493e12f3a0a03c6754f92f202a70a482}
+(\seqsplit{picBunchBench --sweep --repeat 3 --csv matrix.csv}); the bench source
+and \texttt{docs/benchmarking.md} are on that branch \citep{SB1}. The input
+bunches are not checked into the repository; the bench source at
+\texttt{3d05752a} is the generator \citep{SB1}. The fast GPU kernel
+\seqsplit{tools/closed-form/gpu\_extract.cu} lives in picongpu at
+\texttt{b3699df} \citep{CFPORT}. The H100 runs used CUDA $13.4$
+\citep{CFPORT,INT4}.
+
 \paragraph{Correctness anchor.}
 Every timing run is anchored by the Coulomb limit ($\mathbf{u}=0$): one
 particle at a node, far nodes at $d=8,16,24,32$ along all six axis directions.
@@ -25,27 +37,34 @@ the TSC-convolved Coulomb field to roundoff.
 \centering
 \includegraphics[width=0.62\linewidth]{figs/F_a_scaling_vs_N.pdf}\\[2pt]
 \includegraphics[width=0.62\linewidth]{figs/F_b_scaling_vs_box.pdf}
-\caption{Pipeline time on \texttt{rosi\_v100} (V100-SXM2-32GB, idle), CUDA
-12.6, Release, $\gamma=10$, $h=1$, padding 2, double,
-$N=2\times10^6$ for the box sweep \citep{SB1}. Top: total time vs particle
-count, $N\in\{10^3,\dots,2\!\cdot\!10^6\}$, 20-cell box; grey bars span the
-pooled min/max over the four $2\!\cdot\!10^6$ repeats. Bottom: total vs
-source-box size 20/50/100 cells (padded array $M=60/120/220$). Blue is the
-total; the other series are per-stage medians, side by side, not stacked.
-Log-log.}
+\caption{Pipeline time vs particle count (top) and vs source-box size,
+padded array $M=60/120/220$ cells (bottom); log-log; total, blue, with the
+per-stage medians (deposit, kernel, FFT, read-out) side by side, not
+stacked; $\gamma=10$, $h=1$, double; \texttt{rosi\_v100}
+(V100-SXM2-32GB), CUDA 12.6, Release \citep{SB1}. The deposit dominates
+at $N=2\!\cdot\!10^6$, $57$ of the $64.8$ ms total, while the total grows
+$64.8$ ms to $233$ ms from $M=60$ to $M=220$.}
 \label{fig:Fa}
 \end{figure}
 
-The scaling is in two regimes, with the crossover set by the box, not the
-particle count \citep{SB1}. At large $N$ the deposit dominates, linear in $N$,
+Fig.~\ref{fig:Fa} sweeps one axis at a time: the top panel fixes the 20-cell
+box and varies $N$, the bottom panel fixes $N=2\!\cdot\!10^6$ and varies the
+box. The scaling is in two regimes, with the crossover set by the box, not
+the particle count \citep{SB1}. At large $N$ the deposit dominates, linear in $N$,
 $52$--$57$ ms on the $2\times10^6$ rows while the FFT, kernel, and read-out
 stay under $10$ ms at the $20$-cell box; the total is flat across
 $\gamma=1,10,100$ ($64.9/64.4/64.8$ ms) \citep{SB1}. At large boxes the
 kernel and FFT scale with $M^3$: from $M=60$ to $M=220$ the total goes from
 $64.8$ ms to $233$ ms, and halving $h$ costs $1.07\times$ and $2.35\times$
-because the deposit stays constant \citep{SB1}. The per-$h$ totals are
-$64.76$, $69.27$, and $151.51$ ms for $h=1$, $1/2$, $1/4$ (padded array
-$M=60/100/180$, $2\times10^6$ particles, 20-cell box) \citep{SB1}.
+ because the deposit stays constant \citep{SB1}. The per-$h$ totals are
+ $64.76$, $69.27$, and $151.51$ ms for $h=1$, $1/2$, $1/4$ (padded array
+ $M=60/100/180$, $2\times10^6$ particles, 20-cell box) \citep{SB1}.
+ On the \texttt{H100} (\texttt{jureca\_h100}, \texttt{sm\_90}), the same
+ $2\times10^{6}$, $20$-cell, $h=1$ mesh is $0.052$\,s compute
+ (deposit $34.4$\,ms, kernel $1.08$\,ms, FFT $7.44$\,ms, read-out $9.02$\,ms;
+ medians of three), and $0.755$\,s CLI wall including the particle read and the
+ HDF5 write \citep{INT4}.
+
 
 \begin{table}[t]
 \centering
@@ -108,40 +127,51 @@ Table~\ref{tab:matrix}; the two campaigns differ in measurement path and
 timing boundary, so neither is the other's total plus the writer
 \citep{W4b,SB1}.
 
-\subsection{MPI chunked output for global domains}
+\subsection{MPI rank scaling}
 \label{sec:mpi-scale}
 
-The v0.5.0 chunked writer (Section~\ref{sec:mpi}) was measured at
-$512^{3}$, tolerance $10^{-3}$, a 20-cell 4096-electron bunch,
-\texttt{--deterministic-deposit}, on \texttt{rosi\_v100} \citep{FIX1}. The
-quadrupole margin for this bunch exceeds the $2^{28}$ padded-node cap, so the
-code falls back to the measured $6R$ far-tail switch: compute box $212^{3}$,
-output $6.44$ GB, six double components. Table~\ref{tab:mpi} gives the wall
-and writer times for one and two ranks.
+  The rank-parallel compute (Section~\ref{sec:mpi}) and the chunked writer were
+  measured on an idle \texttt{rosi\_v100} window, medians of three runs
+  \citep{INT3}. The node was checked idle before the block (no CPU worker, 1-min
+  load below $2$), but each rank block starts from the preceding measurement,
+  so the 1-min load rises within the block: the near-shell block starts at
+  $1.9$, $8.4$ and $11.8$ for $1$, $2$ and $4$ ranks (mesh block $1.4$--$1.5$,
+  write block $1.1$--$1.6$); no foreign process was active during the window
+  \citep{INT3}. Correctness was verified
+ at $1$, $2$ and $4$ ranks on a $128$-particle, $32^3$, cell $8\times10^{-7}$\,m,
+ tolerance $10^{-3}$, near-shell $R=1.5$, tile $8$ problem: the mesh and the
+ near shell are bitwise identical at $1$-vs-$2$ and $1$-vs-$4$, all six
+ components, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3,MPI2}.
 
-\begin{table}[t]
-\centering
-\small
-\caption{MPI chunked output, $512^{3}$ global domain, tolerance $10^{-3}$,
-20-cell 4096-electron bunch, \texttt{--deterministic-deposit},
-\texttt{rosi\_v100} \citep{FIX1}. Compute box $212^{3}$ (the $6R$ far-tail
-switch, not the quadrupole margin, which exceeds the $2^{28}$ cap); output
-$6.44$ GB. All six datasets bitwise identical across rank counts; metadata
-equal; $n_\mathrm{diff} = 0$.}
-\label{tab:mpi}
-\begin{tabular}{lrr}
-\toprule
-ranks & wall (s) & writer (s) \\
-\midrule
-1 & $54.3$ & $39.8$ \\
-2 & $43.2$ & $39.8$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+ Table~\ref{tab:mpi} gives the speedup for the three parallel pieces. The
+ mesh is component-parallel: the replicated deposit ($307$--$332$\,ms, flat in
+ rank count) and the replicated source-spectrum FFT cap it, so the speedup
+ plateaus at $1.20\times$ at both $2$ and $4$ ranks. The near shell is
+ tile-parallel: the static round-robin tile split plus the all-reduce of the
+ full correction array plateaus it at $1.34\times$ at $4$ ranks. The writer is
+ a collective HDF5 write: it improves to $1.71\times$ at $2$ ranks and falls to
+ $0.48\times$ at $4$ ranks, where the collective flush and metadata traffic
+ contend on the shared filesystem; this is an I/O limit, not a compute limit
+ \citep{INT3}.
 
-Table~\ref{tab:mpi} shows the output is a single collective dataset, not
-per-rank files: the six datasets from the one-rank and two-rank runs are
-bitwise identical, $6$ of $6$ exact, $\max_\mathrm{abs\ diff} = 0.0$, metadata
-equal \citep{FIX1}. The writer time is flat in rank count because each rank
-writes its own $z$-slab of the same total bytes; the wall time drops with two
-ranks because the slab writes overlap.
+ \begin{table}[t]
+ \centering
+ \small
+ \caption{Rank scaling on \texttt{rosi\_v100}, idle window, medians of three
+ \citep{INT3}. Mesh: $N=2\times10^{6}$, $112^3$, component-parallel (replicated
+ deposit and source FFT). Near shell: $N=128$, $32^3$, $R=1.5$, tile $8$,
+ tile-parallel. Write: $N=2\times10^{6}$, $256^3$ global, $0.77$ GB, collective
+ HDF5. Mesh and near shell are bitwise identical at $1/2/4$ ranks.}
+ \label{tab:mpi}
+ \begin{tabular}{lccc|cc|cc}
+ \toprule
+ & \multicolumn{3}{c}{near shell} & \multicolumn{2}{c}{mesh} & \multicolumn{2}{c}{write} \\
+ \cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+ ranks & wall (s) & speedup & eff.\ & wall (ms) & speedup & wall (s) & speedup \\
+ \midrule
+ 1 & $36.61$ & $1.00$ & $100\%$ & $522.2$ & $1.00$ & $7.41$ & $1.00$ \\
+ 2 & $29.60$ & $1.24$ & $62\%$  & $436.3$ & $1.20$ & $4.34$ & $1.71$ \\
+ 4 & $27.29$ & $1.34$ & $34\%$  & $433.6$ & $1.20$ & $15.49$ & $0.48$ \\
+ \bottomrule
+ \end{tabular}
+ \end{table}

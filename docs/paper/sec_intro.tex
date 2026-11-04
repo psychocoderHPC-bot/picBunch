@@ -6,23 +6,26 @@ carry an initial electromagnetic field, or the first push already acts on the
 wrong force. The field of a moving bunch in free space is known in closed form
 for each point charge, but a simulation reads that field on a staggered mesh
 with thousands of observation points, so it is computed by a fast sum over the
-source charges rather than by evaluating the closed form everywhere. We do that
-sum as a TSC deposit onto a zero-padded grid, a sampled exact TSC-convolved
-kernel, and a free-space FFT convolution, with staggered Yee read-out. This
-paper gives the exact discrete recipe a re-implementer needs, and it measures
-the cost and the accuracy of \texttt{picBunch} \texttt{v0.5.0}
-(commit \texttt{7b4f1766}, tag \texttt{3e083fef}) on a single V100, naming the
-reference for every error statement. The release is driven by a single TOML
-configuration (input file, destination, config;
-Section~\ref{sec:interface}), and it carries the capabilities the measurements
-below exercise: an opt-in exact near shell, MPI chunked output for global
-domains larger than the compute box, a tolerance-derived far-tail margin for
-zero fill, and a float32 checkpoint that restarts under a stock PIConGPU.
+source charges rather than by evaluating the closed form everywhere. We compute
+it as a free-space FFT convolution of a TSC deposit with the sampled
+TSC-convolved point-charge kernel. The
+field is the present-time field of uniformly moving charges, with no radiation
+term and no history. This paper gives the exact discrete recipe a
+re-implementer needs, and it measures the cost and the accuracy of
+\texttt{picBunch} \texttt{v0.7.0} (commit \texttt{a152c518}, tag
+\texttt{25d6ca8b}) on a V100, an H100 and a gfx1100, naming the reference for
+every error statement. The release is driven by a single TOML configuration
+(input file, destination, config; Section~\ref{sec:interface}), and it carries
+the capabilities the measurements below exercise: an opt-in near shell with a
+fast closed-form evaluator, MPI component-parallel mesh and tile-parallel near
+shell with bitwise equality across rank counts, a tolerance-derived far-tail
+margin for zero fill, and a float32 checkpoint that restarts under a stock
+PIConGPU.
 
 The established workaround avoids computing the initial field altogether: one
 starts from a field-free state and marches the bunch forward, letting the
 fields build up in the first few steps. The present-time field of a uniformly
 moving bunch has no transient, so this history has no physical basis. We
 measure how well the discrete method reproduces that field and how much it
-costs, and we state the conditions under which it fails
-(Section~\ref{sec:limits}).
+costs, and we state the conditions under which the measured error is
+largest (Section~\ref{sec:limits}).

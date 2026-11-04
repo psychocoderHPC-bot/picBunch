@@ -21,10 +21,10 @@ $4.86\times10^{-2}$ for $\gamma=1$ ($E/z$) and $6.20\times10^{-1}$ for
 $\gamma=10$ ($E/z$; $E/y$ is $5.16\times10^{-1}$), against a reference
 reproducibility floor of $1.19\times10^{-6}$ ($E$) and
 $1.43\times10^{-6}$ ($B$) \citep{W7r,D13}. picBunch is about four to six
-orders of magnitude above that floor, a no-agreement statement at the
-reference floor, not a defect: B is exactly zero for $\gamma=1$ in both, the
-bulk agrees to below $1$--$3\%$, and the error is concentrated at the core
-and the beamed peaks \citep{W7r,D13}.
+orders of magnitude above that floor; the measured error is concentrated at
+the core and the beamed peaks, where the TSC support is, while the bulk
+agrees to below $1$--$3\%$ and B is exactly zero for $\gamma=1$ in both
+\citep{W7r,D13}.
 
 The whole-field comparison, $N=1000$ on $32\times32\times16$, cell
 $2\times10^{-7}$\,m, $16384$ nodes per component, gives the same picture:
@@ -32,10 +32,10 @@ $\gamma=1$ bulk median $3.8$--$7.8\times10^{-3}$ with an L2 of
 $4.6$--$5.7\times10^{-2}$; $\gamma=10$ bulk median $1.4$--$3.3\times10^{-2}$
 but a beamed-core overshoot that pushes the $E/y$, $E/z$ L2 to
 $0.76$--$0.92$ \citep{W7r}. The forward $E/x$ is well resolved at
-$\gamma=10$ ($\sim6\%$); the beamed transverse $E/y$, $E/z$ are
+ $\gamma=10$ ($\sim6\%$); the beamed transverse $E/y$, $E/z$ are
 $50$--$130\%$ worst at the core, where the Lorentz-contracted field is a
-sub-cell pancake that TSC and the spectral near-field kernel cannot resolve
-\citep{W7r}.
+sub-cell pancake below the TSC support and the spectral near-field kernel
+resolution \citep{W7r}.
 
 \begin{table}[t]
 \centering
@@ -84,36 +84,46 @@ $x/y/z$ at the exact Yee positions, grid spacing and offset, and the
 \texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The default
 precision is uniform \texttt{float32} for every field and particle record, so
 a stock single-precision PIConGPU can load the file \citep{IMPL3}.
-\texttt{v0.5.0} copies every species from the input bunch and carries a single
-checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
-the \texttt{charge} and \texttt{mass} records are written rather than omitted,
-and the species is a single particle patch (Section~\ref{sec:interface}). The
-remaining differences against a genuine PIConGPU checkpoint are non-blocking
-metadata \citep{W7B}.
+ \texttt{v0.7.0} copies every species from the input bunch and carries a single
+ checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
+ the \texttt{charge} and \texttt{mass} records are written rather than omitted,
+ and the species is a single particle patch (Section~\ref{sec:interface}). The
+ remaining differences against a genuine PIConGPU checkpoint are non-blocking
+ metadata \citep{W7B}. For a multi-rank restart the writer splits the species
+ into one patch per output rank: \texttt{patch\_count} in
+ \texttt{[placement]} gives cumulative, disjoint
+ \texttt{numParticlesOffset} ranges, with one-cell overlap between neighbouring
+ $z$ regions, and every particle belongs to exactly one patch
+ \citep{INT3,MPI2}.
 
-Field arrival is bitwise. A fresh \texttt{v0.5.0} checkpoint written from a
-two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
-startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
-\texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;
-\texttt{domain}: offset $(0,0,0)$, extent $(24,24,12)$), all six field
-components bitwise-equal, $\max_\mathrm{abs\ diff} = 0.0$, electrons with ids
-$0$ to $15$, first-step displacement exactly $\beta c\,dt$ with
-$\beta = 0.9949874367$ \citep{INT2}. A validation-only build with the field
-solver set to \texttt{None} loads the checkpoint and writes step 1; all six
-components are bitwise-equal, max ULP $0$ \citep{W7B}.
+ Field arrival is bitwise. A fresh \texttt{v0.7.0} checkpoint written from a
+ two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
+ startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
+ \texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;
+ \texttt{domain}: offset $(0,0,0)$, extent $(24,24,12)$), all six field
+ components bitwise-equal, $\max_\mathrm{abs\ diff} = 0.0$, electrons with ids
+ $0$ to $15$, first-step displacement exactly $\beta c\,dt$ with
+ $\beta = 0.9949874367$ \citep{INT2}. A validation-only build with the field
+ solver set to \texttt{None} loads the checkpoint and writes step 1; all six
+ components are bitwise-equal, max ULP $0$ \citep{W7B}.
 
-\subsection{PML passthrough and the restart fixes}
+ A multi-rank restart with the four-patch layout was verified
+ process-level: a $256$-particle bunch written as four non-empty patches
+ (cumulative offsets $0,56,126,203$, one-cell overlap) restarts PIConGPU with
+ exit $0$, and after one step all six field components are bitwise-equal to the
+ checkpoint, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3}.
 
-On a $24\times24\times12$ deck the restart is exit $0$ with
-\texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization drops
-from the $\sim116$\,s neuralBunch path to $1.8$\,s because the checkpoint
-carries the field \citep{W7B}. The same investigation found the defects in
-PIConGPU's restart path that the fixes PR addresses \citep{D15}:
-\texttt{RestartFieldLoader} never reads \texttt{unitSI},
-\texttt{gridSpacing} or \texttt{gridGlobalOffset}; the PML slabs are
-unconditional; a successful restart suppresses the initial dump; and the
-openPMD backend does not convert dataset dtypes. The fixes PR
-(\texttt{psychocoderHPC-bot/picongpu} PR \#25, draft) adds restart metadata
-validation, unitSI conversion, optional PML slabs, and an explicit dtype
-contract, verified by real restarts including a factor-2 unitSI case
-\citep{D15}.
+ \subsection{PML passthrough and open-boundary restart}
+
+ On a $24\times24\times12$ deck the restart is exit $0$ with
+ \texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization drops
+ from the $\sim116$\,s neuralBunch path to $1.8$\,s because the checkpoint
+ carries the field \citep{W7B}. For an open-boundary deck the writer copies the
+ \texttt{Convolutional PML} slabs from the input checkpoint verbatim
+ (converting a non-float32 slab to float32), so the PML state arrives with the
+ restart. On a real LWFA checkpoint ($638976$ electrons, eight
+ \texttt{Convolutional PML} groups with six datasets each, $64\times128\times64$,
+ \texttt{--periodic 0 0 1}) the writer copies all eight groups and the
+ restart exits $0$; the copied PML datasets are float32 and bitwise equal to
+ the source, initialization is $3.986$\,s, and the main $E$ and $B$ records are
+ recomputed from the particles and stay float32 \citep{W7fix,D14}.
