@@ -697,7 +697,10 @@ namespace picBunch
 
     Field computeField(Bunch const& bunch, ComputeOptions const& options, StageTimes* stageTimes)
     {
-        if(options.nearShell.mode == NearShellOptions::Mode::Exact)
+        // Both near-shell backends share the tiled assembly
+        // F = F_mesh(all) - F_mesh(near) + F_exact(near); only the per-pair
+        // evaluator differs (adaptive reference vs closed form).
+        if(options.nearShell.mode != NearShellOptions::Mode::None)
             return computeFieldNearExact(bunch, options, options.nearShell, stageTimes);
 
         // v0.1 is one velocity class: the kernel is exact for a single shared u.
