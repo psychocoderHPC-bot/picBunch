@@ -37,13 +37,7 @@ the TSC-convolved Coulomb field to roundoff.
 \centering
 \includegraphics[width=0.62\linewidth]{figs/F_a_scaling_vs_N.pdf}\\[2pt]
 \includegraphics[width=0.62\linewidth]{figs/F_b_scaling_vs_box.pdf}
-\caption{Pipeline time vs particle count (top) and vs source-box size,
-padded array $M=60/120/220$ cells (bottom); log-log; total, blue, with the
-per-stage medians (deposit, kernel, FFT, read-out) side by side, not
-stacked; $\gamma=10$, $h=1$, double; \texttt{rosi\_v100}
-(V100-SXM2-32GB), CUDA 12.6, Release \citep{SB1}. The deposit dominates
-at $N=2\!\cdot\!10^6$, $57$ of the $64.8$ ms total, while the total grows
-$64.8$ ms to $233$ ms from $M=60$ to $M=220$.}
+\caption{Pipeline time versus particle count (top, log-log) and source-box size (bottom, semi-log), padded array $M=60/120/220$ cells, $\gamma=10$, $h=1$, double precision, \texttt{rosi\_v100}/CUDA 12.6 from \texttt{SB1}. Blue is the total and markers the per-stage medians; the deposit dominates at $N=2\times10^6$ ($57$ of $64.8$\,ms), and the total rises from $64.8$ to $233$\,ms as $M$ grows from $60$ to $220$.}
 \label{fig:Fa}
 \end{figure}
 
@@ -59,7 +53,7 @@ $64.8$ ms to $233$ ms, and halving $h$ costs $1.07\times$ and $2.35\times$
  because the deposit stays constant \citep{SB1}. The per-$h$ totals are
  $64.76$, $69.27$, and $151.51$ ms for $h=1$, $1/2$, $1/4$ (padded array
  $M=60/100/180$, $2\times10^6$ particles, 20-cell box) \citep{SB1}.
- On the \texttt{H100} (\texttt{jureca\_h100}, \texttt{sm\_90}), the same
+ On the \texttt{H100} (\texttt{jureca-h100}, \texttt{sm\_90}), the same
  $2\times10^{6}$, $20$-cell, $h=1$ mesh is $0.052$\,s compute
  (deposit $34.4$\,ms, kernel $1.08$\,ms, FFT $7.44$\,ms, read-out $9.02$\,ms;
  medians of three), and $0.755$\,s CLI wall including the particle read and the
@@ -141,18 +135,12 @@ timing boundary, so neither is the other's total plus the writer
  at $1$, $2$ and $4$ ranks on a $128$-particle, $32^3$, cell $8\times10^{-7}$\,m,
  tolerance $10^{-3}$, near-shell $R=1.5$, tile $8$ problem: the mesh and the
  near shell are bitwise identical at $1$-vs-$2$ and $1$-vs-$4$, all six
-  components, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3,MPI2}.
+ components, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3,MPI2}.
 
   \begin{figure}[t]
   \centering
   \includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling.pdf}
-  \caption{Strong scaling of the three rank-parallel pieces on
-  \texttt{rosi\_v100} (V100, idle window, medians of three), $1$--$4$ ranks;
-  the dashed references are the ideal $1/n$ wall time (top) and $S=n$ speedup
-  (bottom). Error bars are the spread of the three repeats. The near shell
-  plateaus at $1.34\times$ and the component-parallel mesh at $1.20\times$;
-  the collective writer reaches $1.71\times$ at $2$ ranks and falls to
-  $0.48\times$ at $4$.}
+  \caption{Strong scaling of the three rank-parallel pieces on \texttt{rosi\_v100} (idle window, medians of three runs) for $1$--$4$ ranks, with dashed ideal $1/n$ and $S=n$ references. The near shell reaches $1.34\times$, the component-parallel mesh $1.20\times$, and the collective writer $1.71\times$ at two ranks then $0.48\times$ at four.}
   \label{fig:mpiscaling}
   \end{figure}
 

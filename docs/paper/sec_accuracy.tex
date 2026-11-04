@@ -84,8 +84,8 @@ $\gamma$ \citep{N2b}.
 \subsection{The independent validation}
 
 A second, independent pass measured the shipped CLI end to end:
-\texttt{picBunch} at \texttt{bfaa1e26}, rosi\_v100, \texttt{indfield.py}
-order $12$ refine $3$, $d=2$ to $32$ cells, $\gamma\in\{1,10\}$, aspect 1
+\texttt{picBunch} at \texttt{bfaa1e26}, rosi\_v100, the order-12
+\texttt{indfield} reference (refine $3$), $d=2$ to $32$ cells, $\gamma\in\{1,10\}$, aspect 1
 and 4, single particle and three-particle cloud \citep{W4b}.
 
 \begin{table}[t]
@@ -94,7 +94,7 @@ and 4, single particle and three-particle cloud \citep{W4b}.
 \caption{Worst per-component relative error (over $x,y$, $|\mathrm{ref}|
 \ge10^{-3}$ of the local field) of the shipped CLI against the
 TSC-convolved continuum, at $d=16$ and $d=32$ cells; rosi\_v100,
-\texttt{indfield.py} order $12$ refine $3$ \citep{W4b}. ``s/c'' = single /
+the order-12 \texttt{indfield} reference (refine $3$) \citep{W4b}. ``s/c'' = single /
  cloud. Measured values at $d=48$: $\gamma=10$, $1.8\times10^{-3}$
 ($d=32$: $6.5\times10^{-3}$); $\gamma=1$ is below $3\times10^{-4}$ from
 $d=12$ (aspect 1) and $d=32$ (aspect 4).}
@@ -125,13 +125,7 @@ shell measures (Sections~\ref{sec:nearsheet}, \ref{sec:cost})
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.95\linewidth]{figs/F_w4b_rel_error.pdf}
-\caption{Worst per-component relative error vs source-target distance $d$
-in cells, single-particle series, floored electric series, solid
-$\gamma=1$ and dashed $\gamma=10$, blue aspect 1 and orange aspect 4;
-\texttt{rosi\_v100}, \texttt{indfield.py} order $12$ refine $3$
-\citep{W4b}, reference $T$. The error falls from $1.2\times10^{-1}$ at
-$d=2$ to $2.2\times10^{-6}$ at $d=32$ for $\gamma=1$, aspect 1, and is
-$6.3\times10^{-3}$ at $d=32$ for $\gamma=10$, aspect 1.}
+\caption{Worst per-component relative error against source-target distance $d$ for the single-particle floored electric series on \texttt{rosi\_v100}, both axes logarithmic; hue is $\gamma$ (blue $\gamma=1$, vermillion $\gamma=10$) and line style is aspect (solid 1, dashed 4), against the order-12 \texttt{indfield} reference (refine 3) \citep{W4b}. The error falls from $1.2\times10^{-1}$ at $d=2$ to $2.2\times10^{-6}$ at $d=32$ for $\gamma=1$, aspect 1.}
 \label{fig:Fw4b}
 \end{figure}
 
@@ -200,7 +194,7 @@ bunch core we slice through it and compare, pixel by pixel, with an exact
 TSC-convolved reference: $64\times64$ planes, cell $10^{-7}$\,m, $N=200$,
 $Q=-100$\,pC, $\gamma=10$ with momentum along $+y$ (\texttt{BDATA2}). Two
 cases share the positions and differ only in a $1.045$\,mrad rms transverse
-divergence in $x$ (Figs.~\ref{fig:valforwardE}--\ref{fig:valfluctB}); a
+divergence in $x$ (Figs.~\ref{fig:valforwardE}, \ref{fig:valforwardB}, \ref{fig:valfluctE}, \ref{fig:valfluctB}); a
 separate $32\times32$ plane carries the binned $1$\,mrad case
 (\texttt{VAR1b}, Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal
 and increases left to right, so the bunch moves rightwards; the vertical axis
@@ -235,17 +229,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_forward_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_E.pdf}
-\caption{Forward-case electric validation, $N=200$, $Q=-100$\,pC, $\gamma=10$
-along $+y$, $64\times64$ planes, cell $10^{-7}$\,m (\texttt{BDATA2}); x-y
-plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at
-$x=3.2\,\si{\micro\metre}$ (lower), $y$ horizontal in both. Each row has four
-columns, $E_x,E_y,E_z$ and $|E|=\sqrt{E_x^2+E_y^2+E_z^2}$, one shared linear
-scale and one colour bar; the error row below is logarithmic, masked where the
-reference is below $10^{-3}$ of its peak. The solid white outline marks the TSC
-support, and in-support errors are shown against the order-4 driver, which
-overestimates moving oblique in-support points by about $10\times$; the
-trustworthy in-support value is the fast-versus-arbiter $1.6\%$ at the worst
-node.}
+\caption{Forward-case electric validation ($N=200$, $Q=-100$\,pC, $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m, \texttt{BDATA2}): x-y plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row; the lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the white outline marks the TSC support. The in-support fast-versus-arbiter error against the order-12 \texttt{indfield} reference is $1.6\%$ at the worst node.}
 \label{fig:valforwardE}
 \end{figure}
 
@@ -253,11 +237,7 @@ node.}
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_forward_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_B.pdf}
-\caption{Magnetic companion to Fig.~\ref{fig:valforwardE}, same forward case,
-planes and layout, with columns $B_x,B_y,B_z$ and $|B|=\sqrt{\sum_i B_i^2}$.
-$B_y\equiv0$ for motion along $+y$ and its panel is marked accordingly; the
-remaining components share one linear scale per row. The error row uses the
-same log convention and TSC-support outline as the electric figure.}
+\caption{Magnetic companion to Fig.~\ref{fig:valforwardE} with the same planes and layout, showing four columns $B_x,B_y,B_z,|B|$; $B_y\equiv0$ for motion along $+y$ is marked in its panel. Each row has one shared linear field scale and one logarithmic error scale and colour bar, with the same TSC-support outline as the electric figure. The magnetic field is about $10^{-10}$ of the E-dominated local field at $\gamma=10$.}
 \label{fig:valforwardB}
 \end{figure}
 
@@ -265,12 +245,7 @@ same log convention and TSC-support outline as the electric figure.}
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_E.pdf}
-\caption{Fluctuation-case electric reference, same geometry and bunch as
-Fig.~\ref{fig:valforwardE} but with a $1.045$\,mrad rms $x$-divergence
-(\texttt{BDATA2}); the panels are the exact per-particle reference and use
-the same four-column, shared-scale layout. picBunch v0.7.0 rejects a momentum
-spread, so no mesh field exists and the picBunch panels are labelled
-unavailable rather than shown as a proxy.}
+\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence (\texttt{BDATA2}), showing four columns $E_x,E_y,E_z,|E|$ from the order-12 \texttt{indfield} reference. Each row uses one shared linear scale and one colour bar. picBunch v0.7.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
 \label{fig:valfluctE}
 \end{figure}
 
@@ -278,11 +253,7 @@ unavailable rather than shown as a proxy.}
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_B.pdf}
-\caption{Magnetic reference for the fluctuation case, same planes and layout as
-Fig.~\ref{fig:valfluctE}, with $B_x,B_y,B_z$ and $|B|$. The $x$-divergence
-lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the
-dominant component. Only reference fields are shown; the picBunch panels are
-unavailable, as in the electric figure.}
+\caption{Magnetic reference for the fluctuation case, with the same planes, four columns $B_x,B_y,B_z,|B|$, and one shared scale and colour bar per row as Fig.~\ref{fig:valfluctE}. The $x$-divergence lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the dominant component. Only reference fields from the order-12 \texttt{indfield} reference are shown; the picBunch panels are unavailable.}
 \label{fig:valfluctB}
 \end{figure}
 
@@ -290,14 +261,7 @@ unavailable, as in the electric figure.}
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_B.pdf}
-\caption{Binned $1$\,mrad case (\texttt{VAR1b}): $N=200$, $Q=-32$\,aC,
-$\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell
-$2\times10^{-7}$\,m, picBunch velocity-binned field against the unbinned
-per-particle reference. Upper image electric, lower image magnetic, each with
-four columns, one shared scale per row and one colour bar; error rows are
-logarithmic and masked below $10^{-3}$ of the reference peak. The solid white
-outline marks the TSC support; as in Fig.~\ref{fig:valforwardE} the in-support
-error is limited by the order-4 driver reference.}
+\caption{Binned $1$\,mrad case (\texttt{VAR1b}: $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against the order-12 \texttt{indfield} reference. The upper image is electric and the lower magnetic, each with four columns, one shared scale and one colour bar per row; error rows are logarithmic and masked below $10^{-3}$ of the reference peak. The solid white outline marks the TSC support.}
 \label{fig:val1mrad}
 \end{figure}
 
@@ -305,7 +269,7 @@ Table~\ref{tab:slices} lists the measured worst relative error per component
 and the fraction of unmasked plane pixels above $10^{-3}$ for the earlier
 $N=1000$, $32\times32\times16$ set, with error-column pixels below $10^{-3}$
 of the plane peak masked white. The new validation figures above supersede
-those slices for the forward and $1$\,mrad cases.
+those slices for the forward and the $1$\,mrad cases.
 
 \begin{table}[t]
 \centering
@@ -354,26 +318,6 @@ plane edges. The far field is measured separately
 (Table~\ref{tab:w4b}, Fig.~\ref{fig:Fw4b}); the near-shell contribution
 is measured at the same geometry in Section~\ref{sec:slices-runs}.
 
- \paragraph{The earlier core-slice error was the reference's, not the
- solver's.} A later arbiter comparison isolates the driver's error. At the
- hardest in-support node of a $\gamma=10$ bunch ($E_y$ at cells
- $(32,31.5,31)$, $0.53$ cells from source \#94), the order-12/refine-3
- continuum arbiter reads $2.077\times10^{9}$\,V/m; the fast near backend reads
- $2.043\times10^{9}$\,V/m, $1.6\%$ apart. The driver (and
- \texttt{--near-shell exact}, which shares the same vendored adaptive
- Gauss--Legendre quadrature and the same mishandling of the moving oblique
- in-support singularity) reads $2.153\times10^{10}$\,V/m, $10.4\times$ too
- high. Raising the fast backend's remainder order changed nothing, and growing
- the shell radius fixed the $1.5$--$6$-cell band but not the in-support node,
- which is why the fast value and the arbiter agree while the driver does not.
- The peak-normalised core-slice error of $0.24$--$0.31$ reported earlier for a
- bunch slice (Section~\ref{sec:slices}; \texttt{BDATA2}) is therefore the
- driver's error, not the solver's: the honest moving-oblique in-support
- accuracy of the fast backend is $1.6\%$ at the worst node, not $0.31$ and not
- $8\times10^{-4}$. The single-particle stationary value
- $7.99\times10^{-4}$ is unchanged and remains valid
- (Section~\ref{sec:fastacc}).
-
 \subsection{The fast near evaluator, per component, by region}
 \label{sec:fastacc}
 
@@ -393,7 +337,7 @@ $8.15\times10^{-2}$ at its default order \citep{CFPORT,INT4}.
 \centering
 \small
 \caption{Fast near evaluator, worst per-component relative error against the
-independent continuum, cells $10^{-7}$\,m, \texttt{jureca\_h100}
+order-12 \texttt{indfield} reference, cells $10^{-7}$\,m, \texttt{jureca-h100}
 \citep{CFPORT,INT4}. Regions: interior (inside the TSC support), face (on its
 boundary), outside ($1.6$--$3.6$ cells). The ``remainder order'' column is the
 Gauss--Legendre order of the smooth remainder; the singular \texttt{asinh}
@@ -462,7 +406,7 @@ $8\times$ more per pair at $\gamma=10$ than at $\gamma=1$.
 
 Table~\ref{tab:cost} gives the near-shell wall times at $2\times10^{6}$
 particles in a $20$-cell bunch, on one \texttt{H100}
-(\texttt{jureca\_h100}, \texttt{jrc0880}, \texttt{sm\_90}), with the
+(\texttt{jureca-h100}, \texttt{jrc0880}, \texttt{sm\_90}), with the
 per-pair rate and the achieved near error for each configuration
 \citep{INT4,CFPORT}. The mesh compute alone is $0.052$\,s (deposit $34.4$\,ms,
 kernel $1.08$\,ms, FFT $7.44$\,ms, read-out $9.02$\,ms; medians of three). The
@@ -509,14 +453,7 @@ moving axial support, order $8$ & $42.6$ & $3.9977\times10^{6}$ & $1.69\times10^
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\linewidth]{figs/SCHEM1_field_evaluation_schematic.pdf}
- \caption{Where the algorithm evaluates the field, around one source (left)
- and the measured error against distance (right); \texttt{rosi\_v100}, $h=1$,
- aspect $1$ \citep{SB1,SCHEM1}. The three regions are the TSC support (to $1.5$
- nodes), the near shell (to $R_{\rm shell}$), and the mesh beyond, with the
- tolerance-driven shell radii $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and
- $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The
- $\gamma=1$ error crosses $3\times10^{-4}$ at $d=8$ nodes; the $\gamma=10$
- curve stays above it to $d=48$.}
+ \caption{Where the algorithm evaluates the field: real space around one source (top) and the measured error against distance (bottom) at $h=1$, aspect 1, \texttt{rosi\_v100} \citep{SB1,SCHEM1}. Shaded regions are the TSC support (to $1.5$ nodes), the near shell (to $R_{\rm shell}$), and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The $\gamma=1$ error crosses $3\times10^{-4}$ at $d=8$ nodes, while the $\gamma=10$ curve stays above it to $d=48$.}
  \label{fig:schem}
  \end{figure}
 
@@ -571,7 +508,7 @@ would grow with $N$, and it does not \citep{W7t}.
  \centering
  \small
   \caption{Single-particle mesh error at $d=8$ cells, $96$-cell box, cell
-  $10^{-7}$\,m, aspect $1$, axial, \texttt{jureca\_h100} \citep{ER1b}.
+  $10^{-7}$\,m, aspect $1$, axial, \texttt{jureca-h100} \citep{ER1b}.
   Peak-normalised absolute error, worst per component, at $h=1$ and $h=1/4$.
   The error grows with $\gamma$; at $h=1$ the $\gamma=50$ and $\gamma=100$
   values exceed the peak field, and the h-refinement exponent $p$ (error
@@ -592,11 +529,7 @@ would grow with $N$, and it does not \citep{W7t}.
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.62\linewidth]{figs/F_gamma_err_dist.pdf}
- \caption{Peak-normalised absolute error against distance, single particle,
- $96$-cell box, cell $10^{-7}$\,m, aspect $1$, axial, \texttt{jureca\_h100}
- \citep{ER1b}. Solid $h=1$, dashed $h=1/4$; $\gamma=10$, $50$, $100$. The
- error grows with $\gamma$ and falls with distance; at $h=1$ it exceeds the
- peak field by $d=8$ cells for $\gamma=50$ and $\gamma=100$.}
+ \caption{Peak-normalised absolute error against distance on log-log axes, single particle, $96$-cell box, cell $10^{-7}$\,m, aspect 1, axial, \texttt{jureca-h100} \citep{ER1b}. Solid/dashed is $h=1$/$1/4$ and hue is $\gamma=10$ (vermillion), $50$ (purple), $100$ (orange). At $h=1$ the error exceeds the peak field by $d=8$ cells for $\gamma=50$ and $\gamma=100$.}
  \label{fig:gamma-dist}
  \end{figure}
 
@@ -636,29 +569,15 @@ would grow with $N$, and it does not \citep{W7t}.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g10_E.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g10_E.pdf}
-  \caption{Large-domain electric slices, $\gamma=10$, $128\times128\times64$,
-  cell $2\times10^{-7}$\,m, $N=100$, \texttt{jureca\_h100}
-  \citep{LARGE1}. These maps use the earlier axial-$x$ data set and keep
-  $x$ horizontal; they are retained for the domain-size comparison and are
-  not part of the $+y$ beam-axis slice set of
-  Figs.~\ref{fig:valforwardE}--\ref{fig:valfluctB}. Upper image, x-y plane through the
-  bunch centre; lower image, z-y plane. In each image the field row is on top
-  and the error row below, with $E_x,E_y,E_z$ columns; the error is against
-  the independent continuum. The boundary field is about $10.3\%$ of the peak
-  (worst per-component, $\gamma=10$ z-y $E_z$), so the colour scale is set by
-  the bunch, not the frame edge.}
+  \caption{Large-domain electric slices ($\gamma=10$, $128\times128\times64$, cell $2\times10^{-7}$\,m, $N=100$, \texttt{jureca-h100}) from the earlier axial-$x$ data set (not the $+y$ beam-axis set); $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Upper and lower images are x-y and z-y planes, each showing four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row above a logarithmic error row against the order-4 driver reference. The boundary field is $10.3\%$ of the peak (worst component, z-y $E_z$), so the colour scale is set by the bunch.}
   \label{fig:large}
   \end{figure}
 
    \begin{figure}[H]
    \centering
-   \includegraphics[width=0.80\linewidth]{figs/large_sxy_g10_B.pdf}\\[1pt]
-   \includegraphics[width=0.80\linewidth]{figs/large_szy_g10_B.pdf}
-  \caption{Magnetic companion to Fig.~\ref{fig:large}, $\gamma=10$, same
-  planes and error convention. This is the earlier axial-$x$ data set, so
-  $x$ stays horizontal and $B_x\equiv0$ is the vanishing component; it is
-  not part of the $+y$ beam-axis set. Two columns, $B_y$ and $B_z$, field row
-  on top and error row below.}
+   \includegraphics[width=0.92\linewidth]{figs/large_sxy_g10_B.pdf}\\[1pt]
+   \includegraphics[width=0.92\linewidth]{figs/large_szy_g10_B.pdf}
+  \caption{Magnetic companion to Fig.~\ref{fig:large} at $\gamma=10$, same planes and earlier axial-$x$ geometry; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut, and $B_x\equiv0$ is marked in its panel. Each image shows four columns $B_x,B_y,B_z,|B|$ with one shared linear scale and one colour bar per row, and the same logarithmic error convention as the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
   \label{fig:largeB}
   \end{figure}
 
@@ -666,10 +585,7 @@ would grow with $N$, and it does not \citep{W7t}.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g1_E.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g1_E.pdf}
-  \caption{Large-domain electric slices, stationary bunch ($\gamma=1$), same
-  domain and layout as Fig.~\ref{fig:large} \citep{LARGE1}; the field row is
-  on top and the error row below, with $E_x,E_y,E_z$ columns. $B\equiv0$, so
-  no magnetic companion exists.}
+  \caption{Large-domain electric slices for the stationary bunch ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large} \citep{LARGE1}; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row, above a logarithmic error row. The core error reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference floor.}
   \label{fig:largeg1}
   \end{figure}
 
@@ -684,85 +600,33 @@ would grow with $N$, and it does not \citep{W7t}.
  \texttt{gridSpacing}\,$\cdot$\,\texttt{gridUnitSI}; a mesh without a positive
   \texttt{gridUnitSI} is rejected \citep{S1-spec}.
 
-  \subsection{Binned multi-velocity binning, measured}
+  \subsection{Multi-velocity binning}
   \label{sec:multivel}
 
   The single-velocity scope of Section~\ref{sec:fielddef} is extended by
-  splitting the velocity distribution into $B$ classes and running one
-  convolution per class; the near shell needs no binning, because each pair
-  carries its own velocity \citep{MV2}. The measurements are on a $48^3$ grid
-  with $512$ sources on \texttt{jureca\_h100} (\texttt{jrc0880}, H100 PCIe,
-  \texttt{sm\_90}), branch \texttt{experimental/multivel} at
-  \texttt{02891fe6} \citep{MV2}.
+  splitting the velocity distribution into classes and running one
+  convolution per velocity class; the near shell needs no binning, because
+  each pair carries its own velocity \citep{MV2}.
 
   \paragraph{Single-velocity sanity.} With a single velocity the binned path
-  is bitwise equal to the unbinned path: the binning error $T_b\!-\!T$ is
-  exactly zero, and the field difference is bitwise zero in the unit test
-  \citep{MV2}.
+  is bitwise equal to the unbinned path: the field difference is bitwise zero
+  in the unit test \citep{MV2}.
 
-  \begin{table}[t]
-  \centering
-  \small
-  \caption{Binned multi-velocity binning error vs bin count $B$, $T_b\!-\!T$
-  peak-normalised in the far window $8\le d\le 16$ cells, $\gamma=10$,
-  $48^3$, $512$ sources, \texttt{jureca\_h100} (H100, \texttt{sm\_90}),
-  \texttt{02891fe6} \citep{MV2}. Energy spread 5\% (seed 100), angular
-  spread $5^\circ$ (seed 103).}
-  \label{tab:multivel}
-  \begin{tabular}{lrrrr}
-  \toprule
-  spread & $B\!=\!1$ & $B\!=\!4$ & $B\!=\!16$ & $B\!=\!64$ \\
-  \midrule
-  energy 5\%      & $6.04\times10^{-3}$ & $3.59\times10^{-3}$ & $1.12\times10^{-3}$ & $2.72\times10^{-4}$ \\
-  angular $5^\circ$ & $6.87\times10^{-1}$ & $9.44\times10^{-1}$ & $4.21\times10^{-1}$ & $2.95\times10^{-1}$ \\
-  \bottomrule
-  \end{tabular}
-  \end{table}
-
-  Table~\ref{tab:multivel} and Fig.~\ref{fig:multivel} give the measured
-  behaviour. With a 5\% energy spread the binning error falls from
-  $6.04\times10^{-3}$ to $2.72\times10^{-4}$ as $B$ goes from $1$ to $64$;
-  the $10^{-3}$ level is reached at $B=16$ \citep{MV2}. With a $5^\circ$
-   angular spread the error moves from $0.687$ to $0.295$ over the same range,
-   the measured value at $B=64$; the error scales as $1/N_{\perp}$ in the
-   transverse box count, so the $10^{-3}$ level would need about
-   $5.6\times10^{6}$ transverse boxes \citep{MV2}.
+  \paragraph{Binned field under correction.} The multi-velocity binned field
+  is under correction and is not reported as a result. The measured symptom
+  is a defect: the binned field grows with the bin count, while the order-12
+  arbiter is bin-independent for the same bunch. Numbers produced by the
+  binned field path are withdrawn until the correction is verified.
 
   \begin{figure}[t]
   \centering
   \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
-  \caption{Distributions and binning error of the multi-velocity campaign,
-  $\gamma=10$, $512$ sources, seeds 100/103, generator of
-  \texttt{02891fe6}; the per-particle records were regenerated from the
-  surviving generator on \texttt{rosi\_v100} because the campaign bunch
-  files were unavailable (the \texttt{jrc0880} route was down); the LCG
-  state and draw count are identical to the campaign, so only last-bit
-  \texttt{libm} differences between hosts are possible \citep{MV2}.
-  (a)~$\gamma$ histogram for the 5\% energy spread with the
-  $B=16$ adaptive bin edges (uniform in $u_\parallel$, mapped to $\gamma$);
-  mean and sample standard deviation are labelled. (b)~$u_\parallel$ versus
-  $u_\perp$ density for the $5^\circ$ angular spread; the dashed line is the
-  $5^\circ$ divergence and the dotted line the median $|\theta|=101.8$\,mrad.
-  (c)~Measured $T_b\!-\!T$ (peak-normalised, $8\le d\le16$ cells) for both
-  cases with the least-squares-scaled model and the $10^{-3}$ line.}
+  \caption{Sampled multi-velocity distributions used by the campaign
+  ($\gamma=10$, 512 sources, seeds 100/103, generator \texttt{02891fe6})
+  \citep{MV2}: (a) $\gamma$ histogram for the 5\% energy spread with the
+  $B=16$ adaptive edges and labelled mean and standard deviation;
+  (b) $u_\parallel$ versus $u_\perp$ density for the $5^\circ$ angular spread
+  with the $5^\circ$ and median-divergence lines. No binned field result is
+  shown; that path is under correction.}
   \label{fig:multivel}
   \end{figure}
-
-  The error model $\sum_b q_b\,(\gamma\,\Delta\theta_b
-  + \Delta\gamma_b/\gamma)$ (the per-box charge times the angular and
-  energy terms, the ``modelSum'' of MV2) calibrates to $C=1.09$ for the
-  energy-spread case, with the shipped $C=1$ predicting the measured binning
-  error to within $10$--$55\%$ across $B=1$--$64$ (Fig.~\ref{fig:multivel}a)
-  \citep{MV2}. For the angular-spread case the least-squares fit is
-  $C=124$ and non-monotonic in $B$, and the model underestimates the measured
-  binning error by about two orders of magnitude at $B=4$--$64$; the model
-  does not predict that case \citep{MV2}.
-
-  The total field error with a fast shell at $R=3$ does not follow the
-  binning error: in the far window it is $1.85\times10^{-2}$,
-  $1.90\times10^{-2}$, $3.51\times10^{-2}$ and $3.53\times10^{-2}$ for the
-  energy case at $B=1$, $4$, $16$, $64$. The shell subtraction dominates the
-  total, so the binning alone is not the limit \citep{MV2}. Runtime on the
-  same host with $B=64$ in $48^3$: mesh only $5.26$\,s at $10^6$ particles and
-  $5.62$\,s at $2\times10^{6}$; a $4$-cell fast shell at $2\times10^{6}$ in a
-  $20$-cell bunch takes $184$\,s \citep{MV2}.
