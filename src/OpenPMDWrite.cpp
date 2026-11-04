@@ -610,6 +610,16 @@ namespace picBunch
 {
     namespace
     {
+        /*! Warning recorded in a float64 checkpoint.
+         *
+         * Stock PIConGPU builds load particle records as float_X (float32)
+         * and abort with the dtype message below instead of converting.
+         */
+        char const* const kFloat64Warning
+            = "precision=float64: stock PIConGPU cannot load double particle records; "
+              "the restart fails with 'Type conversion during chunk loading not yet implemented!'. "
+              "Use precision=float32 for a stock single-precision PIConGPU.";
+
         [[noreturn]] void hdf5Fail(std::string const& what)
         {
             throw std::runtime_error("PicOnGPU restart writer: HDF5 " + what + " failed");
@@ -1073,7 +1083,7 @@ namespace picBunch
                 "H5Lmove");
         }
 
-        void flattenScalarRecordToFloat(hid_t file, std::string const& path)
+        void flattenScalarRecord(hid_t file, std::string const& path, bool float64)
         {
             if(H5Lexists(file, path.c_str(), H5P_DEFAULT) <= 0)
                 return;
@@ -1083,7 +1093,10 @@ namespace picBunch
                 "H5Oget_info_by_name");
             if(info.type == H5O_TYPE_DATASET)
             {
-                rewriteDataset<float>(file, path, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
+                if(float64)
+                    rewriteDataset<double>(file, path, H5T_NATIVE_DOUBLE, H5T_IEEE_F64LE);
+                else
+                    rewriteDataset<float>(file, path, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
                 return;
             }
             hid_t group = checked(H5Gopen2(file, path.c_str(), H5P_DEFAULT), "H5Gopen2");
@@ -1114,20 +1127,38 @@ namespace picBunch
                 H5Sget_simple_extent_dims(space, dimensions.data(), nullptr),
                 "H5Sget_simple_extent_dims");
             hssize_t const points = H5Sget_simple_extent_npoints(space);
-            std::vector<float> buffer(static_cast<std::size_t>(points));
-            checked(
-                H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
-                "H5Dread");
             std::string const temporary = path + ".picbunch-convert";
             hid_t newSpace = checked(
                 H5Screate_simple(rank, dimensions.data(), nullptr), "H5Screate_simple");
-            hid_t newDataset = checked(
-                H5Dcreate2(
-                    file, temporary.c_str(), H5T_IEEE_F32LE, newSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
-                "H5Dcreate2");
-            checked(
-                H5Dwrite(newDataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
-                "H5Dwrite");
+            hid_t newDataset = -1;
+            if(float64)
+            {
+                std::vector<double> buffer(static_cast<std::size_t>(points));
+                checked(
+                    H5Dread(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                    "H5Dread");
+                newDataset = checked(
+                    H5Dcreate2(
+                        file, temporary.c_str(), H5T_IEEE_F64LE, newSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                    "H5Dcreate2");
+                checked(
+                    H5Dwrite(newDataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                    "H5Dwrite");
+            }
+            else
+            {
+                std::vector<float> buffer(static_cast<std::size_t>(points));
+                checked(
+                    H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                    "H5Dread");
+                newDataset = checked(
+                    H5Dcreate2(
+                        file, temporary.c_str(), H5T_IEEE_F32LE, newSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                    "H5Dcreate2");
+                checked(
+                    H5Dwrite(newDataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()),
+                    "H5Dwrite");
+            }
             copyAttributes(group, newDataset);
             copyAttributes(dataset, newDataset, true);
             closeQuietly(newDataset);
@@ -1193,8 +1224,8 @@ namespace picBunch
                 checked(H5Adelete(object, name), "H5Adelete");
         }
 
-        //! PIConGPU restart reads float_X; convert a non-float32 component once.
-        void ensureFloat32Components(hid_t file, std::string const& recordPath)
+        //! Convert every component of a record to the configured precision once.
+        void ensureFloatComponents(hid_t file, std::string const& recordPath, bool float64)
         {
             hid_t group = checked(H5Gopen2(file, recordPath.c_str(), H5P_DEFAULT), "H5Gopen2");
             auto const names = groupNames(group);
@@ -1203,11 +1234,17 @@ namespace picBunch
                 std::string const childPath = recordPath + "/" + name;
                 hid_t dataset = checked(H5Dopen2(file, childPath.c_str(), H5P_DEFAULT), "H5Dopen2");
                 hid_t type = checked(H5Dget_type(dataset), "H5Dget_type");
-                bool const isFloat32 = H5Tget_class(type) == H5T_FLOAT && H5Tget_size(type) == 4u;
+                bool const wanted = H5Tget_class(type) == H5T_FLOAT
+                    && H5Tget_size(type) == (float64 ? 8u : 4u);
                 closeQuietly(type);
                 closeQuietly(dataset);
-                if(!isFloat32)
-                    rewriteDataset<float>(file, childPath, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
+                if(!wanted)
+                {
+                    if(float64)
+                        rewriteDataset<double>(file, childPath, H5T_NATIVE_DOUBLE, H5T_IEEE_F64LE);
+                    else
+                        rewriteDataset<float>(file, childPath, H5T_NATIVE_FLOAT, H5T_IEEE_F32LE);
+                }
             }
             closeQuietly(group);
         }
@@ -1273,7 +1310,7 @@ namespace picBunch
                             "a slab with a different extent");
                 }
                 closeQuietly(record);
-                ensureFloat32Components(file, destinationPath);
+                ensureFloatComponents(file, destinationPath, options.float64);
 
                 record = checked(H5Gopen2(file, destinationPath.c_str(), H5P_DEFAULT), "H5Gopen2");
                 for(char const* attribute : {
@@ -1555,7 +1592,7 @@ namespace picBunch
                 {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
                 false,
                 0.0,
-                true); // fractional in-cell position is always float64
+                float64);
             writeIntegerVectorRecord(particles, "positionOffset", positionOffset, cellUnit);
             writeFloatVectorRecord(
                 particles,
@@ -1570,19 +1607,33 @@ namespace picBunch
                 float64);
 
             hsize_t const scalarCount = static_cast<hsize_t>(count);
-            // The statistical weight can span orders of magnitude, so it is
-            // always stored as float64, independent of the configured precision.
             hid_t weightingDataset = createOneDimensional(
-                particles, "weighting", scalarCount, H5T_IEEE_F64LE);
-            checked(
-                H5Dwrite(
-                    weightingDataset,
-                    H5T_NATIVE_DOUBLE,
-                    H5S_ALL,
-                    H5S_ALL,
-                    H5P_DEFAULT,
-                    weighting.data()),
-                "H5Dwrite");
+                particles, "weighting", scalarCount, float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE);
+            if(float64)
+                checked(
+                    H5Dwrite(
+                        weightingDataset,
+                        H5T_NATIVE_DOUBLE,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        weighting.data()),
+                    "H5Dwrite");
+            else
+            {
+                std::vector<float> storedWeight(count);
+                for(std::size_t i = 0; i < count; ++i)
+                    storedWeight[i] = static_cast<float>(weighting[i]);
+                checked(
+                    H5Dwrite(
+                        weightingDataset,
+                        H5T_NATIVE_FLOAT,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        storedWeight.data()),
+                    "H5Dwrite");
+            }
             setParticleRecordAttributes(weightingDataset, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
             setScalarAttribute(weightingDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(weightingDataset);
@@ -1717,6 +1768,11 @@ namespace picBunch
                     file, "picongpuIOVersionMajor", H5T_NATIVE_UINT32, std::uint32_t{5});
                 setScalarAttribute(
                     file, "picongpuIOVersionMinor", H5T_NATIVE_UINT32, std::uint32_t{0});
+                if(options.float64)
+                {
+                    std::cerr << "picBunch: warning: " << kFloat64Warning << '\n';
+                    setStringAttribute(file, "picBunchPrecisionWarning", kFloat64Warning);
+                }
 
                 // Locate and validate the particle source before writing the fields,
                 // so a missing species fails without a half-written checkpoint.
@@ -1935,18 +1991,27 @@ namespace picBunch
                     std::string const particlePath = iterationPath + "/particles/" + species;
                     for(char const* record : {"position", "momentum"})
                         for(char const* component : {"x", "y", "z"})
-                            rewriteDataset<float>(
-                                file,
-                                particlePath + "/" + record + "/" + component,
-                                H5T_NATIVE_FLOAT,
-                                H5T_IEEE_F32LE);
+                        {
+                            if(options.float64)
+                                rewriteDataset<double>(
+                                    file,
+                                    particlePath + "/" + record + "/" + component,
+                                    H5T_NATIVE_DOUBLE,
+                                    H5T_IEEE_F64LE);
+                            else
+                                rewriteDataset<float>(
+                                    file,
+                                    particlePath + "/" + record + "/" + component,
+                                    H5T_NATIVE_FLOAT,
+                                    H5T_IEEE_F32LE);
+                        }
                     for(char const* component : {"x", "y", "z"})
                         rewriteDataset<std::int32_t>(
                             file,
                             particlePath + "/positionOffset/" + component,
                             H5T_NATIVE_INT32,
                             H5T_STD_I32LE);
-                    flattenScalarRecordToFloat(file, particlePath + "/weighting");
+                    flattenScalarRecord(file, particlePath + "/weighting", options.float64);
                     // PIConGPU derives charge and mass from the species flags and
                     // ignores these records; dropping them keeps the particle
                     // species extents homogeneous for the openPMD reader.

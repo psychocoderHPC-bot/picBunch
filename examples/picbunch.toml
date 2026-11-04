@@ -13,8 +13,9 @@ unit_b = 1.0e3
 # Time step and checkpoint step. dt is in seconds.
 dt = 1.0e-15
 step = 0
-# "float32" (default) or "float64" for fields, momentum, charge and mass.
-# position and weighting are always float64.
+# "float32" (default) or "float64", applied uniformly to every field and
+# particle property record. float64 is only usable with a PIConGPU that can
+# convert checkpoint dtypes; stock PIConGPU aborts on double particle records.
 precision = "float32"
 # Species to read from --input and write into the checkpoint.
 species = "electrons"

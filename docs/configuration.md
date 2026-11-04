@@ -26,7 +26,7 @@ convolution target and the optional exact near shell.
 | `unit_b` | yes | PIConGPU magnetic-field unit in T (`sim.unit.bField()`). |
 | `dt` | yes | Time step in seconds, stored in the checkpoint. |
 | `step` | yes | Checkpoint step in `[0, 999999]`; also the file suffix. |
-| `precision` | no | `"float32"` (default) or `"float64"` for fields, momentum, charge and mass. `position` and `weighting` are always float64. |
+| `precision` | no | `"float32"` (default) or `"float64"`, applied uniformly to every field component and every particle property record. `positionOffset` stays int32 and `id` stays uint64. |
 | `species` | yes | Species to read from `--input` and write to the checkpoint. |
 | `unit_charge` | no | Charge unit in C. Default `1.602176634e-19`. |
 | `unit_mass` | no | Mass unit in kg. Default `9.1093837015e-31`. |
@@ -94,13 +94,12 @@ box. With `patch = "domain"`, `offset` is zero and `extent` is the full domain.
 Records are in PIConGPU internal units:
 
 - `position`: fractional in-cell coordinate in `[0, 1)`, `unitSI` is the cell
-  size. Always stored as float64. `positionOffset`: integer cell index, stored
-  as int32.
+  size, stored at the configured precision. `positionOffset`: integer cell
+  index, stored as int32.
 - `momentum`: `p / (unit_mass * unit_speed)`, stored at the configured
   precision.
 - `weighting`: statistical weight with `macroWeighted = 1` and
-  `weightingPower = 1`; always float64 so weights spanning orders of magnitude
-  keep their relative precision.
+  `weightingPower = 1`, stored at the configured precision.
 - `charge`: `q / unit_charge` with `unitSI = unit_charge`, read from the input
   bunch and converted with `unit_charge`.
 - `mass`: `m / unit_mass` with `unitSI = unit_mass`, read from the input bunch
@@ -116,16 +115,33 @@ present in the input iteration, and `checkpoints.txt`.
 
 ## Precision
 
-`precision` selects the storage type of the six field components, `momentum`,
-`charge` and `mass`. `float32` is the default and matches a standard
-single-precision PIConGPU build. Use `float64` only for a double-precision
-PIConGPU build; it doubles the checkpoint size and is not beneficial for a
-single-precision deck.
+`precision` selects the storage type of all six field components and every
+particle property record: `position`, `momentum`, `weighting`, `charge` and
+`mass`. It applies uniformly; the writer never mixes dtypes inside one
+checkpoint. `positionOffset` stays int32 and `id` stays uint64.
 
-`position` and `weighting` are always float64 regardless of `precision`. The
-fractional in-cell `position` in `[0, 1)` loses absolute precision at cell
-sizes around `1e-7` m, and weights can span orders of magnitude. `positionOffset`
-stays int32 and `id` stays uint64.
+`float32` is the default. It matches a stock single-precision PIConGPU, whose
+`float_X` is float32, so a default checkpoint restarts without conversion.
+
+The fractional in-cell `position` is stored in `[0, 1)`, not in metres. A
+float32 fraction has a resolution of about `6e-8` (half an ulp near 1). At a
+cell size of `1e-7` m that is about `6e-15` m of absolute position error, and a
+float32 PIConGPU pusher cannot represent anything finer. `float64` reduces the
+fraction error to about `1e-16` (about `1e-23` m at the same cell size), so the
+extra precision only pays off when the consuming PIConGPU also stores
+`float_X` in double precision.
+
+`float64` is therefore only usable with a PIConGPU build that converts
+checkpoint dtypes. Stock PIConGPU cannot: it aborts a restart from a double
+particle record with
+
+```
+Type conversion during chunk loading not yet implemented! Data: DOUBLE; Load as: FLOAT
+```
+
+When `precision = "float64"` is selected, the writer prints this restriction on
+stderr and stores the same text in the checkpoint root attribute
+`picBunchPrecisionWarning`. The checkpoint also roughly doubles in size.
 
 ## Dependency pin
 

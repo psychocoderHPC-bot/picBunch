@@ -155,7 +155,12 @@ namespace picBunch
         //! When set, this species is reconstructed from particles instead of
         //! copied raw.  Every other input species is still copied.
         std::optional<GeneratedParticles> generatedParticles;
-        //! Write float64 particle records and fields instead of float32.
+        /*! Write every field component and every particle property record in
+         *  float64 instead of the default float32.  ``positionOffset`` stays
+         *  int32 and ``id`` stays uint64.  A stock PIConGPU cannot load double
+         *  particle records; the writer prints a warning and stores it in the
+         *  ``picBunchPrecisionWarning`` root attribute.
+         */
         bool float64 = false;
     };
 
@@ -167,21 +172,24 @@ namespace picBunch
      *    ``iterationFormat=<prefix>_%06T``, ``meshesPath=fields/`` and
      *    ``picongpuIOVersionMajor=5`` / ``Minor=0``;
      *  - ``data/<step>/{iteration,sim_slides,dt,time,timeUnitSI}``;
-     *  - ``fields/E/{x,y,z}`` and ``fields/B/{x,y,z}`` as float32 with extent
-     *    ``(Nz,Ny,Nx)``, stored as ``field/unit`` in PIConGPU internal units;
+     *  - ``fields/E/{x,y,z}`` and ``fields/B/{x,y,z}`` as float32 by default
+     *    (float64 when requested) with extent ``(Nz,Ny,Nx)``, stored as
+     *    ``field/unit`` in PIConGPU internal units;
      *  - ``gridSpacing*gridUnitSI`` recover metres, with both written in the
      *    ``z,y,x`` storage order;
      *  - ``fields/picongpu_idProvider/{startId,nextId}`` uint64; one global
      *    range for the whole checkpoint with ``startId = 0`` and
      *    ``nextId >= total particles`` over all copied species;
      *  - ``particles/<species>`` for every species in the input iteration,
-     *    copied byte-for-byte from its input group, including
-     *    ``particlePatches`` when present.
+     *    copied from its input group and normalized to the configured precision,
+     *    including ``particlePatches`` when present.
 
-     * The particle copy is a raw HDF5 object copy, so record attributes and
-     * datasets survive unchanged.  Missing patch metadata is reported through a
-     * ``picBunchRestartWarning`` root attribute and a message on ``stderr``;
-     * PIConGPU may then reject the restart.
+     * Record attributes survive the copy; the numeric datasets are rewritten
+     * to the configured precision so a checkpoint never mixes dtypes.  Missing
+     * patch metadata is reported through a ``picBunchRestartWarning`` root
+     * attribute and a message on ``stderr``; PIConGPU may then reject the
+     * restart.  ``float64`` additionally records ``picBunchPrecisionWarning``
+     * and prints the same warning on ``stderr``.
 
      * @throws std::runtime_error or std::invalid_argument on missing units,
      *         a missing input particle group, or an HDF5 failure.

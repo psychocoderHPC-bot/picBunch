@@ -207,14 +207,15 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
         EXPECT_NEAR(massRecord[p], bunch.restMass[p] / config.picongpu.unitMass, 1e-12);
     }
 
-    // On-disk dtype per record for the default float32 configuration:
-    // position and weighting are always float64.
+    // On-disk dtype per record for the default float32 configuration. Every
+    // floating-point field and particle property is float32; the integer
+    // records keep their PIConGPU layout.
     auto const positionType = readType(file, "data/3/particles/electrons/position/x");
     EXPECT_EQ(positionType.klass, H5T_FLOAT);
-    EXPECT_EQ(positionType.size, 8u);
+    EXPECT_EQ(positionType.size, 4u);
     auto const weightingType = readType(file, "data/3/particles/electrons/weighting");
     EXPECT_EQ(weightingType.klass, H5T_FLOAT);
-    EXPECT_EQ(weightingType.size, 8u);
+    EXPECT_EQ(weightingType.size, 4u);
     auto const momentumType = readType(file, "data/3/particles/electrons/momentum/x");
     EXPECT_EQ(momentumType.klass, H5T_FLOAT);
     EXPECT_EQ(momentumType.size, 4u);
@@ -230,10 +231,12 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     auto const massType = readType(file, "data/3/particles/electrons/mass/mass");
     EXPECT_EQ(massType.klass, H5T_FLOAT);
     EXPECT_EQ(massType.size, 4u);
+    EXPECT_EQ(readType(file, "data/3/fields/E/x").size, 4u);
+    EXPECT_EQ(readType(file, "data/3/fields/B/x").size, 4u);
     H5Fclose(file);
 
-    // float64 moves momentum, charge and mass to 8 bytes; position and
-    // weighting stay float64 and the integer records do not change.
+    // float64 applies to every floating-point field and particle property; the
+    // integer records do not change, and the warning is recorded.
     options.float64 = true;
     picBunch::writePicOnGPUCheckpoint(field, options);
     file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -244,6 +247,20 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     EXPECT_EQ(readType(file, "data/3/particles/electrons/mass/mass").size, 8u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/positionOffset/x").size, 4u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/id").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/fields/E/x").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/fields/B/x").size, 8u);
+    hid_t attribute = H5Aopen(file, "picBunchPrecisionWarning", H5P_DEFAULT);
+    ASSERT_GE(attribute, 0);
+    char* warning = nullptr;
+    hid_t attributeType = H5Aget_type(attribute);
+    ASSERT_EQ(H5Aread(attribute, attributeType, &warning), 0);
+    H5Tclose(attributeType);
+    H5Aclose(attribute);
+    std::string const warningText = warning != nullptr ? warning : "";
+    H5free_memory(warning);
+    EXPECT_NE(
+        warningText.find("stock PIConGPU cannot load double particle records"),
+        std::string::npos);
     H5Fclose(file);
     std::filesystem::remove_all(directory);
 }
