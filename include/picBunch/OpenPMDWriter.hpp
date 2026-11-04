@@ -95,8 +95,9 @@ namespace picBunch
         std::string inputFile;
         //! Iteration index used to locate the source particle group.
         std::uint64_t inputIteration = 0;
-        /*! Particle species group name.  Empty selects the only species of the
-         * input iteration; multiple species then require an explicit name.
+        /*! Particle species group name to require in the input iteration.
+         * Empty disables the check.  Every species present is copied; a
+         * multi-species checkpoint needs all of them for a PIConGPU restart.
          */
         std::string species;
         double time = 0.0;
@@ -109,7 +110,9 @@ namespace picBunch
         double unitEField = 1.0;
         //! PIConGPU magnetic-field unit in T (``sim.unit.bField()``).
         double unitBField = 1.0;
-        //! Value stored in ``fields/picongpu_idProvider/nextId``.
+        //! Lower bound for ``fields/picongpu_idProvider/nextId``.  The writer
+        //! stores at least the total number of particles copied across all
+        //! species, so it is never written smaller.
         std::uint64_t nextId = 0;
     };
 
@@ -125,9 +128,12 @@ namespace picBunch
      *    ``(Nz,Ny,Nx)``, stored as ``field/unit`` in PIConGPU internal units;
      *  - ``gridSpacing*gridUnitSI`` recover metres, with both written in the
      *    ``z,y,x`` storage order;
-     *  - ``fields/picongpu_idProvider/{startId,nextId}`` uint64;
-     *  - ``particles/<species>`` copied byte-for-byte from the input group,
-     *    including ``particlePatches`` when present.
+     *  - ``fields/picongpu_idProvider/{startId,nextId}`` uint64; one global
+     *    range for the whole checkpoint with ``startId = 0`` and
+     *    ``nextId >= total particles`` over all copied species;
+     *  - ``particles/<species>`` for every species in the input iteration,
+     *    copied byte-for-byte from its input group, including
+     *    ``particlePatches`` when present.
 
      * The particle copy is a raw HDF5 object copy, so record attributes and
      * datasets survive unchanged.  Missing patch metadata is reported through a

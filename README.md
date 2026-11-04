@@ -237,12 +237,14 @@ picBunch --input bunch_%T.h5 --species electrons \
 
 All three unit flags are mandatory; a missing one is an error, never a default. The writer
 emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`. Fields are float32 with
-extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. The input particle
-species is copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
-`--picongpu-species` overrides the copied species and `--picongpu-dt` sets the stored `dt`.
-When the input checkpoint contains `Convolutional PML ...` records, the writer copies those
-records from the input instead of recomputing them. See
-[docs/picongpu-restart.md](docs/picongpu-restart.md).
+extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. Every particle
+species group in the input iteration is copied as a raw HDF5 object, so its attributes and
+`particlePatches` survive; a restart needs all of them. `--picongpu-species` only requires
+that the named species is present and never drops the others. `--picongpu-dt` sets the
+stored `dt`. The single `picongpu_idProvider` range covers the particles of every copied
+species (`nextId` is at least their total count). When the input checkpoint contains
+`Convolutional PML ...` records, the writer copies those records from the input instead of
+recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 

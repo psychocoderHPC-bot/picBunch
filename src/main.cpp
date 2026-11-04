@@ -68,7 +68,8 @@ namespace
             "  --picongpu-unit-e <V/m>      E-field unit for the restart writer\n"
             "  --picongpu-unit-b <T>        B-field unit for the restart writer\n"
             "  --picongpu-step <N>          checkpoint step (default: output iteration)\n"
-            "  --picongpu-species <name>    particle species to copy into the checkpoint\n"
+            "  --picongpu-species <name>    require this species in the input; every\n"
+            "                               input species is copied to the checkpoint\n"
             "  --picongpu-dt <value>        stored dt attribute (default: 0)\n"
             "  --deterministic-deposit\n"
             "                        serial host TSC deposit (reproducible bitwise;\n"
@@ -586,7 +587,9 @@ int main(int argc, char** argv)
             restart.unitLength = *args.unitLength;
             restart.unitEField = *args.unitEField;
             restart.unitBField = *args.unitBField;
-            restart.nextId = bunchData.bunch.size();
+            // The writer derives nextId from the particles actually copied, so
+            // the id range covers every species.  Do not override it with the
+            // size of the bunch species read for the field calculation.
 
             auto const writerStart = Clock::now();
             picBunch::writePicOnGPUCheckpoint(field, restart);
