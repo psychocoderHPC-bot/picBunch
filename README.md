@@ -35,6 +35,7 @@ docs/               algorithm and validation notes
 | --- | --- | --- |
 | alpaka | `7b92361468d3280c260200198081ae7e98f0bc56` (reports 3.0.0) | fetched by CMake `FetchContent` |
 | alpakaVendor | `af24cc7b2bd125056e9889e270d3af7bdf972c6f` | fetched by CMake `FetchContent`; FFT via cuFFT/rocFFT/FFTW |
+| toml++ | `30172438cee64926dc41fdd9c11fb3ba5b2ba9de` (v3.4.0) | fetched by CMake `FetchContent`; configuration parser |
 | openPMD-api | system install | HDF5 backend required; configure fails without it |
 | HDF5 C API | system install | checkpoint writer; the parallel build matching openPMD is preferred |
 | MPI | system install | only when HDF5 is parallel, for the HDF5 headers |
@@ -103,6 +104,19 @@ which is gitignored. The presets set only the backend and architecture; pass com
 dependency paths on the command line.
 
 ## Run
+
+The documented interface takes one TOML configuration and creates a PIConGPU
+checkpoint:
+
+```bash
+picBunch --input bunch.h5 --destination checkpoints --config params.toml
+```
+
+The schema, the placement rule, the particle-patch layout and the precision
+switch are in [docs/configuration.md](docs/configuration.md); a complete example
+is [examples/picbunch.toml](examples/picbunch.toml).
+
+The older flags remain available as an advanced path:
 
 ```bash
 picBunch --input <openPMD file/series> [--species <name|index>] \

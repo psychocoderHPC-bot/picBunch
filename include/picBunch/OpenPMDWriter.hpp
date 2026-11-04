@@ -5,7 +5,9 @@
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Types.hpp"
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace picBunch
@@ -91,6 +93,28 @@ namespace picBunch
      * HDF5 openPMD 1.1 file-based iteration, float32 fields in PIConGPU internal
      * units, and the input particle species copied with its attributes intact.
      */
+    /** One species reconstructed from a bunch at its placed position.
+     *
+     * The writer creates the particle group instead of copying it from the
+     * input.  Positions are SI metres, momenta are dimensionless
+     * ``p/(m c)``, weights are the statistical weights and ``restMass`` is the
+     * SI rest mass per macro particle.  The conversion to PIConGPU internal
+     * units happens in the writer with the supplied units.
+     */
+    struct GeneratedParticles
+    {
+        std::string species;
+        Bunch bunch; //!< positions already shifted to the placement
+        std::array<double, 3> domainOrigin{0.0, 0.0, 0.0}; //!< SI metres
+        std::array<double, 3> cellSize{1.0, 1.0, 1.0}; //!< SI metres
+        std::array<std::int64_t, 3> patchOffset{0, 0, 0}; //!< cells from domain origin
+        std::array<std::uint64_t, 3> patchExtent{1, 1, 1};
+        //! PIConGPU momentum unit ``unit_mass * unit_speed`` in SI.
+        double unitMassSpeed = 1.0;
+        //! Rest mass used when a particle has no positive ``restMass`` entry.
+        double fallbackMass = 0.0;
+    };
+
     struct PicOnGPUWriteOptions
     {
         //! Checkpoint step; also the iteration index and the file name suffix.
@@ -122,6 +146,11 @@ namespace picBunch
         //! stores at least the total number of particles copied across all
         //! species, so it is never written smaller.
         std::uint64_t nextId = 0;
+        //! When set, this species is reconstructed from particles instead of
+        //! copied raw.  Every other input species is still copied.
+        std::optional<GeneratedParticles> generatedParticles;
+        //! Write float64 particle records and fields instead of float32.
+        bool float64 = false;
     };
 
     /** Write one PIConGPU checkpoint-restart iteration.

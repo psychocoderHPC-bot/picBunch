@@ -744,23 +744,38 @@ namespace picBunch
             double const* data,
             std::size_t count,
             double unit,
-            std::array<double, 3> const& position)
+            std::array<double, 3> const& position,
+            bool float64 = false)
         {
             hid_t space = checked(H5Screate_simple(3, dimensions, nullptr), "H5Screate_simple");
             hid_t dataset = checked(
                 H5Dcreate2(
                     parent,
                     name,
-                    H5T_IEEE_F32LE,
+                    float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE,
                     space,
                     H5P_DEFAULT,
                     H5P_DEFAULT,
                     H5P_DEFAULT),
                 "H5Dcreate2");
-            std::vector<float> stored(count);
-            for(std::size_t i = 0; i < count; ++i)
-                stored[i] = static_cast<float>(data[i] / unit);
-            checked(H5Dwrite(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, stored.data()), "H5Dwrite");
+            if(float64)
+            {
+                std::vector<double> stored(count);
+                for(std::size_t i = 0; i < count; ++i)
+                    stored[i] = data[i] / unit;
+                checked(
+                    H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, stored.data()),
+                    "H5Dwrite");
+            }
+            else
+            {
+                std::vector<float> stored(count);
+                for(std::size_t i = 0; i < count; ++i)
+                    stored[i] = static_cast<float>(data[i] / unit);
+                checked(
+                    H5Dwrite(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, stored.data()),
+                    "H5Dwrite");
+            }
             setDoubleArrayAttribute(dataset, "position", position);
             setScalarAttribute(dataset, "unitSI", H5T_NATIVE_DOUBLE, unit);
             closeQuietly(space);
@@ -1294,6 +1309,319 @@ namespace picBunch
             closeQuietly(space);
         }
 
+        hid_t createOneDimensional(
+            hid_t parent,
+            char const* name,
+            hsize_t count,
+            hid_t fileType)
+        {
+            hid_t space = checked(H5Screate_simple(1, &count, nullptr), "H5Screate_simple");
+            hid_t dataset = checked(
+                H5Dcreate2(parent, name, fileType, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Dcreate2");
+            closeQuietly(space);
+            return dataset;
+        }
+
+        void setParticleRecordAttributes(
+            hid_t record,
+            std::array<double, 7> const& unitDimension,
+            bool macroWeighted,
+            double weightingPower)
+        {
+            setUnitDimension(record, unitDimension);
+            setScalarAttribute(
+                record,
+                "macroWeighted",
+                H5T_NATIVE_UINT32,
+                static_cast<std::uint32_t>(macroWeighted ? 1u : 0u));
+            setScalarAttribute(record, "weightingPower", H5T_NATIVE_DOUBLE, weightingPower);
+            setScalarAttribute(record, "timeOffset", H5T_NATIVE_FLOAT, 0.0f);
+        }
+
+        void writeFloatVectorRecord(
+            hid_t species,
+            char const* recordName,
+            std::array<std::vector<double>, 3> const& values,
+            std::array<double, 3> const& unitSI,
+            std::array<double, 7> const& unitDimension,
+            bool macroWeighted,
+            double weightingPower,
+            bool float64)
+        {
+            hid_t record = checked(
+                H5Gcreate2(species, recordName, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
+            setParticleRecordAttributes(record, unitDimension, macroWeighted, weightingPower);
+            for(std::size_t a = 0; a < 3; ++a)
+            {
+                char const* componentName = a == 0 ? "x" : (a == 1 ? "y" : "z");
+                hsize_t const count = static_cast<hsize_t>(values[a].size());
+                hid_t dataset = createOneDimensional(
+                    record, componentName, count, float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE);
+                if(float64)
+                {
+                    checked(
+                        H5Dwrite(
+                            dataset,
+                            H5T_NATIVE_DOUBLE,
+                            H5S_ALL,
+                            H5S_ALL,
+                            H5P_DEFAULT,
+                            values[a].data()),
+                        "H5Dwrite");
+                }
+                else
+                {
+                    std::vector<float> stored(values[a].size());
+                    for(std::size_t i = 0; i < values[a].size(); ++i)
+                        stored[i] = static_cast<float>(values[a][i]);
+                    checked(
+                        H5Dwrite(
+                            dataset,
+                            H5T_NATIVE_FLOAT,
+                            H5S_ALL,
+                            H5S_ALL,
+                            H5P_DEFAULT,
+                            stored.data()),
+                        "H5Dwrite");
+                }
+                setScalarAttribute(dataset, "unitSI", H5T_NATIVE_DOUBLE, unitSI[a]);
+                closeQuietly(dataset);
+            }
+            closeQuietly(record);
+        }
+
+        void writeIntegerVectorRecord(
+            hid_t species,
+            char const* recordName,
+            std::array<std::vector<std::int32_t>, 3> const& values,
+            std::array<double, 3> const& unitSI)
+        {
+            hid_t record = checked(
+                H5Gcreate2(species, recordName, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
+            setParticleRecordAttributes(
+                record, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
+            for(std::size_t a = 0; a < 3; ++a)
+            {
+                char const* componentName = a == 0 ? "x" : (a == 1 ? "y" : "z");
+                hsize_t const count = static_cast<hsize_t>(values[a].size());
+                hid_t dataset = createOneDimensional(record, componentName, count, H5T_STD_I32LE);
+                checked(
+                    H5Dwrite(
+                        dataset,
+                        H5T_NATIVE_INT32,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        values[a].data()),
+                    "H5Dwrite");
+                setScalarAttribute(dataset, "unitSI", H5T_NATIVE_DOUBLE, unitSI[a]);
+                closeQuietly(dataset);
+            }
+            closeQuietly(record);
+        }
+
+        void writeGeneratedSpecies(
+            hid_t file,
+            std::string const& speciesPath,
+            GeneratedParticles const& generated,
+            bool float64)
+        {
+            Bunch const& bunch = generated.bunch;
+            std::size_t const count = bunch.size();
+            if(count == 0u)
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: generated species '"
+                    + generated.species + "' has no particles");
+            hid_t particles = checked(
+                H5Gopen2(file, speciesPath.c_str(), H5P_DEFAULT), "H5Gopen2");
+            // The generated group is new; there is nothing to delete first.
+            std::array<std::vector<double>, 3> position;
+            std::array<std::vector<double>, 3> momentum;
+            std::array<std::vector<std::int32_t>, 3> positionOffset;
+            std::vector<double> weighting(count, 0.0);
+            for(int a = 0; a < 3; ++a)
+            {
+                position[static_cast<std::size_t>(a)].resize(count);
+                momentum[static_cast<std::size_t>(a)].resize(count);
+                positionOffset[static_cast<std::size_t>(a)].resize(count);
+            }
+            for(std::size_t p = 0; p < count; ++p)
+            {
+                double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                double const u[3] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
+                double const mass = (!bunch.restMass.empty() && bunch.restMass[p] > 0.0)
+                    ? bunch.restMass[p]
+                    : (generated.fallbackMass > 0.0
+                           ? generated.fallbackMass
+                           : generated.unitMassSpeed / kSpeedOfLight);
+                for(int a = 0; a < 3; ++a)
+                {
+                    double const cells = (xyz[a] - generated.domainOrigin[a])
+                        / generated.cellSize[a];
+                    double const cellIndex = std::floor(cells + 1e-9);
+                    if(cellIndex < 0.0
+                       || cellIndex >= static_cast<double>(
+                           generated.patchOffset[static_cast<std::size_t>(a)]
+                           + static_cast<std::int64_t>(
+                               generated.patchExtent[static_cast<std::size_t>(a)])))
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: particle " + std::to_string(p)
+                            + " lies outside the generated patch on axis " + std::to_string(a));
+                    position[static_cast<std::size_t>(a)][p] = cells - cellIndex;
+                    positionOffset[static_cast<std::size_t>(a)][p]
+                        = static_cast<std::int32_t>(cellIndex);
+                    momentum[static_cast<std::size_t>(a)][p]
+                        = u[a] * mass * kSpeedOfLight / generated.unitMassSpeed;
+                }
+                weighting[p] = bunch.weight[p];
+            }
+
+            std::array<double, 3> const cellUnit{
+                generated.cellSize[0], generated.cellSize[1], generated.cellSize[2]};
+            writeFloatVectorRecord(
+                particles,
+                "position",
+                position,
+                cellUnit,
+                {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+                false,
+                0.0,
+                float64);
+            writeIntegerVectorRecord(particles, "positionOffset", positionOffset, cellUnit);
+            writeFloatVectorRecord(
+                particles,
+                "momentum",
+                momentum,
+                {generated.unitMassSpeed,
+                 generated.unitMassSpeed,
+                 generated.unitMassSpeed},
+                {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0},
+                true,
+                1.0,
+                float64);
+
+            hsize_t const scalarCount = static_cast<hsize_t>(count);
+            hid_t weightingDataset = createOneDimensional(
+                particles,
+                "weighting",
+                scalarCount,
+                float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE);
+            if(float64)
+                checked(
+                    H5Dwrite(
+                        weightingDataset,
+                        H5T_NATIVE_DOUBLE,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        weighting.data()),
+                    "H5Dwrite");
+            else
+            {
+                std::vector<float> stored(count);
+                for(std::size_t i = 0; i < count; ++i)
+                    stored[i] = static_cast<float>(weighting[i]);
+                checked(
+                    H5Dwrite(
+                        weightingDataset,
+                        H5T_NATIVE_FLOAT,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        stored.data()),
+                    "H5Dwrite");
+            }
+            setParticleRecordAttributes(weightingDataset, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
+            setScalarAttribute(weightingDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+            closeQuietly(weightingDataset);
+
+            // Global particle ids run [0, count), matching the startId/nextId
+            // range written below.  PIConGPU ignores the record for a species
+            // without particleId, and loads it for a species that has one.
+            std::vector<std::uint64_t> ids(count);
+            for(std::size_t i = 0; i < count; ++i)
+                ids[i] = static_cast<std::uint64_t>(i);
+            hid_t idDataset = createOneDimensional(particles, "id", scalarCount, H5T_STD_U64LE);
+            checked(
+                H5Dwrite(idDataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, ids.data()),
+                "H5Dwrite");
+            setParticleRecordAttributes(idDataset, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
+            setScalarAttribute(idDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+            closeQuietly(idDataset);
+
+            hid_t patches = checked(
+                H5Gcreate2(particles, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
+            std::uint64_t const total = static_cast<std::uint64_t>(count);
+            std::uint64_t const offsetZero = 0;
+            std::array<double, 7> const patchUnitDimension{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            hid_t numParticles = createOneDimensional(patches, "numParticles", 1, H5T_STD_U64LE);
+            checked(
+                H5Dwrite(numParticles, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &total),
+                "H5Dwrite");
+            setUnitDimension(numParticles, patchUnitDimension);
+            setScalarAttribute(numParticles, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+            closeQuietly(numParticles);
+            hid_t numParticlesOffset
+                = createOneDimensional(patches, "numParticlesOffset", 1, H5T_STD_U64LE);
+            checked(
+                H5Dwrite(
+                    numParticlesOffset,
+                    H5T_NATIVE_UINT64,
+                    H5S_ALL,
+                    H5S_ALL,
+                    H5P_DEFAULT,
+                    &offsetZero),
+                "H5Dwrite");
+            setUnitDimension(numParticlesOffset, patchUnitDimension);
+            setScalarAttribute(numParticlesOffset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+            closeQuietly(numParticlesOffset);
+            hid_t offset = checked(
+                H5Gcreate2(patches, "offset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
+            hid_t extent = checked(
+                H5Gcreate2(patches, "extent", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
+            setUnitDimension(offset, patchUnitDimension);
+            setUnitDimension(extent, patchUnitDimension);
+            for(std::size_t a = 0; a < 3; ++a)
+            {
+                char const* componentName = a == 0 ? "x" : (a == 1 ? "y" : "z");
+                std::uint64_t const offsetValue
+                    = static_cast<std::uint64_t>(generated.patchOffset[a]);
+                std::uint64_t const extentValue = generated.patchExtent[a];
+                hid_t offsetDataset = createOneDimensional(offset, componentName, 1, H5T_STD_U64LE);
+                hid_t extentDataset = createOneDimensional(extent, componentName, 1, H5T_STD_U64LE);
+                checked(
+                    H5Dwrite(
+                        offsetDataset,
+                        H5T_NATIVE_UINT64,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        &offsetValue),
+                    "H5Dwrite");
+                checked(
+                    H5Dwrite(
+                        extentDataset,
+                        H5T_NATIVE_UINT64,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        &extentValue),
+                    "H5Dwrite");
+                setScalarAttribute(offsetDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+                setScalarAttribute(extentDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
+                closeQuietly(offsetDataset);
+                closeQuietly(extentDataset);
+            }
+            closeQuietly(offset);
+            closeQuietly(extent);
+            closeQuietly(patches);
+            closeQuietly(particles);
+        }
+
         void publishPicOnGPU(
             Field const& field,
             PicOnGPUWriteOptions const& options,
@@ -1324,16 +1652,41 @@ namespace picBunch
                 source = checked(H5Fopen(sourcePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), "H5Fopen");
                 std::vector<std::string> const sourceGroups
                     = findSpeciesGroups(source, options.inputIteration, options.species);
+                std::string const generatedSpecies = options.generatedParticles
+                    ? options.generatedParticles->species
+                    : std::string{};
+                if(!generatedSpecies.empty())
+                {
+                    bool found = false;
+                    for(auto const& group : sourceGroups)
+                        if(group.substr(group.find_last_of('/') + 1) == generatedSpecies)
+                            found = true;
+                    if(!found)
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: generated species '"
+                            + generatedSpecies + "' is absent from the input iteration");
+                }
                 std::vector<std::string> warnings;
                 std::uint64_t totalParticles = 0;
                 for(auto const& sourceGroup : sourceGroups)
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    if(species == generatedSpecies)
+                        continue;
                     std::string const warning = particleWarning(source, sourceGroup, species);
                     if(!warning.empty())
                         warnings.push_back(warning);
                     auto const count = countSpeciesParticles(source, sourceGroup);
+                    if(totalParticles > std::numeric_limits<std::uint64_t>::max() - count)
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: particle count overflows uint64");
+                    totalParticles += count;
+                }
+                if(options.generatedParticles)
+                {
+                    auto const count
+                        = static_cast<std::uint64_t>(options.generatedParticles->bunch.size());
                     if(totalParticles > std::numeric_limits<std::uint64_t>::max() - count)
                         throw std::runtime_error(
                             "PicOnGPU restart writer: particle count overflows uint64");
@@ -1420,7 +1773,8 @@ namespace picBunch
                             field.data[spec.firstComponent + a].data(),
                             field.grid.size(),
                             spec.unit,
-                            position);
+                            position,
+                            options.float64);
                         closeQuietly(dataset);
                     }
                     closeQuietly(record);
@@ -1474,6 +1828,8 @@ namespace picBunch
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    if(species == generatedSpecies)
+                        continue;
                     checked(
                         H5Ocopy(
                             source,
@@ -1484,12 +1840,26 @@ namespace picBunch
                             H5P_DEFAULT),
                         "H5Ocopy");
                 }
+                if(options.generatedParticles)
+                {
+                    hid_t generatedGroup = checked(
+                        H5Gcreate2(
+                            particles,
+                            options.generatedParticles->species.c_str(),
+                            H5P_DEFAULT,
+                            H5P_DEFAULT,
+                            H5P_DEFAULT),
+                        "H5Gcreate2");
+                    closeQuietly(generatedGroup);
+                }
                 closeQuietly(particles);
 
                 for(auto const& sourceGroup : sourceGroups)
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    if(species == generatedSpecies)
+                        continue;
                     std::string const particlePath = iterationPath + "/particles/" + species;
                     for(char const* record : {"position", "momentum"})
                         for(char const* component : {"x", "y", "z"})
@@ -1511,6 +1881,12 @@ namespace picBunch
                     for(char const* record : {"charge", "mass", "id"})
                         removeRecordIfPresent(file, particlePath + "/" + record);
                 }
+                if(options.generatedParticles)
+                    writeGeneratedSpecies(
+                        file,
+                        iterationPath + "/particles/" + options.generatedParticles->species,
+                        *options.generatedParticles,
+                        options.float64);
 
                 // PML state is part of a PIConGPU checkpoint and is loaded
                 // unconditionally by an open-boundary restart.  Copy it from the

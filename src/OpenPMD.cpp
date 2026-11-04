@@ -436,6 +436,7 @@ namespace picBunch
             bunch.uz[p] = (denominator != 0.0) ? momentumValues[2][p] * momentumUnits[2] / denominator : 0.0;
             bunch.weight[p] = weight;
             bunch.charge[p] = chargePerParticle.empty() ? -kElementaryCharge : chargePerParticle[p];
+            bunch.restMass[p] = mass;
         }
         return result;
         }

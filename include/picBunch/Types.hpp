@@ -59,6 +59,9 @@ namespace picBunch
         std::vector<double> ux, uy, uz;
         std::vector<double> weight;
         std::vector<double> charge;
+        //! SI rest mass per macro particle; empty or non-positive entries fall
+        //! back to the configured PIConGPU mass unit in the checkpoint writer.
+        std::vector<double> restMass;
 
         [[nodiscard]] std::size_t size() const
         {

@@ -60,6 +60,7 @@ namespace picBunch
                 out.uz[k] = bunch.uz[p];
                 out.weight[k] = bunch.weight[p];
                 out.charge[k] = bunch.charge[p];
+                out.restMass[k] = bunch.restMass.empty() ? 0.0 : bunch.restMass[p];
             }
             return out;
         }

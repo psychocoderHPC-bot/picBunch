@@ -92,9 +92,11 @@ endif()
 #
 # alpaka           7b92361468d3280c260200198081ae7e98f0bc56  (reports 3.0.0)
 # alpakaVendor     af24cc7b2bd125056e9889e270d3af7bdf972c6f  (FFT: cuFFT/rocFFT/FFTW)
+# toml++           30172438cee64926dc41fdd9c11fb3ba5b2ba9de  (v3.4.0, header-only)
 # ---------------------------------------------------------------------------
 set(ALPAKA_PIN "7b92361468d3280c260200198081ae7e98f0bc56")
 set(ALPAKAVENDOR_PIN "af24cc7b2bd125056e9889e270d3af7bdf972c6f")
+set(TOMLPLUSPLUS_PIN "30172438cee64926dc41fdd9c11fb3ba5b2ba9de")
 
 set(alpaka_TESTS OFF CACHE BOOL "alpaka tests" FORCE)
 set(alpaka_EXAMPLES OFF CACHE BOOL "alpaka examples" FORCE)
@@ -138,6 +140,18 @@ FetchContent_Declare(
     GIT_SHALLOW FALSE
 )
 FetchContent_MakeAvailable(alpakaVendor)
+
+# toml++ is a single header; FetchContent supplies the interface target without
+# compiling a library.  The pin above is the v3.4.0 commit.
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG ${TOMLPLUSPLUS_PIN}
+    GIT_SHALLOW FALSE
+)
+set(TOMLPLUSPLUS_BUILD_TESTS OFF CACHE BOOL "toml++ tests" FORCE)
+set(TOMLPLUSPLUS_BUILD_EXAMPLES OFF CACHE BOOL "toml++ examples" FORCE)
+FetchContent_MakeAvailable(tomlplusplus)
 
 # ---------------------------------------------------------------------------
 # openPMD-api (system install).  The reader/writer stages need the HDF5 backend.
@@ -228,7 +242,7 @@ find_package(OpenMP QUIET)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(picBunch PUBLIC OpenMP::OpenMP_CXX)
 endif()
-target_link_libraries(picBunch PUBLIC alpaka::alpaka alpakaVendor::alpakaVendor)
+target_link_libraries(picBunch PUBLIC alpaka::alpaka alpakaVendor::alpakaVendor tomlplusplus::tomlplusplus)
 if(PICBUNCH_ENABLE_CUDA)
     target_compile_definitions(picBunch PUBLIC PICBUNCH_BACKEND_CUDA=1)
 elseif(PICBUNCH_ENABLE_HIP)
@@ -240,7 +254,14 @@ alpaka_finalize(picBunch)
 
 # Host-only openPMD layer, kept out of the device compilation unit so nvcc/hipcc
 # never has to parse the HDF5 headers.
-add_library(picBunchOpenPMD src/OpenPMD.cpp src/OpenPMDWrite.cpp src/Mpi.cpp)
+add_library(
+    picBunchOpenPMD
+    src/Config.cpp
+    src/OpenPMD.cpp
+    src/OpenPMDWrite.cpp
+    src/Mpi.cpp
+    src/Placement.cpp
+)
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
 # The chunked writer needs the multipole far tail from the host library.
 target_link_libraries(picBunchOpenPMD PUBLIC picBunch)

@@ -6,11 +6,13 @@
 // FFT sizes are implementation details and are never exposed.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Config.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
 #include "picBunch/NearShell.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
+#include "picBunch/Placement.hpp"
 #include "picBunch/Types.hpp"
 
 #include <algorithm>
@@ -43,9 +45,15 @@ namespace
     {
         std::fprintf(
             out,
-            "Usage: picBunch --input <openPMD file/series> [options]\n"
+            "Usage:\n"
+            "  picBunch --input <bunch.h5> --destination <checkpoint-dir> --config <params.toml>\n"
+            "  picBunch --input <openPMD file/series> [advanced options]\n"
             "\n"
-            "Options:\n"
+            "Placement interface (documented):\n"
+            "  --config <path>       TOML configuration (see docs/configuration.md)\n"
+            "  --destination <dir>   PIConGPU checkpoint directory to create\n"
+            "\n"
+            "Advanced options (legacy CLI; no unit flags in the documented usage):\n"
             "  --input <path>        openPMD particle series (required)\n"
             "  --species <name|idx>  particle species (default: first)\n"
             "  --output <path>       write E/B as an openPMD series\n"
@@ -99,6 +107,8 @@ namespace
     struct Arguments
     {
         std::string input;
+        std::optional<std::string> destination;
+        std::optional<std::string> config;
         std::optional<std::string> species;
         std::optional<std::string> output;
         std::optional<std::uint64_t> inputIteration;
@@ -258,6 +268,10 @@ namespace
             };
             if(option == "--input")
                 args.input = value("--input");
+            else if(option == "--destination")
+                args.destination = value("--destination");
+            else if(option == "--config")
+                args.config = value("--config");
             else if(option == "--species")
                 args.species = value("--species");
             else if(option == "--output")
@@ -318,6 +332,10 @@ namespace
         }
         if(args.input.empty())
             throw std::invalid_argument("--input is required");
+        if(args.config && !args.destination)
+            throw std::invalid_argument("--config requires --destination");
+        if(args.destination && !args.config)
+            throw std::invalid_argument("--destination requires --config");
         if(!(args.tolerance > 0.0) || !std::isfinite(args.tolerance))
             throw std::invalid_argument("--tolerance must be finite and positive");
         if(args.backend != "auto" && args.backend != compiledBackend())
@@ -387,6 +405,100 @@ namespace
     {
         return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
     }
+
+    int runConfigured(Arguments const& args)
+    {
+        picBunch::Config const config = picBunch::loadConfig(*args.config);
+        for(auto const& warning : config.warnings)
+            std::fprintf(stderr, "picBunch: warning: %s\n", warning.c_str());
+
+        std::printf(
+            "config: species=%s step=%llu precision=%s\n",
+            config.picongpu.species.c_str(),
+            static_cast<unsigned long long>(config.picongpu.step),
+            config.picongpu.float64 ? "float64" : "float32");
+
+        picBunch::BunchSelection selection;
+        selection.speciesName = config.picongpu.species;
+        picBunch::BunchData const bunchData = picBunch::readBunch(args.input, selection);
+        std::printf(
+            "read %zu particles (species %s, iteration %llu)\n",
+            bunchData.bunch.size(),
+            config.picongpu.species.c_str(),
+            static_cast<unsigned long long>(bunchData.iteration));
+
+        picBunch::PlacedBunch const placed = picBunch::placeBunch(bunchData.bunch, config);
+        std::printf(
+            "centroid (charge-weighted, used): (%.9g, %.9g, %.9g) m\n",
+            placed.centroid[0], placed.centroid[1], placed.centroid[2]);
+        std::printf(
+            "bounding-box centre (reported only): (%.9g, %.9g, %.9g) m\n",
+            placed.boundingCentre[0], placed.boundingCentre[1], placed.boundingCentre[2]);
+        std::printf(
+            "target centre: (%.9g, %.9g, %.9g) m; shift: (%.9g, %.9g, %.9g) m\n",
+            placed.targetCentre[0], placed.targetCentre[1], placed.targetCentre[2],
+            placed.shift[0], placed.shift[1], placed.shift[2]);
+        std::printf(
+            "particle patch: offset=(%lld,%lld,%lld) cells extent=(%llu,%llu,%llu) cells\n",
+            static_cast<long long>(placed.patchOffset[0]),
+            static_cast<long long>(placed.patchOffset[1]),
+            static_cast<long long>(placed.patchOffset[2]),
+            static_cast<unsigned long long>(placed.patchExtent[0]),
+            static_cast<unsigned long long>(placed.patchExtent[1]),
+            static_cast<unsigned long long>(placed.patchExtent[2]));
+
+        picBunch::ComputeOptions options;
+        options.tolerance = config.accuracy.tolerance;
+        options.cellSize = config.domain.cellSize;
+        options.gridSize = config.domain.cells;
+        options.gridOrigin = config.domain.origin;
+        options.nearShell.mode = (config.accuracy.nearShell == "exact")
+            ? picBunch::NearShellOptions::Mode::Exact
+            : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.radiusCells = config.accuracy.nearShellRadius;
+        options.nearShell.tileNodes = config.accuracy.nearShellTile;
+        std::printf(
+            "field grid: cells=(%zu,%zu,%zu) cell_size=(%.9g,%.9g,%.9g) m "
+            "origin=(%.9g,%.9g,%.9g) m\n",
+            config.domain.cells[0], config.domain.cells[1], config.domain.cells[2],
+            config.domain.cellSize[0], config.domain.cellSize[1], config.domain.cellSize[2],
+            config.domain.origin[0], config.domain.origin[1], config.domain.origin[2]);
+        picBunch::Field const field = picBunch::computeField(placed.bunch, options);
+
+        picBunch::PicOnGPUWriteOptions restart;
+        restart.step = config.picongpu.step;
+        restart.directory = *args.destination;
+        restart.inputFile = args.input;
+        restart.inputIteration = bunchData.iteration;
+        restart.species = config.picongpu.species;
+        restart.time = static_cast<double>(config.picongpu.step) * config.picongpu.dt;
+        restart.timeUnitSI = 1.0;
+        restart.dt = config.picongpu.dt;
+        restart.unitLength = config.picongpu.unitLength;
+        restart.unitEField = config.picongpu.unitEField;
+        restart.unitBField = config.picongpu.unitBField;
+        restart.float64 = config.picongpu.float64;
+
+        picBunch::GeneratedParticles generated;
+        generated.species = config.picongpu.species;
+        generated.bunch = placed.bunch;
+        generated.domainOrigin = config.domain.origin;
+        generated.cellSize = config.domain.cellSize;
+        generated.patchOffset = placed.patchOffset;
+        generated.patchExtent = placed.patchExtent;
+        generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
+        generated.fallbackMass = config.picongpu.unitMass;
+        restart.generatedParticles = generated;
+
+        picBunch::writePicOnGPUCheckpoint(field, restart);
+        std::printf(
+            "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
+            static_cast<unsigned long long>(config.picongpu.step),
+            args.destination->c_str(),
+            config.picongpu.float64 ? "float64" : "float32",
+            config.picongpu.float64 ? "float64" : "float32");
+        return 0;
+    }
 } // namespace
 
 int main(int argc, char** argv)
@@ -401,6 +513,19 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "picBunch: %s\n\n", error.what());
         usage(stderr);
         return 2;
+    }
+
+    if(args.config)
+    {
+        try
+        {
+            return runConfigured(args);
+        }
+        catch(std::exception const& error)
+        {
+            std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+            return 1;
+        }
     }
 
     picBunch::MpiGuard mpiRuntime(argc, argv);

@@ -21,6 +21,7 @@ namespace picBunch
         uz.resize(n);
         weight.resize(n);
         charge.resize(n);
+        restMass.resize(n);
     }
 
     std::array<std::array<double, 3>, 2> Bunch::bounds() const
