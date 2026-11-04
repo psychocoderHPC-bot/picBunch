@@ -39,15 +39,32 @@ namespace picBunch
      */
     std::optional<std::array<double, 3>> physicalGridOrigin(picBunch::MeshGeometry const& geometry);
 
-    /** Derive the output grid that covers the bunch bounding box plus a shell margin.
+    /** Output-grid extent from the mesh dataset shape, or ``std::nullopt`` when unusable.
      *
-     * The node spacing is ``kRefinement * options.cellSize`` and ``n`` is rounded up
-     * so the box covers ``[min - margin, max + margin]`` on every axis with at least
-     * one extra node.  ``n`` is forced even so the R2C last extent is even regardless
-     * of the padding factor.  The padding factor comes from the tolerance policy
-     * (padding 2 for ``tolerance >= 1e-12``, padding 3 below that down to the
-     * measured double-precision floor ``1e-14``) unless ``options.fftPadding`` is
-     * set explicitly as a diagnostic override.  A tolerance below the floor is
+     * ``readMeshGeometry`` returns ``shape`` already mapped from the stored axis
+     * order to ``x, y, z`` nodes and applies no ``gridUnitSI`` to a node count.
+     * This helper copies the shape verbatim, so the conversion stays owned by
+     * the reader.  A zero extent is rejected.
+     */
+    std::optional<std::array<std::size_t, 3>> physicalGridExtent(picBunch::MeshGeometry const& geometry);
+
+    /** Build the output grid.
+     *
+     * When ``options.gridSize`` is set it wins.  Otherwise
+     * ``options.meshGridSize`` (the input mesh extent) wins.  Without either,
+     * ``n`` is derived from the bunch bounding box plus ``marginCells``.  The
+     * node spacing is ``kRefinement * options.cellSize``; the origin is
+     * ``options.gridOrigin`` when set, otherwise ``options.meshGridOrigin``,
+     * otherwise the derived box minimum.
+     *
+     * Any particle outside the final grid's physical extent
+     * ``[origin, origin + n * spacing]`` is rejected with a message naming the
+     * count and the bounds; the TSC deposit would otherwise drop it silently.
+     *
+     * The padding factor comes from the tolerance policy (padding 2 for
+     * ``tolerance >= 1e-12``, padding 3 below that down to the measured
+     * double-precision floor ``1e-14``) unless ``options.fftPadding`` is set
+     * explicitly as a diagnostic override.  A tolerance below the floor is
      * rejected with ``std::runtime_error``.
      */
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options);

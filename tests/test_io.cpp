@@ -23,6 +23,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -550,4 +551,277 @@ TEST(Io, ReaderAcceptsOpenPMD2ScalarRecords)
     EXPECT_DOUBLE_EQ(data.bunch.uz[1], 2.0);
     EXPECT_DOUBLE_EQ(data.bunch.charge[0], -2.0e-19);
     EXPECT_DOUBLE_EQ(data.bunch.charge[1], -3.0e-19);
+}
+
+namespace
+{
+    struct RunResult
+    {
+        int status = -1;
+        std::string output;
+    };
+
+    //! Run the production executable and capture stdout+stderr and the exit code.
+    RunResult runApp(std::filesystem::path const& path, std::string const& extra)
+    {
+        std::string const command = std::string{"\""} + PICBUNCH_APP_PATH + "\" --input \""
+            + path.string() + "\" " + extra + " 2>&1";
+        RunResult result;
+        FILE* pipe = ::popen(command.c_str(), "r");
+        EXPECT_NE(pipe, nullptr);
+        if(pipe != nullptr)
+        {
+            std::array<char, 4096> buffer{};
+            while(std::fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+                result.output += buffer.data();
+            int const status = ::pclose(pipe);
+            result.status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+        return result;
+    }
+
+    std::array<std::size_t, 3> parseGrid(std::string const& output)
+    {
+        std::array<std::size_t, 3> grid{
+            std::numeric_limits<std::size_t>::max(),
+            std::numeric_limits<std::size_t>::max(),
+            std::numeric_limits<std::size_t>::max()};
+        auto const at = output.find("grid: n=(");
+        if(at != std::string::npos)
+            std::sscanf(
+                output.c_str() + at,
+                "grid: n=(%zu,%zu,%zu)",
+                &grid[0],
+                &grid[1],
+                &grid[2]);
+        return grid;
+    }
+
+    std::array<double, 3> parseOrigin(std::string const& output)
+    {
+        std::array<double, 3> origin{
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN()};
+        auto const at = output.find("origin=(");
+        if(at != std::string::npos)
+            std::sscanf(
+                output.c_str() + at,
+                "origin=(%lf,%lf,%lf)",
+                &origin[0],
+                &origin[1],
+                &origin[2]);
+        return origin;
+    }
+
+    //! Write an openPMD sample with particles and, when ``shape`` is set, an E mesh.
+    //!
+    //! ``shape``, ``offset`` and ``spacing`` are physical x,y,z.  The mesh is
+    //! stored in the PIConGPU z,y,x axis order with raw values divided by
+    //! ``gridUnitSI``, so the reader has to undo both the order and the unit.
+    void writeSample(
+        std::filesystem::path const& path,
+        std::vector<std::array<double, 3>> const& positions,
+        std::optional<std::array<std::size_t, 3>> shape,
+        std::array<double, 3> const& offset,
+        std::array<double, 3> const& spacing,
+        double gridUnitSI)
+    {
+        auto const count = positions.size();
+        std::vector<double> px(count);
+        std::vector<double> py(count);
+        std::vector<double> pz(count);
+        std::vector<double> ux(count, 0.0);
+        std::vector<double> uy(count, 0.0);
+        std::vector<double> uz(count, 1.0);
+        std::vector<double> weight(count, 1.0);
+        std::vector<double> charge(count, -picBunch::kElementaryCharge);
+        for(std::size_t p = 0; p < count; ++p)
+        {
+            px[p] = positions[p][0];
+            py[p] = positions[p][1];
+            pz[p] = positions[p][2];
+        }
+        std::vector<double> meshValues;
+        if(shape)
+            meshValues.assign((*shape)[0] * (*shape)[1] * (*shape)[2], 0.0);
+
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& iteration = series.iterations[0];
+
+        if(shape)
+        {
+            auto& mesh = iteration.meshes["E"];
+            mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
+            mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
+            mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
+            mesh.setGridSpacing(std::vector<double>{
+                spacing[2] / gridUnitSI,
+                spacing[1] / gridUnitSI,
+                spacing[0] / gridUnitSI});
+            mesh.setGridGlobalOffset(std::vector<double>{
+                offset[2] / gridUnitSI,
+                offset[1] / gridUnitSI,
+                offset[0] / gridUnitSI});
+            mesh.setGridUnitSI(gridUnitSI);
+            auto& component = mesh["x"];
+            component.resetDataset(openPMD::Dataset(
+                openPMD::determineDatatype<double>(),
+                openPMD::Extent{(*shape)[2], (*shape)[1], (*shape)[0]}));
+            component.storeChunkRaw(
+                meshValues.data(),
+                openPMD::Offset{0, 0, 0},
+                openPMD::Extent{(*shape)[2], (*shape)[1], (*shape)[0]});
+        }
+
+        auto bindScalar = [count](openPMD::RecordComponent& component, double const* value, double unitSI) {
+            component.resetDataset(openPMD::Dataset(
+                openPMD::determineDatatype<double>(),
+                openPMD::Extent{static_cast<openPMD::Extent::value_type>(count)}));
+            component.storeChunkRaw(
+                value,
+                openPMD::Offset{0},
+                openPMD::Extent{static_cast<openPMD::Extent::value_type>(count)});
+            component.setUnitSI(unitSI);
+        };
+
+        auto& species = iteration.particles["electrons"];
+        species["position"].setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
+        species["momentum"].setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
+        species["charge"].setUnitDimension(
+            {{openPMD::UnitDimension::T, 1.0},
+             {openPMD::UnitDimension::I, 1.0}});
+        char const* const names = "xyz";
+        double* const positionData[3] = {px.data(), py.data(), pz.data()};
+        double* const momentumData[3] = {ux.data(), uy.data(), uz.data()};
+        for(int a = 0; a < 3; ++a)
+        {
+            bindScalar(species["position"][std::string(1, names[a])], positionData[a], 1.0);
+            bindScalar(
+                species["momentum"][std::string(1, names[a])],
+                momentumData[a],
+                picBunch::kElectronMass * picBunch::kSpeedOfLight);
+        }
+        bindScalar(species["weighting"], weight.data(), 1.0);
+        bindScalar(species["charge"], charge.data(), 1.0);
+        series.flush();
+    }
+} // namespace
+
+TEST(Io, MeshZeroOffsetAdoptsMeshExtentWithoutFlags)
+{
+    // A real checkpoint mesh: zero gridGlobalOffset and a 24x24x12 extent, while
+    // the particles occupy a sub-volume.  Defaults must yield exactly the mesh
+    // grid, not an AABB-derived grid.
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    writeSample(
+        path,
+        {{12.0e-6, 12.0e-6, 6.0e-6}},
+        std::array<std::size_t, 3>{24, 24, 12},
+        {0.0, 0.0, 0.0},
+        {1.0e-6, 1.0e-6, 1.0e-6},
+        1.0e-6);
+
+    auto const result = runApp(path, "");
+    ASSERT_EQ(result.status, 0) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{24, 24, 12})) << result.output;
+    auto const origin = parseOrigin(result.output);
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(origin[a], 0.0, 1.0e-15) << result.output;
+    std::filesystem::remove(path);
+}
+
+TEST(Io, MeshNonZeroOffsetAdoptsMeshExtentAndOriginWithoutFlags)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    std::array<double, 3> const offset{1.0e-6, 2.0e-6, 3.0e-6};
+    writeSample(
+        path,
+        {{offset[0] + 2.0e-6, offset[1] + 3.0e-6, offset[2] + 1.0e-6}},
+        std::array<std::size_t, 3>{8, 10, 6},
+        offset,
+        {1.0e-6, 1.0e-6, 1.0e-6},
+        1.0e-6);
+
+    auto const result = runApp(path, "");
+    ASSERT_EQ(result.status, 0) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{8, 10, 6})) << result.output;
+    auto const origin = parseOrigin(result.output);
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(origin[a], offset[a], 1.0e-15) << result.output;
+    std::filesystem::remove(path);
+}
+
+TEST(Io, GridAndOriginOverrideMeshExtent)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    writeSample(
+        path,
+        {{1.0e-6, 1.0e-6, 1.0e-6}},
+        std::array<std::size_t, 3>{24, 24, 12},
+        {0.0, 0.0, 0.0},
+        {1.0e-6, 1.0e-6, 1.0e-6},
+        1.0e-6);
+
+    auto const result = runApp(path, "--grid 8,8,8 --origin 0,0,0");
+    ASSERT_EQ(result.status, 0) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{8, 8, 8})) << result.output;
+    auto const origin = parseOrigin(result.output);
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(origin[a], 0.0, 1.0e-15) << result.output;
+    std::filesystem::remove(path);
+}
+
+TEST(Io, ParticlesOutsideMeshGridAreRejectedByNameAndCount)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    writeSample(
+        path,
+        {{1.0e-6, 1.0e-6, 1.0e-6}, {100.0e-6, 1.0e-6, 1.0e-6}},
+        std::array<std::size_t, 3>{8, 8, 8},
+        {0.0, 0.0, 0.0},
+        {1.0e-6, 1.0e-6, 1.0e-6},
+        1.0e-6);
+
+    auto const result = runApp(path, "");
+    EXPECT_NE(result.status, 0) << result.output;
+    EXPECT_NE(result.output.find("1 of 2 particles lie outside the output grid bounds"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("grid bounds"), std::string::npos) << result.output;
+    std::filesystem::remove(path);
+}
+
+TEST(Io, NoMeshRequiresCellSizeAndUsesBunchAabb)
+{
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    writeSample(
+        path,
+        {{1.0e-6, 2.0e-6, 3.0e-6}},
+        std::nullopt,
+        {0.0, 0.0, 0.0},
+        {1.0e-6, 1.0e-6, 1.0e-6},
+        1.0e-6);
+
+    auto const missing = runApp(path, "");
+    EXPECT_NE(missing.status, 0) << missing.output;
+    EXPECT_NE(missing.output.find("no cell size available"), std::string::npos) << missing.output;
+    EXPECT_NE(missing.output.find("--cell-size"), std::string::npos) << missing.output;
+
+    auto const result = runApp(path, "--cell-size 1e-6");
+    ASSERT_EQ(result.status, 0) << result.output;
+    // One particle at (1,2,3) um, margin 4 cells: n = ceil(8)+1 rounded even = 10.
+    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{10, 10, 10})) << result.output;
+    auto const origin = parseOrigin(result.output);
+    std::array<double, 3> const expectedOrigin{-3.0e-6, -2.0e-6, -1.0e-6};
+    for(int a = 0; a < 3; ++a)
+        EXPECT_NEAR(origin[a], expectedOrigin[a], 1.0e-15) << result.output;
+    std::filesystem::remove(path);
 }

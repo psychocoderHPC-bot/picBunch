@@ -307,6 +307,17 @@ namespace picBunch
         return geometry.gridGlobalOffset;
     }
 
+    std::optional<std::array<std::size_t, 3>> physicalGridExtent(MeshGeometry const& geometry)
+    {
+        // readMeshGeometry already mapped the dataset extent from the stored axis
+        // order to x,y,z.  A node count has no unit conversion; the reader owns
+        // the gridUnitSI handling of spacing and offset.
+        for(std::size_t nodes : geometry.shape)
+            if(nodes == 0u)
+                return std::nullopt;
+        return geometry.shape;
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
@@ -349,8 +360,9 @@ namespace picBunch
             grid.spacing[a] = spacing;
             grid.origin[a] = low;
         }
-        // Explicit CLI geometry overrides the derivation from the bunch bounds.
-        // Values are used verbatim and never blended with the derived grid.
+        // An explicit CLI --grid overrides the mesh extent, which in turn
+        // overrides the bunch-bounding-box derivation.  Values are used
+        // verbatim and never blended.
         if(options.gridSize)
         {
             for(int a = 0; a < 3; ++a)
@@ -365,14 +377,65 @@ namespace picBunch
                 grid.n[a] = n;
             }
         }
-        if(options.gridOrigin)
+        else if(options.meshGridSize)
+        {
+            // The mesh extent is the node count of its dataset, already mapped
+            // to x,y,z by readMeshGeometry.  Copy it verbatim.
+            for(int a = 0; a < 3; ++a)
+            {
+                if((*options.meshGridSize)[a] == 0u)
+                    throw std::invalid_argument("makeGrid: the input mesh extent must be positive");
+                grid.n[a] = (*options.meshGridSize)[a];
+            }
+        }
+        // An explicit --origin overrides the mesh gridGlobalOffset, which in
+        // turn overrides the derived bunch-box minimum.
+        std::optional<std::array<double, 3>> const& originOverride
+            = options.gridOrigin ? options.gridOrigin : options.meshGridOrigin;
+        if(originOverride)
         {
             for(int a = 0; a < 3; ++a)
             {
-                if(!std::isfinite((*options.gridOrigin)[a]))
-                    throw std::invalid_argument("makeGrid: --origin values must be finite");
-                grid.origin[a] = (*options.gridOrigin)[a];
+                if(!std::isfinite((*originOverride)[a]))
+                    throw std::invalid_argument("makeGrid: grid origin values must be finite");
+                grid.origin[a] = (*originOverride)[a];
             }
+        }
+
+        // The TSC deposit silently skips nodes outside the output grid, so a
+        // grid that does not contain every particle would drop charge without
+        // a trace.  Reject that instead.  The physical extent of the node set
+        // is [origin, origin + n*spacing], matching the mesh dataset extent.
+        {
+            std::array<double, 3> lower{};
+            std::array<double, 3> upper{};
+            for(int a = 0; a < 3; ++a)
+            {
+                lower[a] = grid.origin[a];
+                upper[a] = grid.origin[a] + static_cast<double>(grid.n[a]) * grid.spacing[a];
+            }
+            std::size_t outside = 0u;
+            for(std::size_t p = 0; p < bunch.size(); ++p)
+            {
+                double const position[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                for(int a = 0; a < 3; ++a)
+                {
+                    if(position[a] < lower[a] || position[a] > upper[a])
+                    {
+                        ++outside;
+                        break;
+                    }
+                }
+            }
+            if(outside != 0u)
+                throw std::runtime_error(
+                    "makeGrid: " + std::to_string(outside) + " of " + std::to_string(bunch.size())
+                    + " particles lie outside the output grid bounds "
+                    + "[" + std::to_string(lower[0]) + ", " + std::to_string(upper[0]) + "] x "
+                    + "[" + std::to_string(lower[1]) + ", " + std::to_string(upper[1]) + "] x "
+                    + "[" + std::to_string(lower[2]) + ", " + std::to_string(upper[2]) + "]"
+                    + "; the grid comes from the input mesh or --grid/--origin/--cell-size,"
+                    + " and out-of-grid particles would be dropped");
         }
 
         // Reject an infeasible grid before the first allocation.  Both the

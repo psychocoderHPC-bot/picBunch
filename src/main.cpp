@@ -370,15 +370,18 @@ int main(int argc, char** argv)
         options.tolerance = args.tolerance;
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
+        std::optional<std::array<std::size_t, 3>> meshGridExtent;
         try
         {
             auto const geometry = picBunch::readMeshGeometry(args.input);
             // readMeshGeometry already returns physical SI spacing and offset
-            // (raw gridSpacing/gridGlobalOffset times gridUnitSI).  Applying
-            // gridUnitSI again here is the v0.1 regression; the reader owns the
-            // conversion and this helper only validates the result.
+            // (raw gridSpacing/gridGlobalOffset times gridUnitSI) and the shape
+            // mapped to x,y,z.  Applying gridUnitSI again here is the v0.1
+            // regression; the reader owns the conversion and these helpers only
+            // validate the result.
             meshCellSize = picBunch::physicalCellSize(geometry);
             meshGridOrigin = picBunch::physicalGridOrigin(geometry);
+            meshGridExtent = picBunch::physicalGridExtent(geometry);
             if(meshCellSize)
                 std::printf(
                     "cellSize from input mesh E: gridSpacing=(%.6g,%.6g,%.6g) x "
@@ -397,6 +400,12 @@ int main(int argc, char** argv)
                     (*meshGridOrigin)[0], (*meshGridOrigin)[1], (*meshGridOrigin)[2]);
             else
                 std::printf("origin: input mesh gridGlobalOffset is unusable\n");
+            if(meshGridExtent)
+                std::printf(
+                    "grid: input mesh extent (%zu,%zu,%zu) nodes\n",
+                    (*meshGridExtent)[0], (*meshGridExtent)[1], (*meshGridExtent)[2]);
+            else
+                std::printf("grid: input mesh extent is unusable\n");
         }
         catch(picBunch::MeshUnavailable const&)
         {
@@ -407,6 +416,9 @@ int main(int argc, char** argv)
             std::printf(
                 "cellSize: --cell-size override (%.6g,%.6g,%.6g) m\n",
                 options.cellSize[0], options.cellSize[1], options.cellSize[2]);
+        // The mesh extent is the default grid; --grid is an explicit override.
+        // With neither, makeGrid derives the grid from the bunch bounding box.
+        options.meshGridSize = meshGridExtent;
         if(args.grid)
         {
             options.gridSize = args.grid;
@@ -416,7 +428,8 @@ int main(int argc, char** argv)
         }
         // The mesh origin is the default; --origin is an explicit override.  With
         // neither, makeGrid keeps the bunch-bounding-box-minus-margin origin.
-        options.gridOrigin = args.origin ? args.origin : meshGridOrigin;
+        options.meshGridOrigin = meshGridOrigin;
+        options.gridOrigin = args.origin;
         if(args.origin)
             std::printf(
                 "origin: --origin override (%.6g,%.6g,%.6g) m\n",

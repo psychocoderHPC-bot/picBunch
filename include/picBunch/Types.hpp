@@ -121,14 +121,23 @@ namespace picBunch
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
+        /*! Output-grid overrides supplied by the input mesh.
+
+         * The CLI fills ``meshGridSize`` from the mesh dataset shape (already
+         * mapped to x,y,z by the reader) and ``meshGridOrigin`` from the mesh
+         * ``gridGlobalOffset``.  They are defaults, not overrides: ``gridSize``
+         * and ``gridOrigin`` still win when set.  Leaving both unset keeps the
+         * bunch-bounding-box derivation.
+         */
+        std::optional<std::array<std::size_t, 3>> meshGridSize;
+        std::optional<std::array<double, 3>> meshGridOrigin;
         /*! Explicit output-grid overrides (metres / node counts).
 
-         * Unset values keep the automatic derivation from the bunch bounding box.
-         * When set they are used verbatim: an explicit ``--grid`` or ``--origin``
-         * never blends with the derived value.  The CLI supplies ``gridOrigin``
-         * from ``--origin`` when given, otherwise from the input mesh
-         * ``gridGlobalOffset``.  Grid node counts must be even and positive so the
-         * R2C transform keeps its even last extent.
+         * Unset values keep the mesh default or, when there is no mesh, the
+         * automatic derivation from the bunch bounding box.  When set they are
+         * used verbatim: an explicit ``--grid`` or ``--origin`` never blends with
+         * the mesh or derived value.  Grid node counts must be even and positive
+         * so the R2C transform keeps its even last extent.
          */
         std::optional<std::array<std::size_t, 3>> gridSize;
         std::optional<std::array<double, 3>> gridOrigin;

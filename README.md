@@ -127,9 +127,12 @@ clear message when neither source exists. Nothing is assumed or rescaled. The ph
 size is taken from the input mesh (`E`) as `gridSpacing * gridUnitSI` when the input has a
 mesh with a positive `gridUnitSI`; a missing or non-positive `gridUnitSI` is an error. The
 reader applies that conversion once and returns physical SI spacing and offset; the CLI does
-not apply `gridUnitSI` again. When the input has a mesh, its `gridGlobalOffset` is the default
-output-grid origin; `--origin` overrides it. Without a mesh, the origin is the particle
-bounding-box minimum minus the margin.
+not apply `gridUnitSI` again. When the input has a mesh, its extent (dataset shape) is the
+default output grid, its `gridSpacing` the node spacing and its `gridGlobalOffset` the origin.
+`--grid`, `--cell-size` and `--origin` override those defaults individually. Without a mesh,
+the grid is the particle bounding box plus the margin and `--cell-size` is required. A particle
+outside the resulting grid is an error that names the count and the bounds; it is never dropped
+silently.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -299,6 +302,8 @@ N=2e6/20-cell repeats span 60.35 to 64.81 ms, about 7% scatter.
 
 ## Changelog
 
+- **v0.1.3** makes the input mesh define the whole output grid (extent, spacing, origin) when
+  present, rejects particles outside it, and keeps the bunch-AABB path for mesh-free input.
 - **v0.1.2** honours the input mesh `gridGlobalOffset` as the default output-grid origin;
   `--origin` remains an override.
 - **v0.1.1** fixes v0.1 mishandling non-unit `gridUnitSI`. The reader already returned
