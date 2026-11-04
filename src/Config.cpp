@@ -247,8 +247,8 @@ namespace picBunch
                     fail("placement.offset", "fractional offsets must be in [0, 1]");
         positive(config.accuracy.tolerance, "accuracy.tolerance");
         if(config.accuracy.nearShell != "none" && config.accuracy.nearShell != "exact"
-           && config.accuracy.nearShell != "fast")
-            fail("accuracy.near_shell", "expected \"none\", \"exact\" or \"fast\"");
+           && config.accuracy.nearShell != "fast" && config.accuracy.nearShell != "fast-gpu")
+            fail("accuracy.near_shell", "expected \"none\", \"exact\", \"fast\" or \"fast-gpu\"");
         if(config.accuracy.nearShellRadius < 0.0 || !std::isfinite(config.accuracy.nearShellRadius))
             fail("accuracy.near_shell_radius", "must be finite and non-negative");
         if(config.accuracy.nearShellTile == 0u)

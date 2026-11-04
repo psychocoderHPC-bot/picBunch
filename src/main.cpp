@@ -90,10 +90,13 @@ namespace
             "                        slower, diagnostic only)\n"
             "  --tolerance <value>   relative accuracy target of the free-space\n"
             "                        convolution (default: 1e-3; floor 1e-14)\n"
-            "  --near-shell <mode>   none|exact|fast (default: none).  exact replaces\n"
-            "                        the mesh contribution of every source within the\n"
-            "                        shell by the adaptive reference; fast uses the\n"
-            "                        asinh box + subtracted-GL remainder evaluator.\n"
+            "  --near-shell <mode>   none|exact|fast|fast-gpu (default: none).  exact\n"
+            "                        replaces the mesh contribution of every source\n"
+            "                        within the shell by the adaptive reference; fast\n"
+            "                        uses the asinh box + subtracted-GL remainder\n"
+            "                        evaluator on the host; fast-gpu runs the same\n"
+            "                        evaluator on the accelerator and falls back to\n"
+            "                        the host fast path when no device is present.\n"
             "  --near-shell-radius <cells>  shell radius in PIC cells (default: derived\n"
             "                        from --tolerance: 3 at 1e-3, +1 per decade, max 6)\n"
             "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
@@ -385,8 +388,9 @@ namespace
         if(args.backend != "auto" && args.backend != compiledBackend())
             throw std::invalid_argument(
                 "--backend " + args.backend + " is not available; this build uses " + compiledBackend());
-        if(args.nearShell != "none" && args.nearShell != "exact" && args.nearShell != "fast")
-            throw std::invalid_argument("--near-shell must be 'none', 'exact' or 'fast'");
+        if(args.nearShell != "none" && args.nearShell != "exact" && args.nearShell != "fast"
+           && args.nearShell != "fast-gpu")
+            throw std::invalid_argument("--near-shell must be 'none', 'exact', 'fast' or 'fast-gpu'");
         if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
@@ -513,7 +517,9 @@ namespace
             ? picBunch::NearShellOptions::Mode::Exact
             : (config.accuracy.nearShell == "fast")
                 ? picBunch::NearShellOptions::Mode::Fast
-                : picBunch::NearShellOptions::Mode::None;
+                : (config.accuracy.nearShell == "fast-gpu")
+                    ? picBunch::NearShellOptions::Mode::FastGpu
+                    : picBunch::NearShellOptions::Mode::None;
         options.nearShell.fastOrder = config.accuracy.nearShellFastOrder;
         options.nearShell.radiusCells = config.accuracy.nearShellRadius;
         options.nearShell.tileNodes = config.accuracy.nearShellTile;
@@ -633,7 +639,9 @@ int main(int argc, char** argv)
             ? picBunch::NearShellOptions::Mode::Exact
             : (args.nearShell == "fast")
                 ? picBunch::NearShellOptions::Mode::Fast
-                : picBunch::NearShellOptions::Mode::None;
+                : (args.nearShell == "fast-gpu")
+                    ? picBunch::NearShellOptions::Mode::FastGpu
+                    : picBunch::NearShellOptions::Mode::None;
         options.nearShell.fastOrder = args.nearShellFastOrder;
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;

@@ -143,7 +143,9 @@ namespace picBunch
         {
             None,
             Exact,
-            Fast
+            Fast,
+            //! Fast evaluator on the accelerator; falls back to Fast on the host.
+            FastGpu
         };
 
         Mode mode = Mode::None;
