@@ -193,6 +193,21 @@ the driver (and `--near-shell exact`, which shares its quadrature) read `2.153e1
 arbiter, not the driver. The assembled field is unchanged outside the near tiles
 (bitwise) and the seam jump excess is `2.0e-10` stationary.
 
+`--near-shell fast-gpu` (TOML `accuracy.near_shell = "fast-gpu"`) runs the same fast
+evaluator on the accelerator. The CUDA kernel is a line-by-line port of the host
+algebra: one output node per thread, a strided chunk of the tile's near sources, the
+eight-term `asinh` box, the subtracted-Gauss-Legendre remainder, the rest-frame octant
+box for oblique motion, and atomic partial sums for the six staggered components. The
+quadrature nodes and weights, the Yee offsets and the E/B units travel as kernel
+parameters, so no device-side global table is read. The host `--near-shell fast` path
+stays the explicit host selection. `fast-gpu` falls back to it with one stderr warning
+when the build has no CUDA backend or no device is present; it never changes the mesh
+path. On the integrated v0.9.0 tree (rosi_v100, 200 particles, `16^3` output, R = 2,
+tile 2), `fast-gpu` and `fast` agree to `5.7e-15` worst per-component relative
+(`1.37e-2` absolute on an `Ex` peak of `2.39e12 V/m`); the dedicated H100 comparison of
+the branch measured `5.4e-16` to `8.0e-16` relative for stationary, axial gamma 10 and
+oblique cases. The device path is CUDA-only; HIP and CPU builds use the host fallback.
+
 On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
 measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; the
 earlier conservative figure was `0.136 s`. The fast evaluator measures `1.8466e7`
@@ -319,7 +334,7 @@ transform by default and the transposed z-slab transform when selected.
 Without MPI both paths run serially, and the results are unchanged. `--deterministic-deposit`
 is still required for bitwise repeatability of the deposit itself.
 
-#### Distributed FFT measurements (v0.8.0)
+#### Distributed FFT measurements (v0.9.0)
 
 Measured on `jureca-h100` (one H100 PCIe per rank, CUDA 13.4). The distributed path was
 forced with `--fft-mode distributed`; all other settings were identical to the replicated
@@ -331,7 +346,13 @@ per-component relative difference `2.2e-16` (E; B is zero for this stationary bu
 `8.5e-17` relative. The generic distributed 3-D transform matches a replicated c2c plan to
 `1.6e-16`. These are FFT roundoff, not a physics difference. The written `32^3` file of a
 2- and a 4-rank distributed run is bitwise equal (0 ULP, all six components) to the
-single-rank distributed output.
+single-rank distributed output. The same checks were repeated on the integrated
+v0.9.0 tree on `rosi_v100` (200 particles, `32^3` output, deterministic deposit):
+the one-particle convolution matches the replicated path to `8.5e-17` relative, the
+generic transform to `1.6e-16`, and the written 1-, 2- and 4-rank distributed files are
+bitwise equal (0 ULP, all six components). A replicated 1-rank run of the same case
+differs from the distributed file by `5.4e-16` relative (worst component), i.e. FFT
+roundoff only.
 
 Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer),
 `rosi_v100` with idle GPUs (medians of 3 runs at 2 ranks and 2 runs at 4 ranks):
@@ -550,8 +571,9 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.8.0 release tree passes 19/19 CTest entries on all three hosts: rosi_v100
-(CUDA 12.6, sm_70), jureca-h100 (CUDA 13.4, sm_90) and hal (HIP, gfx1100, ROCm 7.2).
+The v0.9.0 release tree passes 19/19 CTest entries on rosi_v100 (CUDA 12.6,
+sm_70) and hal (HIP, gfx1100, ROCm 7.2); jureca-h100 (CUDA 13.4, sm_90) passes
+19/19 on each merged source branch.
 The ROCm 7.2 `librocfft` teardown segfault is gone: the HIP build now calls
 `rocfft_cleanup()` after the plans are destroyed while the queue and runtime are still
 alive. The previously failing `picBunch.Io` entry passed five consecutive repeats on hal.
@@ -745,6 +767,17 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.9.0** adds the optional z-slab distributed FFT (`--fft-mode distributed|auto`)
+  and the device near-field backend (`--near-shell fast-gpu`). The distributed path
+  keeps the six-component output slab-local, exchanges the output planes once per
+  component, and writes each rank's slab directly; it agrees with the replicated path to
+  `5.4e-16` relative and the written 1-, 2- and 4-rank files are bitwise equal. Host
+  memory per rank falls `41.1 -> 20.6 GB` at `640^3` output, but the transposes dominate
+  the run time and the bunch stays replicated. The `fast-gpu` backend runs the fast
+  near-shell algebra on CUDA, agrees with the host fast path to `5.4e-16..8.0e-16`
+  relative on H100 (stationary, axial gamma 10, oblique), and falls back to `fast` on
+  CPU/HIP builds or when no device is present. The v0.9.0 tree passes 19/19 CTest on
+  rosi_v100 and hal; the merged source branches each pass 19/19 on jureca-h100.
 - **v0.8.0** adds tolerance-driven velocity binning for mixed bunches. A momentum spread
   no longer exits with the single-shared-velocity error: the field is summed over
   velocity boxes, the near shell stays bin-free because every pair keeps its own velocity,
