@@ -141,6 +141,26 @@ namespace picBunch
          */
         std::optional<std::array<std::size_t, 3>> gridSize;
         std::optional<std::array<double, 3>> gridOrigin;
+        /*! Global output domain written by the chunked writer.
+         *
+         * The computation stays on the (small) output grid derived above; these
+         * two values only describe the domain that is written.  The compute grid
+         * is aligned to this domain so every computed node lands on a global
+         * node and no interpolation is needed.  Everything outside the compute
+         * box is written as exact zero.  When unset, the written domain is the
+         * compute grid itself (the v0.1 behaviour).
+         */
+        std::optional<std::array<std::size_t, 3>> globalGridSize;
+        std::optional<std::array<double, 3>> globalGridOrigin;
+        /*! Serial host TSC deposit, used to make runs bitwise reproducible.
+         *
+         * The CUDA/HIP deposit uses double atomicAdd, whose summation order is
+         * not fixed, so two runs of the same input differ by ~1 ULP.  This
+         * diagnostic mode accumulates in particle order on the host instead.  It
+         * is slower and is not intended for production, but it lets a rank-count
+         * comparison be a bitwise comparison.
+         */
+        bool deterministicDeposit = false;
     };
 
     //! openPMD record names and component order: E then B.

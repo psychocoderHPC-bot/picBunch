@@ -146,6 +146,81 @@ bound (`1e-12`), padding 3 for targets between that bound and the measured doubl
 floor (`1e-14`), and smaller targets are rejected with a non-zero exit. It does not change
 the interpolation order, the deposit scheme or the node refinement.
 
+## Global output domains and MPI
+
+By default the computation grid and the written grid are the same. When the bunch is much
+smaller than the target field domain, `--global-grid` and `--global-origin` decouple them:
+
+```bash
+mpiexec -n 4 picBunch --input bunch.h5 --cell-size 1e-6 \
+  --global-grid 2048,2048,2048 --global-origin -1.024e-3,-1.024e-3,-1.024e-3 \
+  --output field.h5
+```
+
+The convolution still runs on the padded bunch box. The compute box is snapped to global
+nodes so every computed value lands on a global node. Cells outside it are written as exact
+`0.0`. The global array is never allocated. Each rank owns one contiguous z-slab, divided
+into write tiles of about 128 MiB, so the extra memory per rank is one tile. Rank 0 computes
+the field and broadcasts the small bunch box; all ranks write disjoint `storeChunk` regions.
+Extent, spacing, origin, `unitSI` and the Yee `position` attribute are identical for every
+rank count.
+
+**Physics constraint:** the FFT is not domain-decomposed. A per-rank FFT on a subdomain would
+lose long-range contributions. The convolution covers the bunch box globally; only the
+read-out and the write are decomposed. This is exact only while the bunch box contains the
+sources that matter, which is the existing free-space truncation limitation.
+
+MPI is optional: configure with `-DPICBUNCH_ENABLE_MPI=ON`. openPMD must be built with MPI
+for one collectively written series. If it is not, each rank writes its own
+`<output>.rankNNNN` file and the program prints a warning. That fallback was not exercised
+on rosi because its openPMD 0.17.1 has MPI enabled.
+
+```bash
+export PATH=/usr/local/cuda/bin:$PATH
+env -u LD_PRELOAD cmake --preset cuda-v100 -DPICBUNCH_ENABLE_MPI=ON \
+  -DopenPMD_DIR=/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD
+env -u LD_PRELOAD cmake --build --preset cuda-v100 -j 8
+env -u LD_PRELOAD OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 \
+  mpiexec -n 4 ./build/cuda-v100/picBunch ...
+```
+
+Measured on rosi_v100 (V100, CUDA 12.6, openPMD 0.17.1 with MPI), 20-cell bunch, cell
+`1e-6` m, deterministic deposit:
+
+| configuration | wall | writer | peak host RSS per rank | peak device (idle GPU1) |
+| --- | --- | --- | --- | --- |
+| 512^3 global, 1 rank | 75.8 s | 74.8 s | 315 MB | not usable, GPU shared |
+| 512^3 global, 2 ranks | 61.0 s | 55.8 s | 316 MB | 388 MiB |
+
+The 512^3 output is 6.44 GB (six double components) written from a 32^3 compute box.
+The 512^3 single-rank and 2-rank files have `max_abs_diff = 0.0` over every dataset, equal
+mesh metadata, and exactly zero values outside the compute box. 1-, 2- and 4-rank runs on a
+64^3 domain with `--deterministic-deposit` are bitwise identical. Without that flag the
+CUDA deposit uses `atomicAdd`, so two runs differ by at most 2.5e-16 relative even at one
+rank; use the flag when a bitwise comparison is required.
+
+### Measured single-rank limits
+
+The v0.1 pipeline allocated the output grid and the padded FFT work arrays. Measured on
+rosi_v100, GPU 0 (idle for this sweep):
+
+| output N | padded box | peak device | peak host RSS | total time |
+| --- | --- | --- | --- | --- |
+| 64^3 | 128^3 | 392 MiB | 158 MB | 0.23 s |
+| 128^3 | 256^3 | 1.30 GiB | 299 MB | 0.58 s |
+| 192^3 | 384^3 | 3.36 GiB | 689 MB | 1.62 s |
+| 256^3 | 512^3 | 7.40 GiB | 1.22 GB | 2.96 s |
+| 320^3 | 640^3 | 14.1 GiB | 2.38 GB | 6.16 s |
+
+The code rejects any request whose padded node count exceeds `2^28` nodes
+(`src/Compute.cpp:244` and `src/Compute.cpp:454`), so 384^3 fails before allocation. A
+2048^3 output would need a 4096^3 padded box: 2.75 TB for the five FFT work arrays plus
+412 GB for six double field components, about 3.2 TB total. The measured trend of about
+460 bytes per output node extrapolates to about 3.7 TiB. With the chunked writer the global
+array is not allocated, so a 2048^3 write is bounded by disk (412 GB) and by time (about
+1 h at the measured 115 MB/s aggregate write rate), not by memory. The `2^28` limit applies
+only to the compute box.
+
 ### PIConGPU restart checkpoint
 
 `--restart-format picongpu` writes a checkpoint that PIConGPU's `RestartFieldLoader` can
@@ -171,7 +246,12 @@ records from the input instead of recomputing them. See
 
 ## Test status
 
-The final state is the v0.1.3 commit `da3cd4239926f5da31b5794a36f8184e0b3164da`:
+The v0.3.0 commit passes 13/13 CTest entries on rosi (CUDA 12.6, sm_70) both with and
+without MPI, and 13/13 on hal (HIP, gfx1100). The new entries are `picBunch.Domain`; the
+`Domain.GridStaysOnBunchBox` test checks that a 1024^3 global request keeps the compute box
+small, and `Domain.ChunkedWriteZerosAndOffset` checks exact zeros and the global offset.
+
+The v0.1.3 final state was the commit `da3cd4239926f5da31b5794a36f8184e0b3164da`:
 12/12 CTest entries pass on both validated backends.
 
 - **rosi_v100, Tesla V100-SXM2-32GB, CUDA 12.6, sm_70:** 12/12 CTest entries passed at
@@ -333,6 +413,12 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.3.0** adds `--global-grid`/`--global-origin` and optional MPI. The convolution stays
+  on the padded bunch box; the global field is written as exact-zero-filled chunks so the
+  global array is never allocated. Adds `--deterministic-deposit` for bitwise comparisons
+  and `picBunch.Domain` tests. CUDA builds pass 13/13 CTest entries with and without MPI;
+  HIP passes 13/13. A 512^3 global domain with a 20-cell bunch writes in 61 s on 2 ranks
+  with 316 MB host memory per rank.
 - **v0.1.5** adds an absolute-magnitude regression test. W3n claimed the read-out scale
   `kRefinement^3/M^3` was missing the physical node volume `cellx*celly*cellz`. One stationary
   electron at `1e-7` m cells measured **1.00002x** the analytic Coulomb field in V/m, so the claim
@@ -367,7 +453,9 @@ table above covers the compute stages of the large-N sweep, not the write path.
   selects 1.
 - **Free-space truncation outside the box.** Fields are computed only on the requested
   grid; there is no extrapolation beyond it.
-- **No multi-GPU.** One device, one allocation, one node.
+- **No multi-GPU compute.** One device computes the field. MPI decomposes only the global
+  write; the tested configurations are 2 and 4 ranks on one node, and multi-node was not
+  tested. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.
 
 ## Reproduce
 

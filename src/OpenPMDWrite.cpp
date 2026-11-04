@@ -11,9 +11,16 @@
 
 #include "picBunch/OpenPMDWriter.hpp"
 
+#include "picBunch/Mpi.hpp"
+
 #include <openPMD/openPMD.hpp>
+#include <openPMD/config.hpp>
 
 #include <hdf5.h>
+
+#if defined(PICBUNCH_ENABLE_MPI)
+#    include <mpi.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -23,6 +30,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <cmath>
 #include <cstring>
 #include <regex>
 #include <stdexcept>
@@ -189,6 +198,7 @@ namespace picBunch
                 {"E", 0, {1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0}},
                 {"B", 3, {0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0}}};
 
+            char const componentNames[3] = {'x', 'y', 'z'};
             for(auto const& spec : records)
             {
                 auto& mesh = iteration.meshes[spec.name];
@@ -207,7 +217,6 @@ namespace picBunch
                      {openPMD::UnitDimension::N, spec.unitDimension[5]},
                      {openPMD::UnitDimension::J, spec.unitDimension[6]}});
 
-                char const componentNames[3] = {'x', 'y', 'z'};
                 for(std::size_t a = 0; a < 3; ++a)
                 {
                     std::string const name(1, componentNames[a]);
@@ -260,6 +269,297 @@ namespace picBunch
         catch(...)
         {
             removeTemporary(temporary, fileName);
+            throw;
+        }
+    }
+
+    namespace
+    {
+        //! Check that the compute field lies on global nodes and inside the domain.
+        std::array<long long, 3> globalBase(
+            Grid const& fieldGrid,
+            std::array<std::size_t, 3> const& globalGridSize,
+            std::array<double, 3> const& globalGridOrigin)
+        {
+            std::array<long long, 3> base{};
+            for(int a = 0; a < 3; ++a)
+            {
+                if(globalGridSize[a] == 0u)
+                    throw std::invalid_argument("writeFieldToDomain: global extent must be positive");
+                double const relative
+                    = (fieldGrid.origin[a] - globalGridOrigin[a]) / fieldGrid.spacing[a];
+                double const nearest = std::round(relative);
+                if(std::abs(relative - nearest) > 1e-6)
+                    throw std::invalid_argument(
+                        "writeFieldToDomain: the compute grid is not aligned to the global grid on axis "
+                        + std::to_string(a));
+                if(nearest < 0.0
+                   || nearest + static_cast<double>(fieldGrid.n[a])
+                       > static_cast<double>(globalGridSize[a]))
+                    throw std::invalid_argument(
+                        "writeFieldToDomain: the compute grid is not contained in the global domain on axis "
+                        + std::to_string(a));
+                base[a] = static_cast<long long>(nearest);
+            }
+            return base;
+        }
+
+        /*! Fill one tile of the global array for one component.
+         *
+         * ``tile`` is x-fastest and covers global ``[zBegin,zEnd) x [0,Ny) x [0,Nx)``.
+         * Nodes inside the compute box are copied; all others stay exactly 0.
+         */
+        void fillGlobalTile(
+            std::vector<double>& tile,
+            Field const& field,
+            int component,
+            std::array<long long, 3> const& base,
+            std::array<std::size_t, 3> const& globalN,
+            std::size_t zBegin,
+            std::size_t zEnd)
+        {
+            std::size_t const nx = globalN[0];
+            std::size_t const ny = globalN[1];
+            std::size_t const nz = zEnd - zBegin;
+            tile.assign(nx * ny * nz, 0.0);
+            if(nz == 0u)
+                return;
+
+            std::array<long long, 3> lo{
+                std::max<long long>(base[0], 0),
+                std::max<long long>(base[1], 0),
+                std::max<long long>(base[2], static_cast<long long>(zBegin))};
+            std::array<long long, 3> hi{
+                std::min<long long>(base[0] + static_cast<long long>(field.grid.n[0]),
+                                    static_cast<long long>(globalN[0])),
+                std::min<long long>(base[1] + static_cast<long long>(field.grid.n[1]),
+                                    static_cast<long long>(globalN[1])),
+                std::min<long long>(base[2] + static_cast<long long>(field.grid.n[2]),
+                                    static_cast<long long>(zEnd))};
+            if(lo[0] >= hi[0] || lo[1] >= hi[1] || lo[2] >= hi[2])
+                return;
+
+            std::size_t const fnx = field.grid.n[0];
+            std::size_t const fny = field.grid.n[1];
+            for(long long k = lo[2]; k < hi[2]; ++k)
+            {
+                std::size_t const fk = static_cast<std::size_t>(k - base[2]);
+                for(long long j = lo[1]; j < hi[1]; ++j)
+                {
+                    std::size_t const fj = static_cast<std::size_t>(j - base[1]);
+                    std::size_t const dstRow
+                        = (static_cast<std::size_t>(k) - zBegin) * nx * ny
+                        + static_cast<std::size_t>(j) * nx;
+                    std::size_t const srcRow = fk * fnx * fny + fj * fnx;
+                    for(long long i = lo[0]; i < hi[0]; ++i)
+                    {
+                        std::size_t const fi = static_cast<std::size_t>(i - base[0]);
+                        tile[dstRow + static_cast<std::size_t>(i)] = field.data[component][srcRow + fi];
+                    }
+                }
+            }
+        }
+    } // namespace
+
+    void writeFieldToDomain(
+        Field const& field,
+        std::string const& fileName,
+        FieldWriteOptions const& options,
+        std::array<std::size_t, 3> const& globalGridSize,
+        std::array<double, 3> const& globalGridOrigin)
+    {
+        for(std::size_t c = 0; c < field.data.size(); ++c)
+            if(field.data[c].size() != field.grid.size())
+                throw std::runtime_error(
+                    "writeFieldToDomain: component " + std::to_string(c) + " has "
+                    + std::to_string(field.data[c].size()) + " values, grid.size() is "
+                    + std::to_string(field.grid.size()));
+        if(field.grid.size() == 0u)
+            throw std::runtime_error("writeFieldToDomain: grid is empty");
+        auto const base = globalBase(field.grid, globalGridSize, globalGridOrigin);
+
+        int const rank = mpiRank();
+        int const size = mpiSize();
+
+#if defined(PICBUNCH_ENABLE_MPI) && openPMD_HAVE_MPI
+        bool const collective = mpiActive();
+#else
+        bool const collective = false;
+#endif
+
+        // A slab per rank, divided into tiles.  The tile z extent is chosen once
+        // from the global x/y extents, so every rank issues the same number of
+        // collective flushes even when its slab is shorter.
+        std::size_t const nx = globalGridSize[0];
+        std::size_t const ny = globalGridSize[1];
+        std::size_t const nz = globalGridSize[2];
+        std::size_t const maxSlab = (nz + static_cast<std::size_t>(size) - 1u)
+            / static_cast<std::size_t>(size);
+        constexpr std::size_t kTargetTileBytes = 128u * 1024u * 1024u;
+        std::size_t const bytesPerZ = nx * ny * sizeof(double);
+        std::size_t tileZ = bytesPerZ == 0u ? maxSlab : kTargetTileBytes / bytesPerZ;
+        tileZ = std::max<std::size_t>(tileZ, 1u);
+        tileZ = std::min<std::size_t>(tileZ, std::max<std::size_t>(maxSlab, 1u));
+        std::size_t const tiles = (maxSlab + tileZ - 1u) / tileZ;
+
+        std::size_t const zBegin = (static_cast<std::size_t>(rank) * nz)
+            / static_cast<std::size_t>(size);
+        std::size_t const zEnd = ((static_cast<std::size_t>(rank) + 1u) * nz)
+            / static_cast<std::size_t>(size);
+
+        // Parallel openPMD writes one shared series.  Without its MPI backend,
+        // each rank writes its own file; the content is then chunk-local and a
+        // warning says so.
+        std::string outputName = fileName;
+        if(!collective && size > 1)
+        {
+            char suffix[32];
+            std::snprintf(suffix, sizeof(suffix), ".rank%04d", rank);
+            outputName += suffix;
+            if(rank == 0)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: openPMD has no MPI backend; writing one file per rank "
+                    "(%s.rankNNNN) instead of a single collectively written series\n",
+                    fileName.c_str());
+        }
+
+        std::string temporary = temporaryName(outputName);
+        if(collective)
+            mpiBroadcastString(temporary, 0);
+
+        try
+        {
+            std::unique_ptr<openPMD::Series> series;
+#if defined(PICBUNCH_ENABLE_MPI) && openPMD_HAVE_MPI
+            if(collective)
+                series = std::make_unique<openPMD::Series>(
+                    temporary, openPMD::Access::CREATE, MPI_COMM_WORLD);
+            else
+#endif
+                series = std::make_unique<openPMD::Series>(temporary, openPMD::Access::CREATE);
+
+            auto& iteration = series->iterations[options.iteration];
+            iteration.setTime(options.time);
+            iteration.setTimeUnitSI(options.timeUnitSI);
+            iteration.setAttribute("timeOffset", options.timeOffset);
+
+            std::vector<std::string> const axisLabels{"z", "y", "x"};
+            openPMD::Extent const extent{
+                static_cast<openPMD::Extent::value_type>(globalGridSize[2]),
+                static_cast<openPMD::Extent::value_type>(globalGridSize[1]),
+                static_cast<openPMD::Extent::value_type>(globalGridSize[0])};
+            openPMD::Dataset const dataset{openPMD::determineDatatype<double>(), extent};
+
+            struct RecordSpec
+            {
+                char const* name;
+                std::size_t firstComponent;
+                std::array<double, 7> unitDimension;
+            };
+            RecordSpec const records[] = {
+                {"E", 0, {1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0}},
+                {"B", 3, {0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0}}};
+
+            char const componentNames[3] = {'x', 'y', 'z'};
+            for(auto const& spec : records)
+            {
+                auto& mesh = iteration.meshes[spec.name];
+                mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
+                mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
+                mesh.setAxisLabels(axisLabels);
+                mesh.setGridSpacing(
+                    std::vector<double>{
+                        field.grid.spacing[2], field.grid.spacing[1], field.grid.spacing[0]});
+                mesh.setGridGlobalOffset(
+                    std::vector<double>{
+                        globalGridOrigin[2], globalGridOrigin[1], globalGridOrigin[0]});
+                mesh.setGridUnitSI(1.0);
+                mesh.setUnitDimension(
+                    {{openPMD::UnitDimension::L, spec.unitDimension[0]},
+                     {openPMD::UnitDimension::M, spec.unitDimension[1]},
+                     {openPMD::UnitDimension::T, spec.unitDimension[2]},
+                     {openPMD::UnitDimension::I, spec.unitDimension[3]},
+                     {openPMD::UnitDimension::theta, spec.unitDimension[4]},
+                     {openPMD::UnitDimension::N, spec.unitDimension[5]},
+                     {openPMD::UnitDimension::J, spec.unitDimension[6]}});
+
+                for(std::size_t a = 0; a < 3; ++a)
+                {
+                    std::string const name(1, componentNames[a]);
+                    auto& component = mesh[name];
+                    component.resetDataset(dataset);
+                    component.setUnitSI(1.0);
+                    std::array<double, 3> const yee{
+                        kYeeOffset[spec.firstComponent + a][0] / kRefinement,
+                        kYeeOffset[spec.firstComponent + a][1] / kRefinement,
+                        kYeeOffset[spec.firstComponent + a][2] / kRefinement};
+                    component.setAttribute("position", reverse(yee));
+                }
+            }
+
+            std::vector<double> tile;
+            for(std::size_t t = 0; t < tiles; ++t)
+            {
+                std::size_t const tBegin = zBegin + t * tileZ;
+                std::size_t const tEnd = std::min(zBegin + (t + 1u) * tileZ, zEnd);
+                for(auto const& spec : records)
+                    for(std::size_t a = 0; a < 3; ++a)
+                    {
+                        auto& component = iteration.meshes[spec.name][std::string(1, componentNames[a])];
+                        std::size_t const thisEnd = std::min(tEnd, zEnd);
+                        std::size_t const thisBegin = std::min(tBegin, thisEnd);
+                        if(thisBegin < thisEnd)
+                        {
+                            fillGlobalTile(
+                                tile,
+                                field,
+                                static_cast<int>(spec.firstComponent + a),
+                                base,
+                                globalGridSize,
+                                thisBegin,
+                                thisEnd);
+                            openPMD::Extent const chunkExtent{
+                                static_cast<openPMD::Extent::value_type>(thisEnd - thisBegin),
+                                static_cast<openPMD::Extent::value_type>(ny),
+                                static_cast<openPMD::Extent::value_type>(nx)};
+                            openPMD::Offset const chunkOffset{thisBegin, 0, 0};
+                            auto buffer = std::make_shared<double[]>(tile.size());
+                            std::copy(tile.begin(), tile.end(), buffer.get());
+                            component.storeChunk(buffer, chunkOffset, chunkExtent);
+                        }
+                        // Collective flush: every rank calls it the same number
+                        // of times, so the buffers above are released per tile.
+                        series->flush();
+                    }
+            }
+
+            if(collective)
+                mpiBarrier();
+
+            auto const renames = planRenames(temporary, outputName);
+            if(renames.empty())
+                throw std::runtime_error(
+                    "writeFieldToDomain: the temporary series '" + temporary
+                    + "' produced no output file");
+            if(collective && rank != 0)
+            {
+                // Only rank 0 owns the shared temporary path; the other ranks
+                // must not rename it.
+            }
+            else
+            {
+                for(auto const& [from, to] : renames)
+                {
+                    std::error_code error;
+                    std::filesystem::remove(to, error);
+                    std::filesystem::rename(from, to);
+                }
+            }
+        }
+        catch(...)
+        {
+            removeTemporary(temporary, outputName);
             throw;
         }
     }

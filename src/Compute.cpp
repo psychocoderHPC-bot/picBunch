@@ -402,6 +402,55 @@ namespace picBunch
             }
         }
 
+        // A global output domain does not enlarge the computation.  It only
+        // says where the small compute box sits inside the written domain.  Snap
+        // the compute box onto global nodes so the read-out maps one-to-one and
+        // no interpolation is needed; clip it to the global extent.
+        if(options.globalGridSize)
+        {
+            std::array<std::size_t, 3> const globalN = *options.globalGridSize;
+            std::array<double, 3> const globalOrigin
+                = options.globalGridOrigin.value_or(std::array<double, 3>{0.0, 0.0, 0.0});
+            for(int a = 0; a < 3; ++a)
+            {
+                if(globalN[a] == 0u || globalN[a] % 2u != 0u)
+                    throw std::invalid_argument(
+                        "makeGrid: --global-grid values must be even and positive");
+                if(!std::isfinite(globalOrigin[a]))
+                    throw std::invalid_argument("makeGrid: --global-origin values must be finite");
+            }
+            for(int a = 0; a < 3; ++a)
+            {
+                double const spacing = grid.spacing[a];
+                // Smallest global node at or below the compute-box origin.
+                long long low = std::max<long long>(
+                    0,
+                    static_cast<long long>(
+                        std::floor((grid.origin[a] - globalOrigin[a]) / spacing)));
+                long long high = std::min<long long>(
+                    static_cast<long long>(globalN[a]),
+                    static_cast<long long>(std::ceil(
+                        (grid.origin[a] + static_cast<double>(grid.n[a]) * spacing
+                         - globalOrigin[a])
+                        / spacing)));
+                if(low >= high)
+                    throw std::runtime_error(
+                        "makeGrid: the compute box does not overlap the global output domain on axis "
+                        + std::to_string(a));
+                // Keep the R2C last extent even.  Prefer growing, then shrinking
+                // the low side, so a particle at the upper edge is never dropped.
+                if((high - low) % 2 != 0)
+                {
+                    if(high < static_cast<long long>(globalN[a]))
+                        ++high;
+                    else
+                        --low;
+                }
+                grid.origin[a] = globalOrigin[a] + static_cast<double>(low) * spacing;
+                grid.n[a] = static_cast<std::size_t>(high - low);
+            }
+        }
+
         // The TSC deposit silently skips nodes outside the output grid, so a
         // grid that does not contain every particle would drop charge without
         // a trace.  Reject that instead.  The physical extent of the node set
@@ -525,7 +574,63 @@ namespace picBunch
         auto const depositStart = Clock::now();
         alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
         std::size_t const particleCount = bunch.size();
-        if(particleCount > 0)
+        if(options.deterministicDeposit && particleCount > 0)
+        {
+            // The memset is queued on the device; finish it before the host
+            // touches the same unified buffer.
+            alpaka::onHost::wait(queue);
+            // Deterministic fallback: accumulate each particle's TSC stencil in
+            // particle order.  This is the same stencil the device kernel uses,
+            // only without atomicAdd's unspecified summation order.
+            double* rho = rhoReal.data();
+            double const support = 1.5;
+            for(std::size_t p = 0; p < particleCount; ++p)
+            {
+                double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+                double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
+                long lo[3];
+                long hi[3];
+                double t[3];
+                for(int a = 0; a < 3; ++a)
+                {
+                    t[a] = (pos[a] - org[a]) / sp[a];
+                    lo[a] = static_cast<long>(::ceil(t[a] - support));
+                    hi[a] = static_cast<long>(::floor(t[a] + support));
+                }
+                double const q = bunch.weight[p] * bunch.charge[p];
+                for(long ia = lo[0]; ia <= hi[0]; ++ia)
+                {
+                    if(ia < 0 || ia >= static_cast<long>(grid.n[0]))
+                        continue;
+                    double const wa = tscShape(static_cast<double>(ia) - t[0]);
+                    if(wa == 0.0)
+                        continue;
+                    for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                    {
+                        if(ib < 0 || ib >= static_cast<long>(grid.n[1]))
+                            continue;
+                        double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
+                        if(wb == 0.0)
+                            continue;
+                        for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                        {
+                            if(ic < 0 || ic >= static_cast<long>(grid.n[2]))
+                                continue;
+                            double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
+                            if(wc == 0.0)
+                                continue;
+                            auto const idx = static_cast<std::size_t>(ia)
+                                + static_cast<std::size_t>(Mx)
+                                    * (static_cast<std::size_t>(ib)
+                                       + static_cast<std::size_t>(My) * static_cast<std::size_t>(ic));
+                            rho[idx] += wc * q;
+                        }
+                    }
+                }
+            }
+        }
+        else if(particleCount > 0)
         {
             if(particleCount > 0xffffffffu)
                 throw std::runtime_error("computeField: particle count exceeds uint32 range");

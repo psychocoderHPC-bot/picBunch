@@ -49,6 +49,32 @@ namespace picBunch
         std::string const& fileName,
         FieldWriteOptions const& options = FieldWriteOptions{});
 
+    /** Write the bunch-box field into a global domain without allocating it.
+     *
+     * ``field`` holds the computed field on a small grid.  ``globalGridSize``
+     * and ``globalGridOrigin`` describe the openPMD output domain; the field
+     * grid must be aligned to it (``makeGrid`` does this when
+     * ``ComputeOptions::globalGridSize`` is set) and contained in it.  Every
+     * global node outside the field grid is written as exact ``0.0``.
+     *
+     * The global dataset is never materialised.  Each rank owns one contiguous
+     * z-slab, subdivided into write tiles, so the extra memory is one tile per
+     * rank.  With an MPI-enabled openPMD build all ranks write the same series
+     * collectively through ``storeChunkRaw``; without it each rank writes its
+     * own ``<fileName>.rankNNNN`` file and a warning is printed.  A single rank
+     * still uses the same tiled path, which is what keeps the single-rank memory
+     * bounded too.
+     *
+     * Metadata (extent, spacing, origin, unitSI, Yee ``position``) is written
+     * for the global domain and is identical for every rank count.
+     */
+    void writeFieldToDomain(
+        Field const& field,
+        std::string const& fileName,
+        FieldWriteOptions const& options,
+        std::array<std::size_t, 3> const& globalGridSize,
+        std::array<double, 3> const& globalGridOrigin);
+
 
     /** Configuration of a PIConGPU checkpoint-restart writer.
 

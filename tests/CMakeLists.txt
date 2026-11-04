@@ -25,6 +25,7 @@ if(PICBUNCH_BUILD_GTESTS)
     add_executable(
         picBunchUnitTests
         test_deposit.cpp
+        test_domain.cpp
         test_kernel.cpp
         test_fft.cpp
         test_io.cpp
@@ -47,7 +48,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Kernel Fft Io Physics Padding Restart)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*

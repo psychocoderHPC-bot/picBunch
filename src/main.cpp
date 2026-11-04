@@ -6,6 +6,7 @@
 // FFT sizes are implementation details and are never exposed.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Mpi.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
@@ -51,9 +52,16 @@ namespace
             "  --cell-size <dx>[,<dy>[,<dz>]]\n"
             "                        physical cell size in metres (overrides the\n"
             "                        input mesh; required when there is no mesh)\n"
-            "  --grid <nx>[,<ny>[,<nz>]]  explicit output node counts (even)\n"
-            "  --origin <x>[,<y>[,<z>]]   output grid origin in metres (overrides the\n"
-            "                        input mesh gridGlobalOffset)\n"
+            "  --grid <nx>[,<ny>[,<nz>]]  explicit computation/output node counts (even)\n"
+            "  --origin <x>[,<y>[,<z>]]   computation grid origin in metres (overrides\n"
+            "                        the input mesh gridGlobalOffset)\n"
+            "  --global-grid <nx>[,<ny>[,<nz>]]\n"
+            "                        written domain node counts (even); the computation\n"
+            "                        stays on the padded bunch box and cells outside it\n"
+            "                        are written as exact zero\n"
+            "  --global-origin <x>[,<y>[,<z>]]\n"
+            "                        written domain origin in metres (default: mesh\n"
+            "                        gridGlobalOffset, else 0)\n"
             "  --restart-format <name>    standard|picongpu (default: standard)\n"
             "  --output-dir <dir>    PIConGPU checkpoint directory (default: checkpoints)\n"
             "  --picongpu-unit-length <m>   length unit for the restart writer\n"
@@ -62,6 +70,9 @@ namespace
             "  --picongpu-step <N>          checkpoint step (default: output iteration)\n"
             "  --picongpu-species <name>    particle species to copy into the checkpoint\n"
             "  --picongpu-dt <value>        stored dt attribute (default: 0)\n"
+            "  --deterministic-deposit\n"
+            "                        serial host TSC deposit (reproducible bitwise;\n"
+            "                        slower, diagnostic only)\n"
             "  --tolerance <value>   relative accuracy target of the free-space\n"
             "                        convolution (default: 1e-3; floor 1e-14)\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
@@ -79,10 +90,13 @@ namespace
         std::optional<std::uint64_t> inputIteration;
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
+        bool deterministicDeposit = false;
         std::string backend = "auto";
         std::optional<std::array<double, 3>> cellSize;
         std::optional<std::array<std::size_t, 3>> grid;
         std::optional<std::array<double, 3>> origin;
+        std::optional<std::array<std::size_t, 3>> globalGrid;
+        std::optional<std::array<double, 3>> globalOrigin;
         std::string restartFormat = "standard";
         std::string outputDir = "checkpoints";
         std::optional<double> unitLength;
@@ -236,6 +250,8 @@ namespace
                 args.outputIteration = parseIteration(value("--output-iteration"), "--output-iteration");
             else if(option == "--tolerance")
                 args.tolerance = parseTolerance(value("--tolerance"));
+            else if(option == "--deterministic-deposit")
+                args.deterministicDeposit = true;
             else if(option == "--backend")
                 args.backend = value("--backend");
             else if(option == "--cell-size")
@@ -244,6 +260,10 @@ namespace
                 args.grid = parseTripleSize(value("--grid"), "--grid");
             else if(option == "--origin")
                 args.origin = parseTripleDouble(value("--origin"), "--origin");
+            else if(option == "--global-grid")
+                args.globalGrid = parseTripleSize(value("--global-grid"), "--global-grid");
+            else if(option == "--global-origin")
+                args.globalOrigin = parseTripleDouble(value("--global-origin"), "--global-origin");
             else if(option == "--restart-format")
                 args.restartFormat = value("--restart-format");
             else if(option == "--output-dir")
@@ -287,6 +307,14 @@ namespace
             for(double o : *args.origin)
                 if(!std::isfinite(o))
                     throw std::invalid_argument("--origin values must be finite metres");
+        if(args.globalOrigin)
+            for(double o : *args.globalOrigin)
+                if(!std::isfinite(o))
+                    throw std::invalid_argument("--global-origin values must be finite metres");
+        if(args.globalGrid)
+            for(std::size_t n : *args.globalGrid)
+                if(n == 0u || n % 2u != 0u)
+                    throw std::invalid_argument("--global-grid values must be even and positive");
         if(args.unitLength && !(*args.unitLength > 0.0))
             throw std::invalid_argument("--picongpu-unit-length must be positive");
         if(args.unitEField && !(*args.unitEField > 0.0))
@@ -341,9 +369,17 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    picBunch::MpiGuard mpiRuntime(argc, argv);
     picBunch::StageTimes times;
     try
     {
+        picBunch::BunchData bunchData;
+        picBunch::Field field;
+        bool const root = picBunch::mpiRank() == 0;
+        std::array<double, 3> globalOriginResolved{0.0, 0.0, 0.0};
+
+        if(root)
+        {
         // ---------------------------------------------------------------- reader
         auto const readerStart = Clock::now();
         picBunch::BunchSelection selection;
@@ -356,7 +392,7 @@ int main(int argc, char** argv)
             else
                 selection.speciesName = *args.species;
         }
-        picBunch::BunchData const bunchData = picBunch::readBunch(args.input, selection);
+        bunchData = picBunch::readBunch(args.input, selection);
         times.readerMs = elapsedMs(readerStart);
         std::printf(
             "read %zu particles (iteration %llu, t=%g s)\n",
@@ -368,6 +404,7 @@ int main(int argc, char** argv)
         // When neither is available the run fails; nothing is assumed.
         picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
+        options.deterministicDeposit = args.deterministicDeposit;
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
@@ -432,9 +469,10 @@ int main(int argc, char** argv)
                     "shortest axis (%.6g m)\n",
                     *largest, *shortest, ratio, *shortest);
         }
-        // The mesh extent is the default grid; --grid is an explicit override.
-        // With neither, makeGrid derives the grid from the bunch bounding box.
-        options.meshGridSize = meshGridExtent;
+        // The mesh extent is the default computation grid; --grid is an explicit
+        // override.  A --global-grid must not enlarge the computation, so the
+        // mesh extent is ignored for the compute box in that case.
+        options.meshGridSize = args.globalGrid ? std::nullopt : meshGridExtent;
         if(args.grid)
         {
             options.gridSize = args.grid;
@@ -444,7 +482,11 @@ int main(int argc, char** argv)
         }
         // The mesh origin is the default; --origin is an explicit override.  With
         // neither, makeGrid keeps the bunch-bounding-box-minus-margin origin.
-        options.meshGridOrigin = meshGridOrigin;
+        // With a --global-grid the computation must stay on the bunch box, so the
+        // mesh origin is not allowed to displace the derived box unless the user
+        // asked for an explicit computation origin.
+        options.meshGridOrigin
+            = (args.globalGrid && !args.origin) ? std::nullopt : meshGridOrigin;
         options.gridOrigin = args.origin;
         if(args.origin)
             std::printf(
@@ -455,8 +497,25 @@ int main(int argc, char** argv)
                 "origin: input mesh default (%.6g,%.6g,%.6g) m\n",
                 (*meshGridOrigin)[0], (*meshGridOrigin)[1], (*meshGridOrigin)[2]);
 
+        if(args.globalGrid)
+        {
+            if(args.globalOrigin)
+                globalOriginResolved = *args.globalOrigin;
+            else if(meshGridOrigin)
+                globalOriginResolved = *meshGridOrigin;
+            else
+                globalOriginResolved = {0.0, 0.0, 0.0};
+            options.globalGridSize = args.globalGrid;
+            options.globalGridOrigin = globalOriginResolved;
+            std::printf(
+                "global domain: n=(%zu,%zu,%zu) origin=(%.6g,%.6g,%.6g) m "
+                "(chunked write, computation stays on the bunch box)\n",
+                (*args.globalGrid)[0], (*args.globalGrid)[1], (*args.globalGrid)[2],
+                globalOriginResolved[0], globalOriginResolved[1], globalOriginResolved[2]);
+        }
+
         // --------------------------------------------------------------- compute
-        picBunch::Field const field = picBunch::computeField(bunchData.bunch, options, &times);
+        field = picBunch::computeField(bunchData.bunch, options, &times);
         printGrid(field.grid);
 
         double maxE = 0.0;
@@ -470,9 +529,30 @@ int main(int argc, char** argv)
                     maxB = std::max(maxB, std::abs(value));
             }
         std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
+        } // root
+
+        // Rank 0 computed the bunch-box field; every rank needs it to write its
+        // own disjoint global chunk.  The transfer is the small bunch box, never
+        // the global domain.
+        picBunch::mpiBroadcastField(field, 0);
+        double scalarMeta[6] = {
+            bunchData.time,
+            bunchData.timeUnitSI,
+            static_cast<double>(bunchData.iteration),
+            globalOriginResolved[0],
+            globalOriginResolved[1],
+            globalOriginResolved[2]};
+        picBunch::mpiBroadcast(scalarMeta, 6, 0);
+        if(!root)
+        {
+            bunchData.time = scalarMeta[0];
+            bunchData.timeUnitSI = scalarMeta[1];
+            bunchData.iteration = static_cast<std::uint64_t>(scalarMeta[2]);
+            globalOriginResolved = {scalarMeta[3], scalarMeta[4], scalarMeta[5]};
+        }
 
         // ---------------------------------------------------------------- writer
-        if(args.restartFormat == "picongpu")
+        if(args.restartFormat == "picongpu" && root)
         {
             std::vector<char const*> missing;
             if(!args.unitLength)
@@ -525,17 +605,27 @@ int main(int argc, char** argv)
             writeOptions.time = bunchData.time;
             writeOptions.timeUnitSI = bunchData.timeUnitSI;
             auto const writerStart = Clock::now();
-            picBunch::writeField(field, *args.output, writeOptions);
+            if(args.globalGrid)
+                picBunch::writeFieldToDomain(
+                    field,
+                    *args.output,
+                    writeOptions,
+                    *args.globalGrid,
+                    globalOriginResolved);
+            else if(root)
+                picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);
-            std::printf(
-                "wrote %s (iteration %llu)\n",
-                args.output->c_str(),
-                static_cast<unsigned long long>(args.outputIteration));
+            if(root)
+                std::printf(
+                    "wrote %s (iteration %llu)\n",
+                    args.output->c_str(),
+                    static_cast<unsigned long long>(args.outputIteration));
         }
-        else
+        else if(root)
             std::printf("no --output given; field was computed but not written\n");
 
-        printTimings(times);
+        if(root)
+            printTimings(times);
     }
     catch(std::exception const& error)
     {

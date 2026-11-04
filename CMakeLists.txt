@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     picBunch
-    VERSION 0.1.0
+    VERSION 0.3.0
     DESCRIPTION "Standalone GPU bunch-field initializer: openPMD particles in, free-space hybrid fields out"
     HOMEPAGE_URL "https://github.com/psychocoderHPC-bot/picBunch"
     LANGUAGES CXX
@@ -25,6 +25,11 @@ option(PICBUNCH_BUILD_TESTS "Build the picBunch smoke test and CTest tests." ON)
 option(PICBUNCH_ENABLE_CUDA "Compile the CUDA backend through alpaka (NVIDIA GPUs)." OFF)
 option(PICBUNCH_ENABLE_HIP "Compile the HIP backend through alpaka (AMD GPUs)." OFF)
 option(PICBUNCH_BUILD_GTESTS "Build the GoogleTest unit tests (system package or FetchContent)." ON)
+option(
+    PICBUNCH_ENABLE_MPI
+    "Build MPI support: rank 0 computes the bunch box, all ranks write disjoint global chunks."
+    OFF
+)
 
 set(
     PICBUNCH_ARCH
@@ -51,6 +56,11 @@ set_property(CACHE PICBUNCH_SANITIZE PROPERTY STRINGS off thread address)
 
 if(PICBUNCH_ENABLE_CUDA AND PICBUNCH_ENABLE_HIP)
     message(FATAL_ERROR "PICBUNCH_ENABLE_CUDA and PICBUNCH_ENABLE_HIP are mutually exclusive.")
+endif()
+
+if(PICBUNCH_ENABLE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+    message(STATUS "picBunch: MPI enabled (MPI_CXX ${MPI_CXX_VERSION})")
 endif()
 
 # PIConGPU-style architecture inheritance: only fill CMAKE_<LANG>_ARCHITECTURES
@@ -224,7 +234,7 @@ alpaka_finalize(picBunch)
 
 # Host-only openPMD layer, kept out of the device compilation unit so nvcc/hipcc
 # never has to parse the HDF5 headers.
-add_library(picBunchOpenPMD src/OpenPMD.cpp src/OpenPMDWrite.cpp)
+add_library(picBunchOpenPMD src/OpenPMD.cpp src/OpenPMDWrite.cpp src/Mpi.cpp)
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
 target_include_directories(
     picBunchOpenPMD
@@ -235,6 +245,10 @@ if(HDF5_IS_PARALLEL)
     target_compile_definitions(picBunchOpenPMD PUBLIC OMPI_SKIP_MPICXX=1)
     target_link_libraries(picBunchOpenPMD PUBLIC MPI::MPI_CXX)
 endif()
+if(PICBUNCH_ENABLE_MPI)
+    target_compile_definitions(picBunchOpenPMD PUBLIC PICBUNCH_ENABLE_MPI=1)
+    target_link_libraries(picBunchOpenPMD PUBLIC MPI::MPI_CXX)
+endif()
 
 # ---------------------------------------------------------------------------
 # Command line tool
@@ -242,6 +256,9 @@ endif()
 add_executable(picBunchApp src/main.cpp)
 set_target_properties(picBunchApp PROPERTIES OUTPUT_NAME picBunch)
 target_link_libraries(picBunchApp PRIVATE picBunch::picBunch picBunch::openPMD)
+if(PICBUNCH_ENABLE_MPI)
+    target_link_libraries(picBunchApp PRIVATE MPI::MPI_CXX)
+endif()
 alpaka_finalize(picBunchApp)
 
 # ---------------------------------------------------------------------------
