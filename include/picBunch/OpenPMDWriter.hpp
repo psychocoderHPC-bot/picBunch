@@ -57,6 +57,12 @@ namespace picBunch
      * ``ComputeOptions::globalGridSize`` is set) and contained in it.  Every
      * global node outside the field grid is written as exact ``0.0``.
      *
+     * Writing zero is only justified when the field grid extends to the
+     * tolerance-derived tail margin from ``deriveFieldTailMargin``, or when the
+     * global domain ends before that margin (then no node between the source
+     * and the domain edge is zeroed).  The CLI enforces this; a direct caller
+     * must do the same instead of using this function to truncate silently.
+     *
      * The global dataset is never materialised.  Each rank owns one contiguous
      * z-slab, subdivided into write tiles, so the extra memory is one tile per
      * rank.  With an MPI-enabled openPMD build all ranks write the same series

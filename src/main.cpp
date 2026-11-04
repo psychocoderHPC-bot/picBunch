@@ -62,6 +62,10 @@ namespace
             "  --global-origin <x>[,<y>[,<z>]]\n"
             "                        written domain origin in metres (default: mesh\n"
             "                        gridGlobalOffset, else 0)\n"
+            "  --allow-field-truncation\n"
+            "                        keep the requested compute box even when it is\n"
+            "                        smaller than the tolerance-derived field margin;\n"
+            "                        writes unjustified zeros outside it (diagnostic)\n"
             "  --restart-format <name>    standard|picongpu (default: standard)\n"
             "  --output-dir <dir>    PIConGPU checkpoint directory (default: checkpoints)\n"
             "  --picongpu-unit-length <m>   length unit for the restart writer\n"
@@ -91,6 +95,7 @@ namespace
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
         bool deterministicDeposit = false;
+        bool allowFieldTruncation = false;
         std::string backend = "auto";
         std::optional<std::array<double, 3>> cellSize;
         std::optional<std::array<std::size_t, 3>> grid;
@@ -252,6 +257,8 @@ namespace
                 args.tolerance = parseTolerance(value("--tolerance"));
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
+            else if(option == "--allow-field-truncation")
+                args.allowFieldTruncation = true;
             else if(option == "--backend")
                 args.backend = value("--backend");
             else if(option == "--cell-size")
@@ -516,18 +523,85 @@ int main(int argc, char** argv)
 
         // --------------------------------------------------------------- compute
         field = picBunch::computeField(bunchData.bunch, options, &times);
-        printGrid(field.grid);
 
-        double maxE = 0.0;
-        double maxB = 0.0;
-        for(int c = 0; c < 6; ++c)
-            for(double value : field.data[c])
+        auto fieldPeaks = [](picBunch::Field const& value) {
+            std::array<double, 2> peaks{0.0, 0.0};
+            for(int c = 0; c < 6; ++c)
+                for(double entry : value.data[c])
+                    peaks[c < 3 ? 0 : 1] = std::max(peaks[c < 3 ? 0 : 1], std::abs(entry));
+            return peaks;
+        };
+        auto peaks = fieldPeaks(field);
+        double maxE = peaks[0];
+        double maxB = peaks[1];
+
+        // The chunked writer fills the global domain outside the compute box
+        // with exact zero.  That is only physical at the stated tolerance once
+        // the compute box extends to the tolerance-derived tail radius.  Expand
+        // the box here (second pass); if the global domain ends before the
+        // radius, makeGrid clips the box to the domain, so no zero is written
+        // between the bunch and the domain edge.
+        if(args.globalGrid)
+        {
+            // The same E-tail bound also bounds B: |B_tail| <= |E_tail|/c.
+            // Requiring E_tail <= tol * min(E_peak, c B_peak) therefore keeps
+            // both per-record relative tails at or below tolerance.  A zero B
+            // peak means an electrostatic field and is ignored.
+            double peak = maxE;
+            if(maxB > 0.0)
+                peak = std::min(peak, picBunch::kSpeedOfLight * maxB);
+            picBunch::FieldTailMargin const margin = picBunch::deriveFieldTailMargin(
+                bunchData.bunch, peak, args.tolerance, options.cellSize);
+            std::printf(
+                "field tail: |Q|=%g C, |p|=%g C m, R=%g m, gamma_max=%g, target=%g V/m, "
+                "d=%g m, bound=%g V/m, margin=(%.6g,%.6g,%.6g) cells\n",
+                std::abs(margin.totalCharge), margin.dipoleMagnitude, margin.sourceRadius,
+                margin.maxGamma, args.tolerance * peak, margin.distance, margin.bound,
+                margin.marginCells[0], margin.marginCells[1], margin.marginCells[2]);
+            if(args.allowFieldTruncation)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: --allow-field-truncation: writing zeros outside the "
+                    "unexpanded compute box; the neglected field there is not bounded by "
+                    "--tolerance %g\n",
+                    args.tolerance);
+            else
             {
-                if(c < 3)
-                    maxE = std::max(maxE, std::abs(value));
-                else
-                    maxB = std::max(maxB, std::abs(value));
+                bool needsExpansion = false;
+                for(int a = 0; a < 3; ++a)
+                    if(margin.marginCells[a] > options.marginCells)
+                        needsExpansion = true;
+                if(needsExpansion)
+                {
+                    picBunch::ComputeOptions expanded = options;
+                    expanded.marginCellsPerAxis = margin.marginCells;
+                    // The margin, not the previous explicit extent/origin, now
+                    // defines the compute box.  The global clip in makeGrid keeps
+                    // it inside the written domain.
+                    expanded.gridSize.reset();
+                    expanded.gridOrigin.reset();
+                    expanded.meshGridSize.reset();
+                    expanded.meshGridOrigin.reset();
+                    try
+                    {
+                        field = picBunch::computeField(bunchData.bunch, expanded, &times);
+                    }
+                    catch(std::exception const& error)
+                    {
+                        throw std::runtime_error(
+                            std::string("tolerance-derived field margin cannot be computed: ")
+                            + error.what()
+                            + "; enlarge the compute box or pass --allow-field-truncation"
+                              " to acknowledge the truncation");
+                    }
+                    peaks = fieldPeaks(field);
+                    maxE = peaks[0];
+                    maxB = peaks[1];
+                }
             }
+        }
+
+        printGrid(field.grid);
         std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
         } // root
 

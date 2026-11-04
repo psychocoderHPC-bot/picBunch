@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -318,12 +319,140 @@ namespace picBunch
         return geometry.shape;
     }
 
+    FieldTailMargin deriveFieldTailMargin(
+        Bunch const& bunch,
+        double fieldPeak,
+        double tolerance,
+        std::array<double, 3> const& cellSize,
+        double maxDistance)
+    {
+        if(bunch.size() == 0u)
+            throw std::runtime_error("deriveFieldTailMargin: empty bunch");
+        if(!(tolerance > 0.0) || !std::isfinite(tolerance))
+            throw std::invalid_argument("deriveFieldTailMargin: tolerance must be finite and positive");
+        if(!(fieldPeak >= 0.0) || !std::isfinite(fieldPeak))
+            throw std::invalid_argument("deriveFieldTailMargin: field peak must be finite and non-negative");
+        if(!(maxDistance > 0.0) || !std::isfinite(maxDistance))
+            throw std::invalid_argument("deriveFieldTailMargin: maxDistance must be finite and positive");
+        for(double h : cellSize)
+            if(!(h > 0.0) || !std::isfinite(h))
+                throw std::invalid_argument("deriveFieldTailMargin: cell sizes must be finite and positive");
+
+        // Source moments about the bounding-box centre.  Using the box half
+        // extents for the per-axis conversion is tighter than the circumscribed
+        // radius and still bounds every point outside the expanded box.
+        auto const bounds = bunch.bounds();
+        std::array<double, 3> centre{};
+        std::array<double, 3> halfExtent{};
+        for(int a = 0; a < 3; ++a)
+        {
+            centre[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
+            halfExtent[a] = 0.5 * (bounds[1][a] - bounds[0][a]);
+        }
+
+        double totalCharge = 0.0;
+        double absoluteCharge = 0.0;
+        std::array<double, 3> dipole{0.0, 0.0, 0.0};
+        double sourceRadius = 0.0;
+        double maxGamma = 1.0;
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const u2 = bunch.ux[p] * bunch.ux[p]
+                + bunch.uy[p] * bunch.uy[p] + bunch.uz[p] * bunch.uz[p];
+            maxGamma = std::max(maxGamma, std::sqrt(1.0 + u2));
+            double const q = bunch.weight[p] * bunch.charge[p];
+            totalCharge += q;
+            absoluteCharge += std::abs(q);
+            std::array<double, 3> const displacement{
+                bunch.x[p] - centre[0],
+                bunch.y[p] - centre[1],
+                bunch.z[p] - centre[2]};
+            for(int a = 0; a < 3; ++a)
+                dipole[a] += q * displacement[a];
+            double const r2 = displacement[0] * displacement[0]
+                + displacement[1] * displacement[1]
+                + displacement[2] * displacement[2];
+            sourceRadius = std::max(sourceRadius, std::sqrt(r2));
+        }
+        double const dipoleMagnitude = std::sqrt(
+            dipole[0] * dipole[0] + dipole[1] * dipole[1] + dipole[2] * dipole[2]);
+
+        FieldTailMargin result;
+        result.totalCharge = totalCharge;
+        result.absoluteCharge = absoluteCharge;
+        result.dipoleMagnitude = dipoleMagnitude;
+        result.sourceRadius = sourceRadius;
+        result.maxGamma = maxGamma;
+        result.fieldPeak = fieldPeak;
+        result.tolerance = tolerance;
+        result.distance = sourceRadius;
+        result.bound = 0.0;
+
+        double const target = tolerance * fieldPeak;
+        if(absoluteCharge == 0.0 || target == 0.0)
+            return result; // no source or no field: zero margin is exact
+
+        auto const tailBound = [&](double d) {
+            if(!(d > sourceRadius))
+                return std::numeric_limits<double>::infinity();
+            double const remainder = 24.0 * absoluteCharge * sourceRadius * sourceRadius
+                / std::pow(d - sourceRadius, 4.0);
+            return maxGamma * kCoulombConstant
+                * (std::abs(totalCharge) / (d * d) + 2.0 * dipoleMagnitude / (d * d * d)
+                   + remainder);
+        };
+
+        double low = sourceRadius;
+        if(low <= 0.0)
+            low = 1.0e-6 * std::min({cellSize[0], cellSize[1], cellSize[2]});
+        else
+            low += 1.0e-12 * std::max(low, std::min({cellSize[0], cellSize[1], cellSize[2]}));
+        if(tailBound(low) <= target)
+        {
+            result.distance = low;
+            result.bound = tailBound(low);
+        }
+        else
+        {
+            double high = std::max(2.0 * low, sourceRadius + std::min({cellSize[0], cellSize[1], cellSize[2]}));
+            while(tailBound(high) > target && high < maxDistance)
+                high = std::min(2.0 * high, maxDistance);
+            if(tailBound(high) > target)
+                throw std::runtime_error(
+                    "deriveFieldTailMargin: a neglected-field bound below tolerance requires a distance"
+                    " larger than " + std::to_string(maxDistance) + " m; enlarge the compute box or"
+                    " acknowledge the truncation explicitly");
+            for(int iteration = 0; iteration < 200; ++iteration)
+            {
+                double const mid = 0.5 * (low + high);
+                if(tailBound(mid) > target)
+                    low = mid;
+                else
+                    high = mid;
+            }
+            result.distance = high;
+            result.bound = tailBound(high);
+        }
+
+        for(int a = 0; a < 3; ++a)
+        {
+            double const cells = (result.distance - halfExtent[a]) / cellSize[a];
+            result.marginCells[a] = std::max(0.0, std::ceil(cells));
+        }
+        return result;
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("makeGrid: empty bunch");
         if(options.marginCells < 0.0)
             throw std::invalid_argument("makeGrid: marginCells must not be negative");
+        if(options.marginCellsPerAxis)
+            for(double margin : *options.marginCellsPerAxis)
+                if(!(margin >= 0.0) || !std::isfinite(margin))
+                    throw std::invalid_argument(
+                        "makeGrid: every marginCellsPerAxis value must be finite and non-negative");
         for(double c : options.cellSize)
             if(!(c > 0.0) || !std::isfinite(c))
                 throw std::invalid_argument("makeGrid: every cell size must be finite and positive");
@@ -341,7 +470,10 @@ namespace picBunch
         for(int a = 0; a < 3; ++a)
         {
             double const spacing = kRefinement * options.cellSize[a];
-            double const margin = options.marginCells * options.cellSize[a];
+            double const marginCellCount = options.marginCellsPerAxis
+                ? (*options.marginCellsPerAxis)[a]
+                : options.marginCells;
+            double const margin = marginCellCount * options.cellSize[a];
             double const low = b[0][a] - margin;
             double const high = b[1][a] + margin;
             double const span = (high - low) / spacing;

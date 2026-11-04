@@ -158,12 +158,45 @@ mpiexec -n 4 picBunch --input bunch.h5 --cell-size 1e-6 \
 ```
 
 The convolution still runs on the padded bunch box. The compute box is snapped to global
-nodes so every computed value lands on a global node. Cells outside it are written as exact
-`0.0`. The global array is never allocated. Each rank owns one contiguous z-slab, divided
-into write tiles of about 128 MiB, so the extra memory per rank is one tile. Rank 0 computes
-the field and broadcasts the small bunch box; all ranks write disjoint `storeChunk` regions.
-Extent, spacing, origin, `unitSI` and the Yee `position` attribute are identical for every
-rank count.
+nodes so every computed value lands on a global node. The global array is never allocated.
+Each rank owns one contiguous z-slab, divided into write tiles of about 128 MiB, so the
+extra memory per rank is one tile. Rank 0 computes the field and broadcasts the small bunch
+box; all ranks write disjoint `storeChunk` regions. Extent, spacing, origin, `unitSI` and the
+Yee `position` attribute are identical for every rank count.
+
+**Zero fill and its error bound.** The field outside the bunch does not vanish; it decays as
+`1/r^2`. The writer therefore fills with zero only beyond a margin derived from
+`--tolerance`, not at the bare bunch box. With `Q` the net charge, `p` the dipole moment,
+`Qabs = sum |q_i|`, `R` the source radius, `gamma_max = max sqrt(1+|u_i|^2)` and
+`k = 1/(4 pi eps0)`, the code solves for the smallest centre distance `d` with
+
+```
+E_tail(d) = gamma_max * k * ( |Q|/d^2 + 2|p|/d^3 + 24*Qabs*R^2/(d-R)^4 )
+            <= tolerance * field_peak
+```
+
+The first term is the monopole, the second the dipole (which sets the margin for a neutral
+bunch), and the last is a conservative Taylor remainder that bounds all higher multipoles.
+The `gamma_max` factor covers the boosted field of a moving bunch; the transverse magnitude
+of a uniformly moving charge is at most `gamma` times its rest monopole.
+The margin in cells is `ceil((d - half_extent_axis)/cell_size_axis)` per axis, so every point
+outside the expanded compute box is at least `d` from the source region. The peak used for
+the solve is `min(max|E|, c*max|B|)` (a zero B peak is ignored). Since
+`|B_tail| <= |E_tail|/c`, this keeps both E and B below `tolerance` relative to their own
+peaks.
+
+If the global domain extends beyond that margin, the zero fill beyond it is justified at the
+stated tolerance. If the domain ends before the margin, the compute box is clipped to the
+whole domain, so no node between the bunch and the domain edge is zeroed; the file then ends
+at the simulation boundary instead of carrying an interior discontinuity. The margin is
+reported as `field tail: ... bound=... V/m`. `--allow-field-truncation` keeps a smaller
+explicit compute box and writes zeros anyway; it prints a warning and is diagnostic only. A
+run whose required margin cannot be computed fails with a message that asks for a larger
+compute box or that flag, rather than truncating silently.
+
+PIConGPU restart on a domain larger than the written one must still treat the written file
+as a finite-domain field. The bound above applies inside the written domain; it says nothing
+about the field outside the file extent.
 
 **Physics constraint:** the FFT is not domain-decomposed. A per-rank FFT on a subdomain would
 lose long-range contributions. The convolution covers the bunch box globally; only the
@@ -413,6 +446,11 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **Unreleased** replaces the unconditional zero fill of `--global-grid` output with a
+  tolerance-derived field-tail margin. The margin bounds the monopole, dipole and a
+  conservative higher-multipole remainder; the compute box expands to it (or to the whole
+  global domain when that is smaller), and `--allow-field-truncation` is the explicit opt-out.
+  The global-domain tests now cover the tail bound and the clipped-domain case.
 - **v0.3.0** adds `--global-grid`/`--global-origin` and optional MPI. The convolution stays
   on the padded bunch box; the global field is written as exact-zero-filled chunks so the
   global array is never allocated. Adds `--deterministic-deposit` for bitwise comparisons
@@ -451,8 +489,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
   source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
   (single stationary source, 20^3 box, worst component Ey). The production policy never
   selects 1.
-- **Free-space truncation outside the box.** Fields are computed only on the requested
-  grid; there is no extrapolation beyond it.
+- **Zero fill outside the tolerance margin.** Fields are computed only inside the
+  tolerance-derived margin around the bunch. A global domain smaller than that margin has no
+  interior zero fill; a larger one is zeroed only where the tail bound is below
+  `--tolerance * field_peak`. `--allow-field-truncation` is an explicit diagnostic opt-out.
 - **No multi-GPU compute.** One device computes the field. MPI decomposes only the global
   write; the tested configurations are 2 and 4 ranks on one node, and multi-node was not
   tested. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.

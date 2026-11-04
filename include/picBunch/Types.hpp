@@ -121,6 +121,12 @@ namespace picBunch
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
+        /*! Per-axis override of ``marginCells`` (PIC cells), used by the tolerated
+         * global-domain writer.  The margin is measured from the corresponding
+         * bounding-box face, so anisotropic boxes do not pay the largest axis'
+         * margin on every axis.  Unset keeps the scalar ``marginCells``.
+         */
+        std::optional<std::array<double, 3>> marginCellsPerAxis;
         /*! Output-grid overrides supplied by the input mesh.
 
          * The CLI fills ``meshGridSize`` from the mesh dataset shape (already
