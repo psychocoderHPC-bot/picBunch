@@ -201,13 +201,16 @@ with the independent exact TSC driver
 \citep{SL1,SL2,SL3}. The case is $N=1000$ in a $32\times32\times16$ box, cell
 $2\times10^{-7}$\,m, rosi\_v100: a $\gamma=10$ bunch (axial, $u_x=9.95$) and
 the stationary $\gamma=1$ bunch. Each figure draws the x-y plane at
-$z=1.60\,\si{\micro\metre}$ (top) and the z-y plane at
-$x=3.20\,\si{\micro\metre}$ (bottom), both through the bunch centre; the left
-column is the mesh field, the right column the relative error, pixels below
-$10^{-3}$ of the plane peak masked white. Fig.~\ref{fig:sxy10} is the
-$\gamma=10$ case (five components; $B_x$ identically zero for an axial
-current) and Fig.~\ref{fig:sxy1} the stationary bunch ($B$ zero, three
-electric components). In both figures the error column uses a log scale.
+$z=1.60\,\si{\micro\metre}$ (upper image) and the z-y plane at
+$x=3.20\,\si{\micro\metre}$ (lower image), both through the bunch centre.
+Every image has the field row on top and the error row underneath. The
+electric figures have three columns ($E_x,E_y,E_z$); pixels below
+$10^{-3}$ of the plane peak are masked white, and the error row uses a log
+scale normalised to the plane peak. Fig.~\ref{fig:sxy10} is the
+$\gamma=10$ electric case, and Fig.~\ref{fig:sxy10B} its magnetic companion
+($B_y,B_z$; $B_x\equiv0$ for an axial current and is omitted).
+Fig.~\ref{fig:sxy1} is the stationary bunch: $B\equiv0$, so no magnetic
+companion exists.
 
  \paragraph{Shell radius unit.} These slices run the default mesh with no near
 shell. The near-shell envelope measured in the crossover work, ``3 to 4 PIC
@@ -222,27 +225,39 @@ Section~\ref{sec:slices-runs}.
 
  \begin{figure}[t]
 \centering
-\includegraphics[width=0.95\linewidth]{figs/mid_sxy_g10.pdf}\\[1pt]
-\includegraphics[width=0.95\linewidth]{figs/mid_szy_g10.pdf}
-\caption{Mid-bunch slices, $\gamma=10$, $N=1000$,
+\includegraphics[width=0.95\linewidth]{figs/mid_sxy_g10_E.pdf}\\[1pt]
+\includegraphics[width=0.95\linewidth]{figs/mid_szy_g10_E.pdf}
+\caption{Mid-bunch electric slices, $\gamma=10$, $N=1000$,
 $32\times32\times16$, cell $2\times10^{-7}$\,m, $h=1$ PIC cell, no near
-shell \citep{SL1}. Top, x-y plane at $z=1.60\,\si{\micro\metre}$; bottom,
-z-y plane at $x=3.20\,\si{\micro\metre}$; left column, mesh field per
-component, right column, relative error against the exact TSC driver
-(reference $T$), log scale. The error in the bunch core is $0.11$ to
-$4.60$ per component (Table~\ref{tab:slices}).}
+shell \citep{SL1}. Upper image, x-y plane at $z=1.60\,\si{\micro\metre}$;
+lower image, z-y plane at $x=3.20\,\si{\micro\metre}$. In each image the
+top row is the mesh field and the bottom row the relative error against the
+exact TSC driver (reference $T$), log scale; columns are $E_x,E_y,E_z$. The
+error in the bunch core is $0.11$ to $4.60$ per component
+(Table~\ref{tab:slices}).}
 \label{fig:sxy10}
+\end{figure}
+
+ \begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{figs/mid_sxy_g10_B.pdf}\\[1pt]
+\includegraphics[width=0.82\linewidth]{figs/mid_szy_g10_B.pdf}
+\caption{Magnetic companion to Fig.~\ref{fig:sxy10}, $\gamma=10$, same
+planes and error convention. Two columns, $B_y$ and $B_z$, field row on top
+and error row below. $B_x\equiv0$ for an axial current and is omitted.}
+\label{fig:sxy10B}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.95\linewidth]{figs/mid_sxy_g1.pdf}\\[1pt]
-\includegraphics[width=0.95\linewidth]{figs/mid_szy_g1.pdf}
-\caption{Mid-bunch slices, stationary bunch ($\gamma=1$), $N=1000$,
+\includegraphics[width=0.95\linewidth]{figs/mid_sxy_g1_E.pdf}\\[1pt]
+\includegraphics[width=0.95\linewidth]{figs/mid_szy_g1_E.pdf}
+\caption{Mid-bunch electric slices, stationary bunch ($\gamma=1$), $N=1000$,
 $32\times32\times16$, cell $2\times10^{-7}$\,m, $h=1$ PIC cell, no near
-shell, same planes as Fig.~\ref{fig:sxy10} \citep{SL2}; $B$ is zero, so the
- three electric components are drawn. The error in the bunch core is $0.12$
- to $0.415$ per component (Table~\ref{tab:slices}).}
+shell, same planes and layout as Fig.~\ref{fig:sxy10} \citep{SL2}; the three
+electric components are drawn, with the field row on top and the error row
+below. $B\equiv0$, so no magnetic companion exists. The error in the bunch
+core is $0.12$ to $0.415$ per component (Table~\ref{tab:slices}).}
 \label{fig:sxy1}
 \end{figure}
 
@@ -541,10 +556,11 @@ would grow with $N$, and it does not \citep{W7t}.
   measured limits of the mesh at a fixed distance in cells, stated as the
   behaviour the data show.
 
- Fig.~\ref{fig:large} shows the field and the error on a $128\times128\times64$
- domain, cell $2\times10^{-7}$\,m, $N=100$, at $\gamma=1$ and $\gamma=10$,
- against the independent continuum at tolerance $10^{-3}$
- \citep{LARGE1}. The boundary field is about $10.3\%$ of the peak (worst
+ Fig.~\ref{fig:large} shows the $\gamma=10$ field and error on a
+ $128\times128\times64$ domain, cell $2\times10^{-7}$\,m, $N=100$, against
+ the independent continuum at tolerance $10^{-3}$ \citep{LARGE1};
+ Fig.~\ref{fig:largeB} is its magnetic companion, and
+ Fig.~\ref{fig:largeg1} is the stationary-bunch electric case. The boundary field is about $10.3\%$ of the peak (worst
  per-component, $\gamma=10$ z-y $E_z$), so the colour scale is set by the bunch
  and the far decay is visible inside the frame. The core error is the method
  error of the mesh where the planes cut the bunch, far above the
@@ -552,19 +568,38 @@ would grow with $N$, and it does not \citep{W7t}.
 
   \begin{figure}[t]
   \centering
-  \includegraphics[width=0.98\linewidth]{figs/large_sxy_g10.pdf}\\[1pt]
-  \includegraphics[width=0.98\linewidth]{figs/large_szy_g10.pdf}\\[1pt]
-  \includegraphics[width=0.98\linewidth]{figs/large_sxy_g1.pdf}\\[1pt]
-  \includegraphics[width=0.98\linewidth]{figs/large_szy_g1.pdf}
-  \caption{Large-domain slices, $128\times128\times64$, cell
-  $2\times10^{-7}$\,m, $N=100$, \texttt{jureca\_h100} \citep{LARGE1}. Top
-  $\gamma=10$, bottom $\gamma=1$; in each pair the top panel is the x-y plane
-  through the bunch centre and the bottom panel the z-y plane, left column
-  mesh field, right column relative error against the independent continuum.
-  The boundary field is about $10.3\%$ of the peak (worst per-component,
-  $\gamma=10$ z-y $E_z$), so the colour scale is set by the bunch, not the
-  frame edge.}
+  \includegraphics[width=0.92\linewidth]{figs/large_sxy_g10_E.pdf}\\[1pt]
+  \includegraphics[width=0.92\linewidth]{figs/large_szy_g10_E.pdf}
+  \caption{Large-domain electric slices, $\gamma=10$, $128\times128\times64$,
+  cell $2\times10^{-7}$\,m, $N=100$, \texttt{jureca\_h100}
+  \citep{LARGE1}. Upper image, x-y plane through the bunch centre; lower
+  image, z-y plane. In each image the field row is on top and the error row
+  below, with $E_x,E_y,E_z$ columns; the error is against the independent
+  continuum. The boundary field is about $10.3\%$ of the peak (worst
+  per-component, $\gamma=10$ z-y $E_z$), so the colour scale is set by the
+  bunch, not the frame edge.}
   \label{fig:large}
+  \end{figure}
+
+  \begin{figure}[t]
+  \centering
+  \includegraphics[width=0.80\linewidth]{figs/large_sxy_g10_B.pdf}\\[1pt]
+  \includegraphics[width=0.80\linewidth]{figs/large_szy_g10_B.pdf}
+  \caption{Magnetic companion to Fig.~\ref{fig:large}, $\gamma=10$, same
+  planes and error convention. Two columns, $B_y$ and $B_z$, field row on top
+  and error row below. $B_x\equiv0$ for an axial current and is omitted.}
+  \label{fig:largeB}
+  \end{figure}
+
+  \begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{figs/large_sxy_g1_E.pdf}\\[1pt]
+  \includegraphics[width=0.92\linewidth]{figs/large_szy_g1_E.pdf}
+  \caption{Large-domain electric slices, stationary bunch ($\gamma=1$), same
+  domain and layout as Fig.~\ref{fig:large} \citep{LARGE1}; the field row is
+  on top and the error row below, with $E_x,E_y,E_z$ columns. $B\equiv0$, so
+  no magnetic companion exists.}
+  \label{fig:largeg1}
   \end{figure}
 
  \subsection{Determinism}
