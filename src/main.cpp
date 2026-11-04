@@ -90,13 +90,15 @@ namespace
             "                        slower, diagnostic only)\n"
             "  --tolerance <value>   relative accuracy target of the free-space\n"
             "                        convolution (default: 1e-3; floor 1e-14)\n"
-            "  --near-shell <mode>   none|exact (default: none).  exact replaces the\n"
-            "                        mesh contribution of every source within the shell\n"
-            "                        by the exact TSC-convolved field; expensive.\n"
+            "  --near-shell <mode>   none|exact|fast (default: none).  exact replaces\n"
+            "                        the mesh contribution of every source within the\n"
+            "                        shell by the adaptive reference; fast uses the\n"
+            "                        asinh box + subtracted-GL remainder evaluator.\n"
             "  --near-shell-radius <cells>  shell radius in PIC cells (default: derived\n"
             "                        from --tolerance: 3 at 1e-3, +1 per decade, max 6)\n"
             "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
             "                        (default: 4)\n"
+            "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -117,6 +119,7 @@ namespace
         std::string nearShell = "none";
         double nearShellRadius = 0.0;
         std::size_t nearShellTile = 4;
+        int nearShellFastOrder = 5;
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
@@ -290,6 +293,9 @@ namespace
             else if(option == "--near-shell-tile")
                 args.nearShellTile
                     = parseIteration(value("--near-shell-tile"), "--near-shell-tile");
+            else if(option == "--near-shell-fast-order")
+                args.nearShellFastOrder
+                    = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -341,12 +347,14 @@ namespace
         if(args.backend != "auto" && args.backend != compiledBackend())
             throw std::invalid_argument(
                 "--backend " + args.backend + " is not available; this build uses " + compiledBackend());
-        if(args.nearShell != "none" && args.nearShell != "exact")
-            throw std::invalid_argument("--near-shell must be 'none' or 'exact'");
+        if(args.nearShell != "none" && args.nearShell != "exact" && args.nearShell != "fast")
+            throw std::invalid_argument("--near-shell must be 'none', 'exact' or 'fast'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         if(args.nearShellTile == 0u)
             throw std::invalid_argument("--near-shell-tile must be positive");
+        if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
+            throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
         if(args.restartFormat != "standard" && args.restartFormat != "picongpu")
             throw std::invalid_argument("--restart-format must be 'standard' or 'picongpu'");
         if(args.restartFormat == "picongpu" && args.output)
@@ -454,7 +462,10 @@ namespace
         options.gridOrigin = config.domain.origin;
         options.nearShell.mode = (config.accuracy.nearShell == "exact")
             ? picBunch::NearShellOptions::Mode::Exact
-            : picBunch::NearShellOptions::Mode::None;
+            : (config.accuracy.nearShell == "fast")
+                ? picBunch::NearShellOptions::Mode::Fast
+                : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.fastOrder = config.accuracy.nearShellFastOrder;
         options.nearShell.radiusCells = config.accuracy.nearShellRadius;
         options.nearShell.tileNodes = config.accuracy.nearShellTile;
         std::printf(
@@ -569,7 +580,10 @@ int main(int argc, char** argv)
         options.deterministicDeposit = args.deterministicDeposit;
         options.nearShell.mode = (args.nearShell == "exact")
             ? picBunch::NearShellOptions::Mode::Exact
-            : picBunch::NearShellOptions::Mode::None;
+            : (args.nearShell == "fast")
+                ? picBunch::NearShellOptions::Mode::Fast
+                : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.fastOrder = args.nearShellFastOrder;
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
         std::optional<std::array<double, 3>> meshCellSize;
@@ -687,7 +701,7 @@ int main(int argc, char** argv)
             args.nearShell.c_str(),
             picBunch::resolveNearShellRadius(options, options.nearShell),
             options.nearShell.tileNodes);
-        if(options.nearShell.mode == picBunch::NearShellOptions::Mode::Exact)
+        if(options.nearShell.mode != picBunch::NearShellOptions::Mode::None)
         {
             std::size_t exactPairs = 0;
             options.nearShell.exactPairs = &exactPairs;
