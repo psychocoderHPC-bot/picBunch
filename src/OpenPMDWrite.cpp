@@ -1423,6 +1423,53 @@ namespace picBunch
             closeQuietly(record);
         }
 
+        void writeScalarRecord(
+            hid_t species,
+            char const* recordName,
+            std::vector<double> const& values,
+            double unitSI,
+            std::array<double, 7> const& unitDimension,
+            bool macroWeighted,
+            double weightingPower,
+            bool float64)
+        {
+            hid_t record = checked(
+                H5Gcreate2(species, recordName, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
+            setParticleRecordAttributes(record, unitDimension, macroWeighted, weightingPower);
+            hsize_t const count = static_cast<hsize_t>(values.size());
+            hid_t dataset = createOneDimensional(
+                record, recordName, count, float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE);
+            if(float64)
+                checked(
+                    H5Dwrite(
+                        dataset,
+                        H5T_NATIVE_DOUBLE,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        values.data()),
+                    "H5Dwrite");
+            else
+            {
+                std::vector<float> stored(values.size());
+                for(std::size_t i = 0; i < values.size(); ++i)
+                    stored[i] = static_cast<float>(values[i]);
+                checked(
+                    H5Dwrite(
+                        dataset,
+                        H5T_NATIVE_FLOAT,
+                        H5S_ALL,
+                        H5S_ALL,
+                        H5P_DEFAULT,
+                        stored.data()),
+                    "H5Dwrite");
+            }
+            setScalarAttribute(dataset, "unitSI", H5T_NATIVE_DOUBLE, unitSI);
+            closeQuietly(dataset);
+            closeQuietly(record);
+        }
+
         void writeGeneratedSpecies(
             hid_t file,
             std::string const& speciesPath,
@@ -1442,6 +1489,23 @@ namespace picBunch
             std::array<std::vector<double>, 3> momentum;
             std::array<std::vector<std::int32_t>, 3> positionOffset;
             std::vector<double> weighting(count, 0.0);
+            std::vector<double> charge(count, 0.0);
+            std::vector<double> mass(count, 0.0);
+            if(bunch.charge.size() != count)
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: generated species '"
+                    + generated.species + "' has no per-particle charge; "
+                    "the input bunch must carry it");
+            if(!(generated.unitCharge > 0.0))
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: generated species '"
+                    + generated.species + "' needs a positive unit_charge to write the "
+                    "charge record");
+            if(!(generated.unitMass > 0.0))
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: generated species '"
+                    + generated.species + "' needs a positive unit_mass to write the "
+                    "mass record");
             for(int a = 0; a < 3; ++a)
             {
                 position[static_cast<std::size_t>(a)].resize(count);
@@ -1452,11 +1516,11 @@ namespace picBunch
             {
                 double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
                 double const u[3] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
-                double const mass = (!bunch.restMass.empty() && bunch.restMass[p] > 0.0)
+                double const restMass = (!bunch.restMass.empty() && bunch.restMass[p] > 0.0)
                     ? bunch.restMass[p]
                     : (generated.fallbackMass > 0.0
                            ? generated.fallbackMass
-                           : generated.unitMassSpeed / kSpeedOfLight);
+                           : generated.unitMass);
                 for(int a = 0; a < 3; ++a)
                 {
                     double const cells = (xyz[a] - generated.domainOrigin[a])
@@ -1474,9 +1538,11 @@ namespace picBunch
                     positionOffset[static_cast<std::size_t>(a)][p]
                         = static_cast<std::int32_t>(cellIndex);
                     momentum[static_cast<std::size_t>(a)][p]
-                        = u[a] * mass * kSpeedOfLight / generated.unitMassSpeed;
+                        = u[a] * restMass * kSpeedOfLight / generated.unitMassSpeed;
                 }
                 weighting[p] = bunch.weight[p];
+                charge[p] = bunch.charge[p] / generated.unitCharge;
+                mass[p] = restMass / generated.unitMass;
             }
 
             std::array<double, 3> const cellUnit{
@@ -1489,7 +1555,7 @@ namespace picBunch
                 {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
                 false,
                 0.0,
-                float64);
+                true); // fractional in-cell position is always float64
             writeIntegerVectorRecord(particles, "positionOffset", positionOffset, cellUnit);
             writeFloatVectorRecord(
                 particles,
@@ -1504,36 +1570,19 @@ namespace picBunch
                 float64);
 
             hsize_t const scalarCount = static_cast<hsize_t>(count);
+            // The statistical weight can span orders of magnitude, so it is
+            // always stored as float64, independent of the configured precision.
             hid_t weightingDataset = createOneDimensional(
-                particles,
-                "weighting",
-                scalarCount,
-                float64 ? H5T_IEEE_F64LE : H5T_IEEE_F32LE);
-            if(float64)
-                checked(
-                    H5Dwrite(
-                        weightingDataset,
-                        H5T_NATIVE_DOUBLE,
-                        H5S_ALL,
-                        H5S_ALL,
-                        H5P_DEFAULT,
-                        weighting.data()),
-                    "H5Dwrite");
-            else
-            {
-                std::vector<float> stored(count);
-                for(std::size_t i = 0; i < count; ++i)
-                    stored[i] = static_cast<float>(weighting[i]);
-                checked(
-                    H5Dwrite(
-                        weightingDataset,
-                        H5T_NATIVE_FLOAT,
-                        H5S_ALL,
-                        H5S_ALL,
-                        H5P_DEFAULT,
-                        stored.data()),
-                    "H5Dwrite");
-            }
+                particles, "weighting", scalarCount, H5T_IEEE_F64LE);
+            checked(
+                H5Dwrite(
+                    weightingDataset,
+                    H5T_NATIVE_DOUBLE,
+                    H5S_ALL,
+                    H5S_ALL,
+                    H5P_DEFAULT,
+                    weighting.data()),
+                "H5Dwrite");
             setParticleRecordAttributes(weightingDataset, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
             setScalarAttribute(weightingDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(weightingDataset);
@@ -1551,6 +1600,29 @@ namespace picBunch
             setParticleRecordAttributes(idDataset, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
             setScalarAttribute(idDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(idDataset);
+
+            // PIConGPU can derive charge and mass from the species flags, but a
+            // restart from this checkpoint is self-contained when both records
+            // are present.  Values are stored in internal units and the unitSI
+            // attribute carries the TOML factor.
+            writeScalarRecord(
+                particles,
+                "charge",
+                charge,
+                generated.unitCharge,
+                {0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0},
+                false,
+                1.0,
+                float64);
+            writeScalarRecord(
+                particles,
+                "mass",
+                mass,
+                generated.unitMass,
+                {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+                false,
+                1.0,
+                float64);
 
             hid_t patches = checked(
                 H5Gcreate2(particles, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),

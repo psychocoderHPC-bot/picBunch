@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,10 +80,32 @@ namespace picBunch
         }
 
         auto const bounds = result.bunch.bounds();
+        char const* const axisNames[3] = {"x", "y", "z"};
         for(int a = 0; a < 3; ++a)
         {
             double const lower = config.domain.origin[a];
             double const upper = lower + static_cast<double>(config.domain.cells[a]) * config.domain.cellSize[a];
+            if(bounds[0][a] < lower || bounds[1][a] >= upper)
+            {
+                // Never clip: report the largest distance outside the
+                // [lower, upper) domain and abort before writing any patch.
+                double const outside = std::max({lower - bounds[0][a], bounds[1][a] - upper, 0.0});
+                std::ostringstream message;
+                message << "placement leaves the PIConGPU domain on axis " << axisNames[a]
+                        << ": shifted bunch spans [" << bounds[0][a] << ", " << bounds[1][a]
+                        << "] m, domain is [" << lower << ", " << upper << ") m; "
+                        << outside << " m (" << outside / config.domain.cellSize[a]
+                        << " cells) lie outside the domain; reduce the placement offset";
+                throw std::runtime_error(message.str());
+            }
+            if(config.placement.patch == Config::Placement::Patch::Domain)
+            {
+                // One domain-covering patch.  positionOffset still indexes the
+                // global cells, so the particle cell indices are unchanged.
+                result.patchOffset[a] = 0;
+                result.patchExtent[a] = static_cast<std::uint64_t>(config.domain.cells[a]);
+                continue;
+            }
             // Snap a value that is within one part in 1e9 of a cell boundary
             // to that boundary.  Adding a shift and dividing again can leave
             // 3.0 as 2.9999999999999996, which would otherwise put a particle
@@ -91,13 +114,6 @@ namespace picBunch
                 (bounds[0][a] - lower) / config.domain.cellSize[a] + 1e-9);
             double const highCell = std::floor(
                 (bounds[1][a] - lower) / config.domain.cellSize[a] + 1e-9);
-            if(bounds[0][a] < lower || bounds[1][a] >= upper)
-                throw std::runtime_error(
-                    "placement leaves the PIConGPU domain on axis "
-                    + std::to_string(a) + ": shifted bunch spans ["
-                    + std::to_string(bounds[0][a]) + ", " + std::to_string(bounds[1][a])
-                    + "] m, domain is [" + std::to_string(lower) + ", "
-                    + std::to_string(upper) + ") m; reduce the placement offset");
             auto const offset = static_cast<std::int64_t>(lowCell);
             auto const extent = static_cast<std::uint64_t>(highCell - lowCell) + 1u;
             if(offset < 0 || extent == 0u
@@ -105,7 +121,7 @@ namespace picBunch
                    > static_cast<std::uint64_t>(config.domain.cells[a]))
                 throw std::runtime_error(
                     "placement produces an invalid particle patch on axis "
-                    + std::to_string(a));
+                    + std::string(axisNames[a]));
             result.patchOffset[a] = offset;
             result.patchExtent[a] = extent;
         }

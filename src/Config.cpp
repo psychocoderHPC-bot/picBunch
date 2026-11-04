@@ -62,6 +62,14 @@ namespace picBunch
             return *value;
         }
 
+        bool asBool(toml::node const& node, std::string const& key)
+        {
+            auto const value = node.value<bool>();
+            if(!value)
+                fail(key, "expected a boolean");
+            return *value;
+        }
+
         std::array<double, 3> asTriple(toml::node const& node, std::string const& key)
         {
             auto const* array = node.as_array();
@@ -125,6 +133,8 @@ namespace picBunch
         }
 
         Config config;
+        if(auto const* node = document.get("strict"))
+            config.strict = asBool(*node, "strict");
         auto const& picongpu = requireTable(document, "picongpu");
         auto const& domain = requireTable(document, "domain");
         auto const& placement = requireTable(document, "placement");
@@ -169,6 +179,16 @@ namespace picBunch
             config.placement.fraction = false;
         else
             fail("placement.offset_unit", "expected \"fraction\" or \"metres\"");
+        if(auto const* node = placement.get("patch"))
+        {
+            std::string const patch = asString(*node, "placement.patch");
+            if(patch == "bbox")
+                config.placement.patch = Config::Placement::Patch::BoundingBox;
+            else if(patch == "domain")
+                config.placement.patch = Config::Placement::Patch::Domain;
+            else
+                fail("placement.patch", "expected \"bbox\" or \"domain\"");
+        }
 
         config.accuracy.tolerance = asDouble(require(accuracy, "tolerance"), "accuracy.tolerance");
         if(auto const* node = accuracy.get("near_shell"))
@@ -243,7 +263,11 @@ namespace picBunch
         warnUnknown(
             placement,
             "placement",
-            {"placement.left", "placement.front", "placement.top", "placement.offset_unit"},
+            {"placement.left",
+             "placement.front",
+             "placement.top",
+             "placement.offset_unit",
+             "placement.patch"},
             config.warnings);
         warnUnknown(
             accuracy,
@@ -256,8 +280,22 @@ namespace picBunch
         for(auto const& [key, node] : document)
         {
             std::string const name(key.str());
-            if(name != "picongpu" && name != "domain" && name != "placement" && name != "accuracy")
+            if(name != "strict" && name != "picongpu" && name != "domain" && name != "placement"
+               && name != "accuracy")
                 config.warnings.push_back("unknown configuration key '" + name + "' was ignored");
+        }
+        if(config.strict && !config.warnings.empty())
+        {
+            std::string joined;
+            for(std::size_t i = 0; i < config.warnings.size(); ++i)
+            {
+                if(i != 0)
+                    joined += "; ";
+                joined += config.warnings[i];
+            }
+            throw std::runtime_error(
+                "configuration key 'strict': unknown keys are not allowed in strict mode: "
+                + joined);
         }
         return config;
     }

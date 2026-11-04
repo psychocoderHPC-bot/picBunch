@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,24 @@ namespace
         H5Dread(dataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &value);
         H5Dclose(dataset);
         return value;
+    }
+
+    struct OnDiskType
+    {
+        H5T_class_t klass;
+        std::size_t size;
+    };
+
+    OnDiskType readType(hid_t file, std::string const& path)
+    {
+        hid_t dataset = H5Dopen2(file, path.c_str(), H5P_DEFAULT);
+        if(dataset < 0)
+            throw std::runtime_error("cannot open dataset " + path);
+        hid_t type = H5Dget_type(dataset);
+        OnDiskType const result{H5Tget_class(type), H5Tget_size(type)};
+        H5Tclose(type);
+        H5Dclose(dataset);
+        return result;
     }
 } // namespace
 
@@ -138,6 +157,8 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     generated.patchOffset = placed.patchOffset;
     generated.patchExtent = placed.patchExtent;
     generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
+    generated.unitCharge = config.picongpu.unitCharge;
+    generated.unitMass = config.picongpu.unitMass;
     generated.fallbackMass = config.picongpu.unitMass;
     options.generatedParticles = generated;
     picBunch::writePicOnGPUCheckpoint(field, options);
@@ -173,6 +194,126 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     EXPECT_EQ(readScalar(file, "data/3/particles/electrons/particlePatches/numParticles"), 3u);
     EXPECT_EQ(readScalar(file, "data/3/particles/electrons/particlePatches/offset/x"), 3u);
     EXPECT_EQ(readScalar(file, "data/3/particles/electrons/particlePatches/extent/x"), 5u);
+
+    // charge and mass are stored in internal units; the input bunch carries the
+    // SI values, so the record is charge/unit_charge and restMass/unit_mass.
+    auto const chargeRecord = readVector(file, "data/3/particles/electrons/charge/charge");
+    auto const massRecord = readVector(file, "data/3/particles/electrons/mass/mass");
+    ASSERT_EQ(chargeRecord.size(), 3u);
+    ASSERT_EQ(massRecord.size(), 3u);
+    for(std::size_t p = 0; p < 3; ++p)
+    {
+        EXPECT_NEAR(chargeRecord[p], bunch.charge[p] / config.picongpu.unitCharge, 1e-12);
+        EXPECT_NEAR(massRecord[p], bunch.restMass[p] / config.picongpu.unitMass, 1e-12);
+    }
+
+    // On-disk dtype per record for the default float32 configuration:
+    // position and weighting are always float64.
+    auto const positionType = readType(file, "data/3/particles/electrons/position/x");
+    EXPECT_EQ(positionType.klass, H5T_FLOAT);
+    EXPECT_EQ(positionType.size, 8u);
+    auto const weightingType = readType(file, "data/3/particles/electrons/weighting");
+    EXPECT_EQ(weightingType.klass, H5T_FLOAT);
+    EXPECT_EQ(weightingType.size, 8u);
+    auto const momentumType = readType(file, "data/3/particles/electrons/momentum/x");
+    EXPECT_EQ(momentumType.klass, H5T_FLOAT);
+    EXPECT_EQ(momentumType.size, 4u);
+    auto const offsetType = readType(file, "data/3/particles/electrons/positionOffset/x");
+    EXPECT_EQ(offsetType.klass, H5T_INTEGER);
+    EXPECT_EQ(offsetType.size, 4u);
+    auto const idType = readType(file, "data/3/particles/electrons/id");
+    EXPECT_EQ(idType.klass, H5T_INTEGER);
+    EXPECT_EQ(idType.size, 8u);
+    auto const chargeType = readType(file, "data/3/particles/electrons/charge/charge");
+    EXPECT_EQ(chargeType.klass, H5T_FLOAT);
+    EXPECT_EQ(chargeType.size, 4u);
+    auto const massType = readType(file, "data/3/particles/electrons/mass/mass");
+    EXPECT_EQ(massType.klass, H5T_FLOAT);
+    EXPECT_EQ(massType.size, 4u);
+    H5Fclose(file);
+
+    // float64 moves momentum, charge and mass to 8 bytes; position and
+    // weighting stay float64 and the integer records do not change.
+    options.float64 = true;
+    picBunch::writePicOnGPUCheckpoint(field, options);
+    file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/position/x").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/weighting").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/momentum/x").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/charge/charge").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/mass/mass").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/positionOffset/x").size, 4u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/id").size, 8u);
     H5Fclose(file);
     std::filesystem::remove_all(directory);
+}
+
+TEST(Placement, DomainPatchCoversTheWholeDomain)
+{
+    picBunch::Config config;
+    config.domain.cells = {10, 12, 14};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    config.placement.fraction = true;
+    config.placement.offset = {0.5, 0.5, 0.5};
+    config.placement.patch = picBunch::Config::Placement::Patch::Domain;
+
+    picBunch::Bunch bunch;
+    bunch.resize(3);
+    std::array<std::array<double, 3>, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    for(std::size_t p = 0; p < 3; ++p)
+    {
+        bunch.x[p] = positions[p][0];
+        bunch.y[p] = positions[p][1];
+        bunch.z[p] = positions[p][2];
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+
+    auto const placed = picBunch::placeBunch(bunch, config);
+    EXPECT_EQ(placed.patchOffset, (std::array<std::int64_t, 3>{0, 0, 0}));
+    EXPECT_EQ(placed.patchExtent, (std::array<std::uint64_t, 3>{10, 12, 14}));
+    // positionOffset still indexes the global cells, unchanged by the patch mode.
+    EXPECT_NEAR(placed.centroid[0], 3.0, 1e-12);
+}
+
+TEST(Placement, OutOfDomainIsRejectedWithoutClipping)
+{
+    picBunch::Config config;
+    config.domain.cells = {10, 10, 10};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    config.placement.fraction = false;
+    config.placement.offset = {9.0, 5.0, 5.0};
+
+    picBunch::Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {1.0, 9.0};
+    bunch.y = {4.0, 6.0};
+    bunch.z = {4.0, 6.0};
+    for(std::size_t p = 0; p < 2; ++p)
+    {
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+
+    // charge-weighted centroid is x=5, shift=+4, so the bunch spans x=[5,13]
+    // and the upper edge is 3 m (3 cells) outside the 10 m domain.
+    try
+    {
+        (void)picBunch::placeBunch(bunch, config);
+        FAIL() << "expected an out-of-domain placement error";
+    }
+    catch(std::exception const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis x"), std::string::npos);
+        EXPECT_NE(message.find("outside"), std::string::npos);
+        EXPECT_NE(message.find("3"), std::string::npos);
+    }
+    // The input is untouched: no particle was clipped or moved.
+    EXPECT_DOUBLE_EQ(bunch.x[1], 9.0);
+    EXPECT_DOUBLE_EQ(bunch.y[1], 6.0);
 }

@@ -111,6 +111,12 @@ namespace picBunch
         std::array<std::uint64_t, 3> patchExtent{1, 1, 1};
         //! PIConGPU momentum unit ``unit_mass * unit_speed`` in SI.
         double unitMassSpeed = 1.0;
+        //! PIConGPU charge unit in Coulomb (``sim.unit.charge()``).  Required
+        //! for the ``charge`` record; a non-positive value is an error.
+        double unitCharge = 0.0;
+        //! PIConGPU mass unit in kilograms (``sim.unit.mass()``).  Required for
+        //! the ``mass`` record; a non-positive value is an error.
+        double unitMass = 0.0;
         //! Rest mass used when a particle has no positive ``restMass`` entry.
         double fallbackMass = 0.0;
     };

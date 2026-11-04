@@ -26,7 +26,7 @@ convolution target and the optional exact near shell.
 | `unit_b` | yes | PIConGPU magnetic-field unit in T (`sim.unit.bField()`). |
 | `dt` | yes | Time step in seconds, stored in the checkpoint. |
 | `step` | yes | Checkpoint step in `[0, 999999]`; also the file suffix. |
-| `precision` | no | `"float32"` (default) or `"float64"` for particle records and fields. |
+| `precision` | no | `"float32"` (default) or `"float64"` for fields, momentum, charge and mass. `position` and `weighting` are always float64. |
 | `species` | yes | Species to read from `--input` and write to the checkpoint. |
 | `unit_charge` | no | Charge unit in C. Default `1.602176634e-19`. |
 | `unit_mass` | no | Mass unit in kg. Default `9.1093837015e-31`. |
@@ -59,12 +59,20 @@ bunch centre.
 | `left` | yes | Offset along `+x`. |
 | `front` | yes | Offset along `+y`. |
 | `top` | yes | Offset along `+z`. |
+| `patch` | no | `"bbox"` (default) or `"domain"`. |
 
 Fractional values must be in `[0, 1]`. The placement uses the charge-weighted
 centroid `sum(q w r) / sum(q w)`. The bounding-box centre is printed in the log
-for comparison but does not drive the placement. If the shifted bunch would
-leave the domain, the run fails instead of writing a patch PIConGPU cannot
-restart.
+for comparison but does not drive the placement.
+
+A shifted bunch that would leave the domain is rejected, never clipped. The
+error names the offending axis (`x`, `y` or `z`) and the distance outside the
+domain in metres and cells.
+
+`patch = "bbox"` writes one patch covering only the shifted bunch bounding box.
+It is validated for single-rank restarts. `patch = "domain"` writes one patch
+covering the whole domain and is the safe choice for a multi-rank restart; its
+`positionOffset` still indexes the global cells, so particle data is unchanged.
 
 ### `[accuracy]`
 
@@ -77,28 +85,47 @@ restart.
 
 ## Particle patch and records
 
-The writer creates one particle patch for the species. Its `offset` is the
-lowest cell index of the shifted bunch bounding box relative to the domain
-origin; its `extent` covers the bounding box. `numParticles` is the bunch size
-and `numParticlesOffset` is zero.
+The writer creates one particle patch for the species. With
+`patch = "bbox"`, its `offset` is the lowest cell index of the shifted bunch
+bounding box relative to the domain origin and its `extent` covers the bounding
+box. With `patch = "domain"`, `offset` is zero and `extent` is the full domain.
+`numParticles` is the bunch size and `numParticlesOffset` is zero.
 
 Records are in PIConGPU internal units:
 
 - `position`: fractional in-cell coordinate in `[0, 1)`, `unitSI` is the cell
-  size. `positionOffset`: integer cell index, stored as int32.
-- `momentum`: `p / (unit_mass * unit_speed)`.
+  size. Always stored as float64. `positionOffset`: integer cell index, stored
+  as int32.
+- `momentum`: `p / (unit_mass * unit_speed)`, stored at the configured
+  precision.
 - `weighting`: statistical weight with `macroWeighted = 1` and
-  `weightingPower = 1`.
+  `weightingPower = 1`; always float64 so weights spanning orders of magnitude
+  keep their relative precision.
+- `charge`: `q / unit_charge` with `unitSI = unit_charge`, read from the input
+  bunch and converted with `unit_charge`.
+- `mass`: `m / unit_mass` with `unitSI = unit_mass`, read from the input bunch
+  and converted with `unit_mass`. When the input has no positive rest mass the
+  configured `unit_mass` is used.
+- `id`: uint64 global index.
+
+A missing or non-positive `unit_charge`/`unit_mass` factor is an error when the
+corresponding record is written, so the writer never invents a conversion.
 
 The checkpoint also contains `fields/picongpu_idProvider`, every other species
 present in the input iteration, and `checkpoints.txt`.
 
 ## Precision
 
-`precision` selects the storage type of the particle records and the six field
-components. `float32` is the default and matches a standard single-precision
-PIConGPU build. Use `float64` only for a double-precision PIConGPU build; it
-doubles the checkpoint size and is not beneficial for a single-precision deck.
+`precision` selects the storage type of the six field components, `momentum`,
+`charge` and `mass`. `float32` is the default and matches a standard
+single-precision PIConGPU build. Use `float64` only for a double-precision
+PIConGPU build; it doubles the checkpoint size and is not beneficial for a
+single-precision deck.
+
+`position` and `weighting` are always float64 regardless of `precision`. The
+fractional in-cell `position` in `[0, 1)` loses absolute precision at cell
+sizes around `1e-7` m, and weights can span orders of magnitude. `positionOffset`
+stays int32 and `id` stays uint64.
 
 ## Dependency pin
 

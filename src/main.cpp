@@ -487,6 +487,8 @@ namespace
         generated.patchOffset = placed.patchOffset;
         generated.patchExtent = placed.patchExtent;
         generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
+        generated.unitCharge = config.picongpu.unitCharge;
+        generated.unitMass = config.picongpu.unitMass;
         generated.fallbackMass = config.picongpu.unitMass;
         restart.generatedParticles = generated;
 

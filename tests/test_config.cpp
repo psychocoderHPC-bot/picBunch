@@ -77,6 +77,10 @@ TEST(Config, ParsesEveryRequiredKey)
     EXPECT_DOUBLE_EQ(config.domain.origin[0], 1.0e-6);
     EXPECT_TRUE(config.placement.fraction);
     EXPECT_DOUBLE_EQ(config.placement.offset[2], 0.75);
+    EXPECT_EQ(
+        static_cast<int>(config.placement.patch),
+        static_cast<int>(picBunch::Config::Placement::Patch::BoundingBox));
+    EXPECT_FALSE(config.strict);
     EXPECT_DOUBLE_EQ(config.accuracy.tolerance, 1.0e-4);
     EXPECT_EQ(config.accuracy.nearShell, "exact");
     EXPECT_DOUBLE_EQ(config.accuracy.nearShellRadius, 4.0);
@@ -142,6 +146,53 @@ TEST(Config, UnknownKeyIsWarned)
         if(warning.find("unknown_top_level") != std::string::npos)
             warned = true;
     EXPECT_TRUE(warned);
+}
+
+TEST(Config, StrictRejectsUnknownKey)
+{
+    ConfigTest fixture;
+    std::string text = "strict = true\n" + fullConfig + "\nunknown_top_level = 1\n";
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("strict-unknown.toml", text));
+        FAIL() << "expected an unknown-key error in strict mode";
+    }
+    catch(std::exception const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("strict"), std::string::npos);
+        EXPECT_NE(message.find("unknown_top_level"), std::string::npos);
+    }
+}
+
+TEST(Config, StrictAcceptsKnownKeys)
+{
+    ConfigTest fixture;
+    std::string text = "strict = true\n" + fullConfig;
+    auto const config = picBunch::loadConfig(fixture.write("strict-ok.toml", text));
+    EXPECT_TRUE(config.strict);
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, ParsesDomainPatch)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    text.replace(text.find("offset_unit = \"fraction\""), 24, "offset_unit = \"fraction\"\npatch = \"domain\"");
+    auto const config = picBunch::loadConfig(fixture.write("patch.toml", text));
+    EXPECT_EQ(
+        static_cast<int>(config.placement.patch),
+        static_cast<int>(picBunch::Config::Placement::Patch::Domain));
+}
+
+TEST(Config, RejectsUnknownPatch)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    text.replace(text.find("offset_unit = \"fraction\""), 24, "offset_unit = \"fraction\"\npatch = \"cube\"");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("patch-bad.toml", text)),
+        std::runtime_error);
 }
 
 TEST(Config, PrecisionSwitchRejectsUnknownValue)

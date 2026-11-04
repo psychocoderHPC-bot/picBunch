@@ -42,10 +42,21 @@ namespace picBunch
 
         struct Placement
         {
+            //! One particle patch per generated species.
+            enum class Patch
+            {
+                BoundingBox, //!< cover the shifted bunch bounding box only
+                Domain //!< cover the full PIConGPU domain
+            };
+
             //! Offsets from the PIConGPU domain origin along +x (left), +y
             //! (front), +z (top); metres or a fraction of the domain extent.
             std::array<double, 3> offset{0.0, 0.0, 0.0};
             bool fraction = true;
+            //! ``bbox`` (default) or ``domain``.  A single domain-covering patch
+            //! is the safe choice for a multi-rank restart; the bounding-box
+            //! patch is validated only for single-rank restarts.
+            Patch patch = Patch::BoundingBox;
         } placement;
 
         struct Accuracy
@@ -56,6 +67,8 @@ namespace picBunch
             std::size_t nearShellTile = 4;
         } accuracy;
 
+        //! Reject unknown keys instead of warning about them.
+        bool strict = false;
         std::vector<std::string> warnings;
     };
 
