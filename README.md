@@ -318,6 +318,12 @@ FFT-dominated at large box (kernel 0.43 to 22.66 ms and FFT 3.80 to 75.97 ms fro
 N=2e6/100-cell. No configuration approached the 32 GB device limit. The four independent
 N=2e6/20-cell repeats span 60.35 to 64.81 ms, about 7% scatter.
 
+Beyond the compute pipeline, the fresh-clone reproduction run at the documented smoke
+geometry (64x64x32 grid, cell 1e-7 m, 100 particles, gamma 1) timed the whole executable
+end to end on rosi V100: deposit 1.6 ms, kernel 1.4 ms, FFT 6.8 ms, read-out 7.6 ms,
+writer 46.1 ms, total 63.5 ms. The openPMD writer dominates at small field sizes; the
+table above covers the compute stages of the large-N sweep, not the write path.
+
 ## Changelog
 
 - **v0.1.3** makes the input mesh define the whole output grid (extent, spacing, origin) when
@@ -349,7 +355,8 @@ N=2e6/20-cell repeats span 60.35 to 64.81 ms, about 7% scatter.
 Build and test commands are in [Build](#build). The exact test run for the 12/12 result is:
 
 ```bash
-cd ~/pr24/w6-20261102/picBunch
+git clone https://github.com/psychocoderHPC-bot/picBunch
+cd picBunch
 export PATH=/usr/local/cuda/bin:$PATH
 env -u LD_PRELOAD cmake --preset cuda-v100 \
   -DopenPMD_DIR=/opt/openpmd-hdf5-0.17.1/lib/cmake/openPMD
@@ -370,7 +377,12 @@ The raw measurement data behind the accuracy, refinement and performance claims 
 committed under [docs/measurements/](docs/measurements/), with one provenance line and
 a SHA256 per file in [docs/measurements/README.md](docs/measurements/README.md). The
 rosi working directories named in that file are the reproduction hints; the transient
-`/tmp` mirror is no longer the source of record.
+`/tmp` mirror is no longer the source of record. To verify the committed bytes from the
+clone root:
+
+```bash
+sha256sum -c docs/measurements/MANIFEST.sha256
+```
 
 ## License
 
