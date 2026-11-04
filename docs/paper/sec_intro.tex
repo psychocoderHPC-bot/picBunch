@@ -10,8 +10,14 @@ source charges rather than by evaluating the closed form everywhere. We do that
 sum as a TSC deposit onto a zero-padded grid, a sampled exact TSC-convolved
 kernel, and a free-space FFT convolution, with staggered Yee read-out. This
 paper gives the exact discrete recipe a re-implementer needs, and it measures
-the cost and the accuracy of that recipe on a single V100, naming the reference
-for every error statement.
+the cost and the accuracy of \texttt{picBunch} \texttt{v0.5.0}
+(commit \texttt{7b4f1766}, tag \texttt{3e083fef}) on a single V100, naming the
+reference for every error statement. The release is driven by a single TOML
+configuration (input file, destination, config;
+Section~\ref{sec:interface}), and it carries the capabilities the measurements
+below exercise: an opt-in exact near shell, MPI chunked output for global
+domains larger than the compute box, a tolerance-derived far-tail margin for
+zero fill, and a float32 checkpoint that restarts under a stock PIConGPU.
 
 The established workaround avoids computing the initial field altogether: one
 starts from a field-free state and marches the bunch forward, letting the

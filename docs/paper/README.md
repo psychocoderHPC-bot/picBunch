@@ -1,9 +1,13 @@
 # picBunch paper
 
 Sources and rendered PDF for the picBunch method, cost, and accuracy paper.
-The manuscript reports the shipped v0.1.3 state (tag `v0.1.3`, commit
-`da3cd4239926f5da31b5794a36f8184e0b3164da`). Individual measurements name the
-commit they used; the measured field path is unchanged through v0.1.3.
+The manuscript reports the shipped v0.5.0 state (tag `v0.5.0`, commit
+`7b4f17661e5be355e4d19c1ab296b83905d1b8c4`). Individual measurements name the
+commit they used; the measured field path is unchanged through v0.5.0.
+
+The cost section contains one explicitly marked unfinished measurement
+(`[TODO --- UNFINISHED MEASUREMENT]` in `sec_accuracy.tex`) for the final
+300 s verdict. It is a placeholder, not a result.
 
 ## Build
 

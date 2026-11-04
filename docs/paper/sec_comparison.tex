@@ -7,9 +7,9 @@ restart transport. Neither is a truth comparison.
 
 \subsection{Cross-validation against the PIConGPU reference}
 
-The reference is the TSC-convolved field (Section~\ref{sec:accuracy}), produced
-by the same header-only kernel PIConGPU calls with
-\texttt{fieldInitializer=referenceOnly} \citep{W7t}. picBunch is at
+The reference is the TSC-convolved field (Section~\ref{sec:accuracy}),
+evaluated in PIConGPU in its reference-only field-initializer mode
+\citep{W7t}. picBunch is at
 \texttt{339ca7ad} (\texttt{experimental/mvp}); \texttt{ctest} passes 10/10
 \citep{W7r}. Both sides use identical Yee offsets, grid, and origin; the
 reference staggered point maps to a picBunch node by index with zero snap
@@ -21,7 +21,7 @@ $4.86\times10^{-2}$ for $\gamma=1$ ($E/z$) and $6.20\times10^{-1}$ for
 $\gamma=10$ ($E/z$; $E/y$ is $5.16\times10^{-1}$), against a reference
 reproducibility floor of $1.19\times10^{-6}$ ($E$) and
 $1.43\times10^{-6}$ ($B$) \citep{W7r,D13}. picBunch is about four to six
-orders of magnitude above that floor. This is a no-agreement statement at the
+orders of magnitude above that floor, a no-agreement statement at the
 reference floor, not a defect: B is exactly zero for $\gamma=1$ in both, the
 bulk agrees to below $1$--$3\%$, and the error is concentrated at the core
 and the beamed peaks \citep{W7r,D13}.
@@ -30,9 +30,9 @@ The whole-field comparison, $N=1000$ on $32\times32\times16$, cell
 $2\times10^{-7}$\,m, $16384$ nodes per component, gives the same picture:
 $\gamma=1$ bulk median $3.8$--$7.8\times10^{-3}$ with an L2 of
 $4.6$--$5.7\times10^{-2}$; $\gamma=10$ bulk median $1.4$--$3.3\times10^{-2}$
-but a beamed-core overshoot that pushes the $E/y$, $E/z$ L2 to $0.76$--$0.92$
-\citep{W7r}. The forward component $E/x$ is well resolved at $\gamma=10$
-($\sim6\%$); the beamed transverse components $E/y$, $E/z$ are
+but a beamed-core overshoot that pushes the $E/y$, $E/z$ L2 to
+$0.76$--$0.92$ \citep{W7r}. The forward $E/x$ is well resolved at
+$\gamma=10$ ($\sim6\%$); the beamed transverse $E/y$, $E/z$ are
 $50$--$130\%$ worst at the core, where the Lorentz-contracted field is a
 sub-cell pancake that TSC and the spectral near-field kernel cannot resolve
 \citep{W7r}.
@@ -40,8 +40,9 @@ sub-cell pancake that TSC and the spectral near-field kernel cannot resolve
 \begin{table}[t]
 \centering
 \small
-\caption{Whole-field comparison of picBunch against the exact-quadrature
-reference, $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m,
+\caption{Whole-field comparison of picBunch against the PIConGPU
+\texttt{referenceOnly} field, $N=1000$, $32\times32\times16$, cell
+$2\times10^{-7}$\,m,
 $16384$ nodes/component, rosi\_v100 \citep{W7r}. \texttt{worst\_rel} is
 peak-normalized; median and p99 are per-point over nodes with
 $|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled. Not a truth comparison.}
@@ -79,42 +80,39 @@ contribution \citep{W7t}.
 
 The checkpoint writer emits a PIConGPU openPMD field checkpoint matching
 PIConGPU's own plugin schema: root layout, openPMD version 5.0, $E$, $B$
-$x/y/z$ float32 at the exact Yee positions, grid spacing and offset, and the
-\texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The remaining
-differences against a genuine PIConGPU checkpoint are non-blocking metadata
-\citep{W7B}.
+$x/y/z$ at the exact Yee positions, grid spacing and offset, and the
+\texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The default
+precision is uniform \texttt{float32} for every field and particle record, so
+a stock single-precision PIConGPU can load the file \citep{IMPL3}.
+\texttt{v0.5.0} copies every species from the input bunch and carries a single
+checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
+the \texttt{charge} and \texttt{mass} records are written rather than omitted,
+and the species is a single particle patch (Section~\ref{sec:interface}). The
+remaining differences against a genuine PIConGPU checkpoint are non-blocking
+metadata \citep{W7B}.
 
-Field arrival is bitwise. A validation-only build with the field solver set to
-\texttt{None} loads the checkpoint and writes step 1; all six components are
-bitwise-equal, max ULP $0$ \citep{W7B}.
+Field arrival is bitwise. A fresh \texttt{v0.5.0} checkpoint written from a
+two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
+startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
+\texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;
+\texttt{domain}: offset $(0,0,0)$, extent $(24,24,12)$), all six field
+components bitwise-equal, $\max_\mathrm{abs\ diff} = 0.0$, electrons with ids
+$0$ to $15$, first-step displacement exactly $\beta c\,dt$ with
+$\beta = 0.9949874367$ \citep{INT2}. A validation-only build with the field
+solver set to \texttt{None} loads the checkpoint and writes step 1; all six
+components are bitwise-equal, max ULP $0$ \citep{W7B}.
 
-\subsection{PML passthrough, the LWFA open-boundary limit, and the restart fixes}
+\subsection{PML passthrough and the restart fixes}
 
-On a $24\times24\times12$ deck the restart is exit 0 with
+On a $24\times24\times12$ deck the restart is exit $0$ with
 \texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization drops
 from the $\sim116$\,s neuralBunch path to $1.8$\,s because the checkpoint
-carries the field \citep{W7B}. The larger LWFA case is where the limit shows.
-A $64\times128\times64$ LWFA run with PML active produces a genuine PIConGPU
-checkpoint with $96$ \texttt{Convolutional PML} $E/B$ records. At the W7B
-commit picBunch does not write them, so a restart with open boundaries
-(\texttt{--periodic 0 0 1}) fails with
-\texttt{Key 'Convolutional PML E\_xneg' does not exist (read-only)}, while
-\texttt{--periodic 1 1 1} on the same checkpoint restarts with exit 0,
-isolating the blocker to the missing PML records \citep{W7B}. A later fix
-run (commit \texttt{bed4344c}, the PML-copy writer, W3f) closes this limit:
-it reads the real LWFA checkpoint with its $638{,}976$ particles directly and
-copies the eight \texttt{Convolutional PML} groups, $48$ datasets, float32,
-bitwise equal to the source, so the open-boundary restart
-(\texttt{--periodic 0 0 1}) then exits 0 with initialization
-$3.986$\,s \citep{W7fix}. The PML state is required unconditionally by the
-checkpoint field list and loaded by the same loop, so a field-only writer
-without PML records cannot restart an open-boundary deck \citep{W7B,W7fix}.
-
-The same investigation found the defects in PIConGPU's restart path that the
-fixes PR addresses \citep{D15}: \texttt{RestartFieldLoader} never reads
-\texttt{unitSI}, \texttt{gridSpacing}, or \texttt{gridGlobalOffset}; the PML
-slabs are unconditional; a successful restart suppresses the initial dump; and
-the openPMD backend does not convert dataset dtypes. The fixes PR
+carries the field \citep{W7B}. The same investigation found the defects in
+PIConGPU's restart path that the fixes PR addresses \citep{D15}:
+\texttt{RestartFieldLoader} never reads \texttt{unitSI},
+\texttt{gridSpacing} or \texttt{gridGlobalOffset}; the PML slabs are
+unconditional; a successful restart suppresses the initial dump; and the
+openPMD backend does not convert dataset dtypes. The fixes PR
 (\texttt{psychocoderHPC-bot/picongpu} PR \#25, draft) adds restart metadata
 validation, unitSI conversion, optional PML slabs, and an explicit dtype
 contract, verified by real restarts including a factor-2 unitSI case

@@ -1,6 +1,32 @@
 \section{Method}
 \label{sec:method}
 
+\subsection{The operator interface}
+\label{sec:interface}
+
+\texttt{v0.5.0} (commit \texttt{7b4f1766}, tag \texttt{3e083fef}) is driven
+by \texttt{picBunch --input bunch.h5 --destination <checkpoint> --config
+params.toml}, with every unit and conversion parameter in the TOML file
+\citep{INT2}. The \texttt{[picongpu]} section carries
+\texttt{unit\_length}, \texttt{unit\_e}, \texttt{unit\_b}, \texttt{dt},
+\texttt{step}, \texttt{precision} and \texttt{species}; \texttt{[domain]}
+carries \texttt{cells}, \texttt{cell\_size} and \texttt{origin};
+\texttt{[placement]} carries \texttt{offset\_unit} and the
+\texttt{left}/\texttt{front}/\texttt{top} fractions; \texttt{[accuracy]}
+carries the \texttt{tolerance} and the near-shell settings. A missing
+conversion key is a clear failure, not a silent default. The input bunch is
+centred by its charge-weighted centroid and placed at the requested offset
+from the domain origin; a placement that leaves the bunch outside the domain
+is rejected, never clipped.
+
+The default \texttt{precision} is uniform \texttt{float32} for every field and
+particle record, and such a checkpoint restarts under a stock
+single-precision PIConGPU; \texttt{float64} is a uniform opt-in that records
+a warning attribute because stock PIConGPU cannot load double records
+\citep{IMPL3}. The \texttt{charge} and \texttt{mass} records are written
+rather than omitted, and the species is a single particle patch,
+\texttt{patch} = \texttt{"bbox"} or \texttt{"domain"} \citep{INT2}.
+
 The mesh evaluates Eq.~\eqref{eq:Fc} by a discrete deposit, a sampled kernel,
 and a free-space FFT convolution. Let $N$ be the bunch-box nodes per axis,
 $M=\mathrm{pad}\cdot N$ the padded FFT grid per axis, $h$ the node spacing in
@@ -97,3 +123,118 @@ cost of $M^{3}$ FFT work in $1/h$. The only knob is $r/h$: reaching $10^{-3}$
 perpendicular at $\gamma=10$ for $r=8$ cells needs $h\approx1/29$,
 $2.4\times10^{4}$ times the $M^{3}$ nodes of the $h=1$ run
 \citep{N2b,D10}.
+
+\subsection{The exact near shell}
+\label{sec:nearsheet}
+
+The default mesh is the whole field. \texttt{v0.5.0} carries an opt-in exact
+near shell (\texttt{[accuracy]} in the TOML config, Section~\ref{sec:interface}),
+with a radius and a tile \citep{NS2,FIX1}. It computes
+\begin{equation}
+F = F_{\mathrm{mesh}}(\mathrm{all}) - F_{\mathrm{mesh}}(\mathrm{near})
+    + F_{\mathrm{exact}}(\mathrm{near}),
+\end{equation}
+where the subtraction uses a per-tile local zero-padded FFT of the near sources
+(padding 2) and the exact term is a vendored FP64 TSC-convolution reference
+evaluated per (source, node, component) \citep{NS2}. The default remains
+\texttt{none}; the radius is in mesh nodes of the compute grid, and the envelope
+it must cover depends on $h$ (Section~\ref{sec:slices}).
+
+\paragraph{The assembly is exact.} Single-source tests at a tile centre and a
+tile boundary give an assembly residual of $2\!\times\!10^{-12}$ to
+$1.5\!\times\!10^{-11}$ SI ($4\!\times\!10^{-16}$ relative), flat with
+distance. A local FFT of the near set against the global FFT agrees at
+$10^{-15}$ for margins $0$, $2$, $4$ and a $100$-particle cloud, and boundary
+accounting shows the same near set feeding the exact sum and the subtracted
+mesh (field identity $3.6\!\times\!10^{-13}$). A direct reproduction with
+$100$ particles at radius $3$ gives an assembled field exact to
+$4.6\!\times\!10^{-13}$ over the whole grid, while the plain mesh on the same
+plane is wrong by $5.6\!\times\!10^{-1}$. A plane error of
+$1.36\!\times\!10^{-1}$ is a mesh-outside-the-shell number, not an assembly
+error; the tile subtraction is not the limiting term
+\citep{NS4b}.
+
+\subsection{MPI chunked output}
+\label{sec:mpi}
+
+\texttt{v0.5.0} writes a global output domain larger than the compute box
+\citep{M1,FIX1}. The written extent is set by \texttt{--global-grid} and
+\texttt{--global-origin}. The global array is never allocated: each rank owns
+a contiguous $z$-slab split into tiles of about $128$ MiB, zero-filled, then
+filled with the compute-box overlap, the rest exact $0.0$. All ranks open one
+openPMD series with \texttt{MPI\_COMM\_WORLD} and write disjoint
+\texttt{storeChunk} regions with collective flushes, so the output is a single
+dataset, not per-rank files. The FFT is not domain-decomposed: only rank 0
+computes the padded bunch box, and the write is decomposed. A
+\texttt{--deterministic-deposit} flag gives a serial host deposit for bitwise
+comparisons \citep{M1}.
+
+\subsection{The far-tail margin}
+\label{sec:margin}
+
+For a global domain that extends beyond the compute box, the zero fill must not
+start until the field is below tolerance. \texttt{v0.5.0} places that boundary at
+the smallest centre distance $d$ where
+\begin{equation}
+\label{eq:tail}
+E_{\mathrm{tail}}(d)
+= \gamma_{\max}\,k\left(
+\frac{|Q|}{d^{2}} + \frac{2|\mathbf{p}|}{d^{3}}
++ \frac{3.5\,\lVert D\rVert_{2}}{d^{4}}\right)
+\le \mathrm{tolerance}\cdot E_{\mathrm{peak}} ,
+\end{equation}
+with $Q$ the total charge, $\mathbf{p}$ the dipole, $D_{ij}=\sum q\,(3x_i x_j
+- |\mathbf{x}|^{2}\delta_{ij})$ the traceless quadrupole from the actual
+particle positions, $\lVert D\rVert_{2}$ its largest absolute eigenvalue, and
+$\gamma_{\max}=\max\sqrt{1+|\mathbf{u}|^{2}}$ \citep{FIX1}. Beyond a measured
+switch radius the writer instead evaluates the multipole field directly
+(\texttt{FarTail.hpp}), so the shipped file has no interior zero fill
+\citep{FIX1}. The margin is reported at run time as a bound in V/m.
+
+For the documented 20-cell, 4096-electron bunch (source radius $R=16.85$
+cells, peak $45722.5$ V/m, target $45.72$ V/m), the quadrupole margin is
+$350$ cells, which exceeds the $2^{28}$ padded-node cap, so the code falls
+back to the measured far-tail switch. Table~\ref{tab:margin} gives the
+switch error: the worst per-component
+$|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$ against an
+independent direct charge sum in $13$ directions \citep{FIX1}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Far-tail switch validation, 20-cell 4096-electron bunch,
+$R=16.85$ cells, target $45.72$ V/m ($10^{-3}$ of the peak $45722.5$ V/m).
+Worst per-component $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$
+against an independent direct charge sum over $13$ directions
+\citep{FIX1}. The switch at $6R$ is the one shipped: the error is
+$1.87\times10^{-3}$ of the target.}
+\label{tab:margin}
+\begin{tabular}{lrr}
+\toprule
+switch radius & worst err (V/m) & / target \\
+\midrule
+$2R$ ($33.7$ cells) & $4.80\times10^{1}$ & $1.05$ (fails) \\
+$4R$ ($67.4$ cells) & $8.77\times10^{-1}$ & $1.92\times10^{-2}$ \\
+$6R$ ($101.1$ cells) & $8.53\times10^{-2}$ & $1.87\times10^{-3}$ \\
+$8R$ ($134.8$ cells) & $1.66\times10^{-2}$ & $3.63\times10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A shipped $512^{3}$ output sampled outside the compute box confirms the
+switch in practice: $36$ nodes including corners, worst
+$|\mathbf{E}_{\mathrm{file}}-\mathbf{E}_{\mathrm{direct}}| = 2.8\times10^{-3}$
+V/m against the $45.7$ V/m target ($6.1\times10^{-5}$ of it), and every sample
+nonzero, i.e. no interior zero fill \citep{FIX1}.
+
+\paragraph{The in-support field.}
+\label{sec:insupport}
+Inside the TSC support the singular part of the exact term is analytic: the
+eight \texttt{asinh} face integrals of the kernel's divergence, $O(1)$,
+verified against a converged trapezoid reference ($-2.6333$ versus
+$-2.6348$); the smooth remainder is integrated by octant split. For a moving
+bunch the power-transform quadrature is the validated path, device against
+reference $1.000000$--$1.000040$ at $\gamma=1/2/10/100$ (exact to the six
+digits shown at $\gamma=1$ and $2$), converging to
+$1.5\!\times\!10^{-6}$ at box order $32$ \citep{K3,indfield}; there is no
+validated closed form for the moving case.

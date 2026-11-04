@@ -23,37 +23,17 @@ the TSC-convolved Coulomb field to roundoff.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.95\linewidth]{figs/F_a_scaling_vs_N.pdf}
-\caption{Pipeline time vs particle count.
-\texttt{rosi\_v100}, GPU 0 (V100-SXM2-32GB, idle), CUDA 12.6, Release,
-$N\in\{10^3,10^4,10^5,10^6,2\!\cdot\!10^6\}$, source box 20 cells,
-$\gamma=10$, $h=1$, padding 2, double. Blue is the total time; grey bars span
-the pooled min/max over the four $N\!=\!2\!\cdot\!10^6$ repeats. The other
-series are the per-stage medians, side by side, not stacked. Log-log
-\citep{SB1}.}
+\includegraphics[width=0.62\linewidth]{figs/F_a_scaling_vs_N.pdf}\\[2pt]
+\includegraphics[width=0.62\linewidth]{figs/F_b_scaling_vs_box.pdf}
+\caption{Pipeline time on \texttt{rosi\_v100} (V100-SXM2-32GB, idle), CUDA
+12.6, Release, $\gamma=10$, $h=1$, padding 2, double,
+$N=2\times10^6$ for the box sweep \citep{SB1}. Top: total time vs particle
+count, $N\in\{10^3,\dots,2\!\cdot\!10^6\}$, 20-cell box; grey bars span the
+pooled min/max over the four $2\!\cdot\!10^6$ repeats. Bottom: total vs
+source-box size 20/50/100 cells (padded array $M=60/120/220$). Blue is the
+total; the other series are per-stage medians, side by side, not stacked.
+Log-log.}
 \label{fig:Fa}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.95\linewidth]{figs/F_b_scaling_vs_box.pdf}
-\caption{Pipeline time vs source-box size.
-\texttt{rosi\_v100}, GPU 0, CUDA 12.6, Release, $N\!=\!2\!\cdot\!10^6$,
-$\gamma=10$, $h=1$, padding 2, double. Box sizes 20/50/100 cells with padded
-FFT array $M=60/120/220$ per axis. Blue is the total; the other series are
-the per-stage medians \citep{SB1}.}
-\label{fig:Fb}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.95\linewidth]{figs/F_c_scaling_vs_h.pdf}
-\caption{Total pipeline time vs mesh spacing $h$.
-\texttt{rosi\_v100}, GPU 0, CUDA 12.6, Release, $N\!=\!2\!\cdot\!10^6$,
-source box 20 cells, $\gamma=10$, padding 2, double,
-$h\in\{1,1/2,1/4\}$, padded array $M=60/100/180$. Blue is the total
-(median, min/max bars) \citep{SB1}.}
-\label{fig:Fc}
 \end{figure}
 
 The scaling is in two regimes, with the crossover set by the box, not the
@@ -63,7 +43,9 @@ stay under $10$ ms at the $20$-cell box; the total is flat across
 $\gamma=1,10,100$ ($64.9/64.4/64.8$ ms) \citep{SB1}. At large boxes the
 kernel and FFT scale with $M^3$: from $M=60$ to $M=220$ the total goes from
 $64.8$ ms to $233$ ms, and halving $h$ costs $1.07\times$ and $2.35\times$
-because the deposit stays constant \citep{SB1}.
+because the deposit stays constant \citep{SB1}. The per-$h$ totals are
+$64.76$, $69.27$, and $151.51$ ms for $h=1$, $1/2$, $1/4$ (padded array
+$M=60/100/180$, $2\times10^6$ particles, 20-cell box) \citep{SB1}.
 
 \begin{table}[t]
 \centering
@@ -100,11 +82,11 @@ box, not the global field.
 \caption{End-to-end pipeline time including the checkpoint writer and the
 openPMD reader, medians over 3 repeats, \texttt{rosi\_v100} GPU 0, 20-cell
 box, $\gamma=10$, shipped CLI \texttt{--tolerance} $10^{-3}$
-\citep{W4b}. This is a different measurement path from the compute-only
-Table~\ref{tab:matrix}: the totals here include the writer (the dominant
-added term), and the per-stage split is deposit/kernel/FFT/readout/writer.
-The $N=10^6$ total is $47.15$ ms here versus $61.92$ ms in the compute-only
-campaign, which excludes the writer and uses a different timing boundary.}
+\citep{W4b}. A different measurement path from the compute-only
+Table~\ref{tab:matrix}: the totals include the writer (the dominant added
+term); the per-stage split is deposit/kernel/FFT/readout/writer. The
+$N=10^6$ total is $47.15$ ms here versus $61.92$ ms in the compute-only
+campaign.}
 \label{tab:e2e}
 \begin{tabular}{lrrrrrr}
 \toprule
@@ -125,3 +107,41 @@ with the writer, versus $61.92$ ms in the compute-only
 Table~\ref{tab:matrix}; the two campaigns differ in measurement path and
 timing boundary, so neither is the other's total plus the writer
 \citep{W4b,SB1}.
+
+\subsection{MPI chunked output for global domains}
+\label{sec:mpi-scale}
+
+The v0.5.0 chunked writer (Section~\ref{sec:mpi}) was measured at
+$512^{3}$, tolerance $10^{-3}$, a 20-cell 4096-electron bunch,
+\texttt{--deterministic-deposit}, on \texttt{rosi\_v100} \citep{FIX1}. The
+quadrupole margin for this bunch exceeds the $2^{28}$ padded-node cap, so the
+code falls back to the measured $6R$ far-tail switch: compute box $212^{3}$,
+output $6.44$ GB, six double components. Table~\ref{tab:mpi} gives the wall
+and writer times for one and two ranks.
+
+\begin{table}[t]
+\centering
+\small
+\caption{MPI chunked output, $512^{3}$ global domain, tolerance $10^{-3}$,
+20-cell 4096-electron bunch, \texttt{--deterministic-deposit},
+\texttt{rosi\_v100} \citep{FIX1}. Compute box $212^{3}$ (the $6R$ far-tail
+switch, not the quadrupole margin, which exceeds the $2^{28}$ cap); output
+$6.44$ GB. All six datasets bitwise identical across rank counts; metadata
+equal; $n_\mathrm{diff} = 0$.}
+\label{tab:mpi}
+\begin{tabular}{lrr}
+\toprule
+ranks & wall (s) & writer (s) \\
+\midrule
+1 & $54.3$ & $39.8$ \\
+2 & $43.2$ & $39.8$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:mpi} shows the output is a single collective dataset, not
+per-rank files: the six datasets from the one-rank and two-rank runs are
+bitwise identical, $6$ of $6$ exact, $\max_\mathrm{abs\ diff} = 0.0$, metadata
+equal \citep{FIX1}. The writer time is flat in rank count because each rank
+writes its own $z$-slab of the same total bytes; the wall time drops with two
+ranks because the slab writes overlap.

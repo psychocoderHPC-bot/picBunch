@@ -1,19 +1,32 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-picBunch computes the present-time field of a uniformly moving, TSC-shaped
-bunch as a zero-padded free-space FFT convolution with staggered Yee read-out,
-and the discrete recipe, its measured cost, and its accuracy are given in full.
-In relative per-component error against its TSC-convolved target, the mesh is
-below $3\times10^{-4}$ from $d=12$ cells for $\gamma=1$, aspect 1, and from
-$d=32$ for $\gamma=1$, aspect 4; at $\gamma=10$ it floors near
-$6\times10^{-3}$ at $d=32$ and does not cross within the swept range
-\citep{W4b}. The disagreement with the exact quadrature reference is per-source,
-local to the TSC support, and independent of particle count. On periodic
-decks the field round-trips bitwise through a real PIConGPU checkpoint and
-restart: a solver=None validation load writes step 1 and all six components
-are bitwise-equal, max ULP 0. The
-method is a far-field tool: cheap, deterministic (md5 \texttt{d3641d64\ldots},
-bit-identical repeats), and GPU-portable, with the near shell absent in v0.1
-and the perpendicular direction at $\gamma\ge10$ not converged at the natural
-cell size.
+\texttt{picBunch} \texttt{v0.5.0} computes the present-time field of a
+uniformly moving, TSC-shaped bunch as a zero-padded free-space FFT convolution
+with staggered Yee read-out, driven by a single TOML configuration
+(Section~\ref{sec:interface}), and writes a uniform float32 checkpoint that
+restarts under a stock PIConGPU. In floored relative per-component error
+against its TSC-convolved target, the mesh is below $3\times10^{-4}$ from
+$d=12$ cells for $\gamma=1$, aspect 1, and from $d=32$ for $\gamma=1$, aspect
+4; at $\gamma=10$ it is $6.5\times10^{-3}$ at $d=32$ and $1.8\times10^{-3}$
+at $d=48$, not below $3\times10^{-4}$ within $48$ cells \citep{W4b,V2b}. The
+disagreement with the PIConGPU reference field is per-source, local to the
+TSC support, and independent of particle count. The mesh alone does not reach
+$10^{-3}$ where the slices cut the bunch core ($0.12$--$0.41$ for
+$\gamma=1$, $0.11$--$4.60$ for $\gamma=10$); the opt-in near shell
+(Section~\ref{sec:nearsheet}) assembles exactly to roundoff, so the residual
+at the measured radii is the mesh outside the shell, not the tile
+subtraction \citep{NS4b}. The near-field cost ladder is
+$5.4\times10^{-5}$\,s per pair for the ported stationary box8/rem8 evaluator,
+$3.1\times10^{-4}$\,s out of support and $6.9\times10^{-3}$\,s in support for
+the accurate moving evaluator, $1.62$\,s for the upstream adaptive settings
+(Section~\ref{sec:cost}); the MPI chunked output is bitwise identical across
+rank counts and the $6R$ far-tail switch is $1.87\times10^{-3}$ of the target
+\citep{FIX1}. On a two-species periodic deck the field round-trips bitwise
+through a real PIConGPU restart, first-step displacement exactly
+$\beta c\,dt$ with $\beta = 0.9949874367$
+(Section~\ref{sec:comparison}). The method is a far-field tool: cheap,
+deterministic (md5 \texttt{d3641d64\ldots}), and GPU-portable, with the mesh
+limitation inside the bunch core documented by the slices and the
+perpendicular direction at $\gamma\ge10$ not converged at the natural cell
+size.
