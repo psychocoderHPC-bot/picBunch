@@ -444,11 +444,13 @@ moving axial support, order $8$ & $42.6$ & $3.9977\times10^{6}$ & $1.69\times10^
 \end{tabular}
 \end{table}
 
- The measured wall at the stationary support-only configuration is $9.26$\,s at
- $7.99\times10^{-4}$; the moving axial support-only configuration is $42.6$\,s
- at $1.69\times10^{-4}$ \citep{INT4}. The three- and four-cell shell times are
- $92.1$\,s and $184.2$\,s at the same $7.99\times10^{-4}$ interior error
- \citep{INT4}.
+  The measured wall at the stationary support-only configuration is $9.26$\,s at
+  $7.99\times10^{-4}$; the moving axial support-only configuration is $42.6$\,s
+  at $1.69\times10^{-4}$ \citep{INT4}. The three- and four-cell shell times are
+  $92.1$\,s and $184.2$\,s at the same $7.99\times10^{-4}$ interior error
+  \citep{INT4}. Fig.~\ref{fig:schem} places the three evaluated regions
+  (TSC support, near shell, mesh) around one source and shows the measured
+  error against distance for the $\gamma=1$ and $\gamma=10$ axial cases.
 
   \begin{figure}[H]
   \centering
@@ -544,9 +546,11 @@ would grow with $N$, and it does not \citep{W7t}.
  \label{fig:gamma-dist}
  \end{figure}
 
- Table~\ref{tab:gamma} is the measured behaviour. The error grows steeply with
- $\gamma$: $4.4\times10^{-2}$ at $\gamma=10$, $1.05$ at $\gamma=50$, $5.47$ at
- $\gamma=100$, at $h=1$ and $d=8$ cells \citep{ER1b}. Refining to $h=1/4$
+  Table~\ref{tab:gamma} is the measured behaviour, and
+  Fig.~\ref{fig:gamma-dist} shows the same quantities against distance. The
+  error grows steeply with $\gamma$: $4.4\times10^{-2}$ at $\gamma=10$,
+  $1.05$ at $\gamma=50$, $5.47$ at $\gamma=100$, at $h=1$ and $d=8$ cells
+  \citep{ER1b}. Refining to $h=1/4$
  brings these to $6.9\times10^{-5}$, $5.6\times10^{-2}$, and $0.82$. The
   controlling length is the beaming cone width $d/\gamma$: for $\gamma\ge50$ the
   cone is sub-cell, the h-refinement exponent $p$ (error $\sim h^p$, fitted
@@ -672,16 +676,21 @@ would grow with $N$, and it does not \citep{W7t}.
 
   \begin{figure}[t]
   \centering
-  \includegraphics[width=0.98\linewidth]{figs/F_multivel_binning.pdf}
-  \caption{Binned multi-velocity binning, $\gamma=10$, $48^3$, $512$
-  sources, \texttt{jureca\_h100} (H100, \texttt{sm\_90}),
-  \texttt{02891fe6} \citep{MV2}. (a)~Energy spread 5\%: the model-to-measured
-  ratio $C(B)$, the shipped $C=1$ and the least-squares fit $C=1.09$.
-  (b)~$T_b\!-\!T$ peak-normalised error in the far window $8\le d\le16$ cells
-  vs bin count, energy spread 5\% and angular spread $5^\circ$, with the
-  $10^{-3}$ line. The model curve is the model sum rescaled to the measured
-  $B=1$ point; no $\gamma$-distribution or bin-edge data were available in
-  the artifacts, so the distribution panel is not drawn.}
+  \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
+  \caption{Distributions and binning error of the multi-velocity campaign,
+  $\gamma=10$, $512$ sources, seeds 100/103, generator of
+  \texttt{02891fe6}; the per-particle records were regenerated from the
+  surviving generator on \texttt{rosi\_v100} because the campaign bunch
+  files were unavailable (the \texttt{jrc0880} route was down); the LCG
+  state and draw count are identical to the campaign, so only last-bit
+  \texttt{libm} differences between hosts are possible \citep{MV2}.
+  (a)~$\gamma$ histogram for the 5\% energy spread with the
+  $B=16$ adaptive bin edges (uniform in $u_\parallel$, mapped to $\gamma$);
+  mean and sample standard deviation are labelled. (b)~$u_\parallel$ versus
+  $u_\perp$ density for the $5^\circ$ angular spread; the dashed line is the
+  $5^\circ$ divergence and the dotted line the median $|\theta|=101.8$\,mrad.
+  (c)~Measured $T_b\!-\!T$ (peak-normalised, $8\le d\le16$ cells) for both
+  cases with the least-squares-scaled model and the $10^{-3}$ line.}
   \label{fig:multivel}
   \end{figure}
 

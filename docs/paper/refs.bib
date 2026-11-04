@@ -460,13 +460,54 @@
               4-cell fast shell at 2e6 in a 20-cell bunch. ctest 19/19.},
  }
 
-@misc{SCHEM1,
-  title  = {Algorithm-region schematic of the field evaluation (SCHEM1)},
-  author = {SCHEM1 schematic worker},
-  year   = {2026},
-    note   = {Run pr24-20261102. SCHEM1/figs, make\_schematic.py. Two panels:
-              TSC support / near shell / mesh regions with the tolerance-driven
-              shell radii (3e-4 crossover, 11.8 nodes gamma1, 8.8 gamma10, h=1,
-              aspect 1) and the measured per-component error vs distance
-              (dsweep.csv, SB1).},
- }
+ @misc{SCHEM1,
+   title  = {Algorithm-region schematic of the field evaluation (SCHEM1)},
+   author = {SCHEM1 schematic worker},
+   year   = {2026},
+     note   = {Run pr24-20261102. SCHEM1/figs, make\_schematic.py. Two panels:
+               TSC support / near shell / mesh regions with the tolerance-driven
+               shell radii (3e-4 crossover, 11.8 nodes gamma1, 8.8 gamma10, h=1,
+               aspect 1) and the measured per-component error vs distance
+               (dsweep.csv, SB1).},
+  }
+
+ @misc{B1,
+   title  = {PR \#24 referenceOnly cost and a working reference-field path (B1)},
+   author = {B1 reference-field worker},
+   year   = {2026},
+     note   = {Run pr24-20261102. B1/RESULTS.md. Bunch generator
+               generate\_bunch.py --model gamma --seed 42 --grid 64 64 32
+               --cell-size 1e-7 --centroid 32 32 16 --sigma 6 6 6 --weights
+               uniform; variants gamma\{1,10\}-1k (N=1000) and -100 (N=100);
+               read-back bunches\_verification.json (weight sum 10000,
+               mean/min/max gamma 1.0 and 10.0); gamma\{1,10\}\_1k\_reference
+               .h5/json: full field N=1000, 32x32x16, cell 2e-7 m, tol 1e-4.
+               rosi\_v100 (V100, CUDA 12.6).},
+  }
+
+ @misc{VAR1,
+   title  = {Real bunch: forward divergence makes every field component nonzero (VAR1)},
+   author = {VAR1 divergence worker},
+   year   = {2026},
+     note   = {Run pr24-20261102. VAR1/RESULTS.md. Base case = mid-bunch g10
+               (gamma10-1k, N=1000, seed 42, sigma 0.6 um/axis, electron
+               charge, gamma = 10); field grid 32x32x16 nodes, cell 2e-7 m,
+               origin (0,0,0), CUDA, --near-shell none; paraxial +y model
+               u = u0*(tx,1,tz)/|(tx,1,tz)|, tx,tz ~ N(0, sigma), seeds 43,
+               sigma = 1 mrad and 1 deg; per-macro charge -1.602176634e-19 C,
+               centroid (3.197, 3.208, 1.615) um. rosi\_v100 (gv025, V100).
+               The VAR1b N=200 subset (first 200 rows of the 1 mrad bunch)
+               never ran.},
+  }
+
+ @misc{MV1b,
+   title  = {Multi-velocity binning: comparison artefact and calibrated error (MV1b)},
+   author = {MV1b multi-velocity worker},
+   year   = {2026},
+     note   = {Run pr24-20261102. MV1b/RESULTS.md. Measurement driver
+               picBunchVelocityBinsMeasure, 48x48x48 grid, cell 1e-6 m, 512
+               sources, 3-cell position cloud; cases g10\_e5 (sigma\_g/g=0.05,
+               seed 100), g50\_e5 (seed 101), g10\_a1 (seed 102), g10\_a5
+               (5 deg angular spread, seed 103); comparison artefact diagnosis
+               and per-box model sums.},
+  }
