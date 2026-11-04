@@ -163,7 +163,8 @@ contribution of every source within the shell by the exact TSC-convolved field
 of that source (the vendored FP64 reference quadrature), assembling
 `F_mesh(all) - F_mesh(near) + F_exact(near)` with a per-tile local zero-padded
 FFT for the subtraction. The mode is opt-in because the exact evaluator costs
-quadrature time per (source, node, component). `--near-shell-radius` is in PIC
+quadrature time per (source, node, component). It is kept for comparison; it
+is not trustworthy for moving in-support points (see below). `--near-shell-radius` is in PIC
 cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
 that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
 the effective radius exceeds the nominal one by at most half a tile. The three
@@ -179,11 +180,17 @@ opt-in and not lookup-class. `docs/algorithm.md` has the per-case table.
 singular part is the exact eight-term `asinh` box (24 primitives) and the remainder is
 plain Gauss-Legendre on the subtracted integrand `(S - W*)K` over the TSC knot panels,
 split at `s*`; `--near-shell-fast-order` sets the remainder order (default 5, 8,000
-nodes in-support). Moving axial velocities use the exact gamma-stretched box. Against
-the independent `indfield` reference (order 12, refine 3) the fast backend reaches
-worst-case `7.99e-4` stationary interior (order 5), `1.96e-5` face, `1.57e-7` outside,
-and `1.69e-4` axial gamma 10 interior (order 8); moving oblique interior is `8.15e-2`
-and is not a `1e-3` path. The assembled field is unchanged outside the near tiles
+nodes in-support). Moving axial velocities use the exact gamma-stretched box. The fast
+backend is the accurate one for near-source points. Against the independent `indfield`
+reference (order 12, refine 3) it reaches worst-case `7.99e-4` stationary interior
+(order 5), `1.96e-5` face, `1.57e-7` outside, and `1.69e-4` axial gamma 10 interior
+(order 8); moving oblique interior is `8.15e-2` at the default order and is not a `1e-3`
+path. The arbiter-validated in-support number is `1.6%`: at the hardest in-support node
+of a gamma 10 bunch (`Ey` at cells `(32, 31.5, 31)`, `0.53` cells from source #94),
+`fast` reads `2.043e9 V/m` against the order-12/refine-3 arbiter `2.077e9 V/m`, while
+the driver (and `--near-shell exact`, which shares its quadrature) read `2.153e10 V/m`,
+`10.4x` too high. Validate moving in-support points against the order-12 `indfield`
+arbiter, not the driver. The assembled field is unchanged outside the near tiles
 (bitwise) and the seam jump excess is `2.0e-10` stationary.
 
 On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
@@ -209,8 +216,11 @@ H100 kernel rate times the pair count: the shipped `--near-shell fast` path eval
 the same algebra on the host, so they are an algorithm cost floor, not the CPU wall
 time of the CLI. Moving oblique in-support stays at `8.15e-2` (per component Ex 2.43e-2,
 Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
-`--near-shell exact` is retained for comparison; its adaptive evaluator is inaccurate
-for moving in-support points at the pinned settings (`1.55e-1` axial interior).
+`--near-shell exact` is retained for comparison. Its adaptive evaluator and the
+driver reference share one vendored adaptive Gauss-Legendre path, and that path
+mishandles the moving oblique in-support singularity: at the closest in-support node
+it is about `10x` too high, and its `1.55e-1` axial interior is not a moving
+in-support truth at the pinned settings.
 
 ### Velocity binning
 
@@ -749,9 +759,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 - **Near shell (implemented in v0.4.1).** The v0.1 mesh path had no analytic near-source
   correction; v0.4.1 exposes `--near-shell exact`; `--near-shell fast` adds the closed-form
-  evaluator. Its measured envelope is stated above and in `docs/algorithm.md`. Moving
-  oblique in-support remains at `8.15e-2` on the fast path, and the vendored exact
-  backend is not a moving in-support truth at its pinned settings.
+   evaluator. Its measured envelope is stated above and in `docs/algorithm.md`. The fast
+   path is the accurate one: it validates against the order-12 `indfield` arbiter to
+   `1.6%` at the closest moving in-support node, while the vendored exact backend and the
+   driver reference overestimate that node by about `10x` (they share a quadrature).
 - **Anisotropic cells set the Coulomb-limit offset.** The delivered field is the TSC-convolved
   field, which for non-cubic cells differs from the point Coulomb by the anisotropic TSC
   convolution: at aspect 4 (z/x) the continuum is 21% below the point Coulomb at 4 cells and

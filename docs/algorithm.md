@@ -236,7 +236,12 @@ performance claim about `hal`.
   mesh contribution of sources within a shell by the exact TSC-convolved field
   (vendored FP64 reference quadrature), using a per-tile local zero-padded FFT
   for the `F_mesh(near)` subtraction. It is not lookup-class and its measured
-  accuracy/cost envelope is reported with the change that added it.
+  accuracy/cost envelope is reported with the change that added it. `--near-shell
+  fast` is the accurate backend for near-source points (README Accuracy): it
+  validates against the order-12 `indfield` arbiter to `1.6%` at the closest
+  moving in-support node. `exact` is kept for comparison only; it shares a
+  quadrature with the driver reference and overestimates moving oblique
+  in-support points by about `10x` at the closest node.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
   cost/error measurements are recorded above.

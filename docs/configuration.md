@@ -86,7 +86,7 @@ the input checkpoint. `patch_count = 1` is the previous layout.
 | key | required | meaning |
 | --- | --- | --- |
 | `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. |
-| `near_shell` | no | `"none"` (default) or `"exact"`. |
+| `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (comparison only; not trustworthy for moving in-support points). |
 | `near_shell_radius` | no | Shell radius in PIC cells; `0` (default) derives it from `tolerance`. |
 | `near_shell_tile` | no | Tile edge in nodes; default `4`. |
 
