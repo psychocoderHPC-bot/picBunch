@@ -93,6 +93,24 @@ namespace picBunch
         double writerMs = 0.0;
     };
 
+    /** Explicit near-shell mode.  See NearShell.hpp for the split and the cost. */
+    struct NearShellOptions
+    {
+        enum class Mode
+        {
+            None,
+            Exact
+        };
+
+        Mode mode = Mode::None;
+        //! Shell radius in PIC cells; 0 derives it from ComputeOptions::tolerance.
+        double radiusCells = 0.0;
+        //! Output tile edge in nodes for the local subtraction FFT.
+        std::size_t tileNodes = 4;
+        //! Diagnostic counter: number of exact (source, node, component) evaluations.
+        std::size_t* exactPairs = nullptr;
+    };
+
     /** User-facing knobs of the field computation.
      *
      * The user sets an accuracy target, the physical cell size, and the empty
@@ -121,6 +139,12 @@ namespace picBunch
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
         double marginCells = 4.0;
+        /*! Per-axis override of ``marginCells`` (PIC cells), used by the tolerated
+         * global-domain writer.  The margin is measured from the corresponding
+         * bounding-box face, so anisotropic boxes do not pay the largest axis'
+         * margin on every axis.  Unset keeps the scalar ``marginCells``.
+         */
+        std::optional<std::array<double, 3>> marginCellsPerAxis;
         /*! Output-grid overrides supplied by the input mesh.
 
          * The CLI fills ``meshGridSize`` from the mesh dataset shape (already
@@ -161,6 +185,8 @@ namespace picBunch
          * comparison be a bitwise comparison.
          */
         bool deterministicDeposit = false;
+        //! Opt-in exact near shell.  The default stays the plain mesh.
+        NearShellOptions nearShell;
     };
 
     //! openPMD record names and component order: E then B.

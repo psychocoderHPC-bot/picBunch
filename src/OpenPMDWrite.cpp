@@ -33,6 +33,7 @@
 #include <memory>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -769,7 +770,17 @@ namespace picBunch
             return result > 0;
         }
 
-        std::string findSpeciesGroup(hid_t file, std::uint64_t iteration, std::string const& requested)
+        /*! All particle species groups of the input iteration.
+         *
+         * PIConGPU restarts every compiled species from the checkpoint, so the
+         * writer copies every species present instead of dropping the ones that
+         * do not contain the bunch.  ``requested`` is only a consistency check;
+         * it does not restrict the copy.
+         */
+        std::vector<std::string> findSpeciesGroups(
+            hid_t file,
+            std::uint64_t iteration,
+            std::string const& requested)
         {
             std::string const particles = "data/" + std::to_string(iteration) + "/particles";
             if(!linkExists(file, particles))
@@ -782,7 +793,6 @@ namespace picBunch
                 if(!linkExists(file, path))
                     throw std::runtime_error(
                         "PicOnGPU restart writer: input has no particle species '" + requested + "' at '" + path + "'");
-                return path;
             }
             hid_t group = checked(H5Gopen2(file, particles.c_str(), H5P_DEFAULT), "H5Gopen2");
             std::vector<std::string> names;
@@ -796,14 +806,16 @@ namespace picBunch
                 return 0;
             };
             hsize_t index = 0;
-            H5Literate(group, H5_INDEX_NAME, H5_ITER_INC, &index, collect, &context);
+            checked(H5Literate(group, H5_INDEX_NAME, H5_ITER_INC, &index, collect, &context), "H5Literate");
             closeQuietly(group);
-            if(names.size() != 1u)
+            if(names.empty())
                 throw std::runtime_error(
-                    "PicOnGPU restart writer: input iteration has "
-                    + std::to_string(names.size())
-                    + " particle species; pass --picongpu-species to select one");
-            return particles + "/" + names.front();
+                    "PicOnGPU restart writer: input iteration has no particle species groups");
+            std::vector<std::string> groups;
+            groups.reserve(names.size());
+            for(auto const& name : names)
+                groups.push_back(particles + "/" + name);
+            return groups;
         }
 
         std::string particleWarning(
@@ -824,6 +836,78 @@ namespace picBunch
                 message += " " + item;
             message += "; PIConGPU restart requires them and may reject this checkpoint";
             return message;
+        }
+
+        bool readDatasetElementCount(hid_t file, std::string const& path, std::uint64_t& count)
+        {
+            if(!linkExists(file, path))
+                return false;
+            H5O_info_t info;
+            checked(H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT), "H5Oget_info_by_name");
+            if(info.type != H5O_TYPE_DATASET)
+                return false;
+            hid_t dataset = checked(H5Dopen2(file, path.c_str(), H5P_DEFAULT), "H5Dopen2");
+            hid_t space = checked(H5Dget_space(dataset), "H5Dget_space");
+            hssize_t const points = H5Sget_simple_extent_npoints(space);
+            closeQuietly(space);
+            closeQuietly(dataset);
+            if(points < 0)
+                hdf5Fail("H5Sget_simple_extent_npoints('" + path + "')");
+            count = static_cast<std::uint64_t>(points);
+            return true;
+        }
+
+        bool readPatchParticleCount(hid_t file, std::string const& group, std::uint64_t& count)
+        {
+            std::string const path = group + "/particlePatches/numParticles";
+            if(!linkExists(file, path))
+                return false;
+            hid_t dataset = checked(H5Dopen2(file, path.c_str(), H5P_DEFAULT), "H5Dopen2");
+            hid_t space = checked(H5Dget_space(dataset), "H5Dget_space");
+            hssize_t const points = H5Sget_simple_extent_npoints(space);
+            if(points < 0)
+            {
+                closeQuietly(space);
+                closeQuietly(dataset);
+                hdf5Fail("H5Sget_simple_extent_npoints('" + path + "')");
+            }
+            std::vector<std::uint64_t> values(static_cast<std::size_t>(points));
+            checked(
+                H5Dread(dataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data()),
+                "H5Dread");
+            closeQuietly(space);
+            closeQuietly(dataset);
+            std::uint64_t total = 0;
+            for(auto const value : values)
+            {
+                if(total > std::numeric_limits<std::uint64_t>::max() - value)
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: particle patch counts overflow uint64");
+                total += value;
+            }
+            count = total;
+            return true;
+        }
+
+        /*! Number of particles actually copied for one species.
+         *
+         * The position record is the authoritative per-particle extent.  Patch
+         * metadata is the fallback when the record layout is not the usual
+         * openPMD 2.0 ``position/x`` vector record.
+         */
+        std::uint64_t countSpeciesParticles(hid_t file, std::string const& group)
+        {
+            std::uint64_t count = 0;
+            if(readDatasetElementCount(file, group + "/position/x", count))
+                return count;
+            if(readPatchParticleCount(file, group, count))
+                return count;
+            if(readDatasetElementCount(file, group + "/position", count))
+                return count;
+            throw std::runtime_error(
+                "PicOnGPU restart writer: cannot determine the particle count of species '"
+                + group.substr(group.find_last_of('/') + 1)
+                + "'; the input has neither a position record nor particlePatches/numParticles");
         }
 
         void appendCheckpointStep(std::filesystem::path const& directory, std::uint64_t step)
@@ -1199,14 +1283,34 @@ namespace picBunch
                 // so a missing species fails without a half-written checkpoint.
                 std::string const sourcePath = locateInputFile(options.inputFile, options.inputIteration);
                 source = checked(H5Fopen(sourcePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), "H5Fopen");
-                std::string const sourceGroup
-                    = findSpeciesGroup(source, options.inputIteration, options.species);
-                std::string const species = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
-                std::string const warning = particleWarning(source, sourceGroup, species);
-                if(!warning.empty())
+                std::vector<std::string> const sourceGroups
+                    = findSpeciesGroups(source, options.inputIteration, options.species);
+                std::vector<std::string> warnings;
+                std::uint64_t totalParticles = 0;
+                for(auto const& sourceGroup : sourceGroups)
                 {
-                    std::cerr << "picBunch: warning: " << warning << '\n';
-                    setStringAttribute(file, "picBunchRestartWarning", warning);
+                    std::string const species
+                        = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    std::string const warning = particleWarning(source, sourceGroup, species);
+                    if(!warning.empty())
+                        warnings.push_back(warning);
+                    auto const count = countSpeciesParticles(source, sourceGroup);
+                    if(totalParticles > std::numeric_limits<std::uint64_t>::max() - count)
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: particle count overflows uint64");
+                    totalParticles += count;
+                }
+                if(!warnings.empty())
+                {
+                    std::string joined;
+                    for(std::size_t i = 0; i < warnings.size(); ++i)
+                    {
+                        if(i != 0)
+                            joined += "; ";
+                        joined += warnings[i];
+                    }
+                    std::cerr << "picBunch: warning: " << joined << '\n';
+                    setStringAttribute(file, "picBunchRestartWarning", joined);
                 }
 
                 checked(
@@ -1296,8 +1400,12 @@ namespace picBunch
                 setUnitDimension(idProvider, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
                 hsize_t const idDimensions[3] = {1, 1, 1};
                 hid_t idSpace = checked(H5Screate_simple(3, idDimensions, nullptr), "H5Screate_simple");
+                // One global id range for the whole checkpoint, not one per rank
+                // or per species.  The ids consumed by the copied particles are
+                // [0, totalParticles), so nextId must cover all species together.
+                // options.nextId is a lower bound for callers that reserve ids.
                 std::uint64_t const startId = 0;
-                std::uint64_t const nextId = options.nextId;
+                std::uint64_t const nextId = std::max(options.nextId, totalParticles);
                 hid_t startDataset = checked(
                     H5Dcreate2(
                         idProvider, "startId", H5T_STD_U64LE, idSpace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
@@ -1318,42 +1426,52 @@ namespace picBunch
                 closeQuietly(idSpace);
                 closeQuietly(idProvider);
 
-                // Copy the source particle group, then normalize it to the
+                // Copy every source particle group, then normalize each to the
                 // layout and dtypes PIConGPU's particle loader expects:
                 // float32 position/momentum/weighting and int32 positionOffset.
                 hid_t particles = checked(
                     H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
-                checked(
-                    H5Ocopy(
-                        source,
-                        sourceGroup.c_str(),
-                        particles,
-                        species.c_str(),
-                        H5P_DEFAULT,
-                        H5P_DEFAULT),
-                    "H5Ocopy");
+                for(auto const& sourceGroup : sourceGroups)
+                {
+                    std::string const species
+                        = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    checked(
+                        H5Ocopy(
+                            source,
+                            sourceGroup.c_str(),
+                            particles,
+                            species.c_str(),
+                            H5P_DEFAULT,
+                            H5P_DEFAULT),
+                        "H5Ocopy");
+                }
                 closeQuietly(particles);
 
-                std::string const particlePath = iterationPath + "/particles/" + species;
-                for(char const* record : {"position", "momentum"})
+                for(auto const& sourceGroup : sourceGroups)
+                {
+                    std::string const species
+                        = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
+                    std::string const particlePath = iterationPath + "/particles/" + species;
+                    for(char const* record : {"position", "momentum"})
+                        for(char const* component : {"x", "y", "z"})
+                            rewriteDataset<float>(
+                                file,
+                                particlePath + "/" + record + "/" + component,
+                                H5T_NATIVE_FLOAT,
+                                H5T_IEEE_F32LE);
                     for(char const* component : {"x", "y", "z"})
-                        rewriteDataset<float>(
+                        rewriteDataset<std::int32_t>(
                             file,
-                            particlePath + "/" + record + "/" + component,
-                            H5T_NATIVE_FLOAT,
-                            H5T_IEEE_F32LE);
-                for(char const* component : {"x", "y", "z"})
-                    rewriteDataset<std::int32_t>(
-                        file,
-                        particlePath + "/positionOffset/" + component,
-                        H5T_NATIVE_INT32,
-                        H5T_STD_I32LE);
-                flattenScalarRecordToFloat(file, particlePath + "/weighting");
-                // PIConGPU derives charge and mass from the species flags and
-                // ignores these records; dropping them keeps the particle
-                // species extents homogeneous for the openPMD reader.
-                for(char const* record : {"charge", "mass", "id"})
-                    removeRecordIfPresent(file, particlePath + "/" + record);
+                            particlePath + "/positionOffset/" + component,
+                            H5T_NATIVE_INT32,
+                            H5T_STD_I32LE);
+                    flattenScalarRecordToFloat(file, particlePath + "/weighting");
+                    // PIConGPU derives charge and mass from the species flags and
+                    // ignores these records; dropping them keeps the particle
+                    // species extents homogeneous for the openPMD reader.
+                    for(char const* record : {"charge", "mass", "id"})
+                        removeRecordIfPresent(file, particlePath + "/" + record);
+                }
 
                 // PML state is part of a PIConGPU checkpoint and is loaded
                 // unconditionally by an open-boundary restart.  Copy it from the

@@ -13,6 +13,7 @@
 
 #include "picBunch/Deposit.hpp"
 #include "picBunch/Kernel.hpp"
+#include "picBunch/NearShell.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -23,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -148,9 +150,14 @@ namespace picBunch
                     auto const i = static_cast<std::uint32_t>(idx[0]);
                     auto const j = static_cast<std::uint32_t>(idx[1]);
                     auto const k = static_cast<std::uint32_t>(idx[2]);
-                    int const di = (i < Mx / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(Mx);
-                    int const dj = (j < My / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
-                    int const dk = (k < Mz / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
+                    // Centred index of a node on the (zero-padded) FFT box.  ``i <= (M-1)/2``
+                    // is the parity-correct split: for even M it is identical to ``i < M/2``
+                    // (bins 0..M/2-1 positive, M/2..M-1 negative, Nyquist bin at M/2); for odd
+                    // M (no Nyquist plane) it is 0..(M-1)/2 positive and (M+1)/2..M-1 negative.
+                    // A plain ``i < M/2`` mis-centres the kernel on an odd extent.
+                    int const di = (i <= (Mx - 1u) / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(Mx);
+                    int const dj = (j <= (My - 1u) / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
+                    int const dk = (k <= (Mz - 1u) / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
                     // R = (d*h + yee_delta) * cell
                     double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
                     double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
@@ -318,12 +325,140 @@ namespace picBunch
         return geometry.shape;
     }
 
+    FieldTailMargin deriveFieldTailMargin(
+        Bunch const& bunch,
+        double fieldPeak,
+        double tolerance,
+        std::array<double, 3> const& cellSize,
+        double maxDistance)
+    {
+        if(bunch.size() == 0u)
+            throw std::runtime_error("deriveFieldTailMargin: empty bunch");
+        if(!(tolerance > 0.0) || !std::isfinite(tolerance))
+            throw std::invalid_argument("deriveFieldTailMargin: tolerance must be finite and positive");
+        if(!(fieldPeak >= 0.0) || !std::isfinite(fieldPeak))
+            throw std::invalid_argument("deriveFieldTailMargin: field peak must be finite and non-negative");
+        if(!(maxDistance > 0.0) || !std::isfinite(maxDistance))
+            throw std::invalid_argument("deriveFieldTailMargin: maxDistance must be finite and positive");
+        for(double h : cellSize)
+            if(!(h > 0.0) || !std::isfinite(h))
+                throw std::invalid_argument("deriveFieldTailMargin: cell sizes must be finite and positive");
+
+        // Source moments about the bounding-box centre.  Using the box half
+        // extents for the per-axis conversion is tighter than the circumscribed
+        // radius and still bounds every point outside the expanded box.
+        auto const bounds = bunch.bounds();
+        std::array<double, 3> centre{};
+        std::array<double, 3> halfExtent{};
+        for(int a = 0; a < 3; ++a)
+        {
+            centre[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
+            halfExtent[a] = 0.5 * (bounds[1][a] - bounds[0][a]);
+        }
+
+        double totalCharge = 0.0;
+        double absoluteCharge = 0.0;
+        std::array<double, 3> dipole{0.0, 0.0, 0.0};
+        double sourceRadius = 0.0;
+        double maxGamma = 1.0;
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const u2 = bunch.ux[p] * bunch.ux[p]
+                + bunch.uy[p] * bunch.uy[p] + bunch.uz[p] * bunch.uz[p];
+            maxGamma = std::max(maxGamma, std::sqrt(1.0 + u2));
+            double const q = bunch.weight[p] * bunch.charge[p];
+            totalCharge += q;
+            absoluteCharge += std::abs(q);
+            std::array<double, 3> const displacement{
+                bunch.x[p] - centre[0],
+                bunch.y[p] - centre[1],
+                bunch.z[p] - centre[2]};
+            for(int a = 0; a < 3; ++a)
+                dipole[a] += q * displacement[a];
+            double const r2 = displacement[0] * displacement[0]
+                + displacement[1] * displacement[1]
+                + displacement[2] * displacement[2];
+            sourceRadius = std::max(sourceRadius, std::sqrt(r2));
+        }
+        double const dipoleMagnitude = std::sqrt(
+            dipole[0] * dipole[0] + dipole[1] * dipole[1] + dipole[2] * dipole[2]);
+
+        FieldTailMargin result;
+        result.totalCharge = totalCharge;
+        result.absoluteCharge = absoluteCharge;
+        result.dipoleMagnitude = dipoleMagnitude;
+        result.sourceRadius = sourceRadius;
+        result.maxGamma = maxGamma;
+        result.fieldPeak = fieldPeak;
+        result.tolerance = tolerance;
+        result.distance = sourceRadius;
+        result.bound = 0.0;
+
+        double const target = tolerance * fieldPeak;
+        if(absoluteCharge == 0.0 || target == 0.0)
+            return result; // no source or no field: zero margin is exact
+
+        auto const tailBound = [&](double d) {
+            if(!(d > sourceRadius))
+                return std::numeric_limits<double>::infinity();
+            double const remainder = 24.0 * absoluteCharge * sourceRadius * sourceRadius
+                / std::pow(d - sourceRadius, 4.0);
+            return maxGamma * kCoulombConstant
+                * (std::abs(totalCharge) / (d * d) + 2.0 * dipoleMagnitude / (d * d * d)
+                   + remainder);
+        };
+
+        double low = sourceRadius;
+        if(low <= 0.0)
+            low = 1.0e-6 * std::min({cellSize[0], cellSize[1], cellSize[2]});
+        else
+            low += 1.0e-12 * std::max(low, std::min({cellSize[0], cellSize[1], cellSize[2]}));
+        if(tailBound(low) <= target)
+        {
+            result.distance = low;
+            result.bound = tailBound(low);
+        }
+        else
+        {
+            double high = std::max(2.0 * low, sourceRadius + std::min({cellSize[0], cellSize[1], cellSize[2]}));
+            while(tailBound(high) > target && high < maxDistance)
+                high = std::min(2.0 * high, maxDistance);
+            if(tailBound(high) > target)
+                throw std::runtime_error(
+                    "deriveFieldTailMargin: a neglected-field bound below tolerance requires a distance"
+                    " larger than " + std::to_string(maxDistance) + " m; enlarge the compute box or"
+                    " acknowledge the truncation explicitly");
+            for(int iteration = 0; iteration < 200; ++iteration)
+            {
+                double const mid = 0.5 * (low + high);
+                if(tailBound(mid) > target)
+                    low = mid;
+                else
+                    high = mid;
+            }
+            result.distance = high;
+            result.bound = tailBound(high);
+        }
+
+        for(int a = 0; a < 3; ++a)
+        {
+            double const cells = (result.distance - halfExtent[a]) / cellSize[a];
+            result.marginCells[a] = std::max(0.0, std::ceil(cells));
+        }
+        return result;
+    }
+
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("makeGrid: empty bunch");
         if(options.marginCells < 0.0)
             throw std::invalid_argument("makeGrid: marginCells must not be negative");
+        if(options.marginCellsPerAxis)
+            for(double margin : *options.marginCellsPerAxis)
+                if(!(margin >= 0.0) || !std::isfinite(margin))
+                    throw std::invalid_argument(
+                        "makeGrid: every marginCellsPerAxis value must be finite and non-negative");
         for(double c : options.cellSize)
             if(!(c > 0.0) || !std::isfinite(c))
                 throw std::invalid_argument("makeGrid: every cell size must be finite and positive");
@@ -341,7 +476,10 @@ namespace picBunch
         for(int a = 0; a < 3; ++a)
         {
             double const spacing = kRefinement * options.cellSize[a];
-            double const margin = options.marginCells * options.cellSize[a];
+            double const marginCellCount = options.marginCellsPerAxis
+                ? (*options.marginCellsPerAxis)[a]
+                : options.marginCells;
+            double const margin = marginCellCount * options.cellSize[a];
             double const low = b[0][a] - margin;
             double const high = b[1][a] + margin;
             double const span = (high - low) / spacing;
@@ -352,7 +490,11 @@ namespace picBunch
                     + std::to_string(kMaxNodesPerAxis)
                     + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
             std::size_t nodes = static_cast<std::size_t>(std::ceil(span)) + 1u;
-            // even node count keeps M = padding*nodes even for the R2C transform
+            // The auto-derived grid keeps an even node count for backwards
+            // compatibility (earlier tests expect even n).  Odd extents are now
+            // supported by the R2C path (parity-correct centring in
+            // KernelBuildKernel and the relaxed --grid check); this rounding only
+            // constrains the derived grid, never an explicit one.
             if(nodes % 2u)
                 ++nodes;
             nodes = std::max<std::size_t>(nodes, 8u);
@@ -368,9 +510,9 @@ namespace picBunch
             for(int a = 0; a < 3; ++a)
             {
                 std::size_t const n = (*options.gridSize)[a];
-                if(n == 0u || n % 2u != 0u)
+                if(n == 0u)
                     throw std::invalid_argument(
-                        "makeGrid: --grid values must be even and positive; got "
+                        "makeGrid: --grid values must be positive; got "
                         + std::to_string((*options.gridSize)[0]) + ","
                         + std::to_string((*options.gridSize)[1]) + ","
                         + std::to_string((*options.gridSize)[2]));
@@ -514,6 +656,9 @@ namespace picBunch
 
     Field computeField(Bunch const& bunch, ComputeOptions const& options, StageTimes* stageTimes)
     {
+        if(options.nearShell.mode == NearShellOptions::Mode::Exact)
+            return computeFieldNearExact(bunch, options, options.nearShell, stageTimes);
+
         // v0.1 is one velocity class: the kernel is exact for a single shared u.
         if(bunch.size() > 1)
         {
@@ -551,8 +696,9 @@ namespace picBunch
         std::uint32_t const Mx = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
         std::uint32_t const My = static_cast<std::uint32_t>(grid.n[1] * grid.fftPadding);
         std::uint32_t const Mz = static_cast<std::uint32_t>(grid.n[2] * grid.fftPadding);
-        if(Mx % 2u != 0u)
-            throw std::runtime_error("computeField: padded x extent must be even for R2C");
+        // Mx may be odd: the R2C half-spectrum then has (Mx+1)/2 planes and no Nyquist
+        // plane; KernelBuildKernel's parity-correct centred index handles that.  The
+        // integer ``Mx/2 + 1`` already equals (Mx+1)/2 for odd Mx and Mx/2+1 for even.
         std::uint32_t const CP = Mx / 2u + 1u;
         // Flat layout is x fastest, then y, then z.  The plan's last dimension is x,
         // so the plan extents are (z, y, x) and the packed spectrum is (z, y, CP).

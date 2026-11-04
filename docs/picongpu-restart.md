@@ -52,6 +52,29 @@ restart then fails because PIConGPU loads the PML slabs unconditionally, with
 `Key 'Convolutional PML E_xneg' does not exist`. Use an input checkpoint that
 contains PML records for such a deck, or restart with periodic boundaries.
 
+## Particle species and the id range
+
+A PIConGPU restart loads every compiled species that is present in
+`FileCheckpointParticles`. The writer therefore copies **every** species group
+from the input iteration, not only the species used for the field calculation.
+`--picongpu-species` only requires that the named species exists; it never drops
+the other groups. A requested name that is absent fails with
+`input has no particle species '<name>'`, and the checkpoint file is not left
+behind.
+
+`fields/picongpu_idProvider` holds one global id range for the whole
+checkpoint. The writer stores `startId = 0` and
+`nextId = max(options.nextId, total particles copied over all species)`, with
+`maxNumProc = 1`. This matches PIConGPU's single-rank checkpoint state and is
+consistent with the particles in the file. The id range does not depend on the
+number of species or on the size of the bunch species alone.
+
+The checkpoint has a single 1x1x1 id-provider mesh, which is the single-rank
+contract of this tool. PIConGPU reads the mesh with the modulo rank mapping, so
+restarting the same checkpoint on more than one rank would give every rank the
+same `startId`; newly created particles could then overlap. Use a single rank
+for a restart from a picBunch checkpoint.
+
 ## Non-blocking structural differences
 
 A raw HDF5 diff against a PIConGPU-written checkpoint leaves the following

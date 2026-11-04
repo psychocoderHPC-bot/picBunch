@@ -48,6 +48,58 @@ namespace picBunch
      */
     std::optional<std::array<std::size_t, 3>> physicalGridExtent(picBunch::MeshGeometry const& geometry);
 
+    /** Tolerance-derived field tail outside a compact source region.
+     *
+     * The field of a finite bunch does not vanish outside its bounding box.  At
+     * a distance ``d`` from the box centre the monopole part scales as
+     * ``|Q| / (4 pi eps0 d^2)`` and the dipole part as ``2 |p| / (4 pi eps0 d^3)``.
+     * ``deriveFieldTailMargin`` solves
+     *
+     *   E_tail(d) = gamma_max k [ |Q|/d^2 + 2|p|/d^3 + 24 Q_abs R^2/(d-R)^4 ]
+     *              <= tolerance * fieldPeak
+     *
+     * for the smallest ``d`` larger than the source radius ``R``.  The last term
+     * is a conservative Taylor remainder that bounds every multipole above the
+     * dipole.  ``gamma_max`` is the largest ``sqrt(1+|u|^2)`` of the bunch; a
+     * uniformly moving charge field is the boosted Coulomb field, whose
+     * transverse magnitude is at most ``gamma`` times the rest monopole, so the
+     * factor keeps the bound valid for a moving bunch.  ``marginCells`` converts ``d`` into extra cells beyond each
+     * bounding-box face; every point outside that expanded box is at least
+     * ``distance`` from the box centre, hence its neglected field is within the
+     * target.
+     *
+     * ``fieldPeak`` must be the peak of the computed field in the same units as
+     * the bound.  The CLI uses ``min(max|E|, c max|B|)`` (ignoring a zero B
+     * peak), because ``|B_tail| <= |E_tail|/c``; this keeps both records at or
+     * below their own relative tolerance.  A zero peak, zero charge and zero
+     * dipole return a zero margin.  A target that cannot be reached within ``maxDistance``
+     * throws ``std::runtime_error``; the caller must then enlarge the compute
+     * box or explicitly acknowledge the truncation.
+     */
+    struct FieldTailMargin
+    {
+        double totalCharge = 0.0;
+        double absoluteCharge = 0.0;
+        double dipoleMagnitude = 0.0;
+        double sourceRadius = 0.0;
+        double maxGamma = 1.0;
+        double fieldPeak = 0.0;
+        double tolerance = 0.0;
+        //! Smallest centre distance satisfying the bound (metres).
+        double distance = 0.0;
+        //! Value of the bound at ``distance`` (same units as ``fieldPeak``).
+        double bound = 0.0;
+        //! Extra cells beyond each bounding-box face.
+        std::array<double, 3> marginCells{0.0, 0.0, 0.0};
+    };
+
+    FieldTailMargin deriveFieldTailMargin(
+        Bunch const& bunch,
+        double fieldPeak,
+        double tolerance,
+        std::array<double, 3> const& cellSize,
+        double maxDistance = 1.0e30);
+
     /** Build the output grid.
      *
      * When ``options.gridSize`` is set it wins.  Otherwise

@@ -114,3 +114,99 @@ TEST(Domain, ChunkedWriteZerosAndOffset)
     series.flush();
     std::filesystem::remove(path);
 }
+
+TEST(Domain, TailMarginMonopoleBound)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = bunch.y[0] = bunch.z[0] = 0.0;
+    bunch.ux[0] = bunch.uy[0] = bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+
+    double const cell = 1.0;
+    double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
+    double const tolerance = 1.0e-3;
+    auto const margin = picBunch::deriveFieldTailMargin(
+        bunch, peak, tolerance, std::array<double, 3>{cell, cell, cell});
+
+    double const target = tolerance * peak;
+    EXPECT_LE(margin.bound, target);
+    EXPECT_LE(margin.distance, std::sqrt(picBunch::kCoulombConstant * picBunch::kElementaryCharge / target) + 1.0e-9);
+    // A point charge has R=0 and a 32-cell margin at 1e-3.
+    EXPECT_EQ(margin.marginCells, (std::array<double, 3>{32.0, 32.0, 32.0}));
+    // Just inside the margin the neglected field is above target; this is why
+    // the boundary must be at the solved distance, not at the old 4 cells.
+    double const inside = margin.distance - 1.0;
+    EXPECT_GT(picBunch::kCoulombConstant * picBunch::kElementaryCharge / (inside * inside), target);
+}
+
+TEST(Domain, TailMarginIncludesDipoleForNeutralBunch)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {0.5, -0.5};
+    bunch.y = {0.0, 0.0};
+    bunch.z = {0.0, 0.0};
+    bunch.ux = {0.0, 0.0};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {0.0, 0.0};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {picBunch::kElementaryCharge, -picBunch::kElementaryCharge};
+
+    double const cell = 1.0;
+    double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
+    double const tolerance = 1.0e-3;
+    auto const margin = picBunch::deriveFieldTailMargin(
+        bunch, peak, tolerance, std::array<double, 3>{cell, cell, cell});
+
+    EXPECT_NEAR(margin.totalCharge, 0.0, 1.0e-30);
+    EXPECT_NEAR(margin.dipoleMagnitude, picBunch::kElementaryCharge, 1.0e-30);
+    EXPECT_LE(margin.bound, tolerance * peak);
+    // The dipole term, not a zero monopole, sets this margin.
+    EXPECT_GT(margin.marginCells[0], 0.0);
+    EXPECT_LT(margin.marginCells[0], 32.0);
+}
+
+TEST(Domain, GlobalDomainEndingInsideMarginHasNoZeroHole)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = bunch.y[0] = bunch.z[0] = 0.0;
+    bunch.ux[0] = bunch.uy[0] = bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.marginCellsPerAxis = std::array<double, 3>{32.0, 32.0, 32.0};
+    options.globalGridSize = std::array<std::size_t, 3>{16, 16, 16};
+    options.globalGridOrigin = std::array<double, 3>{0.0, 0.0, 0.0};
+    auto const grid = picBunch::makeGrid(bunch, options);
+
+    // The requested margin exceeds the written domain, so makeGrid clips the
+    // compute box to the whole domain: there is no interior zero-fill region.
+    EXPECT_EQ(grid.n, (std::array<std::size_t, 3>{16, 16, 16}));
+    EXPECT_EQ(grid.origin, (std::array<double, 3>{0.0, 0.0, 0.0}));
+}
+
+TEST(Domain, TailMarginIncludesBeaming)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = bunch.y[0] = bunch.z[0] = 0.0;
+    bunch.ux[0] = bunch.uy[0] = 0.0;
+    bunch.uz[0] = 10.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+
+    double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
+    double const tolerance = 1.0e-3;
+    auto const margin = picBunch::deriveFieldTailMargin(
+        bunch, peak, tolerance, std::array<double, 3>{1.0, 1.0, 1.0});
+
+    EXPECT_NEAR(margin.maxGamma, std::sqrt(101.0), 1.0e-12);
+    EXPECT_LE(margin.bound, tolerance * peak);
+    // The boosted transverse field needs a larger margin than the rest case.
+    EXPECT_GT(margin.marginCells[0], 32.0);
+}

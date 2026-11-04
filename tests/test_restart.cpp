@@ -189,53 +189,73 @@ namespace
         std::filesystem::path const& path,
         bool withPatches,
         bool withPml = false,
-        bool doubleParticles = false)
+        bool doubleParticles = false,
+        std::vector<std::string> const& speciesNames = std::vector<std::string>{"electrons"})
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         H5Gcreate2(file, "data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t iteration = H5Gcreate2(file, "data/0", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t particles = H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        hid_t species = H5Gcreate2(particles, "electrons", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        writeStringAttribute(species, "sourceMarker", "preserved");
-        writeScalarDouble(species, "particleShape", 1.0);
-
-        char const* axes = "xyz";
-        hid_t position = H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        hid_t momentum = H5Gcreate2(species, "momentum", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        hid_t offset = H5Gcreate2(species, "positionOffset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        for(int a = 0; a < 3; ++a)
+        for(auto const& speciesName : speciesNames)
         {
-            std::string const axis(1, axes[a]);
+            hid_t species = H5Gcreate2(particles, speciesName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writeStringAttribute(species, "sourceMarker", "preserved");
+            writeScalarDouble(species, "particleShape", 1.0);
+
+            char const* axes = "xyz";
+            hid_t position = H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            hid_t momentum = H5Gcreate2(species, "momentum", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            hid_t offset = H5Gcreate2(species, "positionOffset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            for(int a = 0; a < 3; ++a)
+            {
+                std::string const axis(1, axes[a]);
+                if(doubleParticles)
+                {
+                    writeDoubleComponent(position, axis.c_str(), 0.25 + 0.1 * static_cast<double>(a));
+                    writeDoubleComponent(momentum, axis.c_str(), 0.0);
+                    hid_t dataset = create(offset, axis.c_str(), H5T_IEEE_F64LE, {1});
+                    double const stored = static_cast<double>(a);
+                    H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                    H5Dclose(dataset);
+                }
+                else
+                {
+                    writeFloatComponent(position, axis.c_str(), 0.25f + 0.1f * static_cast<float>(a));
+                    writeFloatComponent(momentum, axis.c_str(), 0.0f);
+                    hid_t dataset = create(offset, axis.c_str(), H5T_STD_I32LE, {1});
+                    int32_t const stored = a;
+                    H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                    H5Dclose(dataset);
+                }
+            }
+            H5Gclose(position);
+            H5Gclose(momentum);
+            H5Gclose(offset);
             if(doubleParticles)
             {
-                writeDoubleComponent(position, axis.c_str(), 0.25 + 0.1 * static_cast<double>(a));
-                writeDoubleComponent(momentum, axis.c_str(), 0.0);
-                hid_t dataset = create(offset, axis.c_str(), H5T_IEEE_F64LE, {1});
-                double const stored = static_cast<double>(a);
-                H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
-                H5Dclose(dataset);
+                hid_t weighting = H5Gcreate2(species, "weighting", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                writeDoubleComponent(weighting, "weighting", 1.0);
+                H5Gclose(weighting);
             }
             else
+                writeFloatComponent(species, "weighting", 1.0f);
+
+            if(withPatches)
             {
-                writeFloatComponent(position, axis.c_str(), 0.25f + 0.1f * static_cast<float>(a));
-                writeFloatComponent(momentum, axis.c_str(), 0.0f);
-                hid_t dataset = create(offset, axis.c_str(), H5T_STD_I32LE, {1});
-                int32_t const stored = a;
-                H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
-                H5Dclose(dataset);
+                hid_t patches = H5Gcreate2(species, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                hid_t numParticles = create(patches, "numParticles", H5T_STD_U64LE, {1});
+                uint64_t const one = 1;
+                H5Dwrite(numParticles, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &one);
+                H5Dclose(numParticles);
+                hid_t numOffset = create(patches, "numParticlesOffset", H5T_STD_U64LE, {1});
+                uint64_t const zero = 0;
+                H5Dwrite(numOffset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &zero);
+                H5Dclose(numOffset);
+                H5Gclose(patches);
             }
+
+            H5Gclose(species);
         }
-        H5Gclose(position);
-        H5Gclose(momentum);
-        H5Gclose(offset);
-        if(doubleParticles)
-        {
-            hid_t weighting = H5Gcreate2(species, "weighting", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-            writeDoubleComponent(weighting, "weighting", 1.0);
-            H5Gclose(weighting);
-        }
-        else
-            writeFloatComponent(species, "weighting", 1.0f);
 
         if(withPml)
         {
@@ -245,21 +265,6 @@ namespace
             H5Gclose(fields);
         }
 
-        if(withPatches)
-        {
-            hid_t patches = H5Gcreate2(species, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-            hid_t numParticles = create(patches, "numParticles", H5T_STD_U64LE, {1});
-            uint64_t const one = 1;
-            H5Dwrite(numParticles, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &one);
-            H5Dclose(numParticles);
-            hid_t numOffset = create(patches, "numParticlesOffset", H5T_STD_U64LE, {1});
-            uint64_t const zero = 0;
-            H5Dwrite(numOffset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &zero);
-            H5Dclose(numOffset);
-            H5Gclose(patches);
-        }
-
-        H5Gclose(species);
         H5Gclose(particles);
         H5Gclose(iteration);
         H5Fclose(file);
@@ -302,6 +307,27 @@ namespace
         H5Sclose(space);
         H5Aclose(attribute);
         return values;
+    }
+
+    std::uint64_t datasetPoints(hid_t file, char const* path)
+    {
+        hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
+        EXPECT_GE(dataset, 0) << "missing dataset " << path;
+        hid_t space = H5Dget_space(dataset);
+        hssize_t const points = H5Sget_simple_extent_npoints(space);
+        H5Sclose(space);
+        H5Dclose(dataset);
+        return points < 0 ? 0u : static_cast<std::uint64_t>(points);
+    }
+
+    std::uint64_t readUint64Dataset(hid_t file, char const* path)
+    {
+        hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
+        EXPECT_GE(dataset, 0) << "missing dataset " << path;
+        std::uint64_t value = 0;
+        H5Dread(dataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &value);
+        H5Dclose(dataset);
+        return value;
     }
 
     std::vector<float> readFloatDataset(hid_t file, char const* path)
@@ -382,8 +408,12 @@ TEST(Restart, GridAndOriginOverridesReplaceDerivedValues)
     EXPECT_EQ(overridden.spacing, derived.spacing);
     EXPECT_NE(overridden.n, derived.n);
 
+    // Odd extents are supported by the parity-correct R2C path (task W3o): the
+    // even-only requirement that previously rejected {15,20,24} is lifted, so an
+    // odd explicit grid is now accepted verbatim.
     options.gridSize = std::array<std::size_t, 3>{15, 20, 24};
-    EXPECT_THROW(picBunch::makeGrid(twoParticles(), options), std::invalid_argument);
+    auto const oddGrid = picBunch::makeGrid(twoParticles(), options);
+    EXPECT_EQ(oddGrid.n, (std::array<std::size_t, 3>{15, 20, 24}));
 }
 
 TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
@@ -541,6 +571,98 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     H5Gclose(fields);
     H5Gclose(iteration);
     H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, WriterCopiesEverySpeciesAndUsesGlobalIdRange)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_species";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_two_species.h5";
+    writeParticleInput(input, true, false, false, {"electrons", "ions"});
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    // Selecting one species must not drop the other one.
+    options.species = "electrons";
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    // Lower bound below the real particle count: the writer must never store it.
+    options.nextId = 1;
+    picBunch::writePicOnGPUCheckpoint(field, options);
+
+    auto const path = directory / "checkpoint_000002.h5";
+    ASSERT_TRUE(std::filesystem::exists(path));
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+
+    hid_t particles = H5Gopen2(file, "data/2/particles", H5P_DEFAULT);
+    ASSERT_GE(particles, 0);
+    for(char const* name : {"electrons", "ions"})
+    {
+        hid_t species = H5Gopen2(particles, name, H5P_DEFAULT);
+        ASSERT_GE(species, 0) << "missing copied species " << name;
+        EXPECT_EQ(readStringAttribute(species, "sourceMarker"), "preserved");
+        EXPECT_EQ(H5Lexists(species, "particlePatches", H5P_DEFAULT), 1);
+        H5Gclose(species);
+    }
+    H5Gclose(particles);
+
+    // One global range: two particles in total, one per species.
+    std::uint64_t numberOfParticles = 0;
+    for(char const* name : {"electrons", "ions"})
+    {
+        std::string const positionPath = std::string("data/2/particles/") + name + "/position/x";
+        numberOfParticles += datasetPoints(file, positionPath.c_str());
+    }
+    EXPECT_EQ(numberOfParticles, 2u);
+    EXPECT_EQ(readUint64Dataset(file, "data/2/fields/picongpu_idProvider/startId"), 0u);
+    EXPECT_EQ(
+        readUint64Dataset(file, "data/2/fields/picongpu_idProvider/nextId"),
+        numberOfParticles);
+    hid_t startId = H5Dopen2(file, "data/2/fields/picongpu_idProvider/startId", H5P_DEFAULT);
+    ASSERT_GE(startId, 0);
+    EXPECT_EQ(readScalarAttribute<uint64_t>(startId, "maxNumProc", H5T_NATIVE_UINT64), 1u);
+    H5Dclose(startId);
+
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, WriterRejectsMissingRequestedSpecies)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_missing_species";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_electrons_only.h5";
+    writeParticleInput(input, true);
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 0;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "ions";
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    try
+    {
+        picBunch::writePicOnGPUCheckpoint(field, options);
+        FAIL() << "expected an error for the absent species";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("ions"), std::string::npos) << error.what();
+    }
+    EXPECT_FALSE(std::filesystem::exists(directory / "checkpoint_000000.h5"));
     std::filesystem::remove_all(temporaryDirectory());
 }
 

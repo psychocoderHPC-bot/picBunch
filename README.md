@@ -109,7 +109,9 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--output <openPMD file>] [--input-iteration N] \
          [--output-iteration N] [--tolerance 1e-3] \
          [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
-         [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu]
+         [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
+         [--near-shell none|exact] [--near-shell-radius <cells>] \
+         [--near-shell-tile <nodes>]
 ```
 
 Example with mesh metadata in the input:
@@ -140,6 +142,18 @@ the grid is the particle bounding box plus the margin and `--cell-size` is requi
 outside the resulting grid is an error that names the count and the bounds; it is never dropped
 silently.
 
+The default `--near-shell none` keeps the plain padded-FFT mesh, whose
+near-source field is only mesh-accurate. `--near-shell exact` replaces the mesh
+contribution of every source within the shell by the exact TSC-convolved field
+of that source (the vendored FP64 reference quadrature), assembling
+`F_mesh(all) - F_mesh(near) + F_exact(near)` with a per-tile local zero-padded
+FFT for the subtraction. The mode is opt-in because the exact evaluator costs
+quadrature time per (source, node, component). `--near-shell-radius` is in PIC
+cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
+that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
+the effective radius exceeds the nominal one by at most half a tile. See
+`docs/algorithm.md` for the measured radius/cost envelope.
+
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
 bound (`1e-12`), padding 3 for targets between that bound and the measured double-precision
@@ -158,12 +172,45 @@ mpiexec -n 4 picBunch --input bunch.h5 --cell-size 1e-6 \
 ```
 
 The convolution still runs on the padded bunch box. The compute box is snapped to global
-nodes so every computed value lands on a global node. Cells outside it are written as exact
-`0.0`. The global array is never allocated. Each rank owns one contiguous z-slab, divided
-into write tiles of about 128 MiB, so the extra memory per rank is one tile. Rank 0 computes
-the field and broadcasts the small bunch box; all ranks write disjoint `storeChunk` regions.
-Extent, spacing, origin, `unitSI` and the Yee `position` attribute are identical for every
-rank count.
+nodes so every computed value lands on a global node. The global array is never allocated.
+Each rank owns one contiguous z-slab, divided into write tiles of about 128 MiB, so the
+extra memory per rank is one tile. Rank 0 computes the field and broadcasts the small bunch
+box; all ranks write disjoint `storeChunk` regions. Extent, spacing, origin, `unitSI` and the
+Yee `position` attribute are identical for every rank count.
+
+**Zero fill and its error bound.** The field outside the bunch does not vanish; it decays as
+`1/r^2`. The writer therefore fills with zero only beyond a margin derived from
+`--tolerance`, not at the bare bunch box. With `Q` the net charge, `p` the dipole moment,
+`Qabs = sum |q_i|`, `R` the source radius, `gamma_max = max sqrt(1+|u_i|^2)` and
+`k = 1/(4 pi eps0)`, the code solves for the smallest centre distance `d` with
+
+```
+E_tail(d) = gamma_max * k * ( |Q|/d^2 + 2|p|/d^3 + 24*Qabs*R^2/(d-R)^4 )
+            <= tolerance * field_peak
+```
+
+The first term is the monopole, the second the dipole (which sets the margin for a neutral
+bunch), and the last is a conservative Taylor remainder that bounds all higher multipoles.
+The `gamma_max` factor covers the boosted field of a moving bunch; the transverse magnitude
+of a uniformly moving charge is at most `gamma` times its rest monopole.
+The margin in cells is `ceil((d - half_extent_axis)/cell_size_axis)` per axis, so every point
+outside the expanded compute box is at least `d` from the source region. The peak used for
+the solve is `min(max|E|, c*max|B|)` (a zero B peak is ignored). Since
+`|B_tail| <= |E_tail|/c`, this keeps both E and B below `tolerance` relative to their own
+peaks.
+
+If the global domain extends beyond that margin, the zero fill beyond it is justified at the
+stated tolerance. If the domain ends before the margin, the compute box is clipped to the
+whole domain, so no node between the bunch and the domain edge is zeroed; the file then ends
+at the simulation boundary instead of carrying an interior discontinuity. The margin is
+reported as `field tail: ... bound=... V/m`. `--allow-field-truncation` keeps a smaller
+explicit compute box and writes zeros anyway; it prints a warning and is diagnostic only. A
+run whose required margin cannot be computed fails with a message that asks for a larger
+compute box or that flag, rather than truncating silently.
+
+PIConGPU restart on a domain larger than the written one must still treat the written file
+as a finite-domain field. The bound above applies inside the written domain; it says nothing
+about the field outside the file extent.
 
 **Physics constraint:** the FFT is not domain-decomposed. A per-rank FFT on a subdomain would
 lose long-range contributions. The convolution covers the bunch box globally; only the
@@ -237,12 +284,14 @@ picBunch --input bunch_%T.h5 --species electrons \
 
 All three unit flags are mandatory; a missing one is an error, never a default. The writer
 emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`. Fields are float32 with
-extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. The input particle
-species is copied as a raw HDF5 object, so its attributes and `particlePatches` survive.
-`--picongpu-species` overrides the copied species and `--picongpu-dt` sets the stored `dt`.
-When the input checkpoint contains `Convolutional PML ...` records, the writer copies those
-records from the input instead of recomputing them. See
-[docs/picongpu-restart.md](docs/picongpu-restart.md).
+extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. Every particle
+species group in the input iteration is copied as a raw HDF5 object, so its attributes and
+`particlePatches` survive; a restart needs all of them. `--picongpu-species` only requires
+that the named species is present and never drops the others. `--picongpu-dt` sets the
+stored `dt`. The single `picongpu_idProvider` range covers the particles of every copied
+species (`nextId` is at least their total count). When the input checkpoint contains
+`Convolutional PML ...` records, the writer copies those records from the input instead of
+recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
@@ -286,12 +335,29 @@ all six axis directions. The mesh field against the direct TSC stencil sum of th
 Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
 threshold. This is the zero-padded FFT convolution checked against the discrete sum.
 
-Extended to non-unit cells (W3n). One stationary electron at `1e-7` m isotropic cells
-agrees to **7.8e-5** relative error at 12 cells, and at `1,1,4` m anisotropic cells to
-**1.0e-2** at 40 cells, both against the absolute Coulomb field in V/m. No node-volume
-factor is present or needed: a `1e-7` m case that lacked `cellx*celly*cellz` would be
-`1e-21` of this, and the anisotropic residual is TSC deposit discretisation, which vanishes
-with distance. The `Physics.AbsoluteMagnitude*` tests pin this on every backend.
+Extended to non-unit cells (W3n, W3o). One stationary electron at `1e-7` m isotropic cells
+agrees to **7.8e-5** relative error at 12 cells against the absolute Coulomb field in V/m.
+At `1,1,4` m anisotropic cells the deviation from the point Coulomb is the convolution of the
+point with the TSC charge shape, whose physical size is 1.5 cells per axis (1.5 m in x and y,
+6 m in z for this cell), not a node-volume or implementation defect. The exact continuous
+TSC-convolved field (converged quadrature over the anisotropic shape) and the shipped
+free-space mesh, both against the analytic point Coulomb at the E_x Yee point, short axis:
+
+| d (cells) | TSC-convolved continuum | shipped mesh |
+| --- | --- | --- |
+| 4 | 0.7861 | 0.8684 |
+| 8 | 0.9253 | 0.9393 |
+| 12 | 0.9638 | **0.9681** |
+| 16 | 0.9790 | 0.9807 |
+| 24 | 0.9904 | 0.9909 |
+
+The 3.2% gap at 12 cells is the anisotropic TSC convolution itself: the continuum is 3.6%
+below the point Coulomb, and the mesh reproduces that continuum to 0.44% (0.05% at 24 cells),
+the discrete deposit discretisation, which decays as about d^-2. For isotropic cells the TSC
+shape is symmetric, its quadrupole vanishes, and the continuum equals the point Coulomb to
+machine precision, which is why the isotropic anchor is 7.8e-5. No node-volume factor is
+present or needed: a `1e-7` m case that lacked `cellx*celly*cellz` would be `1e-21` of this.
+The `Physics.AbsoluteMagnitude*` tests pin the SI magnitude on every backend.
 
 **Single-particle far field against the TSC-convolved continuum.** The metric is
 per-component relative error, never pooled, measured with the `picBunch` executable
@@ -413,6 +479,25 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.4.0** adds an opt-in exact near shell (`--near-shell exact`, with
+  `--near-shell-radius`/`--near-shell-tile`) that assembles
+  `F_mesh(all) - F_mesh(near) + F_exact(near)` from the vendored FP64 reference
+  quadrature, and replaces the unconditional zero fill of `--global-grid` output
+  with a tolerance-derived field-tail margin. The margin bounds the monopole,
+  dipole and a conservative higher-multipole remainder; the compute box expands
+  to it (or to the whole global domain when that is smaller), and
+  `--allow-field-truncation` is the explicit opt-out. The PIConGPU checkpoint
+  writer now copies every input species and writes one checkpoint-wide
+  `picongpu_idProvider` id range. The referee-facing audit test battery adds
+  padding 2/3, div-E and high-density checks plus two disabled scaffolds.
+- **v0.3.1** settles the anisotropic Coulomb anchor and the R2C parity. At `1,1,4` m anisotropic
+  cells the field at 12 cells is **0.9681x** the analytic point Coulomb: the exact TSC-convolved
+  continuum is **0.9638x**, so the gap is the anisotropic TSC convolution (3.6% below the point
+  Coulomb), not a node-volume or implementation defect, and the mesh reproduces the continuum to
+  0.44%. The Accuracy section now quantifies the deviation from the point Coulomb against distance
+  as an aspect limit instead of bounding it only at 40 cells. The R2C path accepts an odd padded
+  extent (parity-correct kernel centring and relaxed even-only guards); `Physics.OddExtentR2cParity`
+  fails without it.
 - **v0.3.0** adds `--global-grid`/`--global-origin` and optional MPI. The convolution stays
   on the padded bunch box; the global field is written as exact-zero-filled chunks so the
   global array is never allocated. Adds `--deterministic-deposit` for bitwise comparisons
@@ -440,10 +525,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 - **Near shell not implemented.** The mesh path has no analytic near-source correction.
   Its accuracy below the crossovers above is a stated limitation, not a tuning target.
-- **Anisotropic cells bound near-field accuracy.** When the largest and smallest spacing
-  differ by a factor of 2 or more the near-field error is set by the shortest axis, because
-  accuracy depends on distance measured in units of the local spacing. The executable warns
-  on stderr in that case and computes the request unchanged.
+- **Anisotropic cells set the Coulomb-limit offset.** The delivered field is the TSC-convolved
+  field, which for non-cubic cells differs from the point Coulomb by the anisotropic TSC
+  convolution: at aspect 4 (z/x) the continuum is 21% below the point Coulomb at 4 cells and
+  3.6% at 12 cells along the short axis, decaying as about d^-2 (see the Accuracy table). The
+  mesh reproduces that continuum to the discrete deposit tolerance (0.44% at 12 cells, 0.05%
+  at 24 cells). This is a quantified aspect limit, not a "cubic cells only" restriction. The
+  executable also warns on stderr when the largest and smallest spacing differ by a factor of
+  2 or more, and computes the request unchanged.
 - **Single shared velocity.** A momentum spread exits non-zero; per-particle velocity is
   not supported.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
@@ -451,8 +540,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
   source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
   (single stationary source, 20^3 box, worst component Ey). The production policy never
   selects 1.
-- **Free-space truncation outside the box.** Fields are computed only on the requested
-  grid; there is no extrapolation beyond it.
+- **Zero fill outside the tolerance margin.** Fields are computed only inside the
+  tolerance-derived margin around the bunch. A global domain smaller than that margin has no
+  interior zero fill; a larger one is zeroed only where the tail bound is below
+  `--tolerance * field_peak`. `--allow-field-truncation` is an explicit diagnostic opt-out.
 - **No multi-GPU compute.** One device computes the field. MPI decomposes only the global
   write; the tested configurations are 2 and 4 ranks on one node, and multi-node was not
   tested. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.

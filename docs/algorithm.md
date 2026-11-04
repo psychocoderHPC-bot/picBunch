@@ -188,9 +188,12 @@ performance claim about `hal`.
 
 ## Open items
 
-- No near-shell correction is implemented. The measured mesh-path accuracy, its
-  crossovers and the `r/h` invariance are recorded in the README; values below those
-  crossovers are a stated limitation.
+- The plain mesh remains the default; values below its crossovers are a stated
+  limitation. `--near-shell exact` is an opt-in correction that replaces the
+  mesh contribution of sources within a shell by the exact TSC-convolved field
+  (vendored FP64 reference quadrature), using a per-tile local zero-padded FFT
+  for the `F_mesh(near)` subtraction. It is not lookup-class and its measured
+  accuracy/cost envelope is reported with the change that added it.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
   cost/error measurements are recorded above.
