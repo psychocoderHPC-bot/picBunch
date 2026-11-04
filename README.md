@@ -171,14 +171,19 @@ records from the input instead of recomputing them. See
 
 ## Test status
 
+The final state is the v0.1.3 commit `da3cd4239926f5da31b5794a36f8184e0b3164da`:
+12/12 CTest entries pass on both validated backends.
+
 - **rosi_v100, Tesla V100-SXM2-32GB, CUDA 12.6, sm_70:** 12/12 CTest entries passed at
-  `bed4344c45c46a5ec77529b652631d75f7d5bb5b` on 2026-11-04. GPU 0 was idle before and after
+  `da3cd4239926f5da31b5794a36f8184e0b3164da` on 2026-11-04. GPU 0 was idle before and after
   the run, and all four GPUs reported 0% and 0 MiB.
-- **hal, Radeon RX 7900 XTX, gfx1100:** 10/10 passed at
-  `339ca7ad3903249ebf3859f5e106d63db4dc3df5` on 2026-11-03. The two newest tests
-  (`picBunch.ScalarRecordSample` and `picBunch.IoScalarRecord`) were added in `bed4344`;
-  they have run on rosi only, so the HIP result is 10/10, not 12/12, at that commit.
-  The v0.1.1 to v0.1.3 geometry changes have not been re-run on HIP.
+- **hal, Radeon RX 7900 XTX, gfx1100, HIP:** 12/12 CTest entries passed at
+  `da3cd4239926f5da31b5794a36f8184e0b3164da` on 2026-11-04. This is a shared host, so the
+  run gives no timing claim. gfx1100 is a consumer RDNA3 part without a fast native FP64
+  path; its FP64 throughput is unrepresentative of data-centre AMD GPUs.
+
+Historical counts belong to earlier commits: 10/10 on hal at `339ca7ad` and 12/12 on
+rosi at `bed4344`, both before v0.1.3. The v0.1.3 numbers above supersede those counts.
 
 The 12 rosi entries are `smoke`, `Deposit`, `Kernel`, `Fft`, `Io`, `Physics`, `Padding`,
 `Restart`, `OpenPMDVerify`, `PicOnGPUVerify`, `ScalarRecordSample`, `IoScalarRecord`.
@@ -193,6 +198,8 @@ on `rosi_v100` (V100, CUDA), `kRefinement = 1`, one source on a node, against th
 independent `~/pr24/pr24w53-ref/indfield.py` (order 12, refine 3). A separate
 absolute-normalised metric `|ref-mesh|/(1+max(|ref|,|mesh|))` was used by an earlier
 campaign; it is labelled where it appears and is not the basis of the crossover claim.
+The committed raw tables are in [docs/measurements/](docs/measurements/), with the rosi
+campaign workdir recorded per file as the reproduction hint.
 
 **Coulomb limit.** One stationary particle at a node, far nodes at `d = 8,16,24,32` along
 all six axis directions. The mesh field against the direct TSC stencil sum of the analytic
@@ -293,7 +300,10 @@ Measured with the synthetic benchmark on `rosi_v100`, node `gv002`, GPU 0, CUDA 
 Release, double, padding 2. GPU 0 was idle before the sweep (0%, 0 MiB, 135 MHz) and all
 runs used `CUDA_VISIBLE_DEVICES=0`. Each configuration ran one untimed warm-up plus one
 device warm-up and **3 timed repeats**; the table gives medians. Benchmark code:
-`experimental/bench` at `3d05752`, tested picBunch source `dc69c16`.
+`experimental/bench` at `3d05752`, tested picBunch source `dc69c16`. The committed raw
+scaling matrix, Coulomb-limit and d-sweep CSVs are in
+[docs/measurements/](docs/measurements/); the rosi workdir is
+`~/pr24/sb1-20261102/`.
 
 | N | box (cells) | total (ms) | deposit | kernel | FFT | read-out | device (MiB) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -356,11 +366,11 @@ scale invariance). The cross-validation scripts are in `~/pr24/w7-20261102/`
 `~/pr24/w7b-20261102/` and `~/pr24/w7c-20261102/`. The performance sweep is
 `~/pr24/sb1-20261102/` (`matrix.csv`, `coulomb.csv`, `dsweep.csv`).
 
-Artifacts are mirrored on the Terok container under
-`/tmp/alpaka-orchestration/pr24-20261102/`: `W6/` for the final build and CTest logs,
-`SB1/` for performance, `N2b/` for the accuracy sweeps, `W7/` and `W7r/` for
-cross-validation, `W7b/` and `W7B/` for checkpoint transport, and `B1/` for the exact
-reference driver.
+The raw measurement data behind the accuracy, refinement and performance claims is
+committed under [docs/measurements/](docs/measurements/), with one provenance line and
+a SHA256 per file in [docs/measurements/README.md](docs/measurements/README.md). The
+rosi working directories named in that file are the reproduction hints; the transient
+`/tmp` mirror is no longer the source of record.
 
 ## License
 
