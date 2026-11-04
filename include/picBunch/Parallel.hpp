@@ -25,6 +25,8 @@ namespace picBunch
         virtual void allreduceSum(double* /*values*/, std::size_t /*count*/) const {}
         //! In-place sum over all ranks of one unsigned 64-bit value.
         virtual void allreduceSum(std::uint64_t& /*value*/) const {}
+        //! In-place element-wise maximum over all ranks of ``count`` doubles.
+        virtual void allreduceMax(double* /*values*/, std::size_t /*count*/) const {}
 
         /*! All-to-all exchange of double values with per-rank counts and displacements.
          *

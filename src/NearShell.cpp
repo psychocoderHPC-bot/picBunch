@@ -103,6 +103,10 @@ namespace picBunch
 
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
+        // The per-tile subtraction and the returned field are full-grid host
+        // arrays; the near shell therefore keeps the replicated mesh path even
+        // when the outer call supplied a distributed context.
+        plain.fftMode = FftMode::Replicated;
         // The base mesh field is itself component-parallel when a distributed
         // context is supplied, and computeField already reduced the six arrays
         // onto every rank.  The near-shell tiles below are then partitioned so

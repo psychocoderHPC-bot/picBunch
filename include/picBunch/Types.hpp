@@ -85,6 +85,29 @@ namespace picBunch
     {
         Grid grid;
         std::array<std::vector<double>, 6> data;
+        /*! True when ``data`` holds only one contiguous z-slab of the grid.
+         *
+         * The distributed FFT returns this form: every rank owns
+         * ``[slabOffset, slabOffset + slabCount)`` z planes with all x and y
+         * nodes of those planes.  A replicated field keeps ``zSlab == false``
+         * and every component sized ``grid.size()``.
+         */
+        bool zSlab = false;
+        //! First z plane held by this rank (only meaningful when ``zSlab``).
+        std::size_t slabOffset = 0;
+        //! Number of z planes held by this rank (only meaningful when ``zSlab``).
+        std::size_t slabCount = 0;
+
+        //! z planes held locally (the full grid extent for a replicated field).
+        [[nodiscard]] std::size_t planes() const
+        {
+            return zSlab ? slabCount : grid.n[2];
+        }
+        //! Number of stored values per component on this rank.
+        [[nodiscard]] std::size_t localSize() const
+        {
+            return grid.n[0] * grid.n[1] * planes();
+        }
     };
 
     /*! One particle patch region of a generated species.

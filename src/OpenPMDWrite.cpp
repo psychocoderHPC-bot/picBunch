@@ -331,17 +331,25 @@ namespace picBunch
             if(nz == 0u)
                 return;
 
+            // For a distributed field the component arrays hold only the
+            // rank's z-slab; the tile covers this rank's full global slab, so
+            // clamp the copy to the locally owned planes.
+            long long const fieldZBegin = base[2]
+                + static_cast<long long>(field.zSlab ? field.slabOffset : 0u);
+            long long const fieldZEnd = fieldZBegin
+                + static_cast<long long>(field.zSlab ? field.slabCount : field.grid.n[2]);
             std::array<long long, 3> lo{
                 std::max<long long>(base[0], 0),
                 std::max<long long>(base[1], 0),
-                std::max<long long>(base[2], static_cast<long long>(zBegin))};
+                std::max<long long>(base[2], std::max(
+                    static_cast<long long>(zBegin), fieldZBegin))};
             std::array<long long, 3> hi{
                 std::min<long long>(base[0] + static_cast<long long>(field.grid.n[0]),
                                     static_cast<long long>(globalN[0])),
                 std::min<long long>(base[1] + static_cast<long long>(field.grid.n[1]),
                                     static_cast<long long>(globalN[1])),
                 std::min<long long>(base[2] + static_cast<long long>(field.grid.n[2]),
-                                    static_cast<long long>(zEnd))};
+                                    std::min(static_cast<long long>(zEnd), fieldZEnd))};
             bool const overlaps = lo[0] < hi[0] && lo[1] < hi[1] && lo[2] < hi[2];
             if(overlaps)
             {
@@ -349,7 +357,7 @@ namespace picBunch
             std::size_t const fny = field.grid.n[1];
             for(long long k = lo[2]; k < hi[2]; ++k)
             {
-                std::size_t const fk = static_cast<std::size_t>(k - base[2]);
+                std::size_t const fk = static_cast<std::size_t>(k - fieldZBegin);
                 for(long long j = lo[1]; j < hi[1]; ++j)
                 {
                     std::size_t const fj = static_cast<std::size_t>(j - base[1]);
@@ -407,11 +415,11 @@ namespace picBunch
         FarTail const* tail)
     {
         for(std::size_t c = 0; c < field.data.size(); ++c)
-            if(field.data[c].size() != field.grid.size())
+            if(field.data[c].size() != field.localSize())
                 throw std::runtime_error(
                     "writeFieldToDomain: component " + std::to_string(c) + " has "
-                    + std::to_string(field.data[c].size()) + " values, grid.size() is "
-                    + std::to_string(field.grid.size()));
+                    + std::to_string(field.data[c].size()) + " values, localSize() is "
+                    + std::to_string(field.localSize()));
         if(field.grid.size() == 0u)
             throw std::runtime_error("writeFieldToDomain: grid is empty");
         auto const base = globalBase(field.grid, globalGridSize, globalGridOrigin);

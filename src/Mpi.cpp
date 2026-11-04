@@ -63,6 +63,23 @@ namespace picBunch
 #endif
     }
 
+    void MpiParallelContext::allreduceMax(double* values, std::size_t count) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1 && count > 0)
+            MPI_Allreduce(
+                MPI_IN_PLACE,
+                values,
+                static_cast<int>(count),
+                MPI_DOUBLE,
+                MPI_MAX,
+                MPI_COMM_WORLD);
+#else
+        (void)values;
+        (void)count;
+#endif
+    }
+
     void MpiParallelContext::alltoallv(
         double* send,
         int const* sendCounts,
@@ -312,6 +329,10 @@ namespace picBunch
 
     void mpiBroadcastField(Field& field, int root)
     {
+        // A broadcast field is always the full grid on every rank.
+        field.zSlab = false;
+        field.slabOffset = 0;
+        field.slabCount = 0;
 #if defined(PICBUNCH_ENABLE_MPI)
         if(!initialized() || mpiSize() <= 1)
             return;

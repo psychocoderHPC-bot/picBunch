@@ -82,9 +82,9 @@ namespace picBunch
                 , m_My{My}
                 , m_Mz{Mz}
             {
-                if(parallel == nullptr || parallel->size <= 1)
+                if(parallel == nullptr || parallel->size < 1)
                     throw std::invalid_argument(
-                        "DistributedFft3D requires a distributed ParallelContext");
+                        "DistributedFft3D requires a ParallelContext");
                 auto const z = slabRange(Mz, parallel->size, parallel->rank);
                 auto const x = slabRange(Mx, parallel->size, parallel->rank);
                 m_z0 = z.first;

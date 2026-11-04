@@ -288,7 +288,13 @@ source on every rank. Two stages are rank-parallel.
   performs the local x and y 1-D transforms, transposes with `MPI_Alltoallv` so that z
   becomes local, transforms z, multiplies the kernel spectrum, and inverts in reverse
   order. This is the exact global transform, with one copy of each work array per rank.
-  The replicated path remains the default for boxes that fit.
+  After the inverse transform each rank keeps only its output z-slab of all six
+  components, runs the staggered read-out on that slab, and exchanges the output planes
+  once per component so every rank owns exactly the contiguous z-slab the chunked writer
+  writes. No rank allocates or gathers the full output field. An explicit
+  `--fft-mode distributed` on one rank runs the same slab algorithm and provides the
+  single-rank reference for the written-file comparison. The replicated path remains the
+  default for boxes that fit.
 * **Near shell by output tile.** The tile loop is partitioned by linear tile index. Each
   rank builds the near-source list and the local subtraction FFT for its own tiles, writes
   the correction only there, and one all-reduce sums the corrections.
@@ -313,29 +319,44 @@ Agreement with the replicated path on a 128-particle, `32^3` box (`64^3` padded)
 per-component relative difference `2.2e-16` (E; B is zero for this stationary bunch) at
 2 and 4 ranks. A moving one-particle case with all six components present gives
 `8.5e-17` relative. The generic distributed 3-D transform matches a replicated c2c plan to
-`1.6e-16`. These are FFT roundoff, not a physics difference.
+`1.6e-16`. These are FFT roundoff, not a physics difference. The written `32^3` file of a
+2- and a 4-rank distributed run is bitwise equal (0 ULP, all six components) to the
+single-rank distributed output.
 
-Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer):
+Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer),
+`rosi_v100` with idle GPUs (medians of 3 runs at 2 ranks and 2 runs at 4 ranks):
 
-| ranks | distributed FFT (ms) | transpose (ms) | transpose fraction |
-| --- | --- | --- | --- |
-| 2 | 1169 | 7269 | 86.1% of FFT+transpose, 78.9% of the reported total |
-| 4 | 613 | 5311 | 89.6% of FFT+transpose, 84.2% of the reported total |
+| ranks | distributed FFT (ms) | transpose (ms) | read-out (ms) | transpose fraction |
+| --- | --- | --- | --- | --- |
+| 2 | 3809 | 10788 | 1589 | 73.9% of FFT+transpose, 63.6% of the reported total |
+| 4 | 1905 | 6782 | 864 | 78.1% of FFT+transpose, 67.9% of the reported total |
 
-Memory, `640^3` output (`1280^3` padded), one particle:
+On `jureca-h100` with idle GPUs the 2-rank medians are `1237 ms` FFT, `7089 ms`
+transpose and `9455 ms` total (85.1% and 75.0% transpose fractions). The read-out is
+larger than before because it now scales each local slab and performs the output-plane
+exchange; that exchange is included in the read-out time.
+
+Memory, `640^3` output (`1280^3` padded), 128 particles, `jureca-h100`:
 
 | ranks | path | peak host RSS/rank | peak device/rank |
 | --- | --- | --- | --- |
-| 1 | replicated | rejected by the 2^28 padded-node guard (modeled ~80 GB) | - |
-| 2 | distributed | 45.26 GB | 81.1 GB (unified, at the device limit) |
-| 4 | distributed | 28.83 GB | 65.3 GB |
+| 1 | replicated | rejected by the 2^28 padded-node guard | - |
+| 2 | distributed | 41.14 GB | 81.1 GB (unified, at the device limit) |
+| 4 | distributed | 20.64 GB | 65.3 GB |
 
-The distributed work arrays themselves scale as 3 complex arrays per rank, `50.3 GB` at
-2 ranks and `25.2 GB` at 4 ranks for this box. The measured totals fall less sharply
-because the six output components are still replicated (`12.6 GB` here) and unified
-allocations plus plan workspace add overhead. The transposes cost real time even when the
-box fits in memory. They move the whole padded array twice per convolution and dominate the
-distributed run at these sizes; memory is the reason to use the distributed path, not speed.
+Host RSS falls `41.1 -> 20.6 GB` (2.0x) from 2 to 4 ranks instead of approaching the old
+`12.6 GB` replicated-field floor. The six-component output is now slab-local: `6.3 GB`
+per rank at 2 ranks and `3.1 GB` at 4 ranks. The three distributed complex work arrays
+model to `50.3 GB`/rank at 2 ranks and `25.2 GB`/rank at 4 ranks; the measured device peak
+is set by those arrays plus the FFT plan workspace. The only remaining replicated source
+constant is the bunch array, read once and broadcast because the deposit and the transform
+need every source on every rank. At 128 particles it is about `8 KiB`, so it is not the
+dominant term; a many-particle bunch would eventually make it one. The writer also keeps
+six write tiles of about 128 MiB (`~0.77 GB`/rank), independent of rank count.
+
+The transposes and the output-plane exchange cost real time even when the box fits in
+memory. They move the padded array twice per convolution and dominate the distributed run
+at these sizes; memory is the reason to use the distributed path, not speed.
 
 #### Measured rank scaling (v0.6.0)
 
@@ -821,11 +842,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.
 - **Rank-parallel compute is single-node.** MPI divides the six mesh components, the
-  near-shell output tiles and the global write. The bunch is replicated on every rank. The
-  distributed FFT removes the replicated padded box, but the output field is still returned
-  in full on every rank and there is no multi-node redistribution. Tested with 1, 2 and
-  4 ranks on one node only. Without `--deterministic-deposit`, the GPU deposit is not
-  bitwise reproducible.
+  near-shell output tiles and the global write. The bunch is replicated on every rank: it
+  is read once and broadcast because the deposit and the transform need all sources. The
+  distributed FFT removes both the replicated padded box and the replicated output field;
+  each rank keeps and writes only its own z-slab. At 128 particles the replicated bunch is
+  not a memory limit, but a large bunch would become the remaining constant. The near shell
+  still uses the replicated mesh path because its correction buffers are full-grid host
+  arrays. There is no multi-node redistribution. Tested with 1, 2 and 4 ranks on one node
+  only. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.
 
 ## Reproduce
 

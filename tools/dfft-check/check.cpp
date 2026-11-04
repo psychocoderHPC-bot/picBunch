@@ -39,7 +39,17 @@ int main(int argc, char** argv)
 
     std::uint32_t const Mx = 8, My = 6, Mz = 4;
 
-
+    //! Read a field entry from a full field or from the rank's local z-slab.
+    auto fieldValue = [](Field const& f, int c, std::size_t i, std::size_t j, std::size_t k) {
+        std::size_t const nx = f.grid.n[0];
+        std::size_t const ny = f.grid.n[1];
+        if(!f.zSlab)
+            return f.data[c][i + nx * (j + ny * k)];
+        if(k < f.slabOffset || k >= f.slabOffset + f.slabCount)
+            return 0.0;
+        std::size_t const lk = k - f.slabOffset;
+        return f.data[c][i + nx * (j + ny * lk)];
+    };
 
     // End-to-end convolution: replicated vs distributed on a one-particle bunch.
     {
@@ -66,24 +76,39 @@ int main(int argc, char** argv)
         double maxDiff = 0.0;
         double maxRef = 0.0;
         for(int c = 0; c < 6; ++c)
-            for(std::size_t l = 0; l < rep.data[c].size(); ++l)
-            {
-                maxDiff = std::max(maxDiff, std::abs(rep.data[c][l] - dist.data[c][l]));
-                maxRef = std::max(maxRef, std::abs(rep.data[c][l]));
-            }
+            for(std::size_t k = dist.slabOffset; k < dist.slabOffset + dist.slabCount; ++k)
+                for(std::size_t j = 0; j < rep.grid.n[1]; ++j)
+                    for(std::size_t i = 0; i < rep.grid.n[0]; ++i)
+                    {
+                        double const reference = fieldValue(rep, c, i, j, k);
+                        maxDiff = std::max(
+                            maxDiff,
+                            std::abs(reference - fieldValue(dist, c, i, j, k)));
+                        maxRef = std::max(maxRef, std::abs(reference));
+                    }
+        parallel.allreduceMax(&maxDiff, 1);
+        parallel.allreduceMax(&maxRef, 1);
         if(rank == 0)
+            std::printf(
+                "convolution max|rep-dist|=%.6e max|ref|=%.6e rel=%.6e\n",
+                maxDiff,
+                maxRef,
+                maxDiff / std::max(1e-300, maxRef));
+        for(int c = 0; c < 6; ++c)
         {
-            std::printf("convolution max|rep-dist|=%.6e max|ref|=%.6e rel=%.6e\n", maxDiff, maxRef, maxDiff / std::max(1e-300, maxRef));
-            for(int c = 0; c < 6; ++c)
-            {
-                double mr = 0.0, md = 0.0;
-                for(std::size_t l = 0; l < rep.data[c].size(); ++l)
-                {
-                    mr = std::max(mr, std::abs(rep.data[c][l]));
-                    md = std::max(md, std::abs(dist.data[c][l]));
-                }
+            double mr = 0.0, md = 0.0;
+            for(std::size_t k = dist.slabOffset;
+                k < dist.slabOffset + dist.slabCount; ++k)
+                for(std::size_t j = 0; j < rep.grid.n[1]; ++j)
+                    for(std::size_t i = 0; i < rep.grid.n[0]; ++i)
+                    {
+                        mr = std::max(mr, std::abs(fieldValue(rep, c, i, j, k)));
+                        md = std::max(md, std::abs(fieldValue(dist, c, i, j, k)));
+                    }
+            parallel.allreduceMax(&mr, 1);
+            parallel.allreduceMax(&md, 1);
+            if(rank == 0)
                 std::printf("  c=%d rep=%.6e dist=%.6e\n", c, mr, md);
-            }
         }
     }
 
@@ -176,10 +201,15 @@ int main(int argc, char** argv)
                     std::size_t const i = std::size_t(row[0]);
                     std::size_t const j = std::size_t(row[1]);
                     std::size_t const k = std::size_t(row[2]);
-                    std::size_t const flat = i + field.grid.n[0] * (j + field.grid.n[1] * k);
+                    if(field.zSlab
+                       && (k < field.slabOffset || k >= field.slabOffset + field.slabCount))
+                        continue; // another rank owns this row
                     for(int c = 0; c < 6; ++c)
-                        worst = std::max(worst, std::abs(field.data[c][flat] - row[3 + c]) / scale);
+                        worst = std::max(
+                            worst,
+                            std::abs(fieldValue(field, c, i, j, k) - row[3 + c]) / scale);
                 }
+                parallel.allreduceMax(&worst, 1);
                 return worst;
             };
             options.fftMode = FftMode::Replicated;
@@ -188,8 +218,15 @@ int main(int argc, char** argv)
             Field field = computeField(bunch, options);
             double maxDiff = 0.0;
             for(int c = 0; c < 6; ++c)
-                for(std::size_t l = 0; l < repField.data[c].size(); ++l)
-                    maxDiff = std::max(maxDiff, std::abs(repField.data[c][l] - field.data[c][l]));
+                for(std::size_t k = field.slabOffset; k < field.slabOffset + field.slabCount; ++k)
+                    for(std::size_t j = 0; j < repField.grid.n[1]; ++j)
+                        for(std::size_t i = 0; i < repField.grid.n[0]; ++i)
+                            maxDiff = std::max(
+                                maxDiff,
+                                std::abs(
+                                    fieldValue(repField, c, i, j, k)
+                                    - fieldValue(field, c, i, j, k)));
+            parallel.allreduceMax(&maxDiff, 1);
             if(rank == 0)
                 std::printf("  physics rep-vs-dist maxabs=%.6e\n", maxDiff);
             return std::pair<double, double>{worstOf(repField), worstOf(field)};

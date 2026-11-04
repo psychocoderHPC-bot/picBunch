@@ -503,6 +503,8 @@ namespace
             static_cast<unsigned long long>(placed.patchExtent[2]));
 
         picBunch::ComputeOptions options;
+        // The checkpoint writer consumes the full field on rank 0.
+        options.fftMode = picBunch::FftMode::Replicated;
         options.tolerance = config.accuracy.tolerance;
         options.cellSize = config.domain.cellSize;
         options.gridSize = config.domain.cells;
@@ -714,6 +716,15 @@ int main(int argc, char** argv)
             options.fftMode = picBunch::FftMode::Distributed;
         else
             options.fftMode = picBunch::FftMode::Auto;
+        if(args.restartFormat == "picongpu")
+        {
+            // The checkpoint writer needs all six full components on rank 0;
+            // a slab-decomposed field cannot feed it without a gather.
+            options.fftMode = picBunch::FftMode::Replicated;
+            if(root && args.fftMode != "replicated")
+                std::printf(
+                    "fft mode: replicated (PIConGPU checkpoint needs the full field)\n");
+        }
         options.meshGridSize = args.globalGrid ? std::nullopt : meshGridExtent;
         if(args.grid)
         {
@@ -812,11 +823,15 @@ int main(int argc, char** argv)
                 args.tolerance,
                 binning.multiVelocity ? "" : ", single velocity");
 
-        auto fieldPeaks = [](picBunch::Field const& value) {
+        auto fieldPeaks = [&](picBunch::Field const& value) {
             std::array<double, 2> peaks{0.0, 0.0};
             for(int c = 0; c < 6; ++c)
                 for(double entry : value.data[c])
                     peaks[c < 3 ? 0 : 1] = std::max(peaks[c < 3 ? 0 : 1], std::abs(entry));
+            // A distributed field holds one z-slab per rank; the physical peak
+            // is the maximum over all slabs.
+            if(options.parallel && options.parallel->distributed())
+                options.parallel->allreduceMax(peaks.data(), peaks.size());
             return peaks;
         };
         auto peaks = fieldPeaks(field);
@@ -942,8 +957,9 @@ int main(int argc, char** argv)
             std::printf("compute wall (all stages, rank 0): %.3f ms\n", computeWallMs);
         }
 
-        // Every rank computed the component it owns and the all-reduce left the
-        // full bunch-box field on all ranks, so no full-field broadcast is needed.
+        // A distributed run leaves only the rank's output z-slab on each rank;
+        // a replicated run leaves the full bunch-box field on every rank.  The
+        // writer consumes either form without a full-field broadcast.
         double scalarMeta[6] = {
             bunchData.time,
             bunchData.timeUnitSI,
@@ -1062,6 +1078,16 @@ int main(int argc, char** argv)
                     *args.globalGrid,
                     globalOriginResolved,
                     farTail ? &*farTail : nullptr);
+            else if(field.zSlab)
+                // Distributed output: every rank holds its own z-slab.  The
+                // chunked writer writes it collectively without materialising
+                // the full domain.
+                picBunch::writeFieldToDomain(
+                    field,
+                    *args.output,
+                    writeOptions,
+                    field.grid.n,
+                    field.grid.origin);
             else if(root)
                 picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);

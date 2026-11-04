@@ -772,8 +772,6 @@ namespace picBunch
         Grid const grid = makeGrid(bunch, options);
         Field field;
         field.grid = grid;
-        for(auto& component : field.data)
-            component.assign(grid.size(), 0.0);
 
         StageTimes localTimes;
         StageTimes& times = stageTimes ? *stageTimes : localTimes;
@@ -969,7 +967,11 @@ namespace picBunch
         bool const distributedRequested = options.fftMode == FftMode::Distributed
             || (options.fftMode == FftMode::Auto
                 && paddedNodes > options.distributedFftMinNodes);
-        bool const useDistributed = distributedRequested && parSize > 1;
+        // An explicit --fft-mode distributed also runs the slab algorithm on a
+        // single rank so its written field can be compared bitwise with a
+        // multi-rank run; Auto keeps the replicated fallback for one rank.
+        bool const useDistributed = distributedRequested && par != nullptr
+            && (parSize > 1 || options.fftMode == FftMode::Distributed);
 
         if(useDistributed)
         {
@@ -979,6 +981,146 @@ namespace picBunch
             auto* workReal = reinterpret_cast<double*>(dfft.work());
             Extents3 const slabExt{Mx, My, nz};
             Extents3 const slabFrame = Extents3::fill(4u);
+
+            // The inverse transform leaves a z-slab of the *padded* grid.  Only
+            // the output planes [0, grid.n[2]) are written, and those padded
+            // planes are not balanced across ranks (padding 2 leaves the whole
+            // output on the first half of the ranks).  Redistribute the
+            // read-out output once per (bin, component) so every rank owns the
+            // same contiguous z-slab the chunked writer writes.  No rank ever
+            // allocates or gathers the full output field.
+            std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
+            std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
+            std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
+            std::size_t const planeOut
+                = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy);
+
+            std::size_t globalNz = grid.n[2];
+            std::array<double, 3> writeOrigin = grid.origin;
+            if(options.globalGridSize)
+            {
+                globalNz = (*options.globalGridSize)[2];
+                writeOrigin = options.globalGridOrigin.value_or(
+                    std::array<double, 3>{0.0, 0.0, 0.0});
+            }
+            long long const base2 = static_cast<long long>(std::llround(
+                (grid.origin[2] - writeOrigin[2]) / grid.spacing[2]));
+            auto const writerRange = [&](int r) {
+                std::size_t const sz = static_cast<std::size_t>(r);
+                return std::pair<long long, long long>{
+                    static_cast<long long>((sz * globalNz) / static_cast<std::size_t>(parSize)),
+                    static_cast<long long>(
+                        ((sz + 1u) * globalNz) / static_cast<std::size_t>(parSize))};
+            };
+            auto const writerOwner = [&](long long globalZ) {
+                for(int r = 0; r < parSize; ++r)
+                {
+                    auto const range = writerRange(r);
+                    if(globalZ >= range.first && globalZ < range.second)
+                        return r;
+                }
+                return parSize - 1;
+            };
+
+            auto const ownRange = writerRange(parRank);
+            long long const ownLo = std::max(ownRange.first, base2);
+            long long const ownHi = std::min(
+                ownRange.second, base2 + static_cast<long long>(outNz));
+            field.zSlab = true;
+            field.slabOffset = (ownHi > ownLo)
+                ? static_cast<std::size_t>(ownLo - base2)
+                : 0u;
+            field.slabCount = (ownHi > ownLo)
+                ? static_cast<std::size_t>(ownHi - ownLo)
+                : 0u;
+            for(auto& component : field.data)
+                component.assign(field.slabCount * planeOut, 0.0);
+
+            // Padded output planes that this rank received after the inverse.
+            long long const localLo = static_cast<long long>(zOffset);
+            long long const localHi = std::min(
+                static_cast<long long>(zOffset) + static_cast<long long>(nz),
+                static_cast<long long>(outNz));
+
+            std::vector<int> sendCounts(static_cast<std::size_t>(parSize), 0);
+            std::vector<int> sendDispls(static_cast<std::size_t>(parSize), 0);
+            std::vector<int> recvCounts(static_cast<std::size_t>(parSize), 0);
+            std::vector<int> recvDispls(static_cast<std::size_t>(parSize), 0);
+
+            long long sendTotal = 0;
+            for(long long k = localLo; k < localHi; ++k)
+            {
+                int const dest = writerOwner(base2 + k);
+                sendCounts[static_cast<std::size_t>(dest)]
+                    += static_cast<int>(planeOut);
+                sendTotal += static_cast<long long>(planeOut);
+            }
+            long long sendPos = 0;
+            for(int r = 0; r < parSize; ++r)
+            {
+                sendDispls[static_cast<std::size_t>(r)] = static_cast<int>(sendPos);
+                sendPos += sendCounts[static_cast<std::size_t>(r)];
+            }
+            long long recvPos = 0;
+            for(int r = 0; r < parSize; ++r)
+            {
+                auto const z = detail::slabRange(Mz, parSize, r);
+                long long const srcLo = std::min<long long>(z.first, outNz);
+                long long const srcHi = std::min<long long>(
+                    static_cast<long long>(z.first) + static_cast<long long>(z.second),
+                    static_cast<long long>(outNz));
+                long long const lo = std::max(srcLo, static_cast<long long>(field.slabOffset));
+                long long const hi = std::min(
+                    srcHi,
+                    static_cast<long long>(field.slabOffset)
+                        + static_cast<long long>(field.slabCount));
+                long long const planes = std::max(0ll, hi - lo);
+                recvCounts[static_cast<std::size_t>(r)]
+                    = static_cast<int>(planes * static_cast<long long>(planeOut));
+                recvDispls[static_cast<std::size_t>(r)] = static_cast<int>(recvPos);
+                recvPos += static_cast<long long>(planes) * static_cast<long long>(planeOut);
+            }
+            if(sendTotal > static_cast<long long>(std::numeric_limits<int>::max())
+               || recvPos > static_cast<long long>(std::numeric_limits<int>::max()))
+                throw std::runtime_error(
+                    "computeField: an output-slab redistribution exceeds the MPI int count range");
+
+            std::vector<double> sendBuffer(static_cast<std::size_t>(sendTotal));
+            std::vector<double> recvBuffer;
+            double dummy = 0.0;
+            std::array<bool, 6> componentWritten{};
+            auto const redistribute = [&](int c, bool first) {
+                std::vector<int> cursor = sendDispls;
+                for(long long k = localLo; k < localHi; ++k)
+                {
+                    int const dest = writerOwner(base2 + k);
+                    long long const localZ = k - static_cast<long long>(zOffset);
+                    double* dst = sendBuffer.data() + cursor[static_cast<std::size_t>(dest)];
+                    for(std::uint32_t j = 0; j < outNy; ++j)
+                    {
+                        std::size_t const inRow = static_cast<std::size_t>(Mx)
+                                * (static_cast<std::size_t>(j)
+                                   + static_cast<std::size_t>(My) * static_cast<std::size_t>(localZ));
+                        std::size_t const outRow = static_cast<std::size_t>(j) * outNx;
+                        for(std::uint32_t i = 0; i < outNx; ++i)
+                            dst[outRow + i] = dfft.work()[inRow + i].real();
+                    }
+                    cursor[static_cast<std::size_t>(dest)] += static_cast<int>(planeOut);
+                }
+                double* recv = first && !field.data[c].empty()
+                    ? field.data[c].data()
+                    : (recvBuffer.empty() ? &dummy : recvBuffer.data());
+                par->alltoallv(
+                    sendBuffer.empty() ? &dummy : sendBuffer.data(),
+                    sendCounts.data(),
+                    sendDispls.data(),
+                    recv,
+                    recvCounts.data(),
+                    recvDispls.data());
+                if(!first)
+                    for(std::size_t l = 0; l < field.data[c].size(); ++l)
+                        field.data[c][l] += recvBuffer[l];
+            };
 
             for(std::size_t b = 0; b < binCount; ++b)
             {
@@ -1042,35 +1184,40 @@ namespace picBunch
                     // ---------------------------------------------------------- read-out
                     auto const readoutStart = Clock::now();
                     double const factor = scale * (c < 3 ? eFactor : bFactor);
-                    for(std::uint32_t kl = 0; kl < nz; ++kl)
+                    // Scale the slab read-out in place, then hand each output
+                    // z plane to the rank that owns it in the writer layout.
+                    for(long long k = localLo; k < localHi; ++k)
                     {
-                        std::uint32_t const k = zOffset + kl;
-                        if(k >= static_cast<std::uint32_t>(grid.n[2]))
-                            break;
-                        for(std::uint32_t j = 0; j < static_cast<std::uint32_t>(grid.n[1]); ++j)
-                            for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
+                        long long const localZ = k - static_cast<long long>(zOffset);
+                        for(std::uint32_t j = 0; j < outNy; ++j)
+                        {
+                            std::size_t const inRow = static_cast<std::size_t>(Mx)
+                                * (static_cast<std::size_t>(j)
+                                   + static_cast<std::size_t>(My)
+                                       * static_cast<std::size_t>(localZ));
+                            for(std::uint32_t i = 0; i < outNx; ++i)
                             {
-                                auto const in = static_cast<std::size_t>(i)
-                                    + static_cast<std::size_t>(Mx)
-                                        * (static_cast<std::size_t>(j)
-                                           + static_cast<std::size_t>(My) * kl);
-                                auto const out = static_cast<std::size_t>(i)
-                                    + static_cast<std::size_t>(grid.n[0])
-                                        * (static_cast<std::size_t>(j)
-                                           + static_cast<std::size_t>(grid.n[1]) * k);
-                                // Accumulate: the field of the mixed bunch is the
-                                // sum over the velocity classes.
-                                field.data[c][out] += dfft.work()[in].real() * factor;
+                                auto& value = dfft.work()[inRow + i];
+                                value = Complex{value.real() * factor, 0.0};
                             }
+                        }
                     }
+                    bool const first = !componentWritten[static_cast<std::size_t>(c)];
+                    if(!first && recvBuffer.size() != field.data[c].size())
+                        recvBuffer.assign(field.data[c].size(), 0.0);
+                    redistribute(c, first);
+                    componentWritten[static_cast<std::size_t>(c)] = true;
                     times.readoutMs += elapsedMs(readoutStart);
-                    par->allreduceSum(field.data[c].data(), field.data[c].size());
                 }
             }
             times.fftMs += dfft.fftMilliseconds();
             times.transposeMs += dfft.transposeMilliseconds();
             return field;
         }
+
+        // Replicated path: one whole FFT per rank, component-parallel across ranks.
+        for(auto& component : field.data)
+            component.assign(grid.size(), 0.0);
 
         // Replicated path: one whole FFT per rank, component-parallel across ranks.
         for(std::size_t b = 0; b < binCount; ++b)

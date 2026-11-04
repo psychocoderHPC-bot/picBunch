@@ -43,6 +43,7 @@ namespace picBunch
         MpiParallelContext();
         void allreduceSum(double* values, std::size_t count) const override;
         void allreduceSum(std::uint64_t& value) const override;
+        void allreduceMax(double* values, std::size_t count) const override;
         void alltoallv(
             double* send,
             int const* sendCounts,
