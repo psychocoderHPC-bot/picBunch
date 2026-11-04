@@ -6,6 +6,7 @@
 // FFT sizes are implementation details and are never exposed.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
 #include "picBunch/NearShell.hpp"
 #include "picBunch/OpenPMD.hpp"
@@ -267,6 +268,14 @@ namespace
                 args.outputIteration = parseIteration(value("--output-iteration"), "--output-iteration");
             else if(option == "--tolerance")
                 args.tolerance = parseTolerance(value("--tolerance"));
+            else if(option == "--near-shell")
+                args.nearShell = value("--near-shell");
+            else if(option == "--near-shell-radius")
+                args.nearShellRadius
+                    = parseTripleDouble(value("--near-shell-radius"), "--near-shell-radius")[0];
+            else if(option == "--near-shell-tile")
+                args.nearShellTile
+                    = parseIteration(value("--near-shell-tile"), "--near-shell-tile");
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -400,6 +409,7 @@ int main(int argc, char** argv)
     {
         picBunch::BunchData bunchData;
         picBunch::Field field;
+        std::optional<picBunch::FarTail> farTail;
         bool const root = picBunch::mpiRank() == 0;
         std::array<double, 3> globalOriginResolved{0.0, 0.0, 0.0};
 
@@ -545,14 +555,15 @@ int main(int argc, char** argv)
         }
 
         // --------------------------------------------------------------- compute
+        std::printf(
+            "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
+            args.nearShell.c_str(),
+            picBunch::resolveNearShellRadius(options, options.nearShell),
+            options.nearShell.tileNodes);
         if(options.nearShell.mode == picBunch::NearShellOptions::Mode::Exact)
         {
             std::size_t exactPairs = 0;
             options.nearShell.exactPairs = &exactPairs;
-            std::printf(
-                "near shell: exact, R=%.3g PIC cells, tile=%zu nodes\n",
-                picBunch::resolveNearShellRadius(options, options.nearShell),
-                options.nearShell.tileNodes);
             field = picBunch::computeField(bunchData.bunch, options, &times);
             std::printf("near shell: %zu exact (source,node,component) evaluations\n", exactPairs);
         }
@@ -593,23 +604,38 @@ int main(int argc, char** argv)
                 std::abs(margin.totalCharge), margin.dipoleMagnitude, margin.sourceRadius,
                 margin.maxGamma, args.tolerance * peak, margin.distance, margin.bound,
                 margin.marginCells[0], margin.marginCells[1], margin.marginCells[2]);
+            // The multipole tail replaces the former zero fill outside the
+            // exact compute box.  Its measured validity radius is a multiple
+            // of the bunch support radius; the exact box must reach it (plus
+            // two cells for the global-node snap) before the tail is used.
+            picBunch::FarTail const tail = picBunch::deriveFarTail(bunchData.bunch);
+            auto const bounds = bunchData.bunch.bounds();
+            std::array<double, 3> tailMargin{};
+            for(int a = 0; a < 3; ++a)
+            {
+                double const halfExtent = 0.5 * (bounds[1][a] - bounds[0][a]);
+                double const cells = (tail.switchDistance - halfExtent) / options.cellSize[a];
+                tailMargin[a] = std::max(0.0, std::ceil(cells) + 2.0);
+            }
+            std::printf(
+                "far tail: R=%g m, switch=%g m (%g cells), quadrupole norm=%g C m^2, "
+                "tail margin=(%.6g,%.6g,%.6g) cells\n",
+                tail.supportRadius, tail.switchDistance,
+                tail.switchDistance / options.cellSize[0], margin.quadrupoleNorm,
+                tailMargin[0], tailMargin[1], tailMargin[2]);
+
             if(args.allowFieldTruncation)
                 std::fprintf(
                     stderr,
-                    "picBunch: warning: --allow-field-truncation: writing zeros outside the "
-                    "unexpanded compute box; the neglected field there is not bounded by "
-                    "--tolerance %g\n",
+                    "picBunch: warning: --allow-field-truncation: keeping the "
+                    "unexpanded compute box and writing exact zero outside it; the "
+                    "neglected field there is not bounded by --tolerance %g\n",
                     args.tolerance);
             else
             {
-                bool needsExpansion = false;
-                for(int a = 0; a < 3; ++a)
-                    if(margin.marginCells[a] > options.marginCells)
-                        needsExpansion = true;
-                if(needsExpansion)
-                {
+                auto const computeWithMargin = [&](std::array<double, 3> const& useMargin) {
                     picBunch::ComputeOptions expanded = options;
-                    expanded.marginCellsPerAxis = margin.marginCells;
+                    expanded.marginCellsPerAxis = useMargin;
                     // The margin, not the previous explicit extent/origin, now
                     // defines the compute box.  The global clip in makeGrid keeps
                     // it inside the written domain.
@@ -617,22 +643,52 @@ int main(int argc, char** argv)
                     expanded.gridOrigin.reset();
                     expanded.meshGridSize.reset();
                     expanded.meshGridOrigin.reset();
-                    try
-                    {
-                        field = picBunch::computeField(bunchData.bunch, expanded, &times);
-                    }
-                    catch(std::exception const& error)
-                    {
-                        throw std::runtime_error(
-                            std::string("tolerance-derived field margin cannot be computed: ")
-                            + error.what()
-                            + "; enlarge the compute box or pass --allow-field-truncation"
-                              " to acknowledge the truncation");
-                    }
+                    field = picBunch::computeField(bunchData.bunch, expanded, &times);
                     peaks = fieldPeaks(field);
                     maxE = peaks[0];
                     maxB = peaks[1];
+                };
+                std::array<double, 3> preferred = margin.marginCells;
+                bool needsExpansion = false;
+                for(int a = 0; a < 3; ++a)
+                {
+                    preferred[a] = std::max(preferred[a], tailMargin[a]);
+                    if(preferred[a] > options.marginCells)
+                        needsExpansion = true;
                 }
+                if(needsExpansion)
+                {
+                    try
+                    {
+                        computeWithMargin(preferred);
+                    }
+                    catch(std::runtime_error const& error)
+                    {
+                        // The quadrupole margin can be physically justified yet
+                        // exceed the padded-node cap.  The far tail stays valid
+                        // at its measured switch radius, so fall back to that
+                        // smaller exact box instead of failing.
+                        std::string const message = error.what();
+                        bool const infeasible
+                            = message.find("infeasible") != std::string::npos;
+                        bool smaller = false;
+                        for(int a = 0; a < 3; ++a)
+                            if(tailMargin[a] < preferred[a])
+                                smaller = true;
+                        if(!infeasible || !smaller)
+                            throw std::runtime_error(
+                                std::string("tolerance-derived field margin cannot be computed: ")
+                                + message
+                                + "; enlarge the compute box or pass --allow-field-truncation"
+                                  " to acknowledge the truncation");
+                        std::printf(
+                            "field tail: quadrupole margin exceeds the padded-node cap; "
+                            "using the measured far-tail switch at (%.6g,%.6g,%.6g) cells\n",
+                            tailMargin[0], tailMargin[1], tailMargin[2]);
+                        computeWithMargin(tailMargin);
+                    }
+                }
+                farTail = tail;
             }
         }
 
@@ -658,6 +714,44 @@ int main(int argc, char** argv)
             bunchData.timeUnitSI = scalarMeta[1];
             bunchData.iteration = static_cast<std::uint64_t>(scalarMeta[2]);
             globalOriginResolved = {scalarMeta[3], scalarMeta[4], scalarMeta[5]};
+        }
+        // Every rank fills its own global chunk, so the far-tail moments must be
+        // identical everywhere.  Broadcast the small fixed-size description.
+        {
+            double tailData[23] = {};
+            tailData[0] = farTail ? 1.0 : 0.0;
+            if(farTail)
+            {
+                for(int a = 0; a < 3; ++a)
+                {
+                    tailData[1 + a] = farTail->centre[a];
+                    tailData[5 + a] = farTail->dipole[a];
+                    tailData[17 + a] = farTail->meanVelocity[a];
+                }
+                tailData[4] = farTail->charge;
+                for(int i = 0; i < 9; ++i)
+                    tailData[8 + i] = farTail->quadrupole[i];
+                tailData[20] = farTail->supportRadius;
+                tailData[21] = farTail->switchDistance;
+                tailData[22] = farTail->gammaMax;
+            }
+            picBunch::mpiBroadcast(tailData, 23, 0);
+            if(!root && tailData[0] != 0.0)
+            {
+                farTail.emplace();
+                for(int a = 0; a < 3; ++a)
+                {
+                    farTail->centre[a] = tailData[1 + a];
+                    farTail->dipole[a] = tailData[5 + a];
+                    farTail->meanVelocity[a] = tailData[17 + a];
+                }
+                farTail->charge = tailData[4];
+                for(int i = 0; i < 9; ++i)
+                    farTail->quadrupole[i] = tailData[8 + i];
+                farTail->supportRadius = tailData[20];
+                farTail->switchDistance = tailData[21];
+                farTail->gammaMax = tailData[22];
+            }
         }
 
         // ---------------------------------------------------------------- writer
@@ -722,7 +816,8 @@ int main(int argc, char** argv)
                     *args.output,
                     writeOptions,
                     *args.globalGrid,
-                    globalOriginResolved);
+                    globalOriginResolved,
+                    farTail ? &*farTail : nullptr);
             else if(root)
                 picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);

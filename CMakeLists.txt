@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     picBunch
-    VERSION 0.4.0
+    VERSION 0.4.1
     DESCRIPTION "Standalone GPU bunch-field initializer: openPMD particles in, free-space hybrid fields out"
     HOMEPAGE_URL "https://github.com/psychocoderHPC-bot/picBunch"
     LANGUAGES CXX
@@ -206,6 +206,7 @@ endif()
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
     src/Compute.cpp
+    src/FarTail.cpp
     src/NearShell.cpp
 )
 
@@ -241,6 +242,8 @@ alpaka_finalize(picBunch)
 # never has to parse the HDF5 headers.
 add_library(picBunchOpenPMD src/OpenPMD.cpp src/OpenPMDWrite.cpp src/Mpi.cpp)
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
+# The chunked writer needs the multipole far tail from the host library.
+target_link_libraries(picBunchOpenPMD PUBLIC picBunch)
 target_include_directories(
     picBunchOpenPMD
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

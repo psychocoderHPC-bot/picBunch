@@ -229,6 +229,33 @@ namespace picBunch
          * is a conservative bound over both, rounded up by roughly three orders
          * of magnitude to cover geometries and backends that were not measured.
          */
+        //! Largest absolute eigenvalue of a symmetric 3x3 matrix (row-major).
+        double quadrupoleSpectralNorm(std::array<double, 9> const& a)
+        {
+            double const p1 = a[1] * a[1] + a[2] * a[2] + a[5] * a[5];
+            if(p1 == 0.0)
+                return std::max({std::abs(a[0]), std::abs(a[4]), std::abs(a[8])});
+            double const q = (a[0] + a[4] + a[8]) / 3.0;
+            double const p2 = (a[0] - q) * (a[0] - q) + (a[4] - q) * (a[4] - q)
+                + (a[8] - q) * (a[8] - q) + 2.0 * p1;
+            double const p = std::sqrt(p2 / 6.0);
+            std::array<double, 9> b{};
+            for(int i = 0; i < 9; ++i)
+                b[i] = a[i] / p;
+            b[0] -= q / p;
+            b[4] -= q / p;
+            b[8] -= q / p;
+            double const det = b[0] * (b[4] * b[8] - b[5] * b[7])
+                - b[1] * (b[3] * b[8] - b[5] * b[6])
+                + b[2] * (b[3] * b[7] - b[4] * b[6]);
+            double const r = std::max(-1.0, std::min(1.0, det / 2.0));
+            double const phi = std::acos(r) / 3.0;
+            double const e1 = q + 2.0 * p * std::cos(phi);
+            double const e3 = q + 2.0 * p * std::cos(phi + 2.0943951023931953);
+            double const e2 = 3.0 * q - e1 - e3;
+            return std::max({std::abs(e1), std::abs(e2), std::abs(e3)});
+        }
+
         constexpr double kPadding2ErrorBound = 1.0e-12;
 
         /*! Lowest tolerance the double-precision FFT pipeline can honour.
@@ -359,6 +386,7 @@ namespace picBunch
         double totalCharge = 0.0;
         double absoluteCharge = 0.0;
         std::array<double, 3> dipole{0.0, 0.0, 0.0};
+        std::array<double, 9> quadrupole{};
         double sourceRadius = 0.0;
         double maxGamma = 1.0;
         for(std::size_t p = 0; p < bunch.size(); ++p)
@@ -378,15 +406,24 @@ namespace picBunch
             double const r2 = displacement[0] * displacement[0]
                 + displacement[1] * displacement[1]
                 + displacement[2] * displacement[2];
+            for(int i = 0; i < 3; ++i)
+                for(int j = 0; j < 3; ++j)
+                    quadrupole[i * 3 + j]
+                        += q * (3.0 * displacement[i] * displacement[j]
+                                - (i == j ? r2 : 0.0));
             sourceRadius = std::max(sourceRadius, std::sqrt(r2));
         }
         double const dipoleMagnitude = std::sqrt(
             dipole[0] * dipole[0] + dipole[1] * dipole[1] + dipole[2] * dipole[2]);
+        double const quadrupoleNorm = quadrupoleSpectralNorm(quadrupole);
 
         FieldTailMargin result;
         result.totalCharge = totalCharge;
         result.absoluteCharge = absoluteCharge;
         result.dipoleMagnitude = dipoleMagnitude;
+        result.dipoleMoment = dipole;
+        result.quadrupoleMoment = quadrupole;
+        result.quadrupoleNorm = quadrupoleNorm;
         result.sourceRadius = sourceRadius;
         result.maxGamma = maxGamma;
         result.fieldPeak = fieldPeak;
@@ -401,11 +438,12 @@ namespace picBunch
         auto const tailBound = [&](double d) {
             if(!(d > sourceRadius))
                 return std::numeric_limits<double>::infinity();
-            double const remainder = 24.0 * absoluteCharge * sourceRadius * sourceRadius
-                / std::pow(d - sourceRadius, 4.0);
+            // Monopole, dipole and the actual quadrupole.  The angular maximum
+            // of the quadrupole field is (k/2)(5|S| + 2|D n|)/d^4 with
+            // |S|, |D n| <= ||D||_2, hence the factor 3.5.
             return maxGamma * kCoulombConstant
                 * (std::abs(totalCharge) / (d * d) + 2.0 * dipoleMagnitude / (d * d * d)
-                   + remainder);
+                   + 3.5 * quadrupoleNorm / (d * d * d * d));
         };
 
         double low = sourceRadius;

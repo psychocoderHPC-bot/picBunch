@@ -308,7 +308,10 @@ namespace picBunch
         /*! Fill one tile of the global array for one component.
          *
          * ``tile`` is x-fastest and covers global ``[zBegin,zEnd) x [0,Ny) x [0,Nx)``.
-         * Nodes inside the compute box are copied; all others stay exactly 0.
+         * Nodes inside the compute box are copied.  Outside it, the multipole
+         * far tail is evaluated when ``tail`` is given; without a tail the
+         * remaining nodes stay zero (the diagnostic/truncation path and the
+         * direct writer tests).
          */
         void fillGlobalTile(
             std::vector<double>& tile,
@@ -317,7 +320,9 @@ namespace picBunch
             std::array<long long, 3> const& base,
             std::array<std::size_t, 3> const& globalN,
             std::size_t zBegin,
-            std::size_t zEnd)
+            std::size_t zEnd,
+            FarTail const* tail,
+            std::array<double, 3> const& globalOrigin)
         {
             std::size_t const nx = globalN[0];
             std::size_t const ny = globalN[1];
@@ -337,9 +342,9 @@ namespace picBunch
                                     static_cast<long long>(globalN[1])),
                 std::min<long long>(base[2] + static_cast<long long>(field.grid.n[2]),
                                     static_cast<long long>(zEnd))};
-            if(lo[0] >= hi[0] || lo[1] >= hi[1] || lo[2] >= hi[2])
-                return;
-
+            bool const overlaps = lo[0] < hi[0] && lo[1] < hi[1] && lo[2] < hi[2];
+            if(overlaps)
+            {
             std::size_t const fnx = field.grid.n[0];
             std::size_t const fny = field.grid.n[1];
             for(long long k = lo[2]; k < hi[2]; ++k)
@@ -359,6 +364,37 @@ namespace picBunch
                     }
                 }
             }
+            } // overlaps
+            if(tail == nullptr)
+                return;
+            // Outside the exact compute box: evaluate the monopole/dipole/
+            // quadrupole tail instead of writing zeros.  The exact box was
+            // expanded to the measured expansion switch radius, so every node
+            // reached here is in the valid far zone.
+            auto const& spacing = field.grid.spacing;
+            for(long long k = static_cast<long long>(zBegin);
+                k < static_cast<long long>(zEnd); ++k)
+                for(long long j = 0; j < static_cast<long long>(ny); ++j)
+                    for(long long i = 0; i < static_cast<long long>(nx); ++i)
+                    {
+                        bool const inside = i >= lo[0] && i < hi[0]
+                            && j >= lo[1] && j < hi[1] && k >= lo[2] && k < hi[2];
+                        if(inside)
+                            continue;
+                        std::array<double, 3> const position{
+                            globalOrigin[0] + static_cast<double>(i) * spacing[0],
+                            globalOrigin[1] + static_cast<double>(j) * spacing[1],
+                            globalOrigin[2] + static_cast<double>(k) * spacing[2]};
+                        double value = 0.0;
+                        if(component < 3)
+                            value = evaluateFarTailE(*tail, position)[component];
+                        else
+                            value = evaluateFarTailB(*tail, position)[component - 3];
+                        tile[(static_cast<std::size_t>(k) - zBegin) * nx * ny
+                             + static_cast<std::size_t>(j) * nx
+                             + static_cast<std::size_t>(i)]
+                            = value;
+                    }
         }
     } // namespace
 
@@ -367,7 +403,8 @@ namespace picBunch
         std::string const& fileName,
         FieldWriteOptions const& options,
         std::array<std::size_t, 3> const& globalGridSize,
-        std::array<double, 3> const& globalGridOrigin)
+        std::array<double, 3> const& globalGridOrigin,
+        FarTail const* tail)
     {
         for(std::size_t c = 0; c < field.data.size(); ++c)
             if(field.data[c].size() != field.grid.size())
@@ -519,7 +556,9 @@ namespace picBunch
                                 base,
                                 globalGridSize,
                                 thisBegin,
-                                thisEnd);
+                                thisEnd,
+                                tail,
+                                globalGridOrigin);
                             openPMD::Extent const chunkExtent{
                                 static_cast<openPMD::Extent::value_type>(thisEnd - thisBegin),
                                 static_cast<openPMD::Extent::value_type>(ny),

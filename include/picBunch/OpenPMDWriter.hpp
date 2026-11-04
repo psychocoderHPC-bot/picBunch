@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/FarTail.hpp"
 #include "picBunch/Types.hpp"
 
 #include <cstdint>
@@ -79,7 +80,8 @@ namespace picBunch
         std::string const& fileName,
         FieldWriteOptions const& options,
         std::array<std::size_t, 3> const& globalGridSize,
-        std::array<double, 3> const& globalGridOrigin);
+        std::array<double, 3> const& globalGridOrigin,
+        FarTail const* tail = nullptr);
 
 
     /** Configuration of a PIConGPU checkpoint-restart writer.

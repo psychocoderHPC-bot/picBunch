@@ -55,18 +55,27 @@ namespace picBunch
      * ``|Q| / (4 pi eps0 d^2)`` and the dipole part as ``2 |p| / (4 pi eps0 d^3)``.
      * ``deriveFieldTailMargin`` solves
      *
-     *   E_tail(d) = gamma_max k [ |Q|/d^2 + 2|p|/d^3 + 24 Q_abs R^2/(d-R)^4 ]
+     *   E_tail(d) = gamma_max k [ |Q|/d^2 + 2|p|/d^3 + 3.5 ||D||_2/d^4 ]
      *              <= tolerance * fieldPeak
      *
-     * for the smallest ``d`` larger than the source radius ``R``.  The last term
-     * is a conservative Taylor remainder that bounds every multipole above the
-     * dipole.  ``gamma_max`` is the largest ``sqrt(1+|u|^2)`` of the bunch; a
-     * uniformly moving charge field is the boosted Coulomb field, whose
-     * transverse magnitude is at most ``gamma`` times the rest monopole, so the
-     * factor keeps the bound valid for a moving bunch.  ``marginCells`` converts ``d`` into extra cells beyond each
-     * bounding-box face; every point outside that expanded box is at least
-     * ``distance`` from the box centre, hence its neglected field is within the
-     * target.
+     * for the smallest ``d`` larger than the source radius ``R``.  ``D`` is the
+     * traceless quadrupole tensor built from the actual particle positions and
+     * charges, and ``||D||_2`` its largest absolute eigenvalue (the angular
+     * maximum of the quadrupole field gives the factor 3.5).  This replaces the
+     * former worst-case remainder ``24 Q_abs R^2/(d-R)^4``, which is not a
+     * physical moment and dominates the margin for extended bunches.
+     * ``gamma_max`` is the largest ``sqrt(1+|u|^2)`` of the bunch; a uniformly
+     * moving charge field is the boosted Coulomb field, whose transverse
+     * magnitude is at most ``gamma`` times the rest multipole, so the factor
+     * keeps the bound valid for a moving bunch.  ``marginCells`` converts ``d``
+     * into extra cells beyond each bounding-box face; every point outside that
+     * expanded box is at least ``distance`` from the box centre.
+     *
+     * The truncation beyond the quadrupole is not bounded by this expression;
+     * the margin is used only where the field is actually computed.  For a
+     * global output domain the tail outside the compute box is evaluated from
+     * the same monopole/dipole/quadrupole moments (``picBunch/FarTail.hpp``),
+     * after an empirically validated switch radius, instead of being zeroed.
      *
      * ``fieldPeak`` must be the peak of the computed field in the same units as
      * the bound.  The CLI uses ``min(max|E|, c max|B|)`` (ignoring a zero B
@@ -81,6 +90,10 @@ namespace picBunch
         double totalCharge = 0.0;
         double absoluteCharge = 0.0;
         double dipoleMagnitude = 0.0;
+        std::array<double, 3> dipoleMoment{0.0, 0.0, 0.0};
+        std::array<double, 9> quadrupoleMoment{};
+        //! Largest absolute eigenvalue of the traceless quadrupole tensor.
+        double quadrupoleNorm = 0.0;
         double sourceRadius = 0.0;
         double maxGamma = 1.0;
         double fieldPeak = 0.0;

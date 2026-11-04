@@ -151,8 +151,14 @@ FFT for the subtraction. The mode is opt-in because the exact evaluator costs
 quadrature time per (source, node, component). `--near-shell-radius` is in PIC
 cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
 that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
-the effective radius exceeds the nominal one by at most half a tile. See
-`docs/algorithm.md` for the measured radius/cost envelope.
+the effective radius exceeds the nominal one by at most half a tile. The three
+flags are parsed by the shipped binary and the run summary prints
+`near shell: mode=... R=... PIC cells tile=... nodes`. The measured worst-case
+envelope is `1e-3` or better for gamma ~ 1, aspect 1 at R >= 3 PIC cells, and for
+gamma ~ 10, aspect 1, oblique velocity at R >= 4; gamma 1 at aspect 4 needs about
+32 cells and is outside the shell's reach. The exact evaluator costs about
+`3.1e-4 s` per (source, node, component) on one 16-thread CPU socket, so it is
+opt-in and not lookup-class. `docs/algorithm.md` has the per-case table.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -178,35 +184,43 @@ extra memory per rank is one tile. Rank 0 computes the field and broadcasts the 
 box; all ranks write disjoint `storeChunk` regions. Extent, spacing, origin, `unitSI` and the
 Yee `position` attribute are identical for every rank count.
 
-**Zero fill and its error bound.** The field outside the bunch does not vanish; it decays as
-`1/r^2`. The writer therefore fills with zero only beyond a margin derived from
-`--tolerance`, not at the bare bunch box. With `Q` the net charge, `p` the dipole moment,
-`Qabs = sum |q_i|`, `R` the source radius, `gamma_max = max sqrt(1+|u_i|^2)` and
-`k = 1/(4 pi eps0)`, the code solves for the smallest centre distance `d` with
+**Tail margin and far-tail evaluation.** The field outside the bunch does not vanish; it
+decays as `1/r^2`. The code first solves the multipole bound for the smallest centre distance
+`d`. With `Q` the net charge, `p` the dipole moment, `D` the traceless quadrupole tensor
+built from the actual particle positions, `||D||_2` its largest absolute eigenvalue,
+`R` the support radius, `gamma_max = max sqrt(1+|u_i|^2)` and `k = 1/(4 pi eps0)`:
 
 ```
-E_tail(d) = gamma_max * k * ( |Q|/d^2 + 2|p|/d^3 + 24*Qabs*R^2/(d-R)^4 )
+E_tail(d) = gamma_max * k * ( |Q|/d^2 + 2|p|/d^3 + 3.5*||D||_2/d^4 )
             <= tolerance * field_peak
 ```
 
-The first term is the monopole, the second the dipole (which sets the margin for a neutral
-bunch), and the last is a conservative Taylor remainder that bounds all higher multipoles.
-The `gamma_max` factor covers the boosted field of a moving bunch; the transverse magnitude
-of a uniformly moving charge is at most `gamma` times its rest monopole.
-The margin in cells is `ceil((d - half_extent_axis)/cell_size_axis)` per axis, so every point
-outside the expanded compute box is at least `d` from the source region. The peak used for
-the solve is `min(max|E|, c*max|B|)` (a zero B peak is ignored). Since
+The last term replaces the former worst-case remainder `24 Qabs R^2/(d-R)^4`, which is not
+a physical moment. The `gamma_max` factor covers the boosted field of a moving bunch.
+The margin in cells is `ceil((d - half_extent_axis)/cell_size_axis)` per axis. The peak used
+for the solve is `min(max|E|, c*max|B|)` (a zero B peak is ignored); since
 `|B_tail| <= |E_tail|/c`, this keeps both E and B below `tolerance` relative to their own
 peaks.
 
-If the global domain extends beyond that margin, the zero fill beyond it is justified at the
-stated tolerance. If the domain ends before the margin, the compute box is clipped to the
-whole domain, so no node between the bunch and the domain edge is zeroed; the file then ends
-at the simulation boundary instead of carrying an interior discontinuity. The margin is
-reported as `field tail: ... bound=... V/m`. `--allow-field-truncation` keeps a smaller
-explicit compute box and writes zeros anyway; it prints a warning and is diagnostic only. A
-run whose required margin cannot be computed fails with a message that asks for a larger
-compute box or that flag, rather than truncating silently.
+For a charged, extended bunch the monopole alone can still require a large exact box: the
+documented 20-cell, 4096-electron bunch (R = 16.85 cells, 1e-6 m cells, peak 45722.5 V/m)
+needs 350 cells from the new quadrupole bound and 360 cells from the old one, so the exact
+box would exceed the `2^28` padded-node cap at tolerance `1e-3`. Therefore the writer does
+not zero-fill the global domain. Beyond a measured switch radius it evaluates the actual
+monopole + dipole + quadrupole field (`include/picBunch/FarTail.hpp`). The switch is `6R`;
+the measured worst per-component deviation from an independent direct charge sum is
+`0.0853 V/m` at `6R` (target `45.7 V/m`, ratio `1.9e-3`) and `0.0166 V/m` at `8R`.
+At `2R` it is `48 V/m` and fails, which is why `6R` is the floor. The exact compute box
+extends to the switch (plus two cells for the global-node snap) when the quadrupole margin
+itself is infeasible. Zero fill now exists only on the explicit diagnostic
+`--allow-field-truncation` path. If the domain ends before the exact box, the box is clipped
+to the whole domain and no interior hole is written. The margin and switch are reported as
+`field tail: ... bound=... V/m` and `far tail: ... switch=... cells`.
+
+The margin rule is checked by `Margin.MarginBoxMatchesLargerReference`: for a dense 4096
+particle bunch the field on a box extended by exactly the derived margin differs from a
+3x larger reference box by at most `146.5 V/m` per component at `tolerance*field_peak =
+2576.8 V/m`. `Margin.FarTailMatchesDirectSum` checks the expansion against the direct sum.
 
 PIConGPU restart on a domain larger than the written one must still treat the written file
 as a finite-domain field. The bound above applies inside the written domain; it says nothing
@@ -234,17 +248,20 @@ env -u LD_PRELOAD OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 \
 Measured on rosi_v100 (V100, CUDA 12.6, openPMD 0.17.1 with MPI), 20-cell bunch, cell
 `1e-6` m, deterministic deposit:
 
-| configuration | wall | writer | peak host RSS per rank | peak device (idle GPU1) |
-| --- | --- | --- | --- | --- |
-| 512^3 global, 1 rank | 75.8 s | 74.8 s | 315 MB | not usable, GPU shared |
-| 512^3 global, 2 ranks | 61.0 s | 55.8 s | 316 MB | 388 MiB |
+Measured on jureca-h100 (H100 PCIe, CUDA 13.4, openPMD 0.17.0 with MPI) at tolerance
+`1e-3`, with the 20-cell 4096-electron bunch above:
 
-The 512^3 output is 6.44 GB (six double components) written from a 32^3 compute box.
-The 512^3 single-rank and 2-rank files have `max_abs_diff = 0.0` over every dataset, equal
-mesh metadata, and exactly zero values outside the compute box. 1-, 2- and 4-rank runs on a
-64^3 domain with `--deterministic-deposit` are bitwise identical. Without that flag the
-CUDA deposit uses `atomicAdd`, so two runs differ by at most 2.5e-16 relative even at one
-rank; use the flag when a bitwise comparison is required.
+| configuration | wall | writer | compute box |
+| --- | --- | --- | --- |
+| 512^3 global, 1 rank | 54.3 s | 39.8 s | 212^3 |
+| 512^3 global, 2 ranks | 43.2 s | 39.8 s | 212^3 |
+
+The 512^3 output is 6.44 GB (six double components). The compute box is the measured
+far-tail switch (94 cells) and the outer shell carries the quadrupole field, not zeros.
+The 1-rank and 2-rank files have `max_abs_diff = 0.0` over all six datasets and equal mesh
+metadata. 1-, 2- and 4-rank runs on a 64^3 domain with `--deterministic-deposit` are bitwise
+identical. Without that flag the CUDA deposit uses `atomicAdd`, so two runs differ by at most
+2.5e-16 relative even at one rank; use the flag when a bitwise comparison is required.
 
 ### Measured single-rank limits
 
@@ -295,10 +312,13 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.3.0 commit passes 13/13 CTest entries on rosi (CUDA 12.6, sm_70) both with and
-without MPI, and 13/13 on hal (HIP, gfx1100). The new entries are `picBunch.Domain`; the
+The v0.4.1 commit passes 16/16 CTest entries on rosi (CUDA 12.6, sm_70), on jureca-h100
+(CUDA 13.4, sm_90) and on hal (HIP, gfx1100). The new entries are `picBunch.Margin` (margin
+and far-tail validation) and `picBunch.NearShellCli`, which runs the shipped binary with
+`--near-shell exact` and asserts a finite field that changes inside the shell. The
 `Domain.GridStaysOnBunchBox` test checks that a 1024^3 global request keeps the compute box
-small, and `Domain.ChunkedWriteZerosAndOffset` checks exact zeros and the global offset.
+small; `Domain.ChunkedWriteZerosAndOffset` documents the zero-fill writer path used by the
+diagnostic flag.
 
 The v0.1.3 final state was the commit `da3cd4239926f5da31b5794a36f8184e0b3164da`:
 12/12 CTest entries pass on both validated backends.
@@ -479,6 +499,13 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.4.1** makes `--near-shell`, `--near-shell-radius` and `--near-shell-tile` reachable
+  from the shipped CLI (v0.4.0 advertised them but rejected them with exit 2), adds the
+  end-to-end `NearShellCli` test, replaces the worst-case tail remainder with a quadrupole
+  moment bound, and fills a global output domain beyond the exact box with the measured
+  monopole/dipole/quadrupole far tail instead of zeros. The documented 512^3 / `1e-3`
+  recipe runs again and 1-vs-2-rank output is bitwise identical. Adds the empirical margin
+  and far-tail tests.
 - **v0.4.0** adds an opt-in exact near shell (`--near-shell exact`, with
   `--near-shell-radius`/`--near-shell-tile`) that assembles
   `F_mesh(all) - F_mesh(near) + F_exact(near)` from the vendored FP64 reference
@@ -523,8 +550,9 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Known gaps in v0.1
 
-- **Near shell not implemented.** The mesh path has no analytic near-source correction.
-  Its accuracy below the crossovers above is a stated limitation, not a tuning target.
+- **Near shell (implemented in v0.4.1).** The v0.1 mesh path had no analytic near-source
+  correction; v0.4.1 exposes `--near-shell exact`. Its measured envelope is stated above and
+  in `docs/algorithm.md`; it is opt-in because it costs quadrature time per pair.
 - **Anisotropic cells set the Coulomb-limit offset.** The delivered field is the TSC-convolved
   field, which for non-cubic cells differs from the point Coulomb by the anisotropic TSC
   convolution: at aspect 4 (z/x) the continuum is 21% below the point Coulomb at 4 cells and
@@ -540,10 +568,9 @@ table above covers the compute stages of the large-N sweep, not the write path.
   source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
   (single stationary source, 20^3 box, worst component Ey). The production policy never
   selects 1.
-- **Zero fill outside the tolerance margin.** Fields are computed only inside the
-  tolerance-derived margin around the bunch. A global domain smaller than that margin has no
-  interior zero fill; a larger one is zeroed only where the tail bound is below
-  `--tolerance * field_peak`. `--allow-field-truncation` is an explicit diagnostic opt-out.
+- **Zero fill only as a diagnostic.** Global output is filled beyond the exact box with the
+  measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
+  only path that writes zeros, and it warns that those values are not bounded.
 - **No multi-GPU compute.** One device computes the field. MPI decomposes only the global
   write; the tested configurations are 2 and 4 ranks on one node, and multi-node was not
   tested. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.

@@ -33,6 +33,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_padding.cpp
         test_restart.cpp
         test_audit.cpp
+        test_margin.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -49,7 +50,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -97,6 +98,16 @@ if(Python3_Interpreter_FOUND)
                 ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/verify/check_picongpu_restart.py
                 --writer $<TARGET_FILE:picBunchWriteRestartSample>
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        # End-to-end exercise of the shipped binary: --near-shell exact must be
+        # accepted by the parser and must change the field inside the shell.
+        add_test(
+            NAME picBunch.NearShellCli
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/near_shell_cli.py
+                --app $<TARGET_FILE:picBunchApp>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
         )
         # h5py builds the openPMD 2.0 scalar-record layout; the C++ test then
