@@ -444,7 +444,7 @@
  }
 
 @misc{MV2,
-  title  = {Binned multi-velocity binning: measured binning error and model calibration (MV2)},
+  title  = {Multi-velocity campaign provenance (MV2)},
   author = {MV2 multi-velocity worker},
   year   = {2026},
     note   = {Run pr24-20261102. MV2/RESULTS.md. Branch experimental/multivel at
@@ -452,12 +452,8 @@
               jureca\_h100 jrc0880, H100 PCIe, CUDA 13.4, sm\_90. $48^3$ grid,
               512 sources, seed 100 (energy) and 103 (angular). Four defect
               fixes (dangling pointer, parse\_bands, model floor, unit-test
-              build); comparison-artefact diagnosis; single-velocity bitwise
-              sanity; Tb-T binning error and total error with fast shell
-              R=3 vs bin count; model calibration C=1.09 (energy, predicts to
-              10--55\%) vs C=124 non-monotonic (angular); runtime mesh-only
-              5.26/5.62 s at 1e6/2e6 in $48^3$ with 64 bins, 184 s for the
-              4-cell fast shell at 2e6 in a 20-cell bunch. ctest 19/19.},
+              build); single-velocity bitwise sanity. The binned field is
+              under correction and its measured numbers are withdrawn. ctest 19/19.},
  }
 
  @misc{SCHEM1,
@@ -501,13 +497,13 @@
   }
 
  @misc{MV1b,
-   title  = {Multi-velocity binning: comparison artefact and calibrated error (MV1b)},
+   title  = {Multi-velocity campaign configuration and provenance (MV1b)},
    author = {MV1b multi-velocity worker},
    year   = {2026},
      note   = {Run pr24-20261102. MV1b/RESULTS.md. Measurement driver
                picBunchVelocityBinsMeasure, 48x48x48 grid, cell 1e-6 m, 512
                sources, 3-cell position cloud; cases g10\_e5 (sigma\_g/g=0.05,
                seed 100), g50\_e5 (seed 101), g10\_a1 (seed 102), g10\_a5
-               (5 deg angular spread, seed 103); comparison artefact diagnosis
-               and per-box model sums.},
+               (5 deg angular spread, seed 103). The binned field is under
+               correction and its measured numbers are withdrawn.},
   }
