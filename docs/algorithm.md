@@ -78,10 +78,10 @@ pipeline is designed to evaluate. It is not a target for the continuum Coulomb
 field near the source; the difference there comes from the fixed TSC deposit at
 `kRefinement = 1` and no tolerance value can reduce it.
 
-The target controls exactly one implementation choice: the FFT zero-padding
-factor. It does not change the interpolation order (fixed at TSC), the deposit
-scheme, the node spacing, or the refinement. The mapping is a measured
-error-vs-padding model:
+For a single-velocity bunch the target controls exactly one implementation
+choice: the FFT zero-padding factor. It does not change the interpolation order
+(fixed at TSC), the deposit scheme, the node spacing, or the refinement. The
+mapping is a measured error-vs-padding model:
 
 | requested tolerance | padding | basis |
 | --- | --- | --- |
@@ -91,6 +91,49 @@ error-vs-padding model:
 
 Padding 1 is never selected by the policy. It is a diagnostic override used by
 the padding test only.
+
+For a multi-velocity bunch the same target additionally sizes the velocity
+boxes (see "Velocity binning"): the box count is the smallest power of two
+whose calibrated error model stays below the target, and an infeasible
+requirement fails with the needed count instead of running.
+
+## Velocity binning
+
+The mesh kernel is exact only for a single shared `u`.  The field is linear in
+charge, so the field of a mixed bunch is the sum over velocity classes of the
+field of each class.  The particles are split into uniform boxes in `u`-space,
+in a frame aligned to the charge-weighted mean momentum direction, and each
+box is evaluated with its box-centre `u` (one box: the charge-weighted mean
+`u`).  Each box pays one deposit, one density transform, six kernel builds,
+six kernel transforms, six products, six inverse transforms and six read-outs,
+accumulated into the same output; empty boxes cost nothing.
+
+The box geometry depends only on the bunch `u` extent and the box counts,
+never on which particles fall where.  That keeps the near shell consistent:
+its per-tile mesh subtraction reuses the full-bunch boxes on a sub-bunch, and
+its exact term evaluates every (source, node) pair with the source's own
+velocity.  The mesh cancels bin for bin and the near shell is therefore
+bin-free: nodes inside the shell carry the exact per-particle-velocity field,
+and only the outside-shell field carries the binning error.
+
+Error model.  Replacing a particle `u` by its box representative perturbs the
+field by a transverse tilt of the boosted pattern, of relative order
+`gamma * Delta_theta`, and an energy shift, of relative order
+`Delta_gamma / gamma`.  With `q_b` the charge in box `b`, `Q` the total
+absolute charge, `gamma_b` the largest `gamma` in the box, `Delta_theta_b`
+the largest member angle against the representative, and `Delta_gamma_b` the
+`gamma` range of the box, the estimated relative error is
+
+    modelError = C * Sum_b (q_b / Q) * (gamma_b * Delta_theta_b
+                                         + Delta_gamma_b / gamma_b)
+
+`C` is calibrated against the TSC-convolved continuum reference by running a
+mixed bunch with 1, 2, 4, 8 and 16 boxes and fitting the measured worst-case
+relative error against the model sum; the shipped constant is the MV1
+calibration (run `pr24-20261102`, jureca-h100, CUDA 13.4).  `--velocity-bins`
+runs a fixed count (calibration/diagnostics), `--bin-model-constant` overrides
+`C`, and `--max-velocity-bins` (default 256) caps the auto policy; an
+infeasible requirement fails naming the needed count.
 
 ## Padding
 

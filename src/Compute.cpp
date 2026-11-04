@@ -692,22 +692,58 @@ namespace picBunch
         return grid;
     }
 
-    Field computeField(Bunch const& bunch, ComputeOptions const& options, StageTimes* stageTimes)
+    Field computeField(
+        Bunch const& bunch,
+        ComputeOptions const& options,
+        StageTimes* stageTimes,
+        VelocityBinning const** outBinning)
     {
         if(options.nearShell.mode == NearShellOptions::Mode::Exact)
             return computeFieldNearExact(bunch, options, options.nearShell, stageTimes);
 
-        // v0.1 is one velocity class: the kernel is exact for a single shared u.
-        if(bunch.size() > 1)
+        // A multi-velocity bunch is the sum over velocity classes: the kernel
+        // is linear in charge, so each velocity box contributes its own
+        // deposit, kernel spectrum and convolution, accumulated into the same
+        // output.  The box geometry depends only on the u-space extent, so a
+        // fixed binning (the near shell passes the full-bunch one down) stays
+        // bin-consistent on any sub-bunch and the near shell is bin-free.
+        VelocityBinning derivedBinning;
+        VelocityBinning const* binningPointer
+            = options.fixedBinning ? &*options.fixedBinning : nullptr;
+        if(!binningPointer)
         {
-            double const scaleU = std::max({1.0, std::abs(bunch.ux[0]), std::abs(bunch.uy[0]), std::abs(bunch.uz[0])});
-            for(std::size_t p = 1; p < bunch.size(); ++p)
-                if(std::abs(bunch.ux[p] - bunch.ux[0]) > 1e-12 * scaleU
-                   || std::abs(bunch.uy[p] - bunch.uy[0]) > 1e-12 * scaleU
-                   || std::abs(bunch.uz[p] - bunch.uz[0]) > 1e-12 * scaleU)
-                    throw std::runtime_error(
-                        "computeField: v0.1 supports a single shared velocity; the bunch has a momentum spread");
+            derivedBinning = deriveVelocityBinning(
+                bunch, options.tolerance, options.velocityBinning);
+            binningPointer = &derivedBinning;
         }
+        if(outBinning)
+            *outBinning = binningPointer;
+        VelocityBinning const& binning = *binningPointer;
+        std::size_t const binCount = binning.count;
+
+        // Assignment of the actual bunch to the boxes.  A fixed binning was
+        // derived for the full bunch, so a sub-bunch (the near shell tile
+        // meshes) re-derives its own membership from the shared geometry.
+        std::vector<std::size_t> const boxOf = [&] {
+            if(!options.fixedBinning)
+                return binning.boxOf;
+            std::vector<std::size_t> assignment(bunch.size());
+            for(std::size_t p = 0; p < bunch.size(); ++p)
+            {
+                double const coords[3] = {
+                    bunch.ux[p] * binning.basis[0][0] + bunch.uy[p] * binning.basis[0][1]
+                        + bunch.uz[p] * binning.basis[0][2],
+                    bunch.ux[p] * binning.basis[1][0] + bunch.uy[p] * binning.basis[1][1]
+                        + bunch.uz[p] * binning.basis[1][2],
+                    bunch.ux[p] * binning.basis[2][0] + bunch.uy[p] * binning.basis[2][1]
+                        + bunch.uz[p] * binning.basis[2][2]};
+                assignment[p] = binning.boxIndex(coords[0], coords[1], coords[2]);
+            }
+            return assignment;
+        }();
+        std::vector<std::vector<std::size_t>> members(binCount);
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+            members[boxOf[p]].push_back(p);
 
         Grid const grid = makeGrid(bunch, options);
         Field field;
@@ -754,25 +790,16 @@ namespace picBunch
         auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, specExt);
         auto outReal = alpaka::onHost::allocUnified<double>(device, realExt);
 
-        // ------------------------------------------------------------- deposit
-        auto const depositStart = Clock::now();
-        alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
-        std::size_t const particleCount = bunch.size();
-        if(options.deterministicDeposit && particleCount > 0)
-        {
-            // The memset is queued on the device; finish it before the host
-            // touches the same unified buffer.
-            alpaka::onHost::wait(queue);
-            // Deterministic fallback: accumulate each particle's TSC stencil in
-            // particle order.  This is the same stencil the device kernel uses,
-            // only without atomicAdd's unspecified summation order.
+        // Serial host TSC deposit of a particle list, in list order.  Same
+        // stencil as the device kernel, without atomicAdd's unspecified order.
+        auto depositHost = [&](std::vector<std::size_t> const& list) {
             double* rho = rhoReal.data();
             double const support = 1.5;
-            for(std::size_t p = 0; p < particleCount; ++p)
+            double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+            double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
+            for(std::size_t const p : list)
             {
                 double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
-                double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
-                double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
                 long lo[3];
                 long hi[3];
                 double t[3];
@@ -813,22 +840,22 @@ namespace picBunch
                     }
                 }
             }
-        }
-        else if(particleCount > 0)
-        {
-            if(particleCount > 0xffffffffu)
-                throw std::runtime_error("computeField: particle count exceeds uint32 range");
-            auto const numParticles = static_cast<std::uint32_t>(particleCount);
+        };
+
+        // Device TSC deposit of a particle list into the (already zeroed) rho.
+        auto depositDevice = [&](std::vector<std::size_t> const& list) {
+            auto const numParticles = static_cast<std::uint32_t>(list.size());
             auto posX = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto posY = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto posZ = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto charge = alpaka::onHost::allocUnified<double>(device, numParticles);
-            for(std::uint32_t p = 0; p < numParticles; ++p)
+            for(std::uint32_t m = 0; m < numParticles; ++m)
             {
-                posX.data()[p] = bunch.x[p];
-                posY.data()[p] = bunch.y[p];
-                posZ.data()[p] = bunch.z[p];
-                charge.data()[p] = bunch.weight[p] * bunch.charge[p];
+                std::size_t const p = list[m];
+                posX.data()[m] = bunch.x[p];
+                posY.data()[m] = bunch.y[p];
+                posZ.data()[m] = bunch.z[p];
+                charge.data()[m] = bunch.weight[p] * bunch.charge[p];
             }
             std::uint32_t const frame = 64u;
             queue.enqueue(
@@ -855,19 +882,13 @@ namespace picBunch
             // kernel), so the particle buffers must stay alive until the wait.
             // Keep this wait inside the block that owns posX/posY/posZ/charge.
             alpaka::onHost::wait(queue);
-        }
-        times.depositMs += elapsedMs(depositStart);
+        };
 
         // ---------------------------------------------------------------- FFT
         auto r2cPlan
             = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
         auto c2rPlan
             = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device);
-
-        auto const fftStart = Clock::now();
-        alpaka::fft::onHost::executeForward(queue, r2cPlan, rhoReal, rhoSpec);
-        alpaka::onHost::wait(queue);
-        times.fftMs += elapsedMs(fftStart);
 
         double const scale = (kRefinement * kRefinement * kRefinement)
             / (static_cast<double>(Mx) * static_cast<double>(My) * static_cast<double>(Mz));
@@ -876,69 +897,110 @@ namespace picBunch
 
         std::uint32_t const spectrumCount = Mz * My * CP;
 
-        for(int c = 0; c < 6; ++c)
+        // One velocity class: deposit, kernel spectrum and convolution,
+        // accumulated into the shared output.  Empty boxes cost nothing.
+        for(std::size_t b = 0; b < binCount; ++b)
         {
-            // ------------------------------------------------------------ kernel
-            auto const kernelStart = Clock::now();
-            queue.enqueue(
-                alpaka::onHost::FrameSpec{
-                    ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
-                    Extents3::fill(4u)},
-                KernelBuildKernel{},
-                kernelReal.data(),
-                Mx,
-                My,
-                Mz,
-                c,
-                kYeeOffset[c][0],
-                kYeeOffset[c][1],
-                kYeeOffset[c][2],
-                cell[0],
-                cell[1],
-                cell[2],
-                kRefinement,
-                bunch.size() > 0 ? bunch.ux[0] : 0.0,
-                bunch.size() > 0 ? bunch.uy[0] : 0.0,
-                bunch.size() > 0 ? bunch.uz[0] : 0.0);
-            alpaka::onHost::wait(queue);
-            times.kernelMs += elapsedMs(kernelStart);
+            if(members[b].empty())
+                continue;
+            if(members[b].size() > 0xffffffffu)
+                throw std::runtime_error("computeField: particle count exceeds uint32 range");
 
-            // --------------------------------------------------------- spectrum
-            auto const spectrumStart = Clock::now();
-            alpaka::fft::onHost::executeForward(queue, r2cPlan, kernelReal, kernelSpec);
-            alpaka::onHost::wait(queue);
-            // product of two packed half-spectra; Complex<double> is two adjacent doubles
-            static_assert(sizeof(Complex) == 2u * sizeof(double), "unexpected Complex layout");
-            queue.enqueue(
-                alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
-                MultiplySpectrumKernel{},
-                reinterpret_cast<double*>(kernelSpec.data()),
-                reinterpret_cast<double const*>(rhoSpec.data()),
-                spectrumCount);
-            alpaka::onHost::wait(queue);
-            alpaka::fft::onHost::executeBackward(queue, c2rPlan, kernelSpec, outReal);
-            alpaka::onHost::wait(queue);
-            times.fftMs += elapsedMs(spectrumStart);
+            // -------------------------------------------------------- deposit
+            auto const depositStart = Clock::now();
+            alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
+            if(options.deterministicDeposit)
+            {
+                // The memset is queued on the device; finish it before the host
+                // touches the same unified buffer.
+                alpaka::onHost::wait(queue);
+                depositHost(members[b]);
+            }
+            else
+            {
+                alpaka::onHost::wait(queue);
+                depositDevice(members[b]);
+            }
+            times.depositMs += elapsedMs(depositStart);
 
-            // ---------------------------------------------------------- read-out
-            auto const readoutStart = Clock::now();
-            double const factor = scale * (c < 3 ? eFactor : bFactor);
-            for(std::uint32_t k = 0; k < static_cast<std::uint32_t>(grid.n[2]); ++k)
-                for(std::uint32_t j = 0; j < static_cast<std::uint32_t>(grid.n[1]); ++j)
-                    for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
-                    {
-                        auto const in = static_cast<std::size_t>(i)
-                            + static_cast<std::size_t>(Mx)
-                                * (static_cast<std::size_t>(j)
-                                   + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
-                        auto const out = static_cast<std::size_t>(i)
-                            + static_cast<std::size_t>(grid.n[0])
-                                * (static_cast<std::size_t>(j)
-                                   + static_cast<std::size_t>(grid.n[1]) * static_cast<std::size_t>(k));
-                        field.data[c][out] = outReal.data()[in] * factor;
-                    }
-            times.readoutMs += elapsedMs(readoutStart);
+            // ------------------------------------------------------------- FFT
+            auto const fftStart = Clock::now();
+            alpaka::fft::onHost::executeForward(queue, r2cPlan, rhoReal, rhoSpec);
+            alpaka::onHost::wait(queue);
+            times.fftMs += elapsedMs(fftStart);
+
+            std::array<double, 3> const uRep{
+                binning.representativeU[b][0],
+                binning.representativeU[b][1],
+                binning.representativeU[b][2]};
+
+            for(int c = 0; c < 6; ++c)
+            {
+                // ------------------------------------------------------------ kernel
+                auto const kernelStart = Clock::now();
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{
+                        ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
+                        Extents3::fill(4u)},
+                    KernelBuildKernel{},
+                    kernelReal.data(),
+                    Mx,
+                    My,
+                    Mz,
+                    c,
+                    kYeeOffset[c][0],
+                    kYeeOffset[c][1],
+                    kYeeOffset[c][2],
+                    cell[0],
+                    cell[1],
+                    cell[2],
+                    kRefinement,
+                    uRep[0],
+                    uRep[1],
+                    uRep[2]);
+                alpaka::onHost::wait(queue);
+                times.kernelMs += elapsedMs(kernelStart);
+
+                // --------------------------------------------------------- spectrum
+                auto const spectrumStart = Clock::now();
+                alpaka::fft::onHost::executeForward(queue, r2cPlan, kernelReal, kernelSpec);
+                alpaka::onHost::wait(queue);
+                // product of two packed half-spectra; Complex<double> is two adjacent doubles
+                static_assert(sizeof(Complex) == 2u * sizeof(double), "unexpected Complex layout");
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                    MultiplySpectrumKernel{},
+                    reinterpret_cast<double*>(kernelSpec.data()),
+                    reinterpret_cast<double const*>(rhoSpec.data()),
+                    spectrumCount);
+                alpaka::onHost::wait(queue);
+                alpaka::fft::onHost::executeBackward(queue, c2rPlan, kernelSpec, outReal);
+                alpaka::onHost::wait(queue);
+                times.fftMs += elapsedMs(spectrumStart);
+
+                // ---------------------------------------------------------- read-out
+                auto const readoutStart = Clock::now();
+                double const factor = scale * (c < 3 ? eFactor : bFactor);
+                for(std::uint32_t k = 0; k < static_cast<std::uint32_t>(grid.n[2]); ++k)
+                    for(std::uint32_t j = 0; j < static_cast<std::uint32_t>(grid.n[1]); ++j)
+                        for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
+                        {
+                            auto const in = static_cast<std::size_t>(i)
+                                + static_cast<std::size_t>(Mx)
+                                    * (static_cast<std::size_t>(j)
+                                       + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
+                            auto const out = static_cast<std::size_t>(i)
+                                + static_cast<std::size_t>(grid.n[0])
+                                    * (static_cast<std::size_t>(j)
+                                       + static_cast<std::size_t>(grid.n[1]) * static_cast<std::size_t>(k));
+                            // Accumulate: the field of the mixed bunch is the sum
+                        // over the velocity classes.
+                        field.data[c][out] += outReal.data()[in] * factor;
+                        }
+                times.readoutMs += elapsedMs(readoutStart);
+            }
         }
+
 
         return field;
     }

@@ -1,0 +1,47 @@
+# picBunch placement-interface configuration.
+# All physical values are SI unless a key says otherwise.
+
+[picongpu]
+# PIConGPU internal units (sim.unit.length(), eField(), bField()).
+unit_length = 1.0e-7
+unit_e = 1.0e12
+unit_b = 1.0e3
+# Optional; defaults are the elementary charge, electron mass and c.
+# unit_charge = 1.602176634e-19
+# unit_mass = 9.1093837015e-31
+# unit_speed = 299792458.0
+# Time step and checkpoint step. dt is in seconds.
+dt = 1.0e-15
+step = 0
+# "float32" (default) or "float64", applied uniformly to every field and
+# particle property record. float64 is only usable with a PIConGPU that can
+# convert checkpoint dtypes; stock PIConGPU aborts on double particle records.
+precision = "float32"
+# Species to read from --input and write into the checkpoint.
+species = "electrons"
+
+[domain]
+# PIConGPU domain cell counts (one patch per axis).
+cells = [64, 64, 64]
+# Physical cell size in metres.
+cell_size = [1.0e-7, 1.0e-7, 1.0e-7]
+# Physical position of domain cell (0,0,0); omit when the domain starts at zero.
+origin = [0.0, 0.0, 0.0]
+
+[placement]
+# Offset from the domain origin to the bunch centre, along +x (left),
+# +y (front) and +z (top). offset_unit selects the interpretation.
+offset_unit = "fraction"
+left = 0.5
+front = 0.5
+top = 0.5
+# "bbox" (default) covers only the shifted bunch bounding box and is validated
+# for single-rank restarts. "domain" covers the full domain and is the safe
+# choice for a multi-rank restart.
+patch = "bbox"
+
+[accuracy]
+tolerance = 1.0e-3
+near_shell = "none"
+near_shell_radius = 0.0
+near_shell_tile = 4

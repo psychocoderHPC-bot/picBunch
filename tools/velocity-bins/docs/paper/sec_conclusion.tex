@@ -1,0 +1,19 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+picBunch computes the present-time field of a uniformly moving, TSC-shaped
+bunch as a zero-padded free-space FFT convolution with staggered Yee read-out,
+and the discrete recipe, its measured cost, and its accuracy are given in full.
+In relative per-component error against its TSC-convolved target, the mesh is
+below $3\times10^{-4}$ from $d=12$ cells for $\gamma=1$, aspect 1, and from
+$d=32$ for $\gamma=1$, aspect 4; at $\gamma=10$ it floors near
+$6\times10^{-3}$ at $d=32$ and does not cross within the swept range
+\citep{W4b}. The disagreement with the exact quadrature reference is per-source,
+local to the TSC support, and independent of particle count. On periodic
+decks the field round-trips bitwise through a real PIConGPU checkpoint and
+restart: a solver=None validation load writes step 1 and all six components
+are bitwise-equal, max ULP 0. The
+method is a far-field tool: cheap, deterministic (md5 \texttt{d3641d64\ldots},
+bit-identical repeats), and GPU-portable, with the near shell absent in v0.1
+and the perpendicular direction at $\gamma\ge10$ not converged at the natural
+cell size.

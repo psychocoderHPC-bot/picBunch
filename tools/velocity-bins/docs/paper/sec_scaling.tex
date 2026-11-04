@@ -1,0 +1,127 @@
+\section{Measured scaling}
+\label{sec:scaling}
+
+All timings are on one host, \texttt{rosi\_v100} (node \texttt{gv002}),
+exclusive Slurm allocation, pinned to GPU 0 \citep{SB1}. Build: CUDA 12.6,
+\texttt{PICBUNCH\_ARCH=70}, Release, padding 2, double \citep{SB1}. Each
+configuration ran three timed repeats after one untimed warm-up plus one
+device-level warm-up; stage values are medians, the total is
+min/median/max \citep{SB1}. The four $\gamma=10$, $N=2\times10^6$ repeats
+give total medians $60.35$ to $64.76$ ms, about $7\%$ scatter; the $64.81$
+ms row is the $\gamma=100$ run \citep{SB1}. These
+compute-only totals exclude the checkpoint writer; the end-to-end totals with
+the writer are in Table~\ref{tab:e2e}, a different measurement path.
+
+\paragraph{Correctness anchor.}
+Every timing run is anchored by the Coulomb limit ($\mathbf{u}=0$): one
+particle at a node, far nodes at $d=8,16,24,32$ along all six axis directions.
+The mesh field against the direct TSC stencil sum of the analytic Coulomb
+kernel has worst relative error $4.88\times10^{-14}$ (max absolute
+$2.28\times10^{-25}$), passing the $10^{-12}$ threshold
+\citep{SB1,coulomb}. This confirms the zero-padded FFT convolution reproduces
+the TSC-convolved Coulomb field to roundoff.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/F_a_scaling_vs_N.pdf}
+\caption{Pipeline time vs particle count.
+\texttt{rosi\_v100}, GPU 0 (V100-SXM2-32GB, idle), CUDA 12.6, Release,
+$N\in\{10^3,10^4,10^5,10^6,2\!\cdot\!10^6\}$, source box 20 cells,
+$\gamma=10$, $h=1$, padding 2, double. Blue is the total time; grey bars span
+the pooled min/max over the four $N\!=\!2\!\cdot\!10^6$ repeats. The other
+series are the per-stage medians, side by side, not stacked. Log-log
+\citep{SB1}.}
+\label{fig:Fa}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/F_b_scaling_vs_box.pdf}
+\caption{Pipeline time vs source-box size.
+\texttt{rosi\_v100}, GPU 0, CUDA 12.6, Release, $N\!=\!2\!\cdot\!10^6$,
+$\gamma=10$, $h=1$, padding 2, double. Box sizes 20/50/100 cells with padded
+FFT array $M=60/120/220$ per axis. Blue is the total; the other series are
+the per-stage medians \citep{SB1}.}
+\label{fig:Fb}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{figs/F_c_scaling_vs_h.pdf}
+\caption{Total pipeline time vs mesh spacing $h$.
+\texttt{rosi\_v100}, GPU 0, CUDA 12.6, Release, $N\!=\!2\!\cdot\!10^6$,
+source box 20 cells, $\gamma=10$, padding 2, double,
+$h\in\{1,1/2,1/4\}$, padded array $M=60/100/180$. Blue is the total
+(median, min/max bars) \citep{SB1}.}
+\label{fig:Fc}
+\end{figure}
+
+The scaling is in two regimes, with the crossover set by the box, not the
+particle count \citep{SB1}. At large $N$ the deposit dominates, linear in $N$,
+$52$--$57$ ms on the $2\times10^6$ rows while the FFT, kernel, and read-out
+stay under $10$ ms at the $20$-cell box; the total is flat across
+$\gamma=1,10,100$ ($64.9/64.4/64.8$ ms) \citep{SB1}. At large boxes the
+kernel and FFT scale with $M^3$: from $M=60$ to $M=220$ the total goes from
+$64.8$ ms to $233$ ms, and halving $h$ costs $1.07\times$ and $2.35\times$
+because the deposit stays constant \citep{SB1}.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Per-stage medians (ms) and device allocation (MiB), padding 2,
+double, \texttt{rosi\_v100} GPU 0 \citep{SB1}. ``box'' is the source-box size
+in cells; $M$ is the padded FFT array per axis. Stage columns are medians over
+the three timed repeats.}
+\label{tab:matrix}
+\begin{tabular}{lrrrrrrrrrrr}
+\toprule
+$N$ & box & $\gamma$ & $h$ & $n$ & $M$ & total & deposit & kernel & FFT & read-out & dev \\
+\midrule
+$10^3$   & 20  & 10  & 1   & 30  & 60  & 10.17  & 1.13  & 0.48 & 4.36  & 4.08  & 8.4  \\
+$10^4$   & 20  & 10  & 1   & 30  & 60  & 10.69  & 2.42  & 0.53 & 4.37  & 3.35  & 8.7  \\
+$10^5$   & 20  & 10  & 1   & 30  & 60  & 12.90  & 4.59  & 0.48 & 4.07  & 3.28  & 11.4 \\
+$10^6$   & 20  & 10  & 1   & 30  & 60  & 61.92  & 53.61 & 0.53 & 4.31  & 3.45  & 38.9 \\
+$2\!\cdot\!10^6$ & 20  & 10  & 1   & 30  & 60  & 64.76  & 56.51 & 0.43 & 3.80  & 3.69  & 69.4 \\
+$2\!\cdot\!10^6$ & 50  & 10  & 1   & 60  & 120 & 85.67  & 52.82 & 2.85 & 13.89 & 15.20 & 127.4 \\
+$2\!\cdot\!10^6$ & 100 & 10  & 1   & 110 & 220 & 232.97 & 51.89 & 22.66 & 75.97 & 82.40 & 468.7 \\
+$2\!\cdot\!10^6$ & 20  & 10  & 1/2 & 50  & 100 & 69.27  & 52.38 & 1.29 & 7.43  & 8.16  & 99.5  \\
+$2\!\cdot\!10^6$ & 20  & 10  & 1/4 & 90  & 180 & 151.51 & 50.94 & 11.76 & 43.38 & 44.58 & 284.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No configuration came near the $32$ GB device limit; the largest exact device
+allocation was $468.7$ MiB \citep{SB1}. Memory scales with the padded bunch
+box, not the global field.
+
+\begin{table}[t]
+\centering
+\small
+\caption{End-to-end pipeline time including the checkpoint writer and the
+openPMD reader, medians over 3 repeats, \texttt{rosi\_v100} GPU 0, 20-cell
+box, $\gamma=10$, shipped CLI \texttt{--tolerance} $10^{-3}$
+\citep{W4b}. This is a different measurement path from the compute-only
+Table~\ref{tab:matrix}: the totals here include the writer (the dominant
+added term), and the per-stage split is deposit/kernel/FFT/readout/writer.
+The $N=10^6$ total is $47.15$ ms here versus $61.92$ ms in the compute-only
+campaign, which excludes the writer and uses a different timing boundary.}
+\label{tab:e2e}
+\begin{tabular}{lrrrrrr}
+\toprule
+$N$ & total & deposit & kernel & FFT & readout & write \\
+\midrule
+$10^{4}$  & 22.00 & 2.70  & 0.53 & 4.53 & 3.06 & 11.29 \\
+$10^{5}$  & 24.87 & 5.82  & 0.56 & 4.31 & 3.80 & 10.65 \\
+$10^{6}$  & 47.15 & 31.56 & 0.46 & 4.20 & 3.95 & 7.54  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:e2e} is the same pipeline with the writer in the loop. The
+deposit is still linear in $N$ ($2.70\to31.56$ ms from $10^4$ to $10^6$), and
+the FFT is still box-bound and flat. The writer is the dominant added term:
+$11.29$ ms at $10^4$ and $7.54$ ms at $10^6$. The $N=10^6$ total is $47.15$ ms
+with the writer, versus $61.92$ ms in the compute-only
+Table~\ref{tab:matrix}; the two campaigns differ in measurement path and
+timing boundary, so neither is the other's total plus the writer
+\citep{W4b,SB1}.

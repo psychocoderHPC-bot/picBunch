@@ -36,6 +36,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_margin.cpp
         test_config.cpp
         test_placement.cpp
+        test_velocity_bins.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -52,7 +53,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*

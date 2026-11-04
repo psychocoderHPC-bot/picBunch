@@ -86,8 +86,19 @@ namespace picBunch
         if(bunch.size() == 0)
             throw std::runtime_error("computeFieldNearExact: empty bunch");
 
+        // The exact near term evaluates every (source, node) pair with the
+        // source's own velocity: bin-free.  The mesh subtraction cancels the
+        // global mesh bin for bin only if both use the same box geometry and
+        // representatives, so the binning is derived once from the full bunch
+        // and fixed for every per-tile local mesh.
+        VelocityBinning binning;
+        if(!options.fixedBinning)
+            binning = deriveVelocityBinning(bunch, options.tolerance, options.velocityBinning);
+
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
+        if(!options.fixedBinning)
+            plain.fixedBinning = binning;
         Field field = computeField(bunch, plain, stageTimes);
 
         Grid const& grid = field.grid;
