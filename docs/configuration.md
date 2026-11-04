@@ -60,6 +60,7 @@ bunch centre.
 | `front` | yes | Offset along `+y`. |
 | `top` | yes | Offset along `+z`. |
 | `patch` | no | `"bbox"` (default) or `"domain"`. |
+| `patch_count` | no | Positive integer (default `1`): split the generated species along `z` into this many rank-overlap regions. |
 
 Fractional values must be in `[0, 1]`. The placement uses the charge-weighted
 centroid `sum(q w r) / sum(q w)`. The bounding-box centre is printed in the log
@@ -73,6 +74,12 @@ domain in metres and cells.
 It is validated for single-rank restarts. `patch = "domain"` writes one patch
 covering the whole domain and is the safe choice for a multi-rank restart; its
 `positionOffset` still indexes the global cells, so particle data is unchanged.
+
+`patch_count = N` splits the generated species along `z` into `N` rank-overlap
+regions. Neighbouring regions overlap by one cell, particle ownership stays
+disjoint, and the writer reorders the records so each patch has a contiguous
+range and cumulative `numParticlesOffset`. Copied species keep the patches of
+the input checkpoint. `patch_count = 1` is the previous layout.
 
 ### `[accuracy]`
 

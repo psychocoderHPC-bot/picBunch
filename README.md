@@ -217,6 +217,36 @@ source on every rank. Two stages are rank-parallel.
 Without MPI both paths run serially, and the results are unchanged. `--deterministic-deposit`
 is still required for bitwise repeatability of the deposit itself.
 
+#### Measured rank scaling (v0.6.0)
+
+Measured on `rosi_v100` (one V100 per rank, 48 cores, `OMP_NUM_THREADS=48/N` per rank,
+`--deterministic-deposit`) after the node had drained. The load average at the start of
+each rank block was 1.9, 8.4 and 11.8 for 1, 2 and 4 ranks; the rise is the preceding
+measurement, and no foreign process was running. Near-shell times are the near-shell loop;
+mesh times are the in-binary stage total; write times are the `writer` stage of a 256^3
+global domain (0.77 GB).
+
+| case | configuration | ranks | wall | speedup | efficiency | Amdahl `s` |
+| --- | --- | --- | --- | --- | --- | --- |
+| near shell | N=128, 32^3, R=1.5, tile 8 | 1 | 36.61 s | 1.00 | 100% | - |
+| near shell | same | 2 | 29.60 s | 1.24 | 62% | 0.62 |
+| near shell | same | 4 | 27.29 s | 1.34 | 34% | 0.66 |
+| mesh | N=2e6, 112^3 | 1 | 522.2 ms | 1.00 | 100% | - |
+| mesh | same | 2 | 436.3 ms | 1.20 | 60% | 0.67 |
+| mesh | same | 4 | 433.6 ms | 1.20 | 30% | 0.77 |
+| write | N=2e6, 256^3, 0.77 GB | 1 | 7.41 s | 1.00 | 100% | - |
+| write | same | 2 | 4.34 s | 1.71 | 85% | 0.17 |
+| write | same | 4 | 15.49 s | 0.48 | 12% | n/a (I/O-bound) |
+
+The mesh stage breakdown shows the limit directly: deposit is 317, 307 and 332 ms at
+1, 2 and 4 ranks, while the source FFT is 88, 58 and 46 ms. Only the six component
+convolutions are parallel, so the replicated deposit and `rho` transform cap the speedup.
+The near shell improves from 1 to 2 ranks and then plateaus, because the static
+round-robin tile split leaves uneven work and every rank still pays the all-reduce of the
+full correction array. The collective writer is I/O-bound: two ranks overlap metadata and
+flush traffic, but four writers contend on the shared filesystem and run 2.1x slower than
+one rank. These limits are algorithmic and I/O limits, not accuracy effects.
+
 ### Multi-rank particle patches
 
 `placement.patch_count = N` splits the generated particle patch along z into `N`
@@ -368,8 +398,11 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.5.0 commit passes 18/18 CTest entries on rosi (CUDA 12.6, sm_70) and on jureca-h100
-(CUDA 13.4, sm_90), and 18/18 on hal (HIP, gfx1100) for correctness. The new entries are
+The v0.6.0 release tree passes 18/18 CTest entries on rosi (CUDA 12.6, sm_70) and on
+jureca-h100 (CUDA 13.4, sm_90). On hal (HIP, gfx1100) 17/18 entries pass; `picBunch.Io`
+reports all 14 executed assertions green and one skip, then segfaults inside
+`librocfft.so` during process teardown under ROCm 7.2 (a teardown crash, not a field or I/O
+assertion). The v0.5.0 commit passed 18/18 on all three hosts. The entries are
 `picBunch.Config` (TOML parsing, defaults and required keys), `picBunch.Placement`
 (charge-weighted centring, `bbox` and `domain` patches, out-of-domain rejection, dtype and
 `charge`/`mass` records) plus `picBunch.Margin` (margin and far-tail validation) and
@@ -558,6 +591,12 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.6.0** parallelises the mesh component convolutions and the near-shell output tiles
+  across MPI ranks, with one all-reduce per field, and adds `placement.patch_count` to
+  write one checkpoint patch per rank-overlap region. 1-, 2- and 4-rank mesh and near-shell
+  fields are bitwise identical at a fixed problem. The replicated deposit/source FFT cap the
+  mesh speedup at about 1.2x, the near shell plateaus at about 1.34x from static-tile
+  imbalance, and the collective writer is I/O-bound and slower at 4 ranks.
 - **v0.5.0** adds the operator-facing TOML interface
   (`--input/--destination/--config`), charge-weighted centring with `left/front/top`
   placement, `patch = "bbox" | "domain"`, uniform float32 checkpoint records by default
@@ -637,9 +676,11 @@ table above covers the compute stages of the large-N sweep, not the write path.
 - **Zero fill only as a diagnostic.** Global output is filled beyond the exact box with the
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.
-- **No multi-GPU compute.** One device computes the field. MPI decomposes only the global
-  write; the tested configurations are 2 and 4 ranks on one node, and multi-node was not
-  tested. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.
+- **Rank-parallel compute is single-node.** MPI divides the six mesh components, the
+  near-shell output tiles and the global write. The bunch is replicated on every rank;
+  there is no domain-decomposed FFT and no multi-node redistribution. Tested with 1, 2 and
+  4 ranks on one node only. Without `--deterministic-deposit`, the GPU deposit is not
+  bitwise reproducible.
 
 ## Reproduce
 
