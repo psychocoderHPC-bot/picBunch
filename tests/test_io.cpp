@@ -798,6 +798,80 @@ TEST(Io, ParticlesOutsideMeshGridAreRejectedByNameAndCount)
     std::filesystem::remove(path);
 }
 
+TEST(Io, AnisotropicCellSpacingWarnsWithoutChangingFields)
+{
+    // The warning is advisory: the executable must still compute the same field
+    // as the library for the same anisotropic spacing.  The mesh-derived and
+    // --cell-size paths share the resolved spacing, so both must warn.
+    auto const path = temporaryPath();
+
+    auto runSpacing = [&](std::array<double, 3> const& spacing, std::string const& extra) {
+        std::filesystem::remove(path);
+        std::optional<std::array<std::size_t, 3>> const shape
+            = extra.empty() ? std::optional<std::array<std::size_t, 3>>{
+                  std::array<std::size_t, 3>{8, 8, 8}}
+                            : std::nullopt;
+        writeSample(path, {{4.0, 4.0, 4.0}}, shape, {0.0, 0.0, 0.0}, spacing, 1.0);
+        auto const result = runApp(path, extra);
+        EXPECT_EQ(result.status, 0) << result.output;
+        std::filesystem::remove(path);
+        return result.output;
+    };
+
+    for(double const ratio : {1.0, 1.5})
+    {
+        std::string const output = runSpacing({ratio, 1.0, 1.0}, "");
+        EXPECT_EQ(output.find("anisotropic cell spacing"), std::string::npos) << output;
+    }
+    for(double const ratio : {2.0, 4.0})
+    {
+        std::string const output = runSpacing({ratio, 1.0, 1.0}, "");
+        EXPECT_NE(output.find("anisotropic cell spacing"), std::string::npos) << output;
+        EXPECT_NE(
+            output.find("near-field accuracy is set by the shortest axis"),
+            std::string::npos)
+            << output;
+        EXPECT_NE(output.find("shortest 1 m"), std::string::npos) << output;
+
+        std::string const meshFree = runSpacing({ratio, 1.0, 1.0}, "--cell-size 1,1,4");
+        EXPECT_NE(meshFree.find("anisotropic cell spacing"), std::string::npos) << meshFree;
+    }
+
+    // Same geometry through the API: the warning path must not touch the field.
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 4.0;
+    bunch.y[0] = 4.0;
+    bunch.z[0] = 4.0;
+    bunch.ux[0] = 0.0;
+    bunch.uy[0] = 0.0;
+    bunch.uz[0] = 1.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+    picBunch::ComputeOptions options;
+    options.cellSize = {4.0, 1.0, 1.0};
+    options.gridSize = std::array<std::size_t, 3>{8, 8, 8};
+    options.gridOrigin = std::array<double, 3>{0.0, 0.0, 0.0};
+    picBunch::Field const field = picBunch::computeField(bunch, options);
+    double maxE = 0.0;
+    double maxB = 0.0;
+    for(int c = 0; c < 6; ++c)
+        for(double value : field.data[c])
+            (c < 3 ? maxE : maxB) = std::max(c < 3 ? maxE : maxB, std::abs(value));
+
+    std::string const warned = runSpacing({4.0, 1.0, 1.0}, "");
+    double cliE = 0.0;
+    double cliB = 0.0;
+    ASSERT_NE(warned.find("field: max|E|="), std::string::npos) << warned;
+    std::sscanf(
+        warned.c_str() + warned.find("field: max|E|="),
+        "field: max|E|=%lf V/m  max|B|=%lf T",
+        &cliE,
+        &cliB);
+    EXPECT_NEAR(cliE, maxE, 1.0e-5 * std::max(maxE, 1.0e-300));
+    EXPECT_NEAR(cliB, maxB, 1.0e-5 * std::max(maxB, 1.0e-300));
+}
+
 TEST(Io, NoMeshRequiresCellSizeAndUsesBunchAabb)
 {
     auto const path = temporaryPath();

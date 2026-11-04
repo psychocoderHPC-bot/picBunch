@@ -339,6 +339,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 - **Near shell not implemented.** The mesh path has no analytic near-source correction.
   Its accuracy below the crossovers above is a stated limitation, not a tuning target.
+- **Anisotropic cells bound near-field accuracy.** When the largest and smallest spacing
+  differ by a factor of 2 or more the near-field error is set by the shortest axis, because
+  accuracy depends on distance measured in units of the local spacing. The executable warns
+  on stderr in that case and computes the request unchanged.
 - **Single shared velocity.** A momentum spread exits non-zero; per-particle velocity is
   not supported.
 - **Double precision required.** The field pipeline and its accuracy claims are double.

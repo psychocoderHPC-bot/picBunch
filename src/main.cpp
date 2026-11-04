@@ -416,6 +416,22 @@ int main(int argc, char** argv)
             std::printf(
                 "cellSize: --cell-size override (%.6g,%.6g,%.6g) m\n",
                 options.cellSize[0], options.cellSize[1], options.cellSize[2]);
+        // Anisotropic cells are valid, but the near-field error scales with the
+        // distance measured in local cell units.  Warn when the spacing ratio is
+        // large enough that the shortest axis, not the requested "d cells",
+        // controls the near-source accuracy.  This changes no computation.
+        {
+            auto const [shortest, largest] = std::minmax_element(
+                options.cellSize.begin(), options.cellSize.end());
+            double const ratio = *largest / *shortest;
+            if(ratio >= 2.0)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: anisotropic cell spacing: largest %.6g m, "
+                    "shortest %.6g m (ratio %.3g); near-field accuracy is set by the "
+                    "shortest axis (%.6g m)\n",
+                    *largest, *shortest, ratio, *shortest);
+        }
         // The mesh extent is the default grid; --grid is an explicit override.
         // With neither, makeGrid derives the grid from the bunch bounding box.
         options.meshGridSize = meshGridExtent;
