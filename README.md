@@ -206,6 +206,13 @@ all six axis directions. The mesh field against the direct TSC stencil sum of th
 Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
 threshold. This is the zero-padded FFT convolution checked against the discrete sum.
 
+Extended to non-unit cells (W3n). One stationary electron at `1e-7` m isotropic cells
+agrees to **7.8e-5** relative error at 12 cells, and at `1,1,4` m anisotropic cells to
+**1.0e-2** at 40 cells, both against the absolute Coulomb field in V/m. No node-volume
+factor is present or needed: a `1e-7` m case that lacked `cellx*celly*cellz` would be
+`1e-21` of this, and the anisotropic residual is TSC deposit discretisation, which vanishes
+with distance. The `Physics.AbsoluteMagnitude*` tests pin this on every backend.
+
 **Single-particle far field against the TSC-convolved continuum.** The metric is
 per-component relative error, never pooled, measured with the `picBunch` executable
 itself on `rosi_v100` (V100, CUDA), `kRefinement = 1`, one source on a node, against the
@@ -326,6 +333,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.1.5** adds an absolute-magnitude regression test. W3n claimed the read-out scale
+  `kRefinement^3/M^3` was missing the physical node volume `cellx*celly*cellz`. One stationary
+  electron at `1e-7` m cells measured **1.00002x** the analytic Coulomb field in V/m, so the claim
+  is refuted and the scale is unchanged. The new `Physics.AbsoluteMagnitude*` tests pin the SI
+  magnitude: they fail by the full volume factor if `cellx*celly*cellz` is ever applied, and cover
+  `1e-7` m isotropic and `1,1,4` m anisotropic cells.
+- **v0.1.4** warns on stderr when the largest and smallest cell spacing differ by a factor of 2 or
+  more, naming both spacings and the shortest-axis near-field limit; the computation is unchanged.
 - **v0.1.3** makes the input mesh define the whole output grid (extent, spacing, origin) when
   present, rejects particles outside it, and keeps the bunch-AABB path for mesh-free input.
 - **v0.1.2** honours the input mesh `gridGlobalOffset` as the default output-grid origin;
