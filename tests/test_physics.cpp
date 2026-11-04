@@ -303,3 +303,66 @@ TEST(Physics, AbsoluteMagnitudeAnisotropic114Cells)
     EXPECT_LT(rel, 2.0e-2) << "1,1,4 m anisotropic cells disagree with the absolute Coulomb field by "
                            << rel << "; a node-volume factor of 4 would give ~3";
 }
+// ---------------------------------------------------------------------------
+// R2C parity (task W3o).
+//
+// The R2C half-spectrum on the last (x) axis has Mx/2+1 planes when Mx is even
+// (DC at 0 and the Nyquist plane at Mx/2) and (Mx+1)/2 planes with NO Nyquist
+// plane when Mx is odd.  Before this change the pipeline required an even Mx
+// (computeField threw) and the kernel centring assumed one, so an odd padded
+// extent was rejected rather than handled.  The centred index in
+// KernelBuildKernel now splits on ``i <= (M-1)/2`` (identical to ``i < M/2``
+// for even M, correct for odd M) and the even-only guards are relaxed.
+//
+// This test runs the same single-particle free-space TSC convolution with an
+// even padded extent (padding 2 -> Mx=62) and an odd one (padding 3 -> Mx=93)
+// on the same 31^3 output grid.  Neither box wraps (the source-observer lag is
+// far under half a box), so the two fields must agree to transform roundoff.
+// Without the parity support the odd run throws, so this fails.
+TEST(Physics, OddExtentR2cParity)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 15.0;
+    bunch.y[0] = 15.0;
+    bunch.z[0] = 15.0;
+    bunch.ux[0] = 0.0;
+    bunch.uy[0] = 0.0;
+    bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+
+    auto run = [&](unsigned padding)
+    {
+        picBunch::ComputeOptions o;
+        o.tolerance = 1e-12;
+        o.cellSize = {1.0, 1.0, 1.0};
+        o.gridSize = {31, 31, 31};
+        o.gridOrigin = {0.0, 0.0, 0.0};
+        o.fftPadding = padding;
+        return picBunch::computeField(bunch, o);
+    };
+
+    picBunch::Field const even = run(2u); // Mx = 31*2 = 62 (even)
+    picBunch::Field const odd = run(3u);  // Mx = 31*3 = 93 (odd, no Nyquist plane)
+    ASSERT_EQ(even.grid.n, odd.grid.n);
+    EXPECT_EQ(even.grid.n[0] * even.grid.fftPadding % 2u, 0u);
+    EXPECT_EQ(odd.grid.n[0] * odd.grid.fftPadding % 2u, 1u) << "the odd run must use an odd Mx";
+
+    double maxRel = 0.0;
+    for(int c = 0; c < 6; ++c)
+    {
+        double scale = 0.0;
+        for(std::size_t f = 0; f < even.grid.size(); ++f)
+            scale = std::max(scale, std::abs(even.data[c][f]));
+        for(std::size_t f = 0; f < even.grid.size(); ++f)
+        {
+            double const d = std::abs(even.data[c][f] - odd.data[c][f]);
+            if(scale > 0.0)
+                maxRel = std::max(maxRel, d / scale);
+        }
+    }
+    EXPECT_LT(maxRel, 1.0e-6)
+        << "odd padded extent (Mx=93) disagrees with the even extent (Mx=62) by "
+        << maxRel << " relative; the R2C path is not parity-correct for an odd last axis";
+}

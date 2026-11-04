@@ -148,9 +148,14 @@ namespace picBunch
                     auto const i = static_cast<std::uint32_t>(idx[0]);
                     auto const j = static_cast<std::uint32_t>(idx[1]);
                     auto const k = static_cast<std::uint32_t>(idx[2]);
-                    int const di = (i < Mx / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(Mx);
-                    int const dj = (j < My / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
-                    int const dk = (k < Mz / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
+                    // Centred index of a node on the (zero-padded) FFT box.  ``i <= (M-1)/2``
+                    // is the parity-correct split: for even M it is identical to ``i < M/2``
+                    // (bins 0..M/2-1 positive, M/2..M-1 negative, Nyquist bin at M/2); for odd
+                    // M (no Nyquist plane) it is 0..(M-1)/2 positive and (M+1)/2..M-1 negative.
+                    // A plain ``i < M/2`` mis-centres the kernel on an odd extent.
+                    int const di = (i <= (Mx - 1u) / 2u) ? static_cast<int>(i) : static_cast<int>(i) - static_cast<int>(Mx);
+                    int const dj = (j <= (My - 1u) / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
+                    int const dk = (k <= (Mz - 1u) / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
                     // R = (d*h + yee_delta) * cell
                     double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
                     double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
@@ -352,7 +357,11 @@ namespace picBunch
                     + std::to_string(kMaxNodesPerAxis)
                     + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
             std::size_t nodes = static_cast<std::size_t>(std::ceil(span)) + 1u;
-            // even node count keeps M = padding*nodes even for the R2C transform
+            // The auto-derived grid keeps an even node count for backwards
+            // compatibility (earlier tests expect even n).  Odd extents are now
+            // supported by the R2C path (parity-correct centring in
+            // KernelBuildKernel and the relaxed --grid check); this rounding only
+            // constrains the derived grid, never an explicit one.
             if(nodes % 2u)
                 ++nodes;
             nodes = std::max<std::size_t>(nodes, 8u);
@@ -368,9 +377,9 @@ namespace picBunch
             for(int a = 0; a < 3; ++a)
             {
                 std::size_t const n = (*options.gridSize)[a];
-                if(n == 0u || n % 2u != 0u)
+                if(n == 0u)
                     throw std::invalid_argument(
-                        "makeGrid: --grid values must be even and positive; got "
+                        "makeGrid: --grid values must be positive; got "
                         + std::to_string((*options.gridSize)[0]) + ","
                         + std::to_string((*options.gridSize)[1]) + ","
                         + std::to_string((*options.gridSize)[2]));
@@ -551,8 +560,9 @@ namespace picBunch
         std::uint32_t const Mx = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
         std::uint32_t const My = static_cast<std::uint32_t>(grid.n[1] * grid.fftPadding);
         std::uint32_t const Mz = static_cast<std::uint32_t>(grid.n[2] * grid.fftPadding);
-        if(Mx % 2u != 0u)
-            throw std::runtime_error("computeField: padded x extent must be even for R2C");
+        // Mx may be odd: the R2C half-spectrum then has (Mx+1)/2 planes and no Nyquist
+        // plane; KernelBuildKernel's parity-correct centred index handles that.  The
+        // integer ``Mx/2 + 1`` already equals (Mx+1)/2 for odd Mx and Mx/2+1 for even.
         std::uint32_t const CP = Mx / 2u + 1u;
         // Flat layout is x fastest, then y, then z.  The plan's last dimension is x,
         // so the plan extents are (z, y, x) and the packed spectrum is (z, y, CP).

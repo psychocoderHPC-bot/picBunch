@@ -382,8 +382,12 @@ TEST(Restart, GridAndOriginOverridesReplaceDerivedValues)
     EXPECT_EQ(overridden.spacing, derived.spacing);
     EXPECT_NE(overridden.n, derived.n);
 
+    // Odd extents are supported by the parity-correct R2C path (task W3o): the
+    // even-only requirement that previously rejected {15,20,24} is lifted, so an
+    // odd explicit grid is now accepted verbatim.
     options.gridSize = std::array<std::size_t, 3>{15, 20, 24};
-    EXPECT_THROW(picBunch::makeGrid(twoParticles(), options), std::invalid_argument);
+    auto const oddGrid = picBunch::makeGrid(twoParticles(), options);
+    EXPECT_EQ(oddGrid.n, (std::array<std::size_t, 3>{15, 20, 24}));
 }
 
 TEST(Restart, WriterEmitsPIConGPUCheckpointContract)

@@ -286,12 +286,29 @@ all six axis directions. The mesh field against the direct TSC stencil sum of th
 Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
 threshold. This is the zero-padded FFT convolution checked against the discrete sum.
 
-Extended to non-unit cells (W3n). One stationary electron at `1e-7` m isotropic cells
-agrees to **7.8e-5** relative error at 12 cells, and at `1,1,4` m anisotropic cells to
-**1.0e-2** at 40 cells, both against the absolute Coulomb field in V/m. No node-volume
-factor is present or needed: a `1e-7` m case that lacked `cellx*celly*cellz` would be
-`1e-21` of this, and the anisotropic residual is TSC deposit discretisation, which vanishes
-with distance. The `Physics.AbsoluteMagnitude*` tests pin this on every backend.
+Extended to non-unit cells (W3n, W3o). One stationary electron at `1e-7` m isotropic cells
+agrees to **7.8e-5** relative error at 12 cells against the absolute Coulomb field in V/m.
+At `1,1,4` m anisotropic cells the deviation from the point Coulomb is the convolution of the
+point with the TSC charge shape, whose physical size is 1.5 cells per axis (1.5 m in x and y,
+6 m in z for this cell), not a node-volume or implementation defect. The exact continuous
+TSC-convolved field (converged quadrature over the anisotropic shape) and the shipped
+free-space mesh, both against the analytic point Coulomb at the E_x Yee point, short axis:
+
+| d (cells) | TSC-convolved continuum | shipped mesh |
+| --- | --- | --- |
+| 4 | 0.7861 | 0.8684 |
+| 8 | 0.9253 | 0.9393 |
+| 12 | 0.9638 | **0.9681** |
+| 16 | 0.9790 | 0.9807 |
+| 24 | 0.9904 | 0.9909 |
+
+The 3.2% gap at 12 cells is the anisotropic TSC convolution itself: the continuum is 3.6%
+below the point Coulomb, and the mesh reproduces that continuum to 0.44% (0.05% at 24 cells),
+the discrete deposit discretisation, which decays as about d^-2. For isotropic cells the TSC
+shape is symmetric, its quadrupole vanishes, and the continuum equals the point Coulomb to
+machine precision, which is why the isotropic anchor is 7.8e-5. No node-volume factor is
+present or needed: a `1e-7` m case that lacked `cellx*celly*cellz` would be `1e-21` of this.
+The `Physics.AbsoluteMagnitude*` tests pin the SI magnitude on every backend.
 
 **Single-particle far field against the TSC-convolved continuum.** The metric is
 per-component relative error, never pooled, measured with the `picBunch` executable
@@ -413,6 +430,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.3.1** settles the anisotropic Coulomb anchor and the R2C parity. At `1,1,4` m anisotropic
+  cells the field at 12 cells is **0.9681x** the analytic point Coulomb: the exact TSC-convolved
+  continuum is **0.9638x**, so the gap is the anisotropic TSC convolution (3.6% below the point
+  Coulomb), not a node-volume or implementation defect, and the mesh reproduces the continuum to
+  0.44%. The Accuracy section now quantifies the deviation from the point Coulomb against distance
+  as an aspect limit instead of bounding it only at 40 cells. The R2C path accepts an odd padded
+  extent (parity-correct kernel centring and relaxed even-only guards); `Physics.OddExtentR2cParity`
+  fails without it.
 - **v0.3.0** adds `--global-grid`/`--global-origin` and optional MPI. The convolution stays
   on the padded bunch box; the global field is written as exact-zero-filled chunks so the
   global array is never allocated. Adds `--deterministic-deposit` for bitwise comparisons
@@ -440,10 +465,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 - **Near shell not implemented.** The mesh path has no analytic near-source correction.
   Its accuracy below the crossovers above is a stated limitation, not a tuning target.
-- **Anisotropic cells bound near-field accuracy.** When the largest and smallest spacing
-  differ by a factor of 2 or more the near-field error is set by the shortest axis, because
-  accuracy depends on distance measured in units of the local spacing. The executable warns
-  on stderr in that case and computes the request unchanged.
+- **Anisotropic cells set the Coulomb-limit offset.** The delivered field is the TSC-convolved
+  field, which for non-cubic cells differs from the point Coulomb by the anisotropic TSC
+  convolution: at aspect 4 (z/x) the continuum is 21% below the point Coulomb at 4 cells and
+  3.6% at 12 cells along the short axis, decaying as about d^-2 (see the Accuracy table). The
+  mesh reproduces that continuum to the discrete deposit tolerance (0.44% at 12 cells, 0.05%
+  at 24 cells). This is a quantified aspect limit, not a "cubic cells only" restriction. The
+  executable also warns on stderr when the largest and smallest spacing differ by a factor of
+  2 or more, and computes the request unchanged.
 - **Single shared velocity.** A momentum spread exits non-zero; per-particle velocity is
   not supported.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
