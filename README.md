@@ -301,8 +301,20 @@ only to the compute box.
 
 ### PIConGPU restart checkpoint
 
-`--restart-format picongpu` writes a checkpoint that PIConGPU's `RestartFieldLoader` can
-consume instead of the standard SI openPMD series:
+The documented interface writes the checkpoint that PIConGPU's `RestartFieldLoader` can
+consume:
+
+```bash
+picBunch --input bunch.h5 --destination checkpoints --config params.toml
+```
+
+`[picongpu]` supplies `unit_length`, `unit_e`, `unit_b`, `dt`, `step` and `precision`; no
+unit or conversion value is accepted on the command line. `[domain]` and `[placement]`
+supply the geometry. See [docs/configuration.md](docs/configuration.md).
+
+The legacy CLI path `--restart-format picongpu` remains as an advanced option. It is not
+the documented interface and still requires the three advanced unit flags, which are never
+needed by the TOML interface:
 
 ```bash
 picBunch --input bunch_%T.h5 --species electrons \
@@ -313,7 +325,8 @@ picBunch --input bunch_%T.h5 --species electrons \
          --picongpu-unit-b 29522.962355927582
 ```
 
-All three unit flags are mandatory; a missing one is an error, never a default. The writer
+In the advanced path all three unit flags are mandatory; a missing one is an error, never a
+default. The writer
 emits `checkpoints/<prefix>_<step:06d>.h5` plus `checkpoints.txt`. Fields are float32 with
 extent `(Nz,Ny,Nx)`, stored as `field/unit` in PIConGPU internal units. Every particle
 species group in the input iteration is copied as a raw HDF5 object, so its attributes and
@@ -326,12 +339,15 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.4.1 commit passes 16/16 CTest entries on rosi (CUDA 12.6, sm_70), on jureca-h100
-(CUDA 13.4, sm_90) and on hal (HIP, gfx1100). The new entries are `picBunch.Margin` (margin
-and far-tail validation) and `picBunch.NearShellCli`, which runs the shipped binary with
-`--near-shell exact` and asserts a finite field that changes inside the shell. The
-`Domain.GridStaysOnBunchBox` test checks that a 1024^3 global request keeps the compute box
-small; `Domain.ChunkedWriteZerosAndOffset` documents the zero-fill writer path used by the
+The v0.5.0 commit passes 18/18 CTest entries on rosi (CUDA 12.6, sm_70) and on jureca-h100
+(CUDA 13.4, sm_90), and 18/18 on hal (HIP, gfx1100) for correctness. The new entries are
+`picBunch.Config` (TOML parsing, defaults and required keys), `picBunch.Placement`
+(charge-weighted centring, `bbox` and `domain` patches, out-of-domain rejection, dtype and
+`charge`/`mass` records) plus `picBunch.Margin` (margin and far-tail validation) and
+`picBunch.NearShellCli`, which runs the shipped binary with `--near-shell exact` and asserts
+a finite field that changes inside the shell. The `Domain.GridStaysOnBunchBox` test checks
+that a 1024^3 global request keeps the compute box small;
+`Domain.ChunkedWriteZerosAndOffset` documents the zero-fill writer path used by the
 diagnostic flag.
 
 The v0.1.3 final state was the commit `da3cd4239926f5da31b5794a36f8184e0b3164da`:
@@ -513,6 +529,13 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.5.0** adds the operator-facing TOML interface
+  (`--input/--destination/--config`), charge-weighted centring with `left/front/top`
+  placement, `patch = "bbox" | "domain"`, uniform float32 checkpoint records by default
+  (float64 opt-in with the stock-PIConGPU conversion warning), and `charge`/`mass` records.
+  The documented interface takes every unit and conversion from the configuration, so no
+  unit flag appears on its command line. The old flags stay available only as an advanced
+  path.
 - **v0.4.1** makes `--near-shell`, `--near-shell-radius` and `--near-shell-tile` reachable
   from the shipped CLI (v0.4.0 advertised them but rejected them with exit 2), adds the
   end-to-end `NearShellCli` test, replaces the worst-case tail remainder with a quadrupole

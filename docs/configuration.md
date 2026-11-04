@@ -156,5 +156,8 @@ A complete example is committed as `examples/picbunch.toml`.
 ## Legacy CLI
 
 The old flags remain available as an advanced path. They are not the documented
-interface, and the unit flags (`--picongpu-unit-*`) are not part of the
-documented usage.
+interface. In particular, the unit flags (`--picongpu-unit-length`,
+`--picongpu-unit-e`, `--picongpu-unit-b`) and `--restart-format picongpu` are
+advanced only; the documented `--input/--destination/--config` usage takes every
+unit and conversion from the TOML file and rejects no unit value because it
+accepts none on the command line.

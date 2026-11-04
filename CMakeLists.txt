@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     picBunch
-    VERSION 0.4.1
+    VERSION 0.5.0
     DESCRIPTION "Standalone GPU bunch-field initializer: openPMD particles in, free-space hybrid fields out"
     HOMEPAGE_URL "https://github.com/psychocoderHPC-bot/picBunch"
     LANGUAGES CXX
