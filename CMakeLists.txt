@@ -309,6 +309,10 @@ install(TARGETS picBunch picBunchOpenPMD picBunchApp)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Measurement driver for the exact near shell (host-only, no openPMD).
+add_executable(picBunchDfftCheck tools/dfft-check/check.cpp)
+target_link_libraries(picBunchDfftCheck PRIVATE picBunch::picBunch picBunch::openPMD)
+alpaka_finalize(picBunchDfftCheck)
+
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 

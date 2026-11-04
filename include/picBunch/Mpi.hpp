@@ -43,6 +43,13 @@ namespace picBunch
         MpiParallelContext();
         void allreduceSum(double* values, std::size_t count) const override;
         void allreduceSum(std::uint64_t& value) const override;
+        void alltoallv(
+            double* send,
+            int const* sendCounts,
+            int const* sendDispls,
+            double* recv,
+            int const* recvCounts,
+            int const* recvDispls) const override;
     };
 
     //! Broadcast every particle array and the per-particle metadata from root.

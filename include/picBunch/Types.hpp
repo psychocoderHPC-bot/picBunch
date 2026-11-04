@@ -107,6 +107,8 @@ namespace picBunch
         double depositMs = 0.0;
         double kernelMs = 0.0;
         double fftMs = 0.0;
+        //! Time inside the distributed FFT's all-to-all transposes (pack, exchange, unpack).
+        double transposeMs = 0.0;
         double readoutMs = 0.0;
         double writerMs = 0.0;
     };
@@ -257,6 +259,17 @@ namespace picBunch
      * the FFT zero padding and the velocity-box count, and the remaining
      * values are constants of the implementation.
      */
+    //! Selects the replicated or the slab-decomposed global FFT.
+    enum class FftMode
+    {
+        //! Replicated on small boxes, distributed when the padded box exceeds the per-rank limit.
+        Auto,
+        //! Always one whole FFT per rank (the historical path).
+        Replicated,
+        //! Always the distributed z-slab/pencil FFT; falls back to replicated with one rank.
+        Distributed
+    };
+
     struct ComputeOptions
     {
         /*! Relative accuracy target of the delivered free-space convolution.
@@ -339,6 +352,14 @@ namespace picBunch
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.
         std::optional<VelocityBinning> fixedBinning;
+        //! FFT decomposition policy.  The replicated path stays the default for small boxes.
+        FftMode fftMode = FftMode::Auto;
+        /*! Padded-node count per rank above which ``Auto`` selects the distributed FFT.
+         *
+         * Defaults to the existing 2^28 padded-node guard, i.e. the replicated
+         * path runs while one rank can still hold the historical work set.
+         */
+        std::size_t distributedFftMinNodes = std::size_t{1u} << 28;
     };
 
     //! openPMD record names and component order: E then B.

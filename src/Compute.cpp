@@ -14,6 +14,7 @@
 #include "picBunch/Deposit.hpp"
 #include "picBunch/Kernel.hpp"
 #include "picBunch/NearShell.hpp"
+#include "picBunch/DistributedFft.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -59,6 +60,9 @@ namespace picBunch
                 double const* pq,
                 std::uint32_t numParticles,
                 double* rho,
+                std::uint32_t rhoStride,
+                std::uint32_t zOffset,
+                std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t nx,
@@ -130,6 +134,9 @@ namespace picBunch
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 double* kernel,
+                std::uint32_t kernelStride,
+                std::uint32_t zOffset,
+                std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t Mz,
@@ -148,11 +155,12 @@ namespace picBunch
                 for(auto const& idx : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
-                        alpaka::IdxRange{Extents3{Mx, My, Mz}}))
+                        alpaka::IdxRange{Extents3{Mx, My, zExtent}}))
                 {
                     auto const i = static_cast<std::uint32_t>(idx[0]);
                     auto const j = static_cast<std::uint32_t>(idx[1]);
-                    auto const k = static_cast<std::uint32_t>(idx[2]);
+                    auto const kLocal = static_cast<std::uint32_t>(idx[2]);
+                    auto const k = kLocal + zOffset;
                     // Centred index of a node on the (zero-padded) FFT box.  ``i <= (M-1)/2``
                     // is the parity-correct split: for even M it is identical to ``i < M/2``
                     // (bins 0..M/2-1 positive, M/2..M-1 negative, Nyquist bin at M/2); for odd
@@ -173,8 +181,10 @@ namespace picBunch
                     auto const flat = static_cast<std::size_t>(i)
                         + static_cast<std::size_t>(Mx)
                             * (static_cast<std::size_t>(j)
-                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
-                    kernel[flat] = value;
+                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(kLocal));
+                    kernel[flat * kernelStride] = value;
+                    if(kernelStride > 1u)
+                        kernel[flat * kernelStride + 1u] = 0.0;
                 }
             }
         };
@@ -672,7 +682,15 @@ namespace picBunch
 
         // Reject an infeasible grid before the first allocation.  Both the
         // per-axis and the padded total are checked; the product is formed in
-        // 64-bit with an explicit overflow guard.
+        // 64-bit with an explicit overflow guard.  The replicated path keeps
+        // the historical 2^28-node cap; a distributed context may exceed it by
+        // up to the aggregate per-rank budget, because the slab decomposition
+        // keeps only M^3/size nodes per rank.
+        bool const canDistribute = options.parallel && options.parallel->distributed()
+            && options.fftMode != FftMode::Replicated;
+        std::uint64_t maxPadded = static_cast<std::uint64_t>(kMaxPaddedNodes);
+        if(canDistribute)
+            maxPadded *= static_cast<std::uint64_t>(options.parallel->size) * 8u;
         std::uint64_t padded = 1u;
         for(int a = 0; a < 3; ++a)
         {
@@ -683,12 +701,12 @@ namespace picBunch
                     + " is infeasible (per-axis limit " + std::to_string(kMaxNodesPerAxis)
                     + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
             std::uint64_t const axisPadded = static_cast<std::uint64_t>(grid.n[a]) * padding;
-            if(axisPadded != 0u && padded > static_cast<std::uint64_t>(kMaxPaddedNodes) / axisPadded)
+            if(axisPadded != 0u && padded > maxPadded / axisPadded)
                 throw std::runtime_error(
                     "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
                     + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
                     + " with padding " + std::to_string(padding)
-                    + " is infeasible (limit " + std::to_string(kMaxPaddedNodes)
+                    + " is infeasible (limit " + std::to_string(maxPadded)
                     + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
             padded *= axisPadded;
         }
@@ -798,8 +816,12 @@ namespace picBunch
 
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
-        auto depositHost = [&](std::vector<std::size_t> const& list) {
-            double* rho = rhoReal.data();
+        auto depositHost = [&](
+                               std::vector<std::size_t> const& list,
+                               double* rho,
+                               std::uint32_t rhoStride,
+                               std::uint32_t zOffset,
+                               std::uint32_t zExtent) {
             double const support = 1.5;
             double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
             double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
@@ -834,14 +856,18 @@ namespace picBunch
                         {
                             if(ic < 0 || ic >= static_cast<long>(grid.n[2]))
                                 continue;
+                            if(ic < static_cast<long>(zOffset)
+                               || ic >= static_cast<long>(zOffset + zExtent))
+                                continue;
                             double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
                             if(wc == 0.0)
                                 continue;
                             auto const idx = static_cast<std::size_t>(ia)
                                 + static_cast<std::size_t>(Mx)
                                     * (static_cast<std::size_t>(ib)
-                                       + static_cast<std::size_t>(My) * static_cast<std::size_t>(ic));
-                            rho[idx] += wc * q;
+                                       + static_cast<std::size_t>(My)
+                                           * static_cast<std::size_t>(ic - zOffset));
+                            rho[idx * rhoStride] += wc * q;
                         }
                     }
                 }
@@ -849,7 +875,12 @@ namespace picBunch
         };
 
         // Device TSC deposit of a particle list into the (already zeroed) rho.
-        auto depositDevice = [&](std::vector<std::size_t> const& list) {
+        auto depositDevice = [&](
+                                 std::vector<std::size_t> const& list,
+                                 double* rho,
+                                 std::uint32_t rhoStride,
+                                 std::uint32_t zOffset,
+                                 std::uint32_t zExtent) {
             auto const numParticles = static_cast<std::uint32_t>(list.size());
             auto posX = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto posY = alpaka::onHost::allocUnified<double>(device, numParticles);
@@ -872,7 +903,10 @@ namespace picBunch
                 posZ.data(),
                 charge.data(),
                 numParticles,
-                rhoReal.data(),
+                rho,
+                rhoStride,
+                zOffset,
+                zExtent,
                 Mx,
                 My,
                 static_cast<std::uint32_t>(grid.n[0]),
@@ -921,15 +955,124 @@ namespace picBunch
 
         // Component/bin parallelism.  Every rank deposits and transforms the
         // same source spectrum, then owns a disjoint subset of the six output
-        // components.  There is no distributed FFT: the transform stays whole
-        // on each rank, and the six component arrays are summed afterwards.
-        // A rank with no owned component still participates in the reduction.
+        // components.  The replicated path keeps the whole transform on each
+        // rank; the distributed path decomposes the padded box by z-slabs and
+        // uses alltoall transposes.  The six component arrays are summed after
+        // the replicated loop; the distributed path reduces each component as
+        // soon as its local z-slab has been read out.
         ParallelContext const* par = options.parallel;
         int const parSize = (par && par->distributed()) ? par->size : 1;
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
-        // One velocity class: deposit, kernel spectrum and convolution,
-        // accumulated into the shared output.  Empty boxes cost nothing.
+        std::uint64_t const paddedNodes
+            = static_cast<std::uint64_t>(Mx) * My * Mz;
+        bool const distributedRequested = options.fftMode == FftMode::Distributed
+            || (options.fftMode == FftMode::Auto
+                && paddedNodes > options.distributedFftMinNodes);
+        bool const useDistributed = distributedRequested && parSize > 1;
+
+        if(useDistributed)
+        {
+            detail::DistributedFft3D dfft{device, queue, Mx, My, Mz, par};
+            std::uint32_t const nz = dfft.zCount();
+            std::uint32_t const zOffset = dfft.zOffset();
+            auto* workReal = reinterpret_cast<double*>(dfft.work());
+            Extents3 const slabExt{Mx, My, nz};
+            Extents3 const slabFrame = Extents3::fill(4u);
+
+            for(std::size_t b = 0; b < binCount; ++b)
+            {
+                if(members[b].empty())
+                    continue;
+                if(members[b].size() > 0xffffffffu)
+                    throw std::runtime_error("computeField: particle count exceeds uint32 range");
+
+                // -------------------------------------------------------- deposit
+                auto const depositStart = Clock::now();
+                dfft.clearWork();
+                if(options.deterministicDeposit)
+                    depositHost(members[b], workReal, 2u, zOffset, nz);
+                else
+                    depositDevice(members[b], workReal, 2u, zOffset, nz);
+                times.depositMs += elapsedMs(depositStart);
+
+                // ------------------------------------------- rho forward transform
+                dfft.forwardWorkToSpectrum();
+
+                std::array<double, 3> const uRep{
+                    binning.representativeU[b][0],
+                    binning.representativeU[b][1],
+                    binning.representativeU[b][2]};
+
+                for(int c = 0; c < 6; ++c)
+                {
+                    // -------------------------------------------------------- kernel
+                    auto const kernelStart = Clock::now();
+                    queue.enqueue(
+                        alpaka::onHost::FrameSpec{
+                            ceilDivVec(slabExt, slabFrame),
+                            slabFrame},
+                        KernelBuildKernel{},
+                        workReal,
+                        2u,
+                        zOffset,
+                        nz,
+                        Mx,
+                        My,
+                        Mz,
+                        c,
+                        kYeeOffset[c][0],
+                        kYeeOffset[c][1],
+                        kYeeOffset[c][2],
+                        cell[0],
+                        cell[1],
+                        cell[2],
+                        kRefinement,
+                        uRep[0],
+                        uRep[1],
+                        uRep[2]);
+                    alpaka::onHost::wait(queue);
+                    times.kernelMs += elapsedMs(kernelStart);
+
+                    // ------------------------------- kernel forward + product + inverse
+                    dfft.forwardWorkToKernelSpectrum();
+                    dfft.multiply();
+                    dfft.inverseToWork();
+
+                    // ---------------------------------------------------------- read-out
+                    auto const readoutStart = Clock::now();
+                    double const factor = scale * (c < 3 ? eFactor : bFactor);
+                    for(std::uint32_t kl = 0; kl < nz; ++kl)
+                    {
+                        std::uint32_t const k = zOffset + kl;
+                        if(k >= static_cast<std::uint32_t>(grid.n[2]))
+                            break;
+                        for(std::uint32_t j = 0; j < static_cast<std::uint32_t>(grid.n[1]); ++j)
+                            for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
+                            {
+                                auto const in = static_cast<std::size_t>(i)
+                                    + static_cast<std::size_t>(Mx)
+                                        * (static_cast<std::size_t>(j)
+                                           + static_cast<std::size_t>(My) * kl);
+                                auto const out = static_cast<std::size_t>(i)
+                                    + static_cast<std::size_t>(grid.n[0])
+                                        * (static_cast<std::size_t>(j)
+                                           + static_cast<std::size_t>(grid.n[1]) * k);
+                                // Accumulate: the field of the mixed bunch is the
+                                // sum over the velocity classes.
+                                field.data[c][out] += dfft.work()[in].real() * factor;
+                            }
+                    }
+                    times.readoutMs += elapsedMs(readoutStart);
+                    par->allreduceSum(field.data[c].data(), field.data[c].size());
+                }
+            }
+            times.fftMs += dfft.fftMilliseconds();
+            times.transposeMs += dfft.transposeMilliseconds();
+            return field;
+        }
+
+        // Replicated path: one whole FFT per rank, component-parallel across ranks.
         for(std::size_t b = 0; b < binCount; ++b)
         {
             if(members[b].empty())
@@ -945,12 +1088,12 @@ namespace picBunch
                 // The memset is queued on the device; finish it before the host
                 // touches the same unified buffer.
                 alpaka::onHost::wait(queue);
-                depositHost(members[b]);
+                depositHost(members[b], rhoReal.data(), 1u, 0u, Mz);
             }
             else
             {
                 alpaka::onHost::wait(queue);
-                depositDevice(members[b]);
+                depositDevice(members[b], rhoReal.data(), 1u, 0u, Mz);
             }
             times.depositMs += elapsedMs(depositStart);
 
@@ -977,6 +1120,9 @@ namespace picBunch
                         Extents3::fill(4u)},
                     KernelBuildKernel{},
                     kernelReal.data(),
+                    1u,
+                    0u,
+                    Mz,
                     Mx,
                     My,
                     Mz,

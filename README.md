@@ -277,18 +277,65 @@ for every rank count.
 The bunch is replicated, not redistributed: the near shell and the mesh both need every
 source on every rank. Two stages are rank-parallel.
 
-* **Mesh by component.** Every rank deposits the same sources and transforms the same
-  `rho` spectrum. The six staggered convolutions are divided across ranks; a rank evaluates
-  only the components `c` with `c % size == rank`, then one `MPI_Allreduce` sums the six
-  arrays. This is component parallelism, not a domain-decomposed FFT. A per-rank FFT on a
-  subdomain would lose long-range contributions. Deposit and the `rho` transform are
-  replicated and form the Amdahl serial fraction.
+* **Mesh by component (replicated FFT, the default).** Every rank deposits the same sources
+  and transforms the same `rho` spectrum on the whole padded box. The six staggered
+  convolutions are divided across ranks; a rank evaluates only the components `c` with
+  `c % size == rank`, then one `MPI_Allreduce` sums the six arrays. This is component
+  parallelism. It is a global transform on every rank, not a per-rank transform of a
+  truncated subdomain.
+* **Distributed FFT (optional).** `--fft-mode distributed`, or `auto` when the padded box
+  exceeds the per-rank limit, decomposes the padded grid into contiguous z-slabs. Each rank
+  performs the local x and y 1-D transforms, transposes with `MPI_Alltoallv` so that z
+  becomes local, transforms z, multiplies the kernel spectrum, and inverts in reverse
+  order. This is the exact global transform, with one copy of each work array per rank.
+  The replicated path remains the default for boxes that fit.
 * **Near shell by output tile.** The tile loop is partitioned by linear tile index. Each
   rank builds the near-source list and the local subtraction FFT for its own tiles, writes
   the correction only there, and one all-reduce sums the corrections.
 
+The two FFT paths must not be confused with a third, invalid one. A rank that transforms
+only its own subdomain without communication computes a cyclic convolution on the truncated
+local box and loses long-range contributions. That is wrong. A distributed FFT with global
+transposes computes the same transform as one process and is exact; it is the standard way
+to make large boxes fit in aggregate memory. The code currently does the replicated global
+transform by default and the transposed z-slab transform when selected.
+
 Without MPI both paths run serially, and the results are unchanged. `--deterministic-deposit`
 is still required for bitwise repeatability of the deposit itself.
+
+#### Distributed FFT measurements (v0.8.0)
+
+Measured on `jureca-h100` (one H100 PCIe per rank, CUDA 13.4). The distributed path was
+forced with `--fft-mode distributed`; all other settings were identical to the replicated
+run.
+
+Agreement with the replicated path on a 128-particle, `32^3` box (`64^3` padded): worst
+per-component relative difference `2.2e-16` (E; B is zero for this stationary bunch) at
+2 and 4 ranks. A moving one-particle case with all six components present gives
+`8.5e-17` relative. The generic distributed 3-D transform matches a replicated c2c plan to
+`1.6e-16`. These are FFT roundoff, not a physics difference.
+
+Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer):
+
+| ranks | distributed FFT (ms) | transpose (ms) | transpose fraction |
+| --- | --- | --- | --- |
+| 2 | 1169 | 7269 | 86.1% of FFT+transpose, 78.9% of the reported total |
+| 4 | 613 | 5311 | 89.6% of FFT+transpose, 84.2% of the reported total |
+
+Memory, `640^3` output (`1280^3` padded), one particle:
+
+| ranks | path | peak host RSS/rank | peak device/rank |
+| --- | --- | --- | --- |
+| 1 | replicated | rejected by the 2^28 padded-node guard (modeled ~80 GB) | - |
+| 2 | distributed | 45.26 GB | 81.1 GB (unified, at the device limit) |
+| 4 | distributed | 28.83 GB | 65.3 GB |
+
+The distributed work arrays themselves scale as 3 complex arrays per rank, `50.3 GB` at
+2 ranks and `25.2 GB` at 4 ranks for this box. The measured totals fall less sharply
+because the six output components are still replicated (`12.6 GB` here) and unified
+allocations plus plan workspace add overhead. The transposes cost real time even when the
+box fits in memory. They move the whole padded array twice per convolution and dominate the
+distributed run at these sizes; memory is the reason to use the distributed path, not speed.
 
 #### Measured rank scaling (v0.6.0)
 
@@ -371,11 +418,12 @@ PIConGPU restart on a domain larger than the written one must still treat the wr
 as a finite-domain field. The bound above applies inside the written domain; it says nothing
 about the field outside the file extent.
 
-**Physics constraint:** the FFT is not domain-decomposed. A per-rank FFT on a subdomain would
-lose long-range contributions. The convolution covers the bunch box globally; ranks divide
-the six components (and the near-shell output tiles), and the write is decomposed by z-slab.
-This is exact only while the bunch box contains the sources that matter, which is the
-existing free-space truncation limitation.
+**Physics constraint:** every FFT path must transform the whole padded bunch box. A per-rank
+FFT on a truncated subdomain, with no communication, would lose long-range contributions and
+is not used. The default path replicates the whole box; the optional distributed path
+decomposes it by z-slabs and restores the global transform with all-to-all transposes. Both
+compute the same global convolution. The convolution is exact only while the padded box
+contains the sources that matter, which is the existing free-space truncation limitation.
 
 MPI is optional: configure with `-DPICBUNCH_ENABLE_MPI=ON`. openPMD must be built with MPI
 for one collectively written series. If it is not, each rank writes its own
@@ -773,8 +821,9 @@ table above covers the compute stages of the large-N sweep, not the write path.
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.
 - **Rank-parallel compute is single-node.** MPI divides the six mesh components, the
-  near-shell output tiles and the global write. The bunch is replicated on every rank;
-  there is no domain-decomposed FFT and no multi-node redistribution. Tested with 1, 2 and
+  near-shell output tiles and the global write. The bunch is replicated on every rank. The
+  distributed FFT removes the replicated padded box, but the output field is still returned
+  in full on every rank and there is no multi-node redistribution. Tested with 1, 2 and
   4 ranks on one node only. Without `--deterministic-deposit`, the GPU deposit is not
   bitwise reproducible.
 

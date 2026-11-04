@@ -26,6 +26,22 @@ namespace picBunch
         //! In-place sum over all ranks of one unsigned 64-bit value.
         virtual void allreduceSum(std::uint64_t& /*value*/) const {}
 
+        /*! All-to-all exchange of double values with per-rank counts and displacements.
+         *
+         * Counts and displacements are in doubles, not bytes.  The distributed
+         * FFT uses this for its slab/pencil transposes.  A single-rank context
+         * copies the local block so callers need no special case.
+         */
+        virtual void alltoallv(
+            double* /*send*/,
+            int const* /*sendCounts*/,
+            int const* /*sendDispls*/,
+            double* /*recv*/,
+            int const* /*recvCounts*/,
+            int const* /*recvDispls*/) const
+        {
+        }
+
         [[nodiscard]] bool distributed() const
         {
             return size > 1;
