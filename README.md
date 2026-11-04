@@ -109,7 +109,9 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--output <openPMD file>] [--input-iteration N] \
          [--output-iteration N] [--tolerance 1e-3] \
          [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
-         [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu]
+         [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
+         [--near-shell none|exact] [--near-shell-radius <cells>] \
+         [--near-shell-tile <nodes>]
 ```
 
 Example with mesh metadata in the input:
@@ -139,6 +141,18 @@ default output grid, its `gridSpacing` the node spacing and its `gridGlobalOffse
 the grid is the particle bounding box plus the margin and `--cell-size` is required. A particle
 outside the resulting grid is an error that names the count and the bounds; it is never dropped
 silently.
+
+The default `--near-shell none` keeps the plain padded-FFT mesh, whose
+near-source field is only mesh-accurate. `--near-shell exact` replaces the mesh
+contribution of every source within the shell by the exact TSC-convolved field
+of that source (the vendored FP64 reference quadrature), assembling
+`F_mesh(all) - F_mesh(near) + F_exact(near)` with a per-tile local zero-padded
+FFT for the subtraction. The mode is opt-in because the exact evaluator costs
+quadrature time per (source, node, component). `--near-shell-radius` is in PIC
+cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
+that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
+the effective radius exceeds the nominal one by at most half a tile. See
+`docs/algorithm.md` for the measured radius/cost envelope.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2

@@ -13,6 +13,7 @@
 
 #include "picBunch/Deposit.hpp"
 #include "picBunch/Kernel.hpp"
+#include "picBunch/NearShell.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -514,6 +515,9 @@ namespace picBunch
 
     Field computeField(Bunch const& bunch, ComputeOptions const& options, StageTimes* stageTimes)
     {
+        if(options.nearShell.mode == NearShellOptions::Mode::Exact)
+            return computeFieldNearExact(bunch, options, options.nearShell, stageTimes);
+
         // v0.1 is one velocity class: the kernel is exact for a single shared u.
         if(bunch.size() > 1)
         {

@@ -7,6 +7,7 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Mpi.hpp"
+#include "picBunch/NearShell.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
@@ -75,6 +76,13 @@ namespace
             "                        slower, diagnostic only)\n"
             "  --tolerance <value>   relative accuracy target of the free-space\n"
             "                        convolution (default: 1e-3; floor 1e-14)\n"
+            "  --near-shell <mode>   none|exact (default: none).  exact replaces the\n"
+            "                        mesh contribution of every source within the shell\n"
+            "                        by the exact TSC-convolved field; expensive.\n"
+            "  --near-shell-radius <cells>  shell radius in PIC cells (default: derived\n"
+            "                        from --tolerance: 3 at 1e-3, +1 per decade, max 6)\n"
+            "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
+            "                        (default: 4)\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -90,6 +98,9 @@ namespace
         std::optional<std::uint64_t> inputIteration;
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
+        std::string nearShell = "none";
+        double nearShellRadius = 0.0;
+        std::size_t nearShellTile = 4;
         bool deterministicDeposit = false;
         std::string backend = "auto";
         std::optional<std::array<double, 3>> cellSize;
@@ -295,6 +306,12 @@ namespace
         if(args.backend != "auto" && args.backend != compiledBackend())
             throw std::invalid_argument(
                 "--backend " + args.backend + " is not available; this build uses " + compiledBackend());
+        if(args.nearShell != "none" && args.nearShell != "exact")
+            throw std::invalid_argument("--near-shell must be 'none' or 'exact'");
+        if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
+            throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
+        if(args.nearShellTile == 0u)
+            throw std::invalid_argument("--near-shell-tile must be positive");
         if(args.restartFormat != "standard" && args.restartFormat != "picongpu")
             throw std::invalid_argument("--restart-format must be 'standard' or 'picongpu'");
         if(args.restartFormat == "picongpu" && args.output)
@@ -405,6 +422,11 @@ int main(int argc, char** argv)
         picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
         options.deterministicDeposit = args.deterministicDeposit;
+        options.nearShell.mode = (args.nearShell == "exact")
+            ? picBunch::NearShellOptions::Mode::Exact
+            : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.radiusCells = args.nearShellRadius;
+        options.nearShell.tileNodes = args.nearShellTile;
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
@@ -515,7 +537,19 @@ int main(int argc, char** argv)
         }
 
         // --------------------------------------------------------------- compute
-        field = picBunch::computeField(bunchData.bunch, options, &times);
+        if(options.nearShell.mode == picBunch::NearShellOptions::Mode::Exact)
+        {
+            std::size_t exactPairs = 0;
+            options.nearShell.exactPairs = &exactPairs;
+            std::printf(
+                "near shell: exact, R=%.3g PIC cells, tile=%zu nodes\n",
+                picBunch::resolveNearShellRadius(options, options.nearShell),
+                options.nearShell.tileNodes);
+            field = picBunch::computeField(bunchData.bunch, options, &times);
+            std::printf("near shell: %zu exact (source,node,component) evaluations\n", exactPairs);
+        }
+        else
+            field = picBunch::computeField(bunchData.bunch, options, &times);
         printGrid(field.grid);
 
         double maxE = 0.0;

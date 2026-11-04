@@ -206,6 +206,7 @@ endif()
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
     src/Compute.cpp
+    src/NearShell.cpp
 )
 
 if(PICBUNCH_ENABLE_CUDA)
@@ -222,6 +223,10 @@ target_include_directories(
     picBunch
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(picBunch PUBLIC OpenMP::OpenMP_CXX)
+endif()
 target_link_libraries(picBunch PUBLIC alpaka::alpaka alpakaVendor::alpakaVendor)
 if(PICBUNCH_ENABLE_CUDA)
     target_compile_definitions(picBunch PUBLIC PICBUNCH_BACKEND_CUDA=1)
@@ -277,3 +282,7 @@ endif()
 # targets are fetched into the build tree and are not exported in this skeleton.
 install(TARGETS picBunch picBunchOpenPMD picBunchApp)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Measurement driver for the exact near shell (host-only, no openPMD).
+add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
+target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)

@@ -93,6 +93,24 @@ namespace picBunch
         double writerMs = 0.0;
     };
 
+    /** Explicit near-shell mode.  See NearShell.hpp for the split and the cost. */
+    struct NearShellOptions
+    {
+        enum class Mode
+        {
+            None,
+            Exact
+        };
+
+        Mode mode = Mode::None;
+        //! Shell radius in PIC cells; 0 derives it from ComputeOptions::tolerance.
+        double radiusCells = 0.0;
+        //! Output tile edge in nodes for the local subtraction FFT.
+        std::size_t tileNodes = 4;
+        //! Diagnostic counter: number of exact (source, node, component) evaluations.
+        std::size_t* exactPairs = nullptr;
+    };
+
     /** User-facing knobs of the field computation.
      *
      * The user sets an accuracy target, the physical cell size, and the empty
@@ -161,6 +179,8 @@ namespace picBunch
          * comparison be a bitwise comparison.
          */
         bool deterministicDeposit = false;
+        //! Opt-in exact near shell.  The default stays the plain mesh.
+        NearShellOptions nearShell;
     };
 
     //! openPMD record names and component order: E then B.
