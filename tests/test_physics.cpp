@@ -205,3 +205,101 @@ TEST(Physics, MultiParticleAgainstIndependentReference)
     }
     EXPECT_EQ(rows, 3u);
 }
+
+// ---------------------------------------------------------------------------
+// Absolute-magnitude guards (task W3n).
+//
+// These compare the shipped field against the analytic Coulomb field in SI
+// (V/m) at a Yee-staggered observer node.  The reference is absolute and
+// convention-free: k*q*R/r^3.  No cell-volume convention is assumed, so a
+// regression that (wrongly) multiplies the read-out scale by the physical node
+// volume -- cellx*celly*cellz -- fails here by the full volume factor (e.g.
+// 1e-21 for 1e-7 m cells, 4 for 1,1,4 m cells).  The deviation that does
+// remain is TSC deposit discretisation, which shrinks with distance; that is
+// why the anisotropic case is asserted at a far node.
+namespace
+{
+    std::array<double, 6> coulombField(
+        std::array<double, 3> const& obs,
+        std::array<double, 3> const& src,
+        double q)
+    {
+        std::array<double, 6> out{};
+        double Rx = obs[0] - src[0];
+        double Ry = obs[1] - src[1];
+        double Rz = obs[2] - src[2];
+        double const r3 = (Rx * Rx + Ry * Ry + Rz * Rz) * std::sqrt(Rx * Rx + Ry * Ry + Rz * Rz);
+        if(r3 <= 0.0)
+            return out;
+        double const f = picBunch::kCoulombConstant * q / r3;
+        out[0] = f * Rx;
+        out[1] = f * Ry;
+        out[2] = f * Rz;
+        return out;
+    }
+
+    //! One stationary electron on an explicit even grid; max |field-analytic|/|analytic|
+    //! over the six components at the on-axis observer node (obsX, charge, charge).
+    double maxCoulombRelError(
+        std::array<double, 3> const& cell,
+        std::size_t N,
+        std::size_t charge,
+        std::size_t obsX)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x[0] = static_cast<double>(charge) * cell[0];
+        bunch.y[0] = static_cast<double>(charge) * cell[1];
+        bunch.z[0] = static_cast<double>(charge) * cell[2];
+        bunch.ux[0] = 0.0;
+        bunch.uy[0] = 0.0;
+        bunch.uz[0] = 0.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = -picBunch::kElementaryCharge;
+
+        picBunch::ComputeOptions options;
+        options.tolerance = 1e-12;
+        options.cellSize = cell;
+        options.gridSize = {N, N, N};
+        options.gridOrigin = {0.0, 0.0, 0.0};
+
+        picBunch::Field const field = picBunch::computeField(bunch, options);
+        std::array<double, 3> const src{bunch.x[0], bunch.y[0], bunch.z[0]};
+        std::size_t const flat = obsX + field.grid.n[0] * (charge + field.grid.n[1] * charge);
+        double maxRel = 0.0;
+        for(int c = 0; c < 6; ++c)
+        {
+            std::array<double, 3> obs{};
+            for(int a = 0; a < 3; ++a)
+            {
+                std::size_t const node = (a == 0) ? obsX : charge;
+                obs[a] = (static_cast<double>(node) + picBunch::kYeeOffset[c][a]) * cell[a];
+            }
+            std::array<double, 6> const ref = coulombField(obs, src, bunch.charge[0]);
+            double const actual = field.data[c][flat];
+            if(std::abs(ref[c]) > 0.0)
+                maxRel = std::max(maxRel, std::abs(actual - ref[c]) / std::abs(ref[c]));
+        }
+        return maxRel;
+    }
+} // namespace
+
+// 1e-7 m isotropic cells: the shipped field must be the physical Coulomb field in
+// V/m, not 1e-21 of it.  Measured 7.8e-5 at 12 cells on both the CUDA (V100) and
+// CPU (FFTW) backends.
+TEST(Physics, AbsoluteMagnitudeIsotropic100nmCells)
+{
+    double const rel = maxCoulombRelError({1e-7, 1e-7, 1e-7}, /*N*/ 48, /*charge*/ 16, /*obsX*/ 28);
+    EXPECT_LT(rel, 1.0e-3) << "1e-7 m isotropic cells disagree with the absolute Coulomb field by "
+                           << rel << "; a missing node-volume factor would give ~1";
+}
+
+// 1,1,4 m anisotropic cells at a far node: the remaining deviation is TSC
+// deposit discretisation (measured 1.03e-2 at 40 cells), not a uniform 4x
+// (1/0.25) volume factor, which would give ~3.
+TEST(Physics, AbsoluteMagnitudeAnisotropic114Cells)
+{
+    double const rel = maxCoulombRelError({1.0, 1.0, 4.0}, /*N*/ 64, /*charge*/ 16, /*obsX*/ 56);
+    EXPECT_LT(rel, 2.0e-2) << "1,1,4 m anisotropic cells disagree with the absolute Coulomb field by "
+                           << rel << "; a node-volume factor of 4 would give ~3";
+}
