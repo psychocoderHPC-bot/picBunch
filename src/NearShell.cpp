@@ -16,6 +16,9 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/detail/FastNear.hpp"
+#if defined(PICBUNCH_BACKEND_CUDA)
+#    include "picBunch/detail/FastNearDevice.hpp"
+#endif
 #include "picBunch/detail/NearReference.hpp"
 
 #include <algorithm>
@@ -132,7 +135,55 @@ namespace picBunch
         std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
         pbfast::Settings const fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
-        bool const useFast = nearShell.mode == NearShellOptions::Mode::Fast;
+        bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
+        bool useFastGpu = false;
+#if defined(PICBUNCH_BACKEND_CUDA)
+        useFastGpu = nearShell.mode == NearShellOptions::Mode::FastGpu;
+        if(useFastGpu && !pbfast::fastNearDeviceAvailable())
+        {
+            std::fprintf(
+                stderr,
+                "near shell: fast-gpu requested but no CUDA device is available; "
+                "falling back to the host fast evaluator\n");
+            useFastGpu = false;
+            useFast = true;
+        }
+#else
+        if(nearShell.mode == NearShellOptions::Mode::FastGpu)
+        {
+            std::fprintf(
+                stderr,
+                "near shell: fast-gpu is not compiled in; "
+                "falling back to the host fast evaluator\n");
+            useFast = true;
+        }
+#endif
+#if defined(PICBUNCH_BACKEND_CUDA)
+        pbfast::DeviceParams deviceParams;
+        deviceParams.order = fastSettings.order;
+        deviceParams.obliqueOrder = fastSettings.obliqueOrder;
+        {
+            auto const& xi = pbfast::detail::rule(fastSettings.order).x;
+            auto const& wi = pbfast::detail::rule(fastSettings.order).w;
+            for(int i = 0; i < fastSettings.order; ++i)
+            {
+                deviceParams.xi[i] = xi[static_cast<std::size_t>(i)];
+                deviceParams.wi[i] = wi[static_cast<std::size_t>(i)];
+            }
+            auto const& oxi = pbfast::detail::rule(fastSettings.obliqueOrder).x;
+            auto const& owi = pbfast::detail::rule(fastSettings.obliqueOrder).w;
+            for(int i = 0; i < fastSettings.obliqueOrder; ++i)
+            {
+                deviceParams.oxi[i] = oxi[static_cast<std::size_t>(i)];
+                deviceParams.owi[i] = owi[static_cast<std::size_t>(i)];
+            }
+            for(int c = 0; c < 6; ++c)
+                for(int a = 0; a < 3; ++a)
+                    deviceParams.delta[c][a] = kYeeOffset[c][a];
+            deviceParams.unitE = kCoulombConstant;
+            deviceParams.unitB = kCoulombConstant / kSpeedOfLight;
+        }
+#endif
 
         auto const n = grid.n;
         auto const& origin = grid.origin;
@@ -246,67 +297,112 @@ namespace picBunch
                     std::size_t const nLocalY = local.grid.n[1];
                     std::size_t const nLocalZ = local.grid.n[2];
                     (void)nLocalZ;
-                    for(int c = 0; c < 6; ++c)
+                    if(useFastGpu)
                     {
-                        double const unit = (c < 3) ? kCoulombConstant
-                                                    : kCoulombConstant / kSpeedOfLight;
+#if defined(PICBUNCH_BACKEND_CUDA)
+                        std::vector<double> const dev = pbfast::evalFastNearDevice(
+                            near,
+                            nx,
+                            ny,
+                            nz,
+                            origin[0] + static_cast<double>(i0) * spacing[0],
+                            origin[1] + static_cast<double>(j0) * spacing[1],
+                            origin[2] + static_cast<double>(k0) * spacing[2],
+                            spacing[0],
+                            spacing[1],
+                            spacing[2],
+                            cells[0],
+                            cells[1],
+                            cells[2],
+                            deviceParams);
+                        for(int c = 0; c < 6; ++c)
+                        {
 #pragma omp parallel for collapse(3)
-                        for(std::size_t kk = 0; kk < nz; ++kk)
-                            for(std::size_t jj = 0; jj < ny; ++jj)
-                                for(std::size_t ii = 0; ii < nx; ++ii)
-                                {
-                                    std::size_t const i = i0 + ii;
-                                    std::size_t const j = j0 + jj;
-                                    std::size_t const k = k0 + kk;
-                                    std::size_t const gidx = i
-                                        + n[0] * (j + n[1] * k);
-                                    std::size_t const li = i - static_cast<std::size_t>(localLo[0]);
-                                    std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
-                                    std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
-                                    std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
-                                    double value = -local.data[c][lidx];
-
-                                    double const x_obs = origin[0] + static_cast<double>(i) * spacing[0]
-                                        + kYeeOffset[c][0] * cells[0];
-                                    double const y_obs = origin[1] + static_cast<double>(j) * spacing[1]
-                                        + kYeeOffset[c][1] * cells[1];
-                                    double const z_obs = origin[2] + static_cast<double>(k) * spacing[2]
-                                        + kYeeOffset[c][2] * cells[2];
-                                    for(std::size_t q = 0; q < near.size(); ++q)
+                            for(std::size_t kk = 0; kk < nz; ++kk)
+                                for(std::size_t jj = 0; jj < ny; ++jj)
+                                    for(std::size_t ii = 0; ii < nx; ++ii)
                                     {
-                                        nbref::Vec3 E, B;
-                                        if(useFast)
-                                        {
-                                            pbfast::shape_field(
-                                                {x_obs, y_obs, z_obs},
-                                                {near.x[q], near.y[q], near.z[q]},
-                                                {near.ux[q], near.uy[q], near.uz[q]},
-                                                cells[0],
-                                                cells[1],
-                                                cells[2],
-                                                fastSettings,
-                                                E,
-                                                B);
-                                        }
-                                        else
-                                        {
-                                            nbref::shape_field(
-                                                {x_obs, y_obs, z_obs},
-                                                {near.x[q], near.y[q], near.z[q]},
-                                                {near.ux[q], near.uy[q], near.uz[q]},
-                                                cells[0],
-                                                cells[1],
-                                                cells[2],
-                                                settings,
-                                                E,
-                                                B);
-                                        }
-                                        double const component = (c < 3) ? E[c] : B[c - 3];
-                                        value += unit * (near.weight[q] * near.charge[q]) * component;
+                                        std::size_t const i = i0 + ii;
+                                        std::size_t const j = j0 + jj;
+                                        std::size_t const k = k0 + kk;
+                                        std::size_t const gidx = i + n[0] * (j + n[1] * k);
+                                        std::size_t const li = i - static_cast<std::size_t>(localLo[0]);
+                                        std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
+                                        std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
+                                        std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
+                                        std::size_t const didx = ii + nx * (jj + ny * kk);
+                                        correction.data[c][gidx]
+                                            = -local.data[c][lidx]
+                                            + dev[static_cast<std::size_t>(c) * nx * ny * nz + didx];
                                     }
-                                    correction.data[c][gidx] = value;
-                                }
-                        pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
+                        }
+#endif
+                        pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
+                    }
+                    else
+                    {
+                        for(int c = 0; c < 6; ++c)
+                        {
+                            double const unit = (c < 3) ? kCoulombConstant
+                                                        : kCoulombConstant / kSpeedOfLight;
+#pragma omp parallel for collapse(3)
+                            for(std::size_t kk = 0; kk < nz; ++kk)
+                                for(std::size_t jj = 0; jj < ny; ++jj)
+                                    for(std::size_t ii = 0; ii < nx; ++ii)
+                                    {
+                                        std::size_t const i = i0 + ii;
+                                        std::size_t const j = j0 + jj;
+                                        std::size_t const k = k0 + kk;
+                                        std::size_t const gidx = i
+                                            + n[0] * (j + n[1] * k);
+                                        std::size_t const li = i - static_cast<std::size_t>(localLo[0]);
+                                        std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
+                                        std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
+                                        std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
+                                        double value = -local.data[c][lidx];
+
+                                        double const x_obs = origin[0] + static_cast<double>(i) * spacing[0]
+                                            + kYeeOffset[c][0] * cells[0];
+                                        double const y_obs = origin[1] + static_cast<double>(j) * spacing[1]
+                                            + kYeeOffset[c][1] * cells[1];
+                                        double const z_obs = origin[2] + static_cast<double>(k) * spacing[2]
+                                            + kYeeOffset[c][2] * cells[2];
+                                        for(std::size_t q = 0; q < near.size(); ++q)
+                                        {
+                                            nbref::Vec3 E, B;
+                                            if(useFast)
+                                            {
+                                                pbfast::shape_field(
+                                                    {x_obs, y_obs, z_obs},
+                                                    {near.x[q], near.y[q], near.z[q]},
+                                                    {near.ux[q], near.uy[q], near.uz[q]},
+                                                    cells[0],
+                                                    cells[1],
+                                                    cells[2],
+                                                    fastSettings,
+                                                    E,
+                                                    B);
+                                            }
+                                            else
+                                            {
+                                                nbref::shape_field(
+                                                    {x_obs, y_obs, z_obs},
+                                                    {near.x[q], near.y[q], near.z[q]},
+                                                    {near.ux[q], near.uy[q], near.uz[q]},
+                                                    cells[0],
+                                                    cells[1],
+                                                    cells[2],
+                                                    settings,
+                                                    E,
+                                                    B);
+                                            }
+                                            double const component = (c < 3) ? E[c] : B[c - 3];
+                                            value += unit * (near.weight[q] * near.charge[q]) * component;
+                                        }
+                                        correction.data[c][gidx] = value;
+                                    }
+                            pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
+                        }
                     }
                 }
             }
