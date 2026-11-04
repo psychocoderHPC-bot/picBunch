@@ -117,7 +117,8 @@ namespace picBunch
         enum class Mode
         {
             None,
-            Exact
+            Exact,
+            Fast
         };
 
         Mode mode = Mode::None;
@@ -125,6 +126,10 @@ namespace picBunch
         double radiusCells = 0.0;
         //! Output tile edge in nodes for the local subtraction FFT.
         std::size_t tileNodes = 4;
+        //! Gauss order per panel of the fast remainder (default 5).
+        int fastOrder = 5;
+        //! Rest-frame octant order of the fast oblique singular box (default 8).
+        int fastObliqueOrder = 8;
         //! Diagnostic counter: number of exact (source, node, component) evaluations.
         std::size_t* exactPairs = nullptr;
     };

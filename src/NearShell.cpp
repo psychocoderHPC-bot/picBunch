@@ -15,6 +15,7 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/NearReference.hpp"
 
 #include <algorithm>
@@ -116,6 +117,8 @@ namespace picBunch
         std::uint64_t pairs = 0;
         std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
+        pbfast::Settings const fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        bool const useFast = nearShell.mode == NearShellOptions::Mode::Fast;
 
         auto const n = grid.n;
         auto const& origin = grid.origin;
@@ -258,16 +261,32 @@ namespace picBunch
                                     for(std::size_t q = 0; q < near.size(); ++q)
                                     {
                                         nbref::Vec3 E, B;
-                                        nbref::shape_field(
-                                            {x_obs, y_obs, z_obs},
-                                            {near.x[q], near.y[q], near.z[q]},
-                                            {near.ux[q], near.uy[q], near.uz[q]},
-                                            cells[0],
-                                            cells[1],
-                                            cells[2],
-                                            settings,
-                                            E,
-                                            B);
+                                        if(useFast)
+                                        {
+                                            pbfast::shape_field(
+                                                {x_obs, y_obs, z_obs},
+                                                {near.x[q], near.y[q], near.z[q]},
+                                                {near.ux[q], near.uy[q], near.uz[q]},
+                                                cells[0],
+                                                cells[1],
+                                                cells[2],
+                                                fastSettings,
+                                                E,
+                                                B);
+                                        }
+                                        else
+                                        {
+                                            nbref::shape_field(
+                                                {x_obs, y_obs, z_obs},
+                                                {near.x[q], near.y[q], near.z[q]},
+                                                {near.ux[q], near.uy[q], near.uz[q]},
+                                                cells[0],
+                                                cells[1],
+                                                cells[2],
+                                                settings,
+                                                E,
+                                                B);
+                                        }
                                         double const component = (c < 3) ? E[c] : B[c - 3];
                                         value += unit * (near.weight[q] * near.charge[q]) * component;
                                     }

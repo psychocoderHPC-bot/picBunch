@@ -209,6 +209,13 @@ namespace picBunch
                 fail("accuracy.near_shell_tile", "must be positive");
             config.accuracy.nearShellTile = static_cast<std::size_t>(tile);
         }
+        if(auto const* node = accuracy.get("near_shell_fast_order"))
+        {
+            auto const order = asInteger(*node, "accuracy.near_shell_fast_order");
+            if(order < 2 || order > 32)
+                fail("accuracy.near_shell_fast_order", "must be between 2 and 32");
+            config.accuracy.nearShellFastOrder = static_cast<int>(order);
+        }
 
         // Validation.
         auto positive = [](double value, std::string const& key) {
@@ -239,8 +246,9 @@ namespace picBunch
                 if(config.placement.offset[a] < 0.0 || config.placement.offset[a] > 1.0)
                     fail("placement.offset", "fractional offsets must be in [0, 1]");
         positive(config.accuracy.tolerance, "accuracy.tolerance");
-        if(config.accuracy.nearShell != "none" && config.accuracy.nearShell != "exact")
-            fail("accuracy.near_shell", "expected \"none\" or \"exact\"");
+        if(config.accuracy.nearShell != "none" && config.accuracy.nearShell != "exact"
+           && config.accuracy.nearShell != "fast")
+            fail("accuracy.near_shell", "expected \"none\", \"exact\" or \"fast\"");
         if(config.accuracy.nearShellRadius < 0.0 || !std::isfinite(config.accuracy.nearShellRadius))
             fail("accuracy.near_shell_radius", "must be finite and non-negative");
         if(config.accuracy.nearShellTile == 0u)

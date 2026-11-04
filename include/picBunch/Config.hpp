@@ -68,6 +68,7 @@ namespace picBunch
             std::string nearShell = "none";
             double nearShellRadius = 0.0; //!< PIC cells; 0 derives from tolerance
             std::size_t nearShellTile = 4;
+            int nearShellFastOrder = 5; //!< Gauss order of the fast remainder
         } accuracy;
 
         //! Reject unknown keys instead of warning about them.
