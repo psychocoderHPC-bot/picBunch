@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/Parallel.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +85,19 @@ namespace picBunch
     {
         Grid grid;
         std::array<std::vector<double>, 6> data;
+    };
+
+    /*! One particle patch region of a generated species.
+     *
+     * ``offset`` is the lower cell index relative to the PIConGPU domain
+     * origin and ``extent`` the number of cells covered.  Regions may overlap
+     * by one cell; particle ownership is disjoint and is carried separately by
+     * the cumulative ``numParticlesOffset`` written next to these arrays.
+     */
+    struct ParticlePatch
+    {
+        std::array<std::int64_t, 3> offset{0, 0, 0};
+        std::array<std::uint64_t, 3> extent{1, 1, 1};
     };
 
     //! Wall-clock time per pipeline stage, milliseconds.
@@ -188,6 +203,12 @@ namespace picBunch
          * comparison be a bitwise comparison.
          */
         bool deterministicDeposit = false;
+        /*! Host-side rank context for the component-parallel mesh and the
+         * tile-parallel near shell.  Null means a single rank.  The mesh keeps
+         * one full FFT per rank (no domain-decomposed FFT); ranks own disjoint
+         * field components and the six arrays are summed after the loop.
+         */
+        ParallelContext const* parallel = nullptr;
         //! Opt-in exact near shell.  The default stays the plain mesh.
         NearShellOptions nearShell;
     };

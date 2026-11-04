@@ -330,6 +330,19 @@ namespace
         return value;
     }
 
+    std::vector<std::uint64_t> readUint64Vector(hid_t file, char const* path)
+    {
+        hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
+        EXPECT_GE(dataset, 0) << "missing dataset " << path;
+        hid_t space = H5Dget_space(dataset);
+        hssize_t const points = H5Sget_simple_extent_npoints(space);
+        std::vector<std::uint64_t> values(static_cast<std::size_t>(points < 0 ? 0 : points));
+        H5Dread(dataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
+        H5Sclose(space);
+        H5Dclose(dataset);
+        return values;
+    }
+
     std::vector<float> readFloatDataset(hid_t file, char const* path)
     {
         hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
@@ -788,6 +801,72 @@ TEST(Restart, WriterCopiesPmlRecordsVerbatim)
     H5Fclose(sourceFile);
     H5Fclose(file);
     std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, WriterEmitsOnePatchPerRankOverlapWithDisjointOffsets)
+{
+    auto const directory = temporaryDirectory();
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    auto const input = directory / "input.h5";
+    writeParticleInput(input, true);
+
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 7;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.timeUnitSI = 1.0;
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+
+    picBunch::GeneratedParticles generated;
+    generated.species = "electrons";
+    generated.bunch = twoParticles();
+    generated.bunch.z[1] = 3.0; // patch 1 owns this particle
+    generated.domainOrigin = {0.0, 0.0, 0.0};
+    generated.cellSize = {1.0, 1.0, 1.0};
+    generated.patchOffset = {0, 0, 0};
+    generated.patchExtent = {5, 5, 4};
+    generated.unitMassSpeed = 1.0;
+    generated.unitCharge = 1.0;
+    generated.unitMass = 1.0;
+    generated.fallbackMass = 1.0;
+    // Two rank-overlap slabs; z cells 2 and 3 are in both.
+    generated.patches = {
+        {{0, 0, 0}, {5, 5, 3}},
+        {{0, 0, 2}, {5, 5, 2}}};
+    options.generatedParticles = generated;
+    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+
+    auto const path = directory / "checkpoint_000007.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    // Particle z=0 belongs to patch 0 (cells [0,3)); z=3 belongs to patch 1
+    // (cells [2,4)).  The regions overlap on cells 2, but ownership is disjoint:
+    // the writer assigns each particle to the first containing patch and writes
+    // cumulative numParticlesOffset.
+    auto const counts = readUint64Vector(
+        file, "data/7/particles/electrons/particlePatches/numParticles");
+    auto const offsets = readUint64Vector(
+        file, "data/7/particles/electrons/particlePatches/numParticlesOffset");
+    auto const zo = readUint64Vector(file, "data/7/particles/electrons/particlePatches/offset/z");
+    auto const ze = readUint64Vector(file, "data/7/particles/electrons/particlePatches/extent/z");
+    ASSERT_EQ(counts.size(), 2u);
+    ASSERT_EQ(offsets.size(), 2u);
+    EXPECT_EQ(offsets[0], 0u);
+    EXPECT_EQ(offsets[1], counts[0]);
+    EXPECT_EQ(counts[0], 1u);
+    EXPECT_EQ(counts[1], 1u);
+    EXPECT_EQ(counts[0] + counts[1], 2u);
+    EXPECT_EQ(zo[0], 0u);
+    EXPECT_EQ(zo[1], 2u);
+    EXPECT_EQ(ze[0], 3u);
+    EXPECT_EQ(ze[1], 2u);
+    H5Fclose(file);
+    std::filesystem::remove_all(directory);
 }
 
 TEST(Restart, WriterPinsFloat32ParticleDtypes)

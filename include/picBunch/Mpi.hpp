@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/Parallel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <cstddef>
@@ -30,6 +31,28 @@ namespace picBunch
     private:
         bool m_ownsRuntime = false;
     };
+
+    /*! MPI-backed collective context for the rank-parallel compute stages.
+     *
+     * Construct after ``MpiGuard``.  Reports rank/size of ``MPI_COMM_WORLD`` and
+     * reduces in place.  Without MPI it is a single-rank context.
+     */
+    class MpiParallelContext final : public ParallelContext
+    {
+    public:
+        MpiParallelContext();
+        void allreduceSum(double* values, std::size_t count) const override;
+        void allreduceSum(std::uint64_t& value) const override;
+    };
+
+    //! Broadcast every particle array and the per-particle metadata from root.
+    void mpiBroadcastBunch(Bunch& bunch, int root);
+
+    /*! Broadcast the resolved compute options (grid, margins, near-shell
+     * policy) from root.  Pointers are never sent; the receiver keeps its own
+     * ``parallel`` pointer, which the caller sets after this call.
+     */
+    void mpiBroadcastComputeOptions(ComputeOptions& options, int root);
 
     //! True when this build has MPI and the runtime is initialised.
     bool mpiActive();

@@ -18,6 +18,8 @@
 #include "picBunch/detail/NearReference.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -88,14 +90,32 @@ namespace picBunch
 
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
+        // The base mesh field is itself component-parallel when a distributed
+        // context is supplied, and computeField already reduced the six arrays
+        // onto every rank.  The near-shell tiles below are then partitioned so
+        // each rank touches only its own output nodes.
         Field field = computeField(bunch, plain, stageTimes);
+
+        // Each rank owns a disjoint set of output tiles and writes only the
+        // correction there.  A zero correction buffer plus one all-reduce keeps
+        // the untouched tiles and the base field out of the summation.
+        Field correction;
+        correction.grid = field.grid;
+        for(auto& component : correction.data)
+            component.assign(field.grid.size(), 0.0);
+
+        ParallelContext const* par = options.parallel;
+        int const parSize = (par && par->distributed()) ? par->size : 1;
+        int const parRank = (par && par->distributed()) ? par->rank : 0;
 
         Grid const& grid = field.grid;
         double const radius = resolveNearShellRadius(options, nearShell);
         double const cells[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::size_t const tile = std::max<std::size_t>(1u, nearShell.tileNodes);
         nbref::Settings const settings = exactSettings();
-        std::size_t pairs = 0;
+        std::uint64_t pairs = 0;
+        std::size_t tileIndex = 0;
+        auto const nearStart = std::chrono::steady_clock::now();
 
         auto const n = grid.n;
         auto const& origin = grid.origin;
@@ -111,6 +131,10 @@ namespace picBunch
                 std::size_t const j1 = std::min(n[1], j0 + tile);
                 for(std::size_t i0 = 0; i0 < n[0]; i0 += tile)
                 {
+                    std::size_t const thisTile = tileIndex++;
+                    if(parSize > 1 && (thisTile % static_cast<std::size_t>(parSize))
+                           != static_cast<std::size_t>(parRank))
+                        continue; // another rank owns this output tile
                     std::size_t const i1 = std::min(n[0], i0 + tile);
 
                     // Node bounding box of this tile.
@@ -185,6 +209,9 @@ namespace picBunch
                         localOrigin[a] = origin[a] + static_cast<double>(localLo[a]) * spacing[a];
 
                     ComputeOptions localOptions = plain;
+                    // The local subtraction is computed by this rank alone for
+                    // its own tile; never split it across ranks.
+                    localOptions.parallel = nullptr;
                     localOptions.gridSize = localN;
                     localOptions.gridOrigin = localOrigin;
                     localOptions.meshGridSize = std::nullopt;
@@ -220,7 +247,7 @@ namespace picBunch
                                     std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
                                     std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
                                     std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
-                                    double value = field.data[c][gidx] - local.data[c][lidx];
+                                    double value = -local.data[c][lidx];
 
                                     double const x_obs = origin[0] + static_cast<double>(i) * spacing[0]
                                         + kYeeOffset[c][0] * cells[0];
@@ -244,15 +271,31 @@ namespace picBunch
                                         double const component = (c < 3) ? E[c] : B[c - 3];
                                         value += unit * (near.weight[q] * near.charge[q]) * component;
                                     }
-                                    field.data[c][gidx] = value;
+                                    correction.data[c][gidx] = value;
                                 }
-                        pairs += nx * ny * nz * near.size();
+                        pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
                     }
                 }
             }
         }
+        if(parSize > 1)
+        {
+            for(int c = 0; c < 6; ++c)
+                par->allreduceSum(correction.data[c].data(), correction.data[c].size());
+            par->allreduceSum(pairs);
+        }
+        for(int c = 0; c < 6; ++c)
+            for(std::size_t i = 0; i < field.data[c].size(); ++i)
+                field.data[c][i] += correction.data[c][i];
+        if(parRank == 0)
+            std::fprintf(
+                stderr,
+                "near shell wall [rank 0]: %.3f ms\n",
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - nearStart)
+                    .count());
         if(nearShell.exactPairs)
-            *nearShell.exactPairs = pairs;
+            *nearShell.exactPairs = static_cast<std::size_t>(pairs);
         return field;
     }
 

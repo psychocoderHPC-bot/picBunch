@@ -189,6 +189,13 @@ namespace picBunch
             else
                 fail("placement.patch", "expected \"bbox\" or \"domain\"");
         }
+        if(auto const* node = placement.get("patch_count"))
+        {
+            auto const count = asInteger(*node, "placement.patch_count");
+            if(count <= 0)
+                fail("placement.patch_count", "must be positive");
+            config.placement.patchCount = static_cast<std::size_t>(count);
+        }
 
         config.accuracy.tolerance = asDouble(require(accuracy, "tolerance"), "accuracy.tolerance");
         if(auto const* node = accuracy.get("near_shell"))
@@ -267,7 +274,8 @@ namespace picBunch
              "placement.front",
              "placement.top",
              "placement.offset_unit",
-             "placement.patch"},
+             "placement.patch",
+             "placement.patch_count"},
             config.warnings);
         warnUnknown(
             accuracy,

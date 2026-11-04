@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/Parallel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <array>

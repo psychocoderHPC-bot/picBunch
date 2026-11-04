@@ -194,9 +194,37 @@ mpiexec -n 4 picBunch --input bunch.h5 --cell-size 1e-6 \
 The convolution still runs on the padded bunch box. The compute box is snapped to global
 nodes so every computed value lands on a global node. The global array is never allocated.
 Each rank owns one contiguous z-slab, divided into write tiles of about 128 MiB, so the
-extra memory per rank is one tile. Rank 0 computes the field and broadcasts the small bunch
-box; all ranks write disjoint `storeChunk` regions. Extent, spacing, origin, `unitSI` and the
-Yee `position` attribute are identical for every rank count.
+extra memory per rank is one tile. Rank 0 reads the bunch and broadcasts it; every rank then
+computes its share of the field (see below), and all ranks write disjoint `storeChunk`
+regions. Extent, spacing, origin, `unitSI` and the Yee `position` attribute are identical
+for every rank count.
+
+### Rank-parallel compute
+
+The bunch is replicated, not redistributed: the near shell and the mesh both need every
+source on every rank. Two stages are rank-parallel.
+
+* **Mesh by component.** Every rank deposits the same sources and transforms the same
+  `rho` spectrum. The six staggered convolutions are divided across ranks; a rank evaluates
+  only the components `c` with `c % size == rank`, then one `MPI_Allreduce` sums the six
+  arrays. This is component parallelism, not a domain-decomposed FFT. A per-rank FFT on a
+  subdomain would lose long-range contributions. Deposit and the `rho` transform are
+  replicated and form the Amdahl serial fraction.
+* **Near shell by output tile.** The tile loop is partitioned by linear tile index. Each
+  rank builds the near-source list and the local subtraction FFT for its own tiles, writes
+  the correction only there, and one all-reduce sums the corrections.
+
+Without MPI both paths run serially, and the results are unchanged. `--deterministic-deposit`
+is still required for bitwise repeatability of the deposit itself.
+
+### Multi-rank particle patches
+
+`placement.patch_count = N` splits the generated particle patch along z into `N`
+rank-overlap regions. Neighbouring regions overlap by one cell; particle ownership stays
+disjoint. The writer assigns each particle to the first patch that contains its cell,
+reorders the records so each patch owns a contiguous range, and writes cumulative
+`numParticlesOffset`. `patch_count = 1` keeps the previous single-patch layout. Use
+`placement.patch = "domain"` for a restart.
 
 **Tail margin and far-tail evaluation.** The field outside the bunch does not vanish; it
 decays as `1/r^2`. The code first solves the multipole bound for the smallest centre distance
@@ -241,9 +269,10 @@ as a finite-domain field. The bound above applies inside the written domain; it 
 about the field outside the file extent.
 
 **Physics constraint:** the FFT is not domain-decomposed. A per-rank FFT on a subdomain would
-lose long-range contributions. The convolution covers the bunch box globally; only the
-read-out and the write are decomposed. This is exact only while the bunch box contains the
-sources that matter, which is the existing free-space truncation limitation.
+lose long-range contributions. The convolution covers the bunch box globally; ranks divide
+the six components (and the near-shell output tiles), and the write is decomposed by z-slab.
+This is exact only while the bunch box contains the sources that matter, which is the
+existing free-space truncation limitation.
 
 MPI is optional: configure with `-DPICBUNCH_ENABLE_MPI=ON`. openPMD must be built with MPI
 for one collectively written series. If it is not, each rank writes its own

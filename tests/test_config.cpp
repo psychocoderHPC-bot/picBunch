@@ -52,6 +52,7 @@ left = 0.5
 front = 0.25
 top = 0.75
 offset_unit = "fraction"
+patch_count = 4
 
 [accuracy]
 tolerance = 1.0e-4
@@ -80,6 +81,7 @@ TEST(Config, ParsesEveryRequiredKey)
     EXPECT_EQ(
         static_cast<int>(config.placement.patch),
         static_cast<int>(picBunch::Config::Placement::Patch::BoundingBox));
+    EXPECT_EQ(config.placement.patchCount, 4u);
     EXPECT_FALSE(config.strict);
     EXPECT_DOUBLE_EQ(config.accuracy.tolerance, 1.0e-4);
     EXPECT_EQ(config.accuracy.nearShell, "exact");

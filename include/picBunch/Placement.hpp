@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace picBunch
 {
@@ -27,6 +28,8 @@ namespace picBunch
         std::array<std::int64_t, 3> patchOffset{};
         //! Patch extent in cells; the patch covers ``[offset, offset + extent)``.
         std::array<std::uint64_t, 3> patchExtent{};
+        //! One patch per rank-overlap region (always contains at least one).
+        std::vector<ParticlePatch> patches;
     };
 
     /** Shift a bunch so its charge-weighted centroid lands on the requested

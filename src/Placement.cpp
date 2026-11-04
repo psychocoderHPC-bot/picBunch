@@ -125,6 +125,36 @@ namespace picBunch
             result.patchOffset[a] = offset;
             result.patchExtent[a] = extent;
         }
+
+        // One particle patch per rank-overlap region.  The base region (bbox or
+        // full domain) is sliced along z; neighbouring slabs overlap by one
+        // cell so a particle shape at a slab boundary is covered by both
+        // regions.  Particle ownership stays disjoint: the writer assigns each
+        // particle to exactly one patch and writes cumulative numParticlesOffset.
+        std::size_t const requested = std::max<std::size_t>(1u, config.placement.patchCount);
+        std::uint64_t const zOffset
+            = static_cast<std::uint64_t>(std::max<std::int64_t>(0, result.patchOffset[2]));
+        std::uint64_t const zExtent = result.patchExtent[2];
+        std::size_t count = std::min<std::size_t>(requested, static_cast<std::size_t>(zExtent));
+        if(count == 0u)
+            count = 1u;
+        for(std::size_t p = 0; p < count; ++p)
+        {
+            ParticlePatch patch;
+            for(int a = 0; a < 3; ++a)
+            {
+                patch.offset[a] = result.patchOffset[a];
+                patch.extent[a] = result.patchExtent[a];
+            }
+            // Integer slab boundaries, last slab absorbs the remainder.
+            std::uint64_t const lo = zOffset + (zExtent * p) / count;
+            std::uint64_t const hi = zOffset + (zExtent * (p + 1u)) / count;
+            std::uint64_t const lower = (p == 0u) ? lo : (lo > 0u ? lo - 1u : 0u);
+            std::uint64_t const upper = (p + 1u == count) ? hi : std::min(zOffset + zExtent, hi + 1u);
+            patch.offset[2] = static_cast<std::int64_t>(lower);
+            patch.extent[2] = upper - lower;
+            result.patches.push_back(patch);
+        }
         return result;
     }
 } // namespace picBunch

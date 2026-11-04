@@ -486,6 +486,7 @@ namespace
         generated.cellSize = config.domain.cellSize;
         generated.patchOffset = placed.patchOffset;
         generated.patchExtent = placed.patchExtent;
+        generated.patches = placed.patches;
         generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
         generated.unitCharge = config.picongpu.unitCharge;
         generated.unitMass = config.picongpu.unitMass;
@@ -539,6 +540,8 @@ int main(int argc, char** argv)
         std::optional<picBunch::FarTail> farTail;
         bool const root = picBunch::mpiRank() == 0;
         std::array<double, 3> globalOriginResolved{0.0, 0.0, 0.0};
+        picBunch::MpiParallelContext parallel;
+        picBunch::ComputeOptions options;
 
         if(root)
         {
@@ -564,7 +567,6 @@ int main(int argc, char** argv)
 
         // Geometry: an explicit --cell-size always wins over the input mesh.
         // When neither is available the run fails; nothing is assumed.
-        picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
         options.deterministicDeposit = args.deterministicDeposit;
         options.nearShell.mode = (args.nearShell == "exact")
@@ -681,7 +683,31 @@ int main(int argc, char** argv)
                 globalOriginResolved[0], globalOriginResolved[1], globalOriginResolved[2]);
         }
 
+        } // root: reader and geometry resolution
+
+        // The bunch is replicated, not redistributed: the near shell and the
+        // component-parallel mesh both need every source on every rank.  Only
+        // the small resolved option set travels with it.
+        picBunch::mpiBroadcastBunch(bunchData.bunch, 0);
+        {
+            double meta[3] = {
+                bunchData.time,
+                bunchData.timeUnitSI,
+                static_cast<double>(bunchData.iteration)};
+            picBunch::mpiBroadcast(meta, 3, 0);
+            if(!root)
+            {
+                bunchData.time = meta[0];
+                bunchData.timeUnitSI = meta[1];
+                bunchData.iteration = static_cast<std::uint64_t>(meta[2]);
+            }
+        }
+        picBunch::mpiBroadcastComputeOptions(options, 0);
+        options.parallel = &parallel;
+
         // --------------------------------------------------------------- compute
+        auto const computeStart = Clock::now();
+        if(root)
         std::printf(
             "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
             args.nearShell.c_str(),
@@ -692,7 +718,10 @@ int main(int argc, char** argv)
             std::size_t exactPairs = 0;
             options.nearShell.exactPairs = &exactPairs;
             field = picBunch::computeField(bunchData.bunch, options, &times);
-            std::printf("near shell: %zu exact (source,node,component) evaluations\n", exactPairs);
+            if(root)
+                std::printf(
+                    "near shell: %zu exact (source,node,component) evaluations\n",
+                    exactPairs);
         }
         else
             field = picBunch::computeField(bunchData.bunch, options, &times);
@@ -819,14 +848,16 @@ int main(int argc, char** argv)
             }
         }
 
-        printGrid(field.grid);
-        std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
-        } // root
+        double const computeWallMs = elapsedMs(computeStart);
+        if(root)
+        {
+            printGrid(field.grid);
+            std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
+            std::printf("compute wall (all stages, rank 0): %.3f ms\n", computeWallMs);
+        }
 
-        // Rank 0 computed the bunch-box field; every rank needs it to write its
-        // own disjoint global chunk.  The transfer is the small bunch box, never
-        // the global domain.
-        picBunch::mpiBroadcastField(field, 0);
+        // Every rank computed the component it owns and the all-reduce left the
+        // full bunch-box field on all ranks, so no full-field broadcast is needed.
         double scalarMeta[6] = {
             bunchData.time,
             bunchData.timeUnitSI,
