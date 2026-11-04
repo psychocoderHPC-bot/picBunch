@@ -185,20 +185,31 @@ and `1.69e-4` axial gamma 10 interior (order 8); moving oblique interior is `8.1
 and is not a `1e-3` path. The assembled field is unchanged outside the near tiles
 (bitwise) and the seam jump excess is `2.0e-10` stationary.
 
-On one H100 at 2e6 particles / 20-cell bunch the mesh compute is `0.136 s`. The fast
-near evaluator measures `1.8468e7` pairs/s stationary at order 5 (`9.21 s` for the
-`1.7e8` support pairs) and `3.983e6` pairs/s axial gamma 10 at order 8:
+On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
+measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; the
+earlier conservative figure was `0.136 s`. The fast evaluator measures `1.8466e7`
+pairs/s stationary at order 5 and `3.9977e6` pairs/s axial gamma 10 at order 8. Pair
+counts are `1.7e8` support-only, `1.7e9` for the 3-cell shell and `3.4e9` for the
+4-cell shell. The wall times below add the measured mesh time to the near-evaluator
+time:
 
-| configuration | end-to-end | near error |
+| configuration | wall | worst per component (Ex, Ey, Ez, Bx, By, Bz) |
 | --- | --- | --- |
-| mesh only | 0.136 s | no near correction |
-| support-only shell | 9.35 s | 7.99e-4 |
-| 3-cell shell | 92.2 s | 7.99e-4 in, <=1.6e-7 out |
-| 4-cell shell | 184.2 s | 7.99e-4 in, <=1.6e-7 out |
+| mesh only | 0.052 s | no near correction (in-support O(1)) |
+| support-only shell, o5 | 9.26 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 |
+| 3-cell shell, o5 | 92.1 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 (<=1.6e-7 out) |
+| 4-cell shell, o5 | 184.2 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 (<=1.6e-7 out) |
+| moving axial support, o8 | 42.6 s | 1.69e-4, 1.68e-4, 1.36e-5, 1.67e-4, 1.69e-4, 0 |
 
-So `1e-3` is reached in `9.35 s` support-only and in `184 s` with the full 4-cell
-shell, below 300 s. Axial gamma 10 reaches `1.69e-4` in `42.8 s` support-only but
-its 3- and 4-cell shells exceed 300 s.
+So `1e-3` is reached in `9.26 s` support-only and in `184.2 s` with the full 4-cell
+shell, below 300 s. Moving axial gamma 10 reaches `1.69e-4` in `42.6 s` support-only;
+its 3- and 4-cell shells exceed 300 s. The near wall times are the measured standalone
+H100 kernel rate times the pair count: the shipped `--near-shell fast` path evaluates
+the same algebra on the host, so they are an algorithm cost floor, not the CPU wall
+time of the CLI. Moving oblique in-support stays at `8.15e-2` (per component Ex 2.43e-2,
+Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
+`--near-shell exact` is retained for comparison; its adaptive evaluator is inaccurate
+for moving in-support points at the pinned settings (`1.55e-1` axial interior).
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -424,11 +435,12 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.6.0 release tree passes 18/18 CTest entries on rosi (CUDA 12.6, sm_70) and on
-jureca-h100 (CUDA 13.4, sm_90). On hal (HIP, gfx1100) 17/18 entries pass; `picBunch.Io`
-reports all 14 executed assertions green and one skip, then segfaults inside
-`librocfft.so` during process teardown under ROCm 7.2 (a teardown crash, not a field or I/O
-assertion). The v0.5.0 commit passed 18/18 on all three hosts. The entries are
+The v0.7.0 release tree passes 18/18 CTest entries on all three hosts: rosi_v100
+(CUDA 12.6, sm_70), jureca-h100 (CUDA 13.4, sm_90) and hal (HIP, gfx1100, ROCm 7.2).
+The ROCm 7.2 `librocfft` teardown segfault is gone: the HIP build now calls
+`rocfft_cleanup()` after the plans are destroyed while the queue and runtime are still
+alive. The previously failing `picBunch.Io` entry passed five consecutive repeats on hal.
+The entries are
 `picBunch.Config` (TOML parsing, defaults and required keys), `picBunch.Placement`
 (charge-weighted centring, `bbox` and `domain` patches, out-of-domain rejection, dtype and
 `charge`/`mass` records) plus `picBunch.Margin` (margin and far-tail validation) and
@@ -617,6 +629,14 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.7.0** adds `--near-shell fast` (TOML `accuracy.near_shell = "fast"`,
+  `--near-shell-fast-order`): the exact eight-term `asinh` box plus a gamma-stretched
+  axial box and plain Gauss-Legendre on the subtracted `(S - W*)K` remainder, order 5 by
+  default. It reaches `7.99e-4` stationary and `1.69e-4` for moving axial gamma 10 at
+  order 8, so `1e-3` is met end to end; moving oblique in-support remains `8.15e-2`
+  (documented limit). `--near-shell exact` stays available for comparison. Also fixes a
+  dispatch bug that produced the plain mesh field for `--near-shell fast`, and guards the
+  ROCm 7.2 `librocfft` teardown segfault with `rocfft_cleanup()` after plan destruction.
 - **v0.6.0** parallelises the mesh component convolutions and the near-shell output tiles
   across MPI ranks, with one all-reduce per field, and adds `placement.patch_count` to
   write one checkpoint patch per rank-overlap region. 1-, 2- and 4-rank mesh and near-shell
