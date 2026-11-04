@@ -4,7 +4,7 @@
 \subsection{The operator interface}
 \label{sec:interface}
 
- \texttt{v0.7.0} (commit \texttt{a152c518}, tag \texttt{25d6ca8b}) is driven by
+ \texttt{v0.9.0} (commit \texttt{970fc52f8fb5b150f2d3f777b4c9d6e99da0fc6b}, tag \texttt{97ca8647}) is driven by
  \texttt{picBunch --input bunch.h5} \texttt{--destination <checkpoint>}
  \texttt{--config params.toml}, with every unit and conversion parameter in the
  TOML file \citep{INT2}. The \texttt{[picongpu]} section carries
@@ -13,9 +13,10 @@
  carries \texttt{cells}, \texttt{cell\_size}, \texttt{origin};
  \texttt{[placement]} carries \texttt{offset\_unit} and the
  \texttt{left}/\texttt{front}/\texttt{top} frac-\linebreak tions; \texttt{[accuracy]}
- carries \texttt{tolerance} and the near-shell settings,
- \texttt{near\_shell} \texttt{none}/\texttt{exact}/\texttt{fast} plus
- \texttt{near\_shell\_radius} and \texttt{near\_shell\_tile}. A missing
+  carries \texttt{tolerance} and the near-shell settings,
+  \texttt{near\_shell} \texttt{none}/\texttt{exact}/\texttt{fast}/
+  \texttt{fast-gpu} plus \texttt{near\_shell\_radius} and
+  \texttt{near\_shell\_tile}. A missing
   conversion key causes a clear error at start-up. The input bunch is centred
   by its charge-weighted centroid and placed at the requested offset from the
   domain origin; a placement leaving the bunch outside the domain is rejected
@@ -133,10 +134,11 @@ The kernel is homogeneous of degree $-2$, the deposit shape width equals the
 \subsection{The near shell and the fast evaluator}
 \label{sec:nearsheet}
 
-The default mesh is the whole field. \texttt{v0.7.0} carries an opt-in near
+The default mesh is the whole field. \texttt{v0.9.0} carries an opt-in near
 shell (\texttt{[accuracy]} in the TOML config,
 Section~\ref{sec:interface}), with a radius and a tile
-\citep{NS2,FIX1,CFPORT}. It computes
+\citep{NS2,FIX1,CFPORT}. A distributed-FFT option
+(Section~\ref{sec:distfft}) makes the output field slab-local. It computes
 \begin{equation}
 \label{eq:nearshell}
 F = F_{\mathrm{mesh}}(\mathrm{all}) - F_{\mathrm{mesh}}(\mathrm{near})
@@ -219,7 +221,7 @@ $64$-source cloud \citep{CFPORT,INT4}.
 \subsection{MPI parallelism}
 \label{sec:mpi}
 
-\texttt{v0.7.0} writes a global output domain larger than the compute box
+\texttt{v0.9.0} writes a global output domain larger than the compute box
 \citep{M1,FIX1}, and computes the field in parallel across ranks
 \citep{MPI2}. The written extent is set by \texttt{--global-grid} and
 \texttt{--global-origin}. The global array is never allocated: each rank owns
@@ -247,7 +249,7 @@ $1$, $2$ and $4$ ranks (Section~\ref{sec:mpi-scale}) \citep{MPI2,INT3}.
 \label{sec:margin}
 
  For a global domain that extends beyond the compute box, the zero fill must not
- start until the field is below tolerance. \texttt{v0.7.0} places that boundary at
+ start until the field is below tolerance. \texttt{v0.9.0} places that boundary at
  the smallest centre distance $d$ where
 \begin{equation}
 \label{eq:tail}

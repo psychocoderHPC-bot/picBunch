@@ -211,7 +211,7 @@ solid white outline marks the TSC support and the in-support error pixels are
 shown against a reference that is itself unreliable there. The trustworthy
 in-support statement is the fast-versus-arbiter $1.6\%$ at the worst node
 (Section~\ref{sec:fastacc}). The fluctuation reference is complete, but
-picBunch v0.7.0 rejects a momentum spread, so only its reference field panels
+picBunch v0.9.0 rejects a momentum spread, so only its reference field panels
 are shown and the picBunch panels are labelled unavailable.
 
  \paragraph{Shell radius unit.} The earlier $N=1000$ slices run the default
@@ -245,7 +245,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_E.pdf}
-\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence (\texttt{BDATA2}), showing four columns $E_x,E_y,E_z,|E|$ from the order-12 \texttt{indfield} reference. Each row uses one shared linear scale and one colour bar. picBunch v0.7.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
+\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence (\texttt{BDATA2}), showing four columns $E_x,E_y,E_z,|E|$ from the order-12 \texttt{indfield} reference. Each row uses one shared linear scale and one colour bar. picBunch v0.9.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
 \label{fig:valfluctE}
 \end{figure}
 
@@ -404,51 +404,88 @@ $8\times$ more per pair at $\gamma=10$ than at $\gamma=1$.
 \subsection{Cost at $2\times10^{6}$ particles, one H100}
 \label{sec:cost}
 
-Table~\ref{tab:cost} gives the near-shell wall times at $2\times10^{6}$
-particles in a $20$-cell bunch, on one \texttt{H100}
-(\texttt{jureca-h100}, \texttt{jrc0880}, \texttt{sm\_90}), with the
-per-pair rate and the achieved near error for each configuration
-\citep{INT4,CFPORT}. The mesh compute alone is $0.052$\,s (deposit $34.4$\,ms,
-kernel $1.08$\,ms, FFT $7.44$\,ms, read-out $9.02$\,ms; medians of three). The
-near evaluator is the standalone GPU kernel of the shipped fast backend
-(Section~\ref{sec:nearsheet}); the measured rates are
-$1.8466\times10^{7}$ pairs/s stationary order $5$ and
-$3.9977\times10^{6}$ pairs/s moving axial order $8$ \citep{INT4}. Pair counts
-are $1.7\times10^{8}$ support-only, $1.7\times10^{9}$ three-cell, and
-$3.4\times10^{9}$ four-cell, the neighbour counts of the $20$-cell geometry
-\citep{CF1}.
+Table~\ref{tab:cost} gives the measured CLI wall times at $2\times10^{6}$
+particles in a $20$-cell bunch, grid $66\times68\times66$, cell
+$2.5\times10^{-7}$\,m, near-shell tile $4$, on one \texttt{H100}
+(\texttt{jrc0880}, \texttt{sm\_90}), with the achieved near error for each
+configuration \citep{INT4,CFPORT}. The near shell is the dominant term in every
+shell row; the mesh-only wall is $2.48$\,s, of which the compute is $0.116$\,s
+(deposit $34.8$--$40.5$\,ms, kernel $1.1$\,ms, FFT $7.3$--$7.6$\,ms, read-out
+$8.0$--$8.5$\,ms, writer $48.8$--$254.5$\,ms). The near evaluator is the
+shipped fast backend of Section~\ref{sec:nearsheet}, measured through the CLI,
+not as a standalone kernel. Pair counts are quoted in source-node pairs and in
+components: support $4.319\times10^{8}$ / $2.59\times10^{9}$, three-cell
+$1.458\times10^{9}$ / $8.75\times10^{9}$, four-cell
+$2.662\times10^{9}$ / $1.60\times10^{10}$, the neighbour counts of the
+$20$-cell geometry \citep{CF1}.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Near-shell wall at $2\times10^{6}$ particles, $20$-cell bunch, one
-\texttt{H100} (\texttt{sm\_90}), with the mesh compute at $0.052$\,s and the
-per-pair rate \citep{INT4,CFPORT}. The three- and four-cell wall times are the
-measured per-pair rate times the pair count; a direct $1.7\times10^{9}$-pair
-allocation faulted, so the rate, not the full allocation, is the measured
-quantity. The shipped \texttt{--near-shell fast} path is host-side, so the CPU
-CLI wall at $2\times10^{6}$ is larger than the GPU kernel time.}
+\caption{Measured CLI wall at $2\times10^{6}$ particles, $20$-cell bunch,
+$66\times68\times66$, cell $2.5\times10^{-7}$\,m, tile $4$, one \texttt{H100}
+(\texttt{sm\_90}) \citep{INT4,CFPORT}. ``near-shell wall'' excludes the mesh,
+``end-to-end wall'' includes it. The mesh-only compute inside its $2.48$\,s
+wall is $0.116$\,s; the per-stage split (deposit, kernel, FFT, read-out,
+writer) is in the text.}
 \label{tab:cost}
 \begin{tabular}{lrrl}
 \toprule
-configuration & wall (s) & pairs/s & worst near error \\
+configuration & near-shell wall (s) & end-to-end wall (s) & worst near error \\
 \midrule
-mesh only & $0.052$ & --- & no near correction \\
-support-only shell, order $5$ & $9.26$ & $1.8466\times10^{7}$ & $7.99\times10^{-4}$ \\
-three-cell shell, order $5$ & $92.1$ & $1.8466\times10^{7}$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
-four-cell shell, order $5$ & $184.2$ & $1.8466\times10^{7}$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
-moving axial support, order $8$ & $42.6$ & $3.9977\times10^{6}$ & $1.69\times10^{-4}$ \\
+mesh only & 0 & $2.48$ & no near correction \\
+support-only shell, $R=1.5$, order $5$ & $278.28$ & $281.0$ & $7.99\times10^{-4}$ \\
+three-cell shell, $R=3$, order $5$ & $908.14$ & $955.4$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
+four-cell shell, $R=4$, order $5$ & $1508.12$ & $1510.7$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-  The measured wall at the stationary support-only configuration is $9.26$\,s at
-  $7.99\times10^{-4}$; the moving axial support-only configuration is $42.6$\,s
-  at $1.69\times10^{-4}$ \citep{INT4}. The three- and four-cell shell times are
-  $92.1$\,s and $184.2$\,s at the same $7.99\times10^{-4}$ interior error
-  \citep{INT4}. Fig.~\ref{fig:schem} places the three evaluated regions
+  The support-only shell costs $281.0$\,s end-to-end at
+  $7.99\times10^{-4}$ interior error, the three-cell shell $955.4$\,s, and the
+  four-cell shell $1510.7$\,s, at the same interior error
+  \citep{INT4}. The shell radius is the dominant cost lever: going from
+  $R=1.5$ to $R=4$ multiplies the end-to-end wall by $5.4\times$ at fixed
+  particle count and grid, while the accuracy of the in-shell region is already
+  at $7.99\times10^{-4}$ at $R=1.5$. The shell rate on the integrated path is
+  $1.55\times10^{6}$, $1.61\times10^{6}$ and $1.76\times10^{6}$ pairs/s
+  (source-node pairs) for the three radii, about $2\times$ slower per
+  component than the standalone kernel, the overhead of the per-tile local FFT
+  and launch in the integrated path \citep{INT4}.
+  Fig.~\ref{fig:schem} places the three evaluated regions
   (TSC support, near shell, mesh) around one source and shows the measured
   error against distance for the $\gamma=1$ and $\gamma=10$ axial cases.
+
+\subsection{Device backend for the fast near evaluator}
+\label{sec:fastgpu}
+
+\texttt{v0.9.0} carries a device backend, \texttt{--near-shell fast-gpu}: the
+same algebra as the host fast path, one thread per (pair, component), on the
+CUDA device \citep{CFPORT,INT4}. Against the host fast path it agrees to
+$5.4\times10^{-16}$ to $8.0\times10^{-16}$; when no CUDA device is present the
+run falls back to the host path with a warning, so the flag is safe on
+host-only builds \citep{CFPORT,INT4}. The device backend is the fast path of
+Section~\ref{sec:nearsheet} moved to the device; the lid slice run, one
+near-shell tile of the shipped problem, is $14.13$\,s on the device versus
+$25.68$\,s on the host, a $1.82\times$ speed-up for that stage
+\citep{CFPORT,INT4}.
+
+\subsection{Distributed FFT}
+\label{sec:distfft}
+
+A distributed FFT (\texttt{experimental/distributed-fft},
+\texttt{d602484d}) decomposes the output field in $z$ slabs, one slab per
+rank, and moves the $z$ rows of each 2-D slice between ranks with
+\texttt{MPI\_Alltoallv} transposes around each 2-D transform
+\citep{DIST1,INT3}. Against the replicated path it agrees to
+$2.2\times10^{-16}$, and the written outputs are bitwise equal at $1$, $2$ and
+$4$ ranks, so the decomposition changes no value
+\citep{DIST1,INT3}. At a $640^{3}$ output the per-rank host memory is
+$41.1$\,GB at $2$ ranks and $20.6$\,GB at $4$, the quantity the decomposition
+buys: the output field is slab-local, while the bunch remains replicated on
+every rank \citep{DIST1,INT3}. The transposes are $74$--$85\%$ of the FFT-plus-
+transpose time, so the distributed path is a memory feature rather than a
+speed feature \citep{DIST1,INT3}.
 
   \begin{figure}[H]
   \centering
@@ -589,6 +626,90 @@ would grow with $N$, and it does not \citep{W7t}.
   \label{fig:largeg1}
   \end{figure}
 
+\subsection{Six-velocity single-particle validation}
+\label{sec:gpvalid}
+
+Figures~\ref{fig:gpvalid-xy-e}, \ref{fig:gpvalid-xy-b},
+\ref{fig:gpvalid-xy-err}, \ref{fig:gpvalid-zy-e}, \ref{fig:gpvalid-zy-b} and
+\ref{fig:gpvalid-zy-err} show the shipped mesh field for one electron on a
+$64^3$ grid, cell $10^{-7}$\,m, against the independent order-12 continuum
+reference on the two mid planes. The six rows
+are the velocity cases $\beta=0.1$, $\beta=0.5$, $\gamma=1$, $\gamma=10$,
+$\gamma=30$ and $\gamma=100$, with $y$ horizontal and increasing left to
+right. The measured worst relative errors are $3.49\times10^{-3}$,
+$3.73\times10^{-3}$, $3.47\times10^{-3}$, $1.20\times10^{-1}$,
+$7.39\times10^{-1}$ and $3.21$ in that order. The error grows with $\gamma$
+because the field is compressed into a fraction of a cell: at $\gamma=30$ and
+$\gamma=100$ the Lorentz pancake is thinner than the mesh spacing, so those
+rows show the geometric sub-cell limit of the mesh, not a solver defect.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figs/gp_xy_E.pdf}
+\caption{Single-electron electric field on the x-y plane at mid-$z$ for the
+six velocity cases $\beta=0.1$, $\beta=0.5$, $\gamma=1$, $\gamma=10$,
+$\gamma=30$ and $\gamma=100$ (rows). The columns are $E_x$, $E_y$, $E_z$ and
+$E_x^2+E_y^2+E_z^2$; each row has one shared symmetric-log colour scale and
+one colour bar, and $y$ increases left to right in $\mu$m. The measured worst
+relative error over the six rows is $3.21$ at $\gamma=100$.}
+\label{fig:gpvalid-xy-e}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figs/gp_zy_E.pdf}
+\caption{Same six-velocity electric data as Fig.~\ref{fig:gpvalid-xy-e} on
+the z-y plane at mid-$x$, with $y$ horizontal and $z$ vertical, four columns
+$E_x$, $E_y$, $E_z$ and $E_x^2+E_y^2+E_z^2$, and one shared colour scale and
+one colour bar per row. The measured worst relative error is again $3.21$ at
+$\gamma=100$.}
+\label{fig:gpvalid-zy-e}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figs/gp_xy_B.pdf}
+\caption{Magnetic companion to Fig.~\ref{fig:gpvalid-xy-e}: x-y plane, six
+velocity rows, columns $B_x$, $B_y$, $B_z$ and $B_x^2+B_y^2+B_z^2$, one shared
+symmetric-log colour scale and one colour bar per row. The field is
+identically zero at $\gamma=1$, and the measured worst magnetic relative error
+over the six rows is $0.694$ at $\gamma=100$.}
+\label{fig:gpvalid-xy-b}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figs/gp_zy_B.pdf}
+\caption{Magnetic companion on the z-y plane at mid-$x$, same six velocity
+rows and columns $B_x$, $B_y$, $B_z$ and $B_x^2+B_y^2+B_z^2$, each row on one
+shared colour scale with one colour bar. The field is identically zero at
+$\gamma=1$, and the measured worst magnetic relative error is $0.694$ at
+$\gamma=100$.}
+\label{fig:gpvalid-zy-b}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\linewidth]{figs/gp_xy_err.pdf}
+\caption{Relative error $|\mathrm{mesh}-\mathrm{ref}|/\mathrm{peak}(\mathrm{ref})$
+on the x-y plane for the six velocity rows, with columns $E_x$, $E_y$, $E_z$,
+$E^2$, $B_x$, $B_y$, $B_z$ and $B^2$. Each row is logarithmic, has one colour
+bar, and is masked where the reference is below $10^{-3}$ of its own peak. The
+worst component error is $3.21$ at $\gamma=100$.}
+\label{fig:gpvalid-xy-err}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\linewidth]{figs/gp_zy_err.pdf}
+\caption{Same error convention on the z-y plane at mid-$x$, with the six
+velocity rows and the same eight columns. Each row is logarithmic, has one
+colour bar, and is masked where the reference is below $10^{-3}$ of its own
+peak. The worst component error is $3.21$ at $\gamma=100$.}
+\label{fig:gpvalid-zy-err}
+\end{figure}
+
+
  \subsection{Determinism}
 
  Repeated runs of the shipped CLI are bit-identical: two runs of the same
@@ -600,23 +721,26 @@ would grow with $N$, and it does not \citep{W7t}.
  \texttt{gridSpacing}\,$\cdot$\,\texttt{gridUnitSI}; a mesh without a positive
   \texttt{gridUnitSI} is rejected \citep{S1-spec}.
 
-  \subsection{Multi-velocity binning}
+  \subsection{Binned multi-velocity binning}
   \label{sec:multivel}
 
   The single-velocity scope of Section~\ref{sec:fielddef} is extended by
-  splitting the velocity distribution into classes and running one
-  convolution per velocity class; the near shell needs no binning, because
-  each pair carries its own velocity \citep{MV2}.
+  splitting the velocity distribution into $B$ classes and running one
+  convolution per class; the near shell needs no binning, because each pair
+  carries its own velocity \citep{MV2}. The campaign ran on a $48^3$ grid
+  with $512$ sources on \texttt{jureca-h100} (\texttt{jrc0880}, H100 PCIe,
+  \texttt{sm\_90}), branch \texttt{experimental/multivel} at
+  \texttt{02891fe6} \citep{MV2}.
 
   \paragraph{Single-velocity sanity.} With a single velocity the binned path
-  is bitwise equal to the unbinned path: the field difference is bitwise zero
-  in the unit test \citep{MV2}.
+  is bitwise equal to the unbinned path: the binning error $T_b\!-\!T$ is
+  exactly zero, and the field difference is bitwise zero in the unit test
+  \citep{MV2}.
 
-  \paragraph{Binned field under correction.} The multi-velocity binned field
-  is under correction and is not reported as a result. The measured symptom
-  is a defect: the binned field grows with the bin count, while the order-12
-  arbiter is bin-independent for the same bunch. Numbers produced by the
-  binned field path are withdrawn until the correction is verified.
+  \paragraph{Binned field.} The binned field is excluded from the reported
+  results: it grows with the bin count, while the order-12 arbiter is
+  bin-independent for the same bunch. This section therefore reports the
+  method and the bitwise single-velocity check only.
 
   \begin{figure}[t]
   \centering
@@ -626,7 +750,6 @@ would grow with $N$, and it does not \citep{W7t}.
   \citep{MV2}: (a) $\gamma$ histogram for the 5\% energy spread with the
   $B=16$ adaptive edges and labelled mean and standard deviation;
   (b) $u_\parallel$ versus $u_\perp$ density for the $5^\circ$ angular spread
-  with the $5^\circ$ and median-divergence lines. No binned field result is
-  shown; that path is under correction.}
+  with the $5^\circ$ and median-divergence lines.}
   \label{fig:multivel}
   \end{figure}

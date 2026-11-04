@@ -55,11 +55,17 @@ independent of particle count \citep{W7t,D13}.
  source FFT), the tile-parallel near shell at $1.34\times$ (static tile split
  plus all-reduce), and the collective writer improves to $1.71\times$ at two
  ranks and falls to $0.48\times$ at four, where it is I/O-bound
- (Section~\ref{sec:mpi-scale}) \citep{INT3,MPI2}. The near-field cost is a
- separate wall: the fast backend is $1.8466\times10^{7}$ pairs/s stationary
- order $5$ and $3.9977\times10^{6}$ pairs/s moving axial order $8$ on one H100,
- giving $9.26$\,s support-only at $2\times10^{6}$
- (Section~\ref{sec:cost}) \citep{INT4}.
+  (Section~\ref{sec:mpi-scale}) \citep{INT3,MPI2}. The near-field cost is a
+  separate wall, measured end-to-end through the CLI on one H100: $281.0$\,s
+  for the support-only shell ($R=1.5$) and $1510.7$\,s for the four-cell shell
+  ($R=4$) at $2\times10^{6}$, against a mesh-only wall of $2.48$\,s
+  (Section~\ref{sec:cost}) \citep{INT4}. The shell radius is the dominant cost
+  lever, and the device backend runs the same fast algebra on the CUDA device,
+  agreeing with the host fast path to $5.4\times10^{-16}$--$8.0\times10^{-16}$
+  (Section~\ref{sec:fastgpu}); the distributed FFT makes the output field
+  slab-local at the cost of \texttt{MPI\_Alltoallv} transposes that are
+  $74$--$85\%$ of the FFT-plus-transpose time, a memory feature rather than a
+  speed feature (Section~\ref{sec:distfft}).
 
 
  \paragraph{Measured error by config-\linebreak u-ration.} In floored
@@ -92,5 +98,6 @@ uniformly-moving point-charge field; the convolution is free-space (no
 boundary condition other than zero fill beyond the far-tail switch); and
 there is no radiation term, because the motion is uniform. A bunch with a
 velocity spread requires one convolution per velocity class; the binned
-path is under correction (Section~\ref{sec:multivel}), and the validated
-shipped scope is a single shared $\mathbf{u}$ (Section~\ref{sec:fielddef}).
+path is excluded from the reported results (Section~\ref{sec:multivel}), and
+the validated shipped scope is a single shared $\mathbf{u}$
+(Section~\ref{sec:fielddef}).

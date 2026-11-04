@@ -1,7 +1,7 @@
  \section{Conclusion}
  \label{sec:conclusion}
 
- \texttt{picBunch} \texttt{v0.7.0} computes the present-time field of a
+ \texttt{picBunch} \texttt{v0.9.0} computes the present-time field of a
  uniformly moving, TSC-shaped bunch as a zero-padded free-space FFT convolution
  with staggered Yee read-out, driven by a single TOML configuration
  (Section~\ref{sec:interface}), and writes a uniform float32 checkpoint that
@@ -18,10 +18,17 @@
  $10^{-3}$ stationary ($7.99\times10^{-4}$ interior) and moving axial
  ($1.69\times10^{-4}$ interior); the moving oblique interior is
  $8.15\times10^{-2}$, the measured limit of the fast backend
-  \citep{CFPORT,INT4}. At $2\times10^{6}$ particles the mesh is
-  $0.052$\,s on one H100, deterministic (md5 \texttt{d3641d64\ldots}); the
-  near shell is $9.26$\,s support-only at $7.99\times10^{-4}$ and
-  $42.6$\,s moving axial at $1.69\times10^{-4}$ (Section~\ref{sec:cost}).
+  \citep{CFPORT,INT4}. At $2\times10^{6}$ particles the mesh-only CLI wall is
+   $2.48$\,s on one H100 (compute $0.116$\,s), deterministic (md5
+   \texttt{d3641d64\ldots}); the near shell is $281.0$\,s end-to-end
+   support-only at $7.99\times10^{-4}$ and $1510.7$\,s end-to-end four-cell at
+   the same interior error, the shell radius the dominant cost lever
+   (Section~\ref{sec:cost}). The device backend runs the fast algebra on the
+   CUDA device, agreeing with the host fast path to
+   $5.4\times10^{-16}$--$8.0\times10^{-16}$ (Section~\ref{sec:fastgpu}), and
+   the distributed FFT makes the output field slab-local with the transposes
+   dominating the FFT-plus-transpose time, a memory feature
+   (Section~\ref{sec:distfft}).
 
  In the far field the mesh is below $3\times10^{-4}$ from $d=12$ cells for
  $\gamma=1$, aspect $1$, and from $d=32$ for $\gamma=1$, aspect $4$; at

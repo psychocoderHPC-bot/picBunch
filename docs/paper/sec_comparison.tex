@@ -3,7 +3,8 @@
 
 Two independent checks constrain the method externally: a cross-validation
 against PIConGPU's exact-quadrature field reference, and a checkpoint and
-restart transport. Neither is a truth comparison.
+restart transport. Both checks measure agreement against an independently
+generated reference.
 
 \subsection{Cross-validation against the PIConGPU reference}
 
@@ -45,7 +46,7 @@ resolution \citep{W7r}.
 $2\times10^{-7}$\,m,
 $16384$ nodes/component, rosi\_v100 \citep{W7r}. \texttt{worst\_rel} is
 peak-normalized; median and p99 are per-point over nodes with
-$|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled. Not a truth comparison.}
+$|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled.}
 \label{tab:wholefield}
 \begin{tabular}{lrrrr}
 \toprule
@@ -66,7 +67,7 @@ $B/z$ & $4.63\times10^{-1}$ & $1.52\times10^{-2}$ & $0.93$ & $2.20\times10^{-1}$
 \end{tabular}
 \end{table}
 
-\paragraph{Caveat: the sampling groups are distance-from-centroid.} The
+\paragraph{The sampling groups are distance-from-centroid.} The
 $318$-point groups (inside-support, face, outside) were cut by distance from
 the bunch centroid, in a bunch with a $\sim6$-cell spread \citep{D13}. That
 grouping may understate how close the ``outside'' points actually are to a
@@ -84,7 +85,7 @@ $x/y/z$ at the exact Yee positions, grid spacing and offset, and the
 \texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The default
 precision is uniform \texttt{float32} for every field and particle record, so
 a stock single-precision PIConGPU can load the file \citep{IMPL3}.
- \texttt{v0.7.0} copies every species from the input bunch and carries a single
+ \texttt{v0.9.0} copies every species from the input bunch and carries a single
  checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
  the \texttt{charge} and \texttt{mass} records are written rather than omitted,
  and the species is a single particle patch (Section~\ref{sec:interface}). The
@@ -96,7 +97,7 @@ a stock single-precision PIConGPU can load the file \citep{IMPL3}.
  $z$ regions, and every particle belongs to exactly one patch
  \citep{INT3,MPI2}.
 
- Field arrival is bitwise. A fresh \texttt{v0.7.0} checkpoint written from a
+ Field arrival is bitwise. A fresh \texttt{v0.9.0} checkpoint written from a
  two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
  startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
  \texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;

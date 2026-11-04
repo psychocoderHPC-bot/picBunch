@@ -184,7 +184,7 @@
     note   = {Run pr24-20261102. W7r/RESULTS.md. picBunch @ 339ca7ad. 318
              staggered points (64x64x32, cell 1e-7 m) and whole-field
              (N=1000, 32x32x16, cell 2e-7 m); groups distance-from-centroid
-             (caveat D13).},
+             (D13).},
 }
 
 @misc{D15,
@@ -197,7 +197,7 @@
 }
 
 @misc{D3,
-  title  = {Decision D3: the near-band per-pair time is provisional; the near band is ~99\% of runtime},
+  title  = {Decision D3: the near-band per-pair time is harness-dependent; the near band is ~99\% of runtime},
   author = {Orchestrator},
   year   = {2026},
   note   = {Run pr24-20261102. DECISIONS.md, D3.
@@ -452,11 +452,25 @@
               jureca\_h100 jrc0880, H100 PCIe, CUDA 13.4, sm\_90. $48^3$ grid,
               512 sources, seed 100 (energy) and 103 (angular). Four defect
               fixes (dangling pointer, parse\_bands, model floor, unit-test
-              build); single-velocity bitwise sanity. The binned field is
-              under correction and its measured numbers are withdrawn. ctest 19/19.},
+              build); single-velocity bitwise sanity. The binned field path is
+              excluded from the reported results. ctest 19/19.},
  }
 
- @misc{SCHEM1,
+  @misc{DIST1,
+    title  = {Distributed FFT: z-slab decomposition with Alltoallv transposes (DIST1)},
+    author = {DIST1 distributed-FFT worker},
+    year   = {2026},
+      note   = {Run pr24-20261102. experimental/distributed-fft at d602484d.
+                z-slab decomposition, one slab per rank, MPI\_Alltoallv
+                transposes around each 2-D transform. Agreement with the
+                replicated path at $2.2\times10^{-16}$, written outputs bitwise
+                equal at 1, 2, 4 ranks. On a 640-cubed output, host memory per
+                rank is 41.1 GB at 2 ranks and 20.6 GB at 4. Transposes are
+                74-85\% of the FFT-plus-transpose time. Output field
+                slab-local, the bunch replicated.},
+   }
+
+  @misc{SCHEM1,
    title  = {Algorithm-region schematic of the field evaluation (SCHEM1)},
    author = {SCHEM1 schematic worker},
    year   = {2026},
@@ -504,6 +518,6 @@
                picBunchVelocityBinsMeasure, 48x48x48 grid, cell 1e-6 m, 512
                sources, 3-cell position cloud; cases g10\_e5 (sigma\_g/g=0.05,
                seed 100), g50\_e5 (seed 101), g10\_a1 (seed 102), g10\_a5
-               (5 deg angular spread, seed 103). The binned field is under
-               correction and its measured numbers are withdrawn.},
+               (5 deg angular spread, seed 103). The binned field path is
+               excluded from the reported results.},
   }
