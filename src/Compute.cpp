@@ -17,6 +17,9 @@
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+#    include <rocfft/rocfft.h>
+#endif
 #include <alpaka/math/Complex.hpp>
 
 #include <algorithm>
@@ -859,6 +862,22 @@ namespace picBunch
         times.depositMs += elapsedMs(depositStart);
 
         // ---------------------------------------------------------------- FFT
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+        // rocFFT keeps a process-global pool of HIP streams and destroys it from
+        // a static destructor at library unload.  On ROCm 7.2.0 that destructor
+        // calls hipStreamDestroy after the HIP runtime has already finalised and
+        // segfaults.  Tear the pool down here, after the plans below are destroyed
+        // but while the queue and HIP runtime are still alive.
+        struct RocfftTeardownGuard
+        {
+            decltype(queue)& queue;
+            ~RocfftTeardownGuard()
+            {
+                alpaka::onHost::wait(queue);
+                static_cast<void>(rocfft_cleanup());
+            }
+        } rocfftTeardownGuard{queue};
+#endif
         auto r2cPlan
             = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
         auto c2rPlan
