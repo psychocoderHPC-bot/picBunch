@@ -141,18 +141,31 @@ timing boundary, so neither is the other's total plus the writer
  at $1$, $2$ and $4$ ranks on a $128$-particle, $32^3$, cell $8\times10^{-7}$\,m,
  tolerance $10^{-3}$, near-shell $R=1.5$, tile $8$ problem: the mesh and the
  near shell are bitwise identical at $1$-vs-$2$ and $1$-vs-$4$, all six
- components, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3,MPI2}.
+  components, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3,MPI2}.
 
- Table~\ref{tab:mpi} gives the speedup for the three parallel pieces. The
- mesh is component-parallel: the replicated deposit ($307$--$332$\,ms, flat in
- rank count) and the replicated source-spectrum FFT cap it, so the speedup
- plateaus at $1.20\times$ at both $2$ and $4$ ranks. The near shell is
- tile-parallel: the static round-robin tile split plus the all-reduce of the
- full correction array plateaus it at $1.34\times$ at $4$ ranks. The writer is
- a collective HDF5 write: it improves to $1.71\times$ at $2$ ranks and falls to
- $0.48\times$ at $4$ ranks, where the collective flush and metadata traffic
- contend on the shared filesystem; this is an I/O limit, not a compute limit
- \citep{INT3}.
+  \begin{figure}[t]
+  \centering
+  \includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling.pdf}
+  \caption{Strong scaling of the three rank-parallel pieces on
+  \texttt{rosi\_v100} (V100, idle window, medians of three), $1$--$4$ ranks;
+  the dashed references are the ideal $1/n$ wall time (top) and $S=n$ speedup
+  (bottom). Error bars are the spread of the three repeats. The near shell
+  plateaus at $1.34\times$ and the component-parallel mesh at $1.20\times$;
+  the collective writer reaches $1.71\times$ at $2$ ranks and falls to
+  $0.48\times$ at $4$.}
+  \label{fig:mpiscaling}
+  \end{figure}
+
+  Fig.~\ref{fig:mpiscaling} shows the speedup for the three parallel pieces.
+  The mesh is component-parallel: the replicated deposit ($307$--$332$\,ms,
+  flat in rank count) and the replicated source-spectrum FFT cap it, so the
+  speedup plateaus at $1.20\times$ at both $2$ and $4$ ranks. The near shell is
+  tile-parallel: the static round-robin tile split plus the all-reduce of the
+  full correction array leave static-tile imbalance that plateaus it at
+  $1.34\times$ at $4$ ranks. The writer is a collective HDF5 write: it improves
+  to $1.71\times$ at $2$ ranks and falls to $0.48\times$ at $4$ ranks, where the
+  collective flush and metadata traffic contend on the shared filesystem, an
+  I/O limit rather than a compute limit \citep{INT3}.
 
  \begin{table}[t]
  \centering

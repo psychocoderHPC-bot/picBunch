@@ -17,14 +17,20 @@ $64.8$\,ms, dominated by the deposit ($56.5$\,ms), and flat in $\gamma$
 the Coulomb limit reproduces the TSC-convolved Coulomb field to
 $4.88\times10^{-14}$ \citep{W4b,coulomb}.
 
- \paragraph{Measured error in the bunch core.} The mesh alone, on the
+  \paragraph{Measured error in the bunch core.} The mesh alone, on the
 $N=1000$ slice geometry, has a worst per-component plane error of
 $0.12$--$0.415$ for $\gamma=1$ and $0.11$--$4.60$ for $\gamma=10$ where the
-planes cut the bunch core (Table~\ref{tab:slices}). The exact near shell
+planes cut the bunch core (Table~\ref{tab:slices}); those core errors are
+measured against the order-4 driver and so inherit its $\sim10\times$
+overestimate of moving oblique in-support points (Section~\ref{sec:slices}).
+The exact near shell
 (Section~\ref{sec:nearsheet}) is opt-in and its assembly is exact to
 roundoff; at the measured $R=3/4$ radii on the $h=1$ slice grid the
 residual is the mesh contribution outside the shell, not the tile
-subtraction (Section~\ref{sec:slices-runs}). In the perpendicular
+subtraction (Section~\ref{sec:slices-runs}). The arbiter-validated in-support
+accuracy of the fast backend is $1.6\%$ at the closest moving node, not the
+$0.31$ the driver-based slices reported (Section~\ref{sec:slices},
+\citep{indfield}). In the perpendicular
 direction at $\gamma=10$, aspect 1, the measured $M\!-\!T$ error at $d=48$ is
 $2.6\times10^{-4}$, the $M\!-\!P$ error is $1.5\times10^{-2}$, and the TSC
 smoothing $T\!-\!P$ is $1.48\times10^{-2}$; the $M\!-\!P$ error is the TSC

@@ -148,9 +148,14 @@ of two backends selected by \texttt{near\_shell}: \texttt{exact}, a vendored
 adaptive FP64 TSC-convolution quadrature \citep{NS2}, or \texttt{fast}, the
 closed-form evaluator below. The default remains \texttt{none}; the radius is in
 mesh nodes of the compute grid, and the envelope it must cover depends on
-$h$ (Section~\ref{sec:slices}). The fast backend is the recommended one: its
+$h$ (Section~\ref{sec:slices}). The fast backend is the accurate one: its
 measured accuracy and cost are in Sections~\ref{sec:accuracy} and
-\ref{sec:cost} \citep{CFPORT}.
+\ref{sec:cost} \citep{CFPORT}. The \texttt{exact} evaluator shares its vendored
+adaptive Gauss--Legendre quadrature with the independent driver reference, and
+that path overestimates moving oblique in-support points by a factor of
+$\sim 10$ at the closest node, so \texttt{exact} is retained for comparison
+rather than as a moving in-support truth (Section~\ref{sec:slices},
+\citep{CFPORT,indfield}).
 
 The fast evaluator splits the in-support integral of
 Eq.~\eqref{eq:Fc} into a singular part and a smooth remainder. The singular

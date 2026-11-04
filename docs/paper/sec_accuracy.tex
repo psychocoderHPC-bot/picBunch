@@ -196,26 +196,32 @@ $\gamma$ \citep{N2b}.
 \label{sec:slices}
 
  The distance sweeps above sample the far field. To measure the mesh in the
-bunch core, we slice the mesh through the core and compare, pixel by pixel,
-with the independent exact TSC driver
-\citep{DIR1,SL2}. The case is $N=1000$ in a $32\times32\times16$ box, cell
-$2\times10^{-7}$\,m: a $\gamma=10$ bunch with momentum along $+y$
-($u_y=9.95$) and the stationary $\gamma=1$ bunch. In every panel the
-horizontal axis is $y$, increasing left to right, so the bunch travels to
-the right. The vertical axis is $x$ in the x-y cut and $z$ in the z-y cut.
-Each figure draws the x-y plane at $z=1.60\,\si{\micro\metre}$ (upper image)
-and the z-y plane at $x=3.20\,\si{\micro\metre}$ (lower image), both through
-the bunch centre. Every image has the field row on top and the error row
-underneath. The electric figures have three columns ($E_x,E_y,E_z$); pixels
-below $10^{-3}$ of the plane peak are masked white, and the error row uses a
-log scale normalised to the plane peak. Fig.~\ref{fig:sxy10} is the
-$\gamma=10$ electric case, and Fig.~\ref{fig:sxy10B} its magnetic companion
-($B_x,B_z$; $B_y\equiv0$ for motion along $+y$ and is omitted).
-Fig.~\ref{fig:sxy1} is the stationary bunch: $B\equiv0$, so no magnetic
-companion exists.
+bunch core we slice through it and compare, pixel by pixel, with an exact
+TSC-convolved reference: $64\times64$ planes, cell $10^{-7}$\,m, $N=200$,
+$Q=-100$\,pC, $\gamma=10$ with momentum along $+y$ (\texttt{BDATA2}). Two
+cases share the positions and differ only in a $1.045$\,mrad rms transverse
+divergence in $x$ (Figs.~\ref{fig:valforwardE}--\ref{fig:valfluctB}); a
+separate $32\times32$ plane carries the binned $1$\,mrad case
+(\texttt{VAR1b}, Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal
+and increases left to right, so the bunch moves rightwards; the vertical axis
+is $x$ in the x-y cut and $z$ in the z-y cut. Each figure has a field row with
+four columns ($E_x,E_y,E_z$ and the magnitude $\sqrt{\sum_i E_i^2}$) and an
+error row underneath; the magnitude is the square root of
+$E_x^2+E_y^2+E_z^2$ so that it shares the components' linear scale. A row has
+one colour scale and one colour bar at its right edge, the error row is
+logarithmic and masked where the reference is below $10^{-3}$ of its own
+peak. The forward case compares the shipped mesh plus fast shell against the
+order-4 adaptive Gauss--Legendre driver \citep{DIR1}; that driver
+overestimates moving oblique in-support points by about $10\times$, so the
+solid white outline marks the TSC support and the in-support error pixels are
+shown against a reference that is itself unreliable there. The trustworthy
+in-support statement is the fast-versus-arbiter $1.6\%$ at the worst node
+(Section~\ref{sec:fastacc}). The fluctuation reference is complete, but
+picBunch v0.7.0 rejects a momentum spread, so only its reference field panels
+are shown and the picBunch panels are labelled unavailable.
 
- \paragraph{Shell radius unit.} These slices run the default mesh with no near
-shell. The near-shell envelope measured in the crossover work, ``3 to 4 PIC
+ \paragraph{Shell radius unit.} The earlier $N=1000$ slices run the default
+mesh with no near shell. The near-shell envelope measured in the crossover work, ``3 to 4 PIC
 cells,'' assumed a mesh spacing $h=1/4$ of the PIC cell, so $R=3$ and $R=4$
 are 12 and 16 mesh nodes \citep{NS2,SL3}. On this grid the node spacing is
 $h=1$ PIC cell ($2\times10^{-7}$\,m), so the same $R=3/4$ is 3/4 mesh nodes,
@@ -227,51 +233,79 @@ Section~\ref{sec:slices-runs}.
 
   \begin{figure}[H]
 \centering
-\includegraphics[width=0.95\linewidth]{figs/beamY_xy_g10_E.pdf}\\[1pt]
-\includegraphics[width=0.95\linewidth]{figs/beamY_zy_g10_E.pdf}
-\caption{Mid-bunch electric slices, $\gamma=10$ with momentum along $+y$,
-$N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m, $h=1$ PIC cell, no
-near shell \citep{DIR1}. The beam axis is $y$ and runs left to right in every
-panel, so the bunch moves rightwards; the vertical axis is $x$ in the x-y cut
-and $z$ in the z-y cut, both in $\si{\micro\metre}$. Upper image, x-y plane at
-$z=1.60\,\si{\micro\metre}$; lower image, z-y plane at
-$x=3.20\,\si{\micro\metre}$. In each image the top row is the mesh field and
-the bottom row the relative error against the exact TSC driver (reference
-$T$), log scale; columns are $E_x,E_y,E_z$. The error in the bunch core is
-$0.12$ to $5.33$ per component (Table~\ref{tab:slices}).}
-\label{fig:sxy10}
+\includegraphics[width=0.92\linewidth]{figs/val_forward_xy_E.pdf}\\[2pt]
+\includegraphics[width=0.92\linewidth]{figs/val_forward_zy_E.pdf}
+\caption{Forward-case electric validation, $N=200$, $Q=-100$\,pC, $\gamma=10$
+along $+y$, $64\times64$ planes, cell $10^{-7}$\,m (\texttt{BDATA2}); x-y
+plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at
+$x=3.2\,\si{\micro\metre}$ (lower), $y$ horizontal in both. Each row has four
+columns, $E_x,E_y,E_z$ and $|E|=\sqrt{E_x^2+E_y^2+E_z^2}$, one shared linear
+scale and one colour bar; the error row below is logarithmic, masked where the
+reference is below $10^{-3}$ of its peak. The solid white outline marks the TSC
+support, and in-support errors are shown against the order-4 driver, which
+overestimates moving oblique in-support points by about $10\times$; the
+trustworthy in-support value is the fast-versus-arbiter $1.6\%$ at the worst
+node.}
+\label{fig:valforwardE}
 \end{figure}
 
   \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{figs/beamY_xy_g10_B.pdf}\\[1pt]
-\includegraphics[width=0.82\linewidth]{figs/beamY_zy_g10_B.pdf}
-\caption{Magnetic companion to Fig.~\ref{fig:sxy10}, $\gamma=10$ with the
-same $+y$ beam axis and error convention. Two columns, $B_x$ and $B_z$,
-field row on top and error row below. $B_y\equiv0$ for motion along $+y$
-(measured max $|B_y|=0$, ratio $0$ to the largest magnetic component) and is
-therefore omitted; the beam moves left to right along $y$.}
-\label{fig:sxy10B}
+\includegraphics[width=0.92\linewidth]{figs/val_forward_xy_B.pdf}\\[2pt]
+\includegraphics[width=0.92\linewidth]{figs/val_forward_zy_B.pdf}
+\caption{Magnetic companion to Fig.~\ref{fig:valforwardE}, same forward case,
+planes and layout, with columns $B_x,B_y,B_z$ and $|B|=\sqrt{\sum_i B_i^2}$.
+$B_y\equiv0$ for motion along $+y$ and its panel is marked accordingly; the
+remaining components share one linear scale per row. The error row uses the
+same log convention and TSC-support outline as the electric figure.}
+\label{fig:valforwardB}
+\end{figure}
+
+  \begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_E.pdf}\\[2pt]
+\includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_E.pdf}
+\caption{Fluctuation-case electric reference, same geometry and bunch as
+Fig.~\ref{fig:valforwardE} but with a $1.045$\,mrad rms $x$-divergence
+(\texttt{BDATA2}); the panels are the exact per-particle reference and use
+the same four-column, shared-scale layout. picBunch v0.7.0 rejects a momentum
+spread, so no mesh field exists and the picBunch panels are labelled
+unavailable rather than shown as a proxy.}
+\label{fig:valfluctE}
+\end{figure}
+
+  \begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_B.pdf}\\[2pt]
+\includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_B.pdf}
+\caption{Magnetic reference for the fluctuation case, same planes and layout as
+Fig.~\ref{fig:valfluctE}, with $B_x,B_y,B_z$ and $|B|$. The $x$-divergence
+lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the
+dominant component. Only reference fields are shown; the picBunch panels are
+unavailable, as in the electric figure.}
+\label{fig:valfluctB}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.95\linewidth]{figs/beamY_xy_g1_E.pdf}\\[1pt]
-\includegraphics[width=0.95\linewidth]{figs/beamY_zy_g1_E.pdf}
-\caption{Mid-bunch electric slices, stationary bunch ($\gamma=1$), $N=1000$,
-$32\times32\times16$, cell $2\times10^{-7}$\,m, $h=1$ PIC cell, no near
-shell, same planes, $+y$ beam-axis convention and layout as
-Fig.~\ref{fig:sxy10} \citep{SL2}; $y$ increases left to right and the
-vertical axis is $x$ (x-y) or $z$ (z-y). The three electric components are
-drawn, with the field row on top and the error row below. $B\equiv0$, so no
-magnetic companion exists. The error in the bunch core is $0.12$ to $0.415$
-per component (Table~\ref{tab:slices}).}
-\label{fig:sxy1}
+\includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
+\includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_B.pdf}
+\caption{Binned $1$\,mrad case (\texttt{VAR1b}): $N=200$, $Q=-32$\,aC,
+$\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell
+$2\times10^{-7}$\,m, picBunch velocity-binned field against the unbinned
+per-particle reference. Upper image electric, lower image magnetic, each with
+four columns, one shared scale per row and one colour bar; error rows are
+logarithmic and masked below $10^{-3}$ of the reference peak. The solid white
+outline marks the TSC support; as in Fig.~\ref{fig:valforwardE} the in-support
+error is limited by the order-4 driver reference.}
+\label{fig:val1mrad}
 \end{figure}
 
 Table~\ref{tab:slices} lists the measured worst relative error per component
-and the fraction of unmasked plane pixels above $10^{-3}$, with error-column
-pixels below $10^{-3}$ of the plane peak masked white in both figures.
+and the fraction of unmasked plane pixels above $10^{-3}$ for the earlier
+$N=1000$, $32\times32\times16$ set, with error-column pixels below $10^{-3}$
+of the plane peak masked white. The new validation figures above supersede
+those slices for the forward and $1$\,mrad cases.
 
 \begin{table}[t]
 \centering
@@ -319,6 +353,26 @@ measured error concentrated at the beamed core and falling away toward the
 plane edges. The far field is measured separately
 (Table~\ref{tab:w4b}, Fig.~\ref{fig:Fw4b}); the near-shell contribution
 is measured at the same geometry in Section~\ref{sec:slices-runs}.
+
+ \paragraph{The earlier core-slice error was the reference's, not the
+ solver's.} A later arbiter comparison isolates the driver's error. At the
+ hardest in-support node of a $\gamma=10$ bunch ($E_y$ at cells
+ $(32,31.5,31)$, $0.53$ cells from source \#94), the order-12/refine-3
+ continuum arbiter reads $2.077\times10^{9}$\,V/m; the fast near backend reads
+ $2.043\times10^{9}$\,V/m, $1.6\%$ apart. The driver (and
+ \texttt{--near-shell exact}, which shares the same vendored adaptive
+ Gauss--Legendre quadrature and the same mishandling of the moving oblique
+ in-support singularity) reads $2.153\times10^{10}$\,V/m, $10.4\times$ too
+ high. Raising the fast backend's remainder order changed nothing, and growing
+ the shell radius fixed the $1.5$--$6$-cell band but not the in-support node,
+ which is why the fast value and the arbiter agree while the driver does not.
+ The peak-normalised core-slice error of $0.24$--$0.31$ reported earlier for a
+ bunch slice (Section~\ref{sec:slices}; \texttt{BDATA2}) is therefore the
+ driver's error, not the solver's: the honest moving-oblique in-support
+ accuracy of the fast backend is $1.6\%$ at the worst node, not $0.31$ and not
+ $8\times10^{-4}$. The single-particle stationary value
+ $7.99\times10^{-4}$ is unchanged and remains valid
+ (Section~\ref{sec:fastacc}).
 
 \subsection{The fast near evaluator, per component, by region}
 \label{sec:fastacc}
@@ -378,7 +432,7 @@ On the same $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m geometry,
 the exact near shell was run through the library path at the radius the
 envelope case assumed, $R=3$ for $\gamma=1$ and $R=4$ for $\gamma=10$, in mesh
 nodes of this $h=1$ grid \citep{SL3}. The mesh-only plane errors
-(Table~\ref{tab:slices}, Fig.~\ref{fig:sxy10}, Fig.~\ref{fig:sxy1}) are
+(Table~\ref{tab:slices}) are
  $0.12$--$0.415$ for $\gamma=1$ and $0.11$--$4.60$ for $\gamma=10$: these
 planes cut the sources, the region where the spectral convolution is not
 the dominant term. With the near shell the worst per-component plane error
@@ -587,7 +641,7 @@ would grow with $N$, and it does not \citep{W7t}.
   \citep{LARGE1}. These maps use the earlier axial-$x$ data set and keep
   $x$ horizontal; they are retained for the domain-size comparison and are
   not part of the $+y$ beam-axis slice set of
-  Figs.~\ref{fig:sxy10}--\ref{fig:sxy1}. Upper image, x-y plane through the
+  Figs.~\ref{fig:valforwardE}--\ref{fig:valfluctB}. Upper image, x-y plane through the
   bunch centre; lower image, z-y plane. In each image the field row is on top
   and the error row below, with $E_x,E_y,E_z$ columns; the error is against
   the independent continuum. The boundary field is about $10.3\%$ of the peak

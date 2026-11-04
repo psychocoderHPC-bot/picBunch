@@ -9,10 +9,14 @@
  $7.99\times10^{-4}$ stationary interior, $1.96\times10^{-5}$ face, and
  $1.57\times10^{-7}$ outside; $1.69\times10^{-4}$ moving axial interior,
  $1.11\times10^{-4}$ face, $2.12\times10^{-6}$ outside; and
- $8.15\times10^{-2}$ moving oblique interior, the measured limit of the fast
- backend (Section~\ref{sec:fastacc}) \citep{CFPORT,INT4}. The oblique value is
- the one region where the fast backend is above $10^{-3}$ at its default
- order.
+  $8.15\times10^{-2}$ moving oblique interior, the measured limit of the fast
+  backend at its default order (Section~\ref{sec:fastacc})
+  \citep{CFPORT,INT4}. The oblique value is the one region where the fast
+  backend is above $10^{-3}$ at its default order. Against the order-12/refine-3
+  continuum arbiter the fast backend is $1.6\%$ at the closest moving in-support
+  node, the arbiter-validated in-support accuracy, whereas the driver and the
+  \texttt{exact} backend overestimate that node by $\sim10\times$
+  (Section~\ref{sec:slices}) \citep{indfield}.
 
  The mesh alone, without the near shell, reproduces the field to
  $0.12$--$0.415$ for $\gamma=1$ and $0.11$--$4.60$ for $\gamma=10$ where the
