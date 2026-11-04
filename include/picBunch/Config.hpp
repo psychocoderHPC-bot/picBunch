@@ -57,6 +57,9 @@ namespace picBunch
             //! is the safe choice for a multi-rank restart; the bounding-box
             //! patch is validated only for single-rank restarts.
             Patch patch = Patch::BoundingBox;
+            //! Number of particle patches written for the generated species.
+            //! One patch per rank-overlap region; 1 keeps the single-rank layout.
+            std::size_t patchCount = 1;
         } placement;
 
         struct Accuracy

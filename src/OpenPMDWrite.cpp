@@ -568,10 +568,13 @@ namespace picBunch
                             std::copy(tile.begin(), tile.end(), buffer.get());
                             component.storeChunk(buffer, chunkOffset, chunkExtent);
                         }
-                        // Collective flush: every rank calls it the same number
-                        // of times, so the buffers above are released per tile.
-                        series->flush();
                     }
+                // One collective flush per z-tile instead of one per component.
+                // The old per-component flush multiplied the collective HDF5
+                // metadata round-trips by six and dominated the multi-rank
+                // writer; a tile's six component buffers are still released
+                // here, so peak memory stays at six tile buffers per rank.
+                series->flush();
             }
 
             if(collective)
@@ -1543,14 +1546,78 @@ namespace picBunch
                     "PicOnGPU restart writer: generated species '"
                     + generated.species + "' needs a positive unit_mass to write the "
                     "mass record");
+            // Patch layout: one region per rank-overlap slab when requested.
+            std::vector<ParticlePatch> patches = generated.patches;
+            if(patches.empty())
+            {
+                ParticlePatch patch;
+                patch.offset = generated.patchOffset;
+                patch.extent = generated.patchExtent;
+                patches.push_back(patch);
+            }
+            // Assign each particle to the first patch that contains its cell.
+            // Regions may overlap; ownership is disjoint, so every particle is
+            // written exactly once and the numParticles offsets are cumulative.
+            std::vector<std::vector<std::size_t>> owned(patches.size());
+            std::vector<std::size_t> order;
+            order.reserve(count);
+            for(std::size_t p = 0; p < count; ++p)
+            {
+                double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                std::int64_t cell[3];
+                for(int a = 0; a < 3; ++a)
+                {
+                    double const cells = (xyz[a] - generated.domainOrigin[a])
+                        / generated.cellSize[a];
+                    cell[a] = static_cast<std::int64_t>(std::floor(cells + 1e-9));
+                }
+                bool found = false;
+                for(std::size_t q = 0; q < patches.size() && !found; ++q)
+                {
+                    bool inside = true;
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        std::int64_t const lo = patches[q].offset[static_cast<std::size_t>(a)];
+                        std::int64_t const hi = lo
+                            + static_cast<std::int64_t>(
+                                patches[q].extent[static_cast<std::size_t>(a)]);
+                        if(cell[a] < lo || cell[a] >= hi)
+                        {
+                            inside = false;
+                            break;
+                        }
+                    }
+                    if(inside)
+                    {
+                        owned[q].push_back(p);
+                        order.push_back(p);
+                        found = true;
+                    }
+                }
+                if(!found)
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: particle " + std::to_string(p)
+                        + " lies outside every generated patch; enlarge the patch extent");
+            }
+            std::vector<std::uint64_t> patchCount(patches.size());
+            std::vector<std::uint64_t> patchOffsetCumulative(patches.size());
+            std::uint64_t running = 0;
+            for(std::size_t q = 0; q < patches.size(); ++q)
+            {
+                patchCount[q] = static_cast<std::uint64_t>(owned[q].size());
+                patchOffsetCumulative[q] = running;
+                running += patchCount[q];
+            }
+
             for(int a = 0; a < 3; ++a)
             {
                 position[static_cast<std::size_t>(a)].resize(count);
                 momentum[static_cast<std::size_t>(a)].resize(count);
                 positionOffset[static_cast<std::size_t>(a)].resize(count);
             }
-            for(std::size_t p = 0; p < count; ++p)
+            for(std::size_t slot = 0; slot < count; ++slot)
             {
+                std::size_t const p = order[slot];
                 double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
                 double const u[3] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
                 double const restMass = (!bunch.restMass.empty() && bunch.restMass[p] > 0.0)
@@ -1563,23 +1630,15 @@ namespace picBunch
                     double const cells = (xyz[a] - generated.domainOrigin[a])
                         / generated.cellSize[a];
                     double const cellIndex = std::floor(cells + 1e-9);
-                    if(cellIndex < 0.0
-                       || cellIndex >= static_cast<double>(
-                           generated.patchOffset[static_cast<std::size_t>(a)]
-                           + static_cast<std::int64_t>(
-                               generated.patchExtent[static_cast<std::size_t>(a)])))
-                        throw std::runtime_error(
-                            "PicOnGPU restart writer: particle " + std::to_string(p)
-                            + " lies outside the generated patch on axis " + std::to_string(a));
-                    position[static_cast<std::size_t>(a)][p] = cells - cellIndex;
-                    positionOffset[static_cast<std::size_t>(a)][p]
+                    position[static_cast<std::size_t>(a)][slot] = cells - cellIndex;
+                    positionOffset[static_cast<std::size_t>(a)][slot]
                         = static_cast<std::int32_t>(cellIndex);
-                    momentum[static_cast<std::size_t>(a)][p]
+                    momentum[static_cast<std::size_t>(a)][slot]
                         = u[a] * restMass * kSpeedOfLight / generated.unitMassSpeed;
                 }
-                weighting[p] = bunch.weight[p];
-                charge[p] = bunch.charge[p] / generated.unitCharge;
-                mass[p] = restMass / generated.unitMass;
+                weighting[slot] = bunch.weight[p];
+                charge[slot] = bunch.charge[p] / generated.unitCharge;
+                mass[slot] = restMass / generated.unitMass;
             }
 
             std::array<double, 3> const cellUnit{
@@ -1675,21 +1734,28 @@ namespace picBunch
                 1.0,
                 float64);
 
-            hid_t patches = checked(
+            hid_t patchGroup = checked(
                 H5Gcreate2(particles, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
                 "H5Gcreate2");
-            std::uint64_t const total = static_cast<std::uint64_t>(count);
-            std::uint64_t const offsetZero = 0;
+            std::size_t const patchTotal = patches.size();
+            hsize_t const patchCountDim = static_cast<hsize_t>(patchTotal);
             std::array<double, 7> const patchUnitDimension{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-            hid_t numParticles = createOneDimensional(patches, "numParticles", 1, H5T_STD_U64LE);
+            hid_t numParticles = createOneDimensional(
+                patchGroup, "numParticles", patchCountDim, H5T_STD_U64LE);
             checked(
-                H5Dwrite(numParticles, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &total),
+                H5Dwrite(
+                    numParticles,
+                    H5T_NATIVE_UINT64,
+                    H5S_ALL,
+                    H5S_ALL,
+                    H5P_DEFAULT,
+                    patchCount.data()),
                 "H5Dwrite");
             setUnitDimension(numParticles, patchUnitDimension);
             setScalarAttribute(numParticles, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(numParticles);
-            hid_t numParticlesOffset
-                = createOneDimensional(patches, "numParticlesOffset", 1, H5T_STD_U64LE);
+            hid_t numParticlesOffset = createOneDimensional(
+                patchGroup, "numParticlesOffset", patchCountDim, H5T_STD_U64LE);
             checked(
                 H5Dwrite(
                     numParticlesOffset,
@@ -1697,25 +1763,33 @@ namespace picBunch
                     H5S_ALL,
                     H5S_ALL,
                     H5P_DEFAULT,
-                    &offsetZero),
+                    patchOffsetCumulative.data()),
                 "H5Dwrite");
             setUnitDimension(numParticlesOffset, patchUnitDimension);
             setScalarAttribute(numParticlesOffset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(numParticlesOffset);
             hid_t offset = checked(
-                H5Gcreate2(patches, "offset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
+                H5Gcreate2(patchGroup, "offset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
             hid_t extent = checked(
-                H5Gcreate2(patches, "extent", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");
+                H5Gcreate2(patchGroup, "extent", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                "H5Gcreate2");
             setUnitDimension(offset, patchUnitDimension);
             setUnitDimension(extent, patchUnitDimension);
             for(std::size_t a = 0; a < 3; ++a)
             {
                 char const* componentName = a == 0 ? "x" : (a == 1 ? "y" : "z");
-                std::uint64_t const offsetValue
-                    = static_cast<std::uint64_t>(generated.patchOffset[a]);
-                std::uint64_t const extentValue = generated.patchExtent[a];
-                hid_t offsetDataset = createOneDimensional(offset, componentName, 1, H5T_STD_U64LE);
-                hid_t extentDataset = createOneDimensional(extent, componentName, 1, H5T_STD_U64LE);
+                std::vector<std::uint64_t> offsetValues(patchTotal);
+                std::vector<std::uint64_t> extentValues(patchTotal);
+                for(std::size_t q = 0; q < patchTotal; ++q)
+                {
+                    offsetValues[q] = static_cast<std::uint64_t>(patches[q].offset[a]);
+                    extentValues[q] = patches[q].extent[a];
+                }
+                hid_t offsetDataset = createOneDimensional(
+                    offset, componentName, patchCountDim, H5T_STD_U64LE);
+                hid_t extentDataset = createOneDimensional(
+                    extent, componentName, patchCountDim, H5T_STD_U64LE);
                 checked(
                     H5Dwrite(
                         offsetDataset,
@@ -1723,7 +1797,7 @@ namespace picBunch
                         H5S_ALL,
                         H5S_ALL,
                         H5P_DEFAULT,
-                        &offsetValue),
+                        offsetValues.data()),
                     "H5Dwrite");
                 checked(
                     H5Dwrite(
@@ -1732,7 +1806,7 @@ namespace picBunch
                         H5S_ALL,
                         H5S_ALL,
                         H5P_DEFAULT,
-                        &extentValue),
+                        extentValues.data()),
                     "H5Dwrite");
                 setScalarAttribute(offsetDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
                 setScalarAttribute(extentDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
@@ -1741,7 +1815,7 @@ namespace picBunch
             }
             closeQuietly(offset);
             closeQuietly(extent);
-            closeQuietly(patches);
+            closeQuietly(patchGroup);
             closeQuietly(particles);
         }
 

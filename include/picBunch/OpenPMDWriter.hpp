@@ -109,6 +109,10 @@ namespace picBunch
         std::array<double, 3> cellSize{1.0, 1.0, 1.0}; //!< SI metres
         std::array<std::int64_t, 3> patchOffset{0, 0, 0}; //!< cells from domain origin
         std::array<std::uint64_t, 3> patchExtent{1, 1, 1};
+        //! Patch regions.  Empty keeps the single ``patchOffset``/``patchExtent``
+        //! layout.  With more than one, particles are reordered so each patch
+        //! owns a contiguous range and ``numParticlesOffset`` is cumulative.
+        std::vector<ParticlePatch> patches;
         //! PIConGPU momentum unit ``unit_mass * unit_speed`` in SI.
         double unitMassSpeed = 1.0;
         //! PIConGPU charge unit in Coulomb (``sim.unit.charge()``).  Required

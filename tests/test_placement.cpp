@@ -295,6 +295,54 @@ TEST(Placement, DomainPatchCoversTheWholeDomain)
     EXPECT_NEAR(placed.centroid[0], 3.0, 1e-12);
 }
 
+TEST(Placement, PatchCountSplitsTheRegionWithCumulativeCoverage)
+{
+    picBunch::Config config;
+    config.domain.cells = {10, 12, 32};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    config.placement.fraction = true;
+    config.placement.offset = {0.5, 0.5, 0.5};
+    config.placement.patch = picBunch::Config::Placement::Patch::Domain;
+    config.placement.patchCount = 4;
+
+    picBunch::Bunch bunch;
+    bunch.resize(3);
+    std::array<std::array<double, 3>, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    for(std::size_t p = 0; p < 3; ++p)
+    {
+        bunch.x[p] = positions[p][0];
+        bunch.y[p] = positions[p][1];
+        bunch.z[p] = positions[p][2];
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+
+    auto const placed = picBunch::placeBunch(bunch, config);
+    ASSERT_EQ(placed.patches.size(), 4u);
+    // The z slices tile the domain; neighbours overlap by one cell and the
+    // union covers [0, 32).  x/y stay at the full domain patch.
+    EXPECT_EQ(placed.patches.front().offset[2], 0);
+    EXPECT_EQ(placed.patches.back().offset[2] + static_cast<std::int64_t>(
+                  placed.patches.back().extent[2]), 32);
+    for(std::size_t q = 0; q < placed.patches.size(); ++q)
+    {
+        EXPECT_EQ(placed.patches[q].offset[0], 0);
+        EXPECT_EQ(placed.patches[q].extent[0], 10u);
+        EXPECT_EQ(placed.patches[q].extent[1], 12u);
+        if(q + 1u < placed.patches.size())
+        {
+            auto const& current = placed.patches[q];
+            auto const& next = placed.patches[q + 1u];
+            EXPECT_LE(
+                current.offset[2] + static_cast<std::int64_t>(current.extent[2]),
+                next.offset[2] + static_cast<std::int64_t>(next.extent[2]));
+            EXPECT_LE(next.offset[2], current.offset[2] + static_cast<std::int64_t>(current.extent[2]));
+        }
+    }
+}
+
 TEST(Placement, OutOfDomainIsRejectedWithoutClipping)
 {
     picBunch::Config config;

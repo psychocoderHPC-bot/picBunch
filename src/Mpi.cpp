@@ -3,8 +3,10 @@
 
 #include "picBunch/Mpi.hpp"
 
+#include <array>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 #if defined(PICBUNCH_ENABLE_MPI)
 #    include <mpi.h>
@@ -25,6 +27,155 @@ namespace picBunch
 #endif
         }
     } // namespace
+
+
+    MpiParallelContext::MpiParallelContext()
+    {
+        rank = mpiRank();
+        size = mpiSize();
+    }
+
+    void MpiParallelContext::allreduceSum(double* values, std::size_t count) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1 && count > 0)
+            MPI_Allreduce(
+                MPI_IN_PLACE,
+                values,
+                static_cast<int>(count),
+                MPI_DOUBLE,
+                MPI_SUM,
+                MPI_COMM_WORLD);
+#else
+        (void)values;
+        (void)count;
+#endif
+    }
+
+    void MpiParallelContext::allreduceSum(std::uint64_t& value) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+            MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+#else
+        (void)value;
+#endif
+    }
+
+    void mpiBroadcastBunch(Bunch& bunch, int root)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(!initialized() || mpiSize() <= 1)
+            return;
+        std::uint64_t count = (mpiRank() == root) ? bunch.size() : 0;
+        MPI_Bcast(&count, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        if(mpiRank() != root)
+            bunch.resize(static_cast<std::size_t>(count));
+        auto broadcastVector = [&](std::vector<double>& values, bool always) {
+            std::uint64_t present = values.empty() ? 0u : 1u;
+            MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+            if(present == 0u && !always)
+                return;
+            if(mpiRank() != root)
+                values.assign(static_cast<std::size_t>(count), 0.0);
+            MPI_Bcast(values.data(), static_cast<int>(values.size()), MPI_DOUBLE, root, MPI_COMM_WORLD);
+        };
+        broadcastVector(bunch.x, true);
+        broadcastVector(bunch.y, true);
+        broadcastVector(bunch.z, true);
+        broadcastVector(bunch.ux, true);
+        broadcastVector(bunch.uy, true);
+        broadcastVector(bunch.uz, true);
+        broadcastVector(bunch.weight, true);
+        broadcastVector(bunch.charge, true);
+        broadcastVector(bunch.restMass, false);
+#else
+        (void)bunch;
+        (void)root;
+#endif
+    }
+
+    void mpiBroadcastComputeOptions(ComputeOptions& options, int root)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(!initialized() || mpiSize() <= 1)
+            return;
+        double scalars[8] = {
+            options.tolerance,
+            options.marginCells,
+            options.nearShell.radiusCells,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0};
+        std::uint64_t integers[4] = {
+            options.fftPadding,
+            options.deterministicDeposit ? 1u : 0u,
+            static_cast<std::uint64_t>(options.nearShell.mode),
+            static_cast<std::uint64_t>(options.nearShell.tileNodes)};
+        double cell[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
+        MPI_Bcast(scalars, 8, MPI_DOUBLE, root, MPI_COMM_WORLD);
+        MPI_Bcast(integers, 4, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
+        // Optional arrays: one presence flag, then three values each.
+        auto broadcastOptional = [&](std::optional<std::array<std::size_t, 3>>& value) {
+            std::uint64_t present = (mpiRank() == root && value) ? 1u : 0u;
+            MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+            if(present == 0u)
+            {
+                if(mpiRank() != root)
+                    value.reset();
+                return;
+            }
+            std::uint64_t data[3] = {};
+            if(mpiRank() == root)
+                for(int a = 0; a < 3; ++a)
+                    data[a] = (*value)[static_cast<std::size_t>(a)];
+            MPI_Bcast(data, 3, MPI_UINT64_T, root, MPI_COMM_WORLD);
+            value = std::array<std::size_t, 3>{
+                static_cast<std::size_t>(data[0]),
+                static_cast<std::size_t>(data[1]),
+                static_cast<std::size_t>(data[2])};
+        };
+        auto broadcastOptionalDouble = [&](std::optional<std::array<double, 3>>& value) {
+            std::uint64_t present = (mpiRank() == root && value) ? 1u : 0u;
+            MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+            if(present == 0u)
+            {
+                if(mpiRank() != root)
+                    value.reset();
+                return;
+            }
+            double data[3] = {};
+            if(mpiRank() == root)
+                for(int a = 0; a < 3; ++a)
+                    data[a] = (*value)[static_cast<std::size_t>(a)];
+            MPI_Bcast(data, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
+            value = std::array<double, 3>{data[0], data[1], data[2]};
+        };
+        broadcastOptional(options.meshGridSize);
+        broadcastOptionalDouble(options.meshGridOrigin);
+        broadcastOptional(options.gridSize);
+        broadcastOptionalDouble(options.gridOrigin);
+        broadcastOptional(options.globalGridSize);
+        broadcastOptionalDouble(options.globalGridOrigin);
+        if(mpiRank() != root)
+        {
+            options.tolerance = scalars[0];
+            options.marginCells = scalars[1];
+            options.nearShell.radiusCells = scalars[2];
+            options.fftPadding = static_cast<unsigned>(integers[0]);
+            options.deterministicDeposit = integers[1] != 0u;
+            options.nearShell.mode = static_cast<NearShellOptions::Mode>(integers[2]);
+            options.nearShell.tileNodes = static_cast<std::size_t>(integers[3]);
+            options.cellSize = {cell[0], cell[1], cell[2]};
+        }
+#else
+        (void)options;
+        (void)root;
+#endif
+    }
 
     MpiGuard::MpiGuard(int& argc, char**& argv)
     {

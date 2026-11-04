@@ -876,8 +876,19 @@ namespace picBunch
 
         std::uint32_t const spectrumCount = Mz * My * CP;
 
+        // Component/bin parallelism.  Every rank deposits and transforms the
+        // same source spectrum, then owns a disjoint subset of the six output
+        // components.  There is no distributed FFT: the transform stays whole
+        // on each rank, and the six component arrays are summed afterwards.
+        // A rank with no owned component still participates in the reduction.
+        ParallelContext const* par = options.parallel;
+        int const parSize = (par && par->distributed()) ? par->size : 1;
+        int const parRank = (par && par->distributed()) ? par->rank : 0;
+
         for(int c = 0; c < 6; ++c)
         {
+            if(parSize > 1 && (c % parSize) != parRank)
+                continue; // another rank owns this component
             // ------------------------------------------------------------ kernel
             auto const kernelStart = Clock::now();
             queue.enqueue(
@@ -939,6 +950,10 @@ namespace picBunch
                     }
             times.readoutMs += elapsedMs(readoutStart);
         }
+
+        if(parSize > 1)
+            for(int c = 0; c < 6; ++c)
+                par->allreduceSum(field.data[c].data(), field.data[c].size());
 
         return field;
     }
