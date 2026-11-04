@@ -155,13 +155,13 @@ namespace picBunch
      * fixed ``options.fixedBinning``); each velocity box contributes its own
      * deposit, kernel spectrum and convolution, accumulated into the same
      * output.  ``outBinning``, when non-null, receives the binning actually
-     * used (the near shell passes the full-bunch binning down, so the caller
-     * sees the same one).
+     * used (a copy; the near shell passes the full-bunch binning down, so the
+     * caller sees the same one).
      */
     Field computeField(
         Bunch const& bunch,
         ComputeOptions const& options = {},
         StageTimes* stageTimes = nullptr,
-        VelocityBinning const** outBinning = nullptr);
+        VelocityBinning* outBinning = nullptr);
 
 } // namespace picBunch

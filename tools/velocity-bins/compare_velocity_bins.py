@@ -66,8 +66,8 @@ def parse_bands(text: str):
             lo = float(part[:-1])
             bands.append((lo, math.inf, f"[{lo:g}, inf)"))
         else:
-            lo, hi = part.split("-")
-            bands.append((float(lo), float(hi), f"[{lo:g}, {hi:g})"))
+            lo, hi = (float(v) for v in part.split("-"))
+            bands.append((lo, hi, f"[{lo:g}, {hi:g})"))
     return bands
 
 
@@ -206,7 +206,7 @@ def error_stats(mesh, ref, dist, bands, band_idx):
     for c in range(6):
         m = mesh[c][window]
         r = ref[c][window]
-        denom = np.maximum(np.maximum(np.abs(r), np.abs(m)), 1e-30)
+        denom = np.maximum(np.abs(r), 1e-30)
         rel_all[c] = np.max(np.abs(m - r) / denom)
         abs_all[c] = np.max(np.abs(m - r))
     per_band = []
@@ -221,7 +221,7 @@ def error_stats(mesh, ref, dist, bands, band_idx):
         for c in range(6):
             m = mesh[c][sel]
             r = ref[c][sel]
-            denom = np.maximum(np.maximum(np.abs(r), np.abs(m)), 1e-30)
+            denom = np.maximum(np.abs(r), 1e-30)
             rel[c] = np.max(np.abs(m - r) / denom)
             absv[c] = np.max(np.abs(m - r))
         per_band.append({"band": label, "n": int(sel.sum()), "rel": rel.tolist(),
@@ -308,7 +308,7 @@ def main() -> None:
         mesh_disp = mesh.copy()
         stats_disc = error_stats(mesh_disp, Tb, dist, bands, band_idx)
         outside = dist < 0
-        roundoff = float(np.max(np.abs(mesh[outside])) if outside.any() else 0.0)
+        roundoff = float(np.max(np.abs(mesh[:, outside])) if outside.any() else 0.0)
 
         results["runs"][str(B)] = {
             "bins_used": B_used, "per_axis": per_axis, "model_sum": model_sum,

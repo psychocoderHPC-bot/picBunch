@@ -15,6 +15,7 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/NearReference.hpp"
 
 #include <algorithm>
@@ -81,7 +82,8 @@ namespace picBunch
         Bunch const& bunch,
         ComputeOptions const& options,
         NearShellOptions const& nearShell,
-        StageTimes* stageTimes)
+        StageTimes* stageTimes,
+        VelocityBinning* outBinning)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("computeFieldNearExact: empty bunch");
@@ -94,6 +96,8 @@ namespace picBunch
         VelocityBinning binning;
         if(!options.fixedBinning)
             binning = deriveVelocityBinning(bunch, options.tolerance, options.velocityBinning);
+        if(outBinning)
+            *outBinning = options.fixedBinning ? *options.fixedBinning : binning;
 
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
@@ -106,6 +110,8 @@ namespace picBunch
         double const cells[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::size_t const tile = std::max<std::size_t>(1u, nearShell.tileNodes);
         nbref::Settings const settings = exactSettings();
+        pbfast::Settings const fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        bool const useFast = nearShell.mode == NearShellOptions::Mode::Fast;
         std::size_t pairs = 0;
 
         auto const n = grid.n;
@@ -242,16 +248,32 @@ namespace picBunch
                                     for(std::size_t q = 0; q < near.size(); ++q)
                                     {
                                         nbref::Vec3 E, B;
-                                        nbref::shape_field(
-                                            {x_obs, y_obs, z_obs},
-                                            {near.x[q], near.y[q], near.z[q]},
-                                            {near.ux[q], near.uy[q], near.uz[q]},
-                                            cells[0],
-                                            cells[1],
-                                            cells[2],
-                                            settings,
-                                            E,
-                                            B);
+                                        if(useFast)
+                                        {
+                                            pbfast::shape_field(
+                                                {x_obs, y_obs, z_obs},
+                                                {near.x[q], near.y[q], near.z[q]},
+                                                {near.ux[q], near.uy[q], near.uz[q]},
+                                                cells[0],
+                                                cells[1],
+                                                cells[2],
+                                                fastSettings,
+                                                E,
+                                                B);
+                                        }
+                                        else
+                                        {
+                                            nbref::shape_field(
+                                                {x_obs, y_obs, z_obs},
+                                                {near.x[q], near.y[q], near.z[q]},
+                                                {near.ux[q], near.uy[q], near.uz[q]},
+                                                cells[0],
+                                                cells[1],
+                                                cells[2],
+                                                settings,
+                                                E,
+                                                B);
+                                        }
                                         double const component = (c < 3) ? E[c] : B[c - 3];
                                         value += unit * (near.weight[q] * near.charge[q]) * component;
                                     }

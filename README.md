@@ -124,8 +124,8 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--output-iteration N] [--tolerance 1e-3] \
          [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
          [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
-         [--near-shell none|exact] [--near-shell-radius <cells>] \
-         [--near-shell-tile <nodes>]
+         [--near-shell none|exact|fast] [--near-shell-radius <cells>] \
+         [--near-shell-tile <nodes>] [--near-shell-fast-order <n>]
 ```
 
 Example with mesh metadata in the input:
@@ -173,6 +173,32 @@ gamma ~ 10, aspect 1, oblique velocity at R >= 4; gamma 1 at aspect 4 needs abou
 32 cells and is outside the shell's reach. The exact evaluator costs about
 `3.1e-4 s` per (source, node, component) on one 16-thread CPU socket, so it is
 opt-in and not lookup-class. `docs/algorithm.md` has the per-case table.
+
+`--near-shell fast` replaces that adaptive evaluator with the closed-form port: the
+singular part is the exact eight-term `asinh` box (24 primitives) and the remainder is
+plain Gauss-Legendre on the subtracted integrand `(S - W*)K` over the TSC knot panels,
+split at `s*`; `--near-shell-fast-order` sets the remainder order (default 5, 8,000
+nodes in-support). Moving axial velocities use the exact gamma-stretched box. Against
+the independent `indfield` reference (order 12, refine 3) the fast backend reaches
+worst-case `7.99e-4` stationary interior (order 5), `1.96e-5` face, `1.57e-7` outside,
+and `1.69e-4` axial gamma 10 interior (order 8); moving oblique interior is `8.15e-2`
+and is not a `1e-3` path. The assembled field is unchanged outside the near tiles
+(bitwise) and the seam jump excess is `2.0e-10` stationary.
+
+On one H100 at 2e6 particles / 20-cell bunch the mesh compute is `0.136 s`. The fast
+near evaluator measures `1.8468e7` pairs/s stationary at order 5 (`9.21 s` for the
+`1.7e8` support pairs) and `3.983e6` pairs/s axial gamma 10 at order 8:
+
+| configuration | end-to-end | near error |
+| --- | --- | --- |
+| mesh only | 0.136 s | no near correction |
+| support-only shell | 9.35 s | 7.99e-4 |
+| 3-cell shell | 92.2 s | 7.99e-4 in, <=1.6e-7 out |
+| 4-cell shell | 184.2 s | 7.99e-4 in, <=1.6e-7 out |
+
+So `1e-3` is reached in `9.35 s` support-only and in `184 s` with the full 4-cell
+shell, below 300 s. Axial gamma 10 reaches `1.69e-4` in `42.8 s` support-only but
+its 3- and 4-cell shells exceed 300 s.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -588,8 +614,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
 ## Known gaps in v0.1
 
 - **Near shell (implemented in v0.4.1).** The v0.1 mesh path had no analytic near-source
-  correction; v0.4.1 exposes `--near-shell exact`. Its measured envelope is stated above and
-  in `docs/algorithm.md`; it is opt-in because it costs quadrature time per pair.
+  correction; v0.4.1 exposes `--near-shell exact`; `--near-shell fast` adds the closed-form
+  evaluator. Its measured envelope is stated above and in `docs/algorithm.md`. Moving
+  oblique in-support remains at `8.15e-2` on the fast path, and the vendored exact
+  backend is not a moving in-support truth at its pinned settings.
 - **Anisotropic cells set the Coulomb-limit offset.** The delivered field is the TSC-convolved
   field, which for non-cubic cells differs from the point Coulomb by the anisotropic TSC
   convolution: at aspect 4 (z/x) the continuum is 21% below the point Coulomb at 4 cells and

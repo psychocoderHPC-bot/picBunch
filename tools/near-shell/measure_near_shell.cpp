@@ -66,6 +66,8 @@ int main(int argc, char** argv)
         std::vector<std::size_t> grid{32, 32, 32};
         double radius = 3.0;
         std::size_t tile = 4;
+        std::string shell = "exact";
+        int fastOrder = 5;
         std::size_t sources = 1;
         double cloudCells = 0.0;
         std::string prefix = "near_shell";
@@ -96,6 +98,10 @@ int main(int argc, char** argv)
                 radius = std::stod(next());
             else if(a == "--tile")
                 tile = static_cast<std::size_t>(std::stoul(next()));
+            else if(a == "--shell")
+                shell = next();
+            else if(a == "--order")
+                fastOrder = std::stoi(next());
             else if(a == "--sources")
                 sources = static_cast<std::size_t>(std::stoul(next()));
             else if(a == "--cloud-cells")
@@ -142,8 +148,12 @@ int main(int argc, char** argv)
         picBunch::Field const mesh = picBunch::computeField(bunch, options);
         auto t1 = std::chrono::steady_clock::now();
 
+        if(shell != "exact" && shell != "fast")
+            throw std::runtime_error("--shell must be 'exact' or 'fast'");
         picBunch::NearShellOptions ns;
-        ns.mode = picBunch::NearShellOptions::Mode::Exact;
+        ns.mode = (shell == "fast") ? picBunch::NearShellOptions::Mode::Fast
+                                    : picBunch::NearShellOptions::Mode::Exact;
+        ns.fastOrder = fastOrder;
         ns.radiusCells = radius;
         ns.tileNodes = tile;
         std::size_t pairs = 0;
@@ -165,6 +175,8 @@ int main(int argc, char** argv)
         meta << "source " << source[0] << " " << source[1] << " " << source[2] << "\n";
         meta << "radius " << radius << "\n";
         meta << "tile " << tile << "\n";
+        meta << "shell " << shell << "\n";
+        meta << "order " << fastOrder << "\n";
         meta << "sources " << sources << "\n";
         meta << "cloud_cells " << cloudCells << "\n";
         meta << "pairs " << pairs << "\n";

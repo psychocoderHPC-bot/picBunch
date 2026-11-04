@@ -141,6 +141,9 @@ int main(int argc, char** argv)
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
         unsigned fftPadding = 2u;
         bool deterministicDeposit = false;
+        std::string nearShell = "none";
+        double nearShellRadius = 0.0;
+        std::size_t nearShellTile = 4;
         std::string prefix = "velocity_bins";
 
         for(int i = 1; i < argc; ++i)
@@ -191,6 +194,12 @@ int main(int argc, char** argv)
                 fftPadding = static_cast<unsigned>(std::stoul(next()));
             else if(a == "--deterministic-deposit")
                 deterministicDeposit = true;
+            else if(a == "--near-shell")
+                nearShell = next();
+            else if(a == "--near-shell-radius")
+                nearShellRadius = std::stod(next());
+            else if(a == "--near-shell-tile")
+                nearShellTile = static_cast<std::size_t>(std::stoul(next()));
             else if(a == "--output")
                 prefix = next();
             else
@@ -204,6 +213,12 @@ int main(int argc, char** argv)
             throw std::runtime_error("--angle-degrees must be finite and >= 0");
         if(sources == 0u)
             throw std::runtime_error("--sources must be positive");
+        if(nearShell != "none" && nearShell != "exact" && nearShell != "fast")
+            throw std::runtime_error("--near-shell must be none, exact or fast");
+        if(!(nearShellRadius >= 0.0) || !std::isfinite(nearShellRadius))
+            throw std::runtime_error("--near-shell-radius must be finite and non-negative");
+        if(nearShellTile == 0u)
+            throw std::runtime_error("--near-shell-tile must be positive");
 
         // ------------------------------------------------------- bunch generation
         // Beam axis: +z.  Energy spread: gamma_p = gamma*(1 + s*z1), clipped to
@@ -267,6 +282,12 @@ int main(int argc, char** argv)
         options.gridOrigin = {origin[0], origin[1], origin[2]};
         options.fftPadding = fftPadding;
         options.deterministicDeposit = deterministicDeposit;
+        options.nearShell.mode = (nearShell == "fast")
+            ? picBunch::NearShellOptions::Mode::Fast
+            : (nearShell == "exact") ? picBunch::NearShellOptions::Mode::Exact
+                                     : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.radiusCells = nearShellRadius;
+        options.nearShell.tileNodes = nearShellTile;
         options.velocityBinning.modelConstant = modelConstant;
         options.velocityBinning.maxBins = maxBins;
 
@@ -290,17 +311,17 @@ int main(int argc, char** argv)
             options.velocityBinning.explicitBins = std::max<std::size_t>(1u, requested);
 
             picBunch::StageTimes times;
-            picBunch::VelocityBinning const* binning = nullptr;
+            picBunch::VelocityBinning binning;
             auto const t0 = std::chrono::steady_clock::now();
             picBunch::Field const field
                 = picBunch::computeField(bunch, options, &times, &binning);
             auto const t1 = std::chrono::steady_clock::now();
             double const wallS = std::chrono::duration<double>(t1 - t0).count();
 
-            std::size_t const B = binning->count;
+            std::size_t const B = binning.count;
             writeField(prefix + "_field_B" + std::to_string(B) + ".bin", field);
 
-            std::vector<std::size_t> const boxOf = binning->boxOf;
+            std::vector<std::size_t> const boxOf = binning.boxOf;
             std::ofstream meta(prefix + "_meta_B" + std::to_string(B) + ".txt");
             meta.precision(17);
             meta << "grid " << grid[0] << " " << grid[1] << " " << grid[2] << "\n";
@@ -314,30 +335,32 @@ int main(int argc, char** argv)
             meta << "seed " << seed << "\n";
             meta << "tolerance " << tolerance << "\n";
             meta << "fft_padding " << fftPadding << "\n";
+            meta << "near_shell " << nearShell << "\n";
+            meta << "near_shell_radius " << nearShellRadius << "\n";
             meta << "bin_model_constant " << modelConstant << "\n";
             meta << "max_bins " << maxBins << "\n";
             meta << "requested_bins " << requested << "\n";
             meta << "bins_used " << B << "\n";
-            meta << "per_axis " << binning->perAxis[0] << " " << binning->perAxis[1] << " "
-                 << binning->perAxis[2] << "\n";
-            meta << "multi_velocity " << (binning->multiVelocity ? 1 : 0) << "\n";
-            meta << "model_sum " << binning->modelSum << "\n";
-            meta << "model_error " << binning->modelError << "\n";
+            meta << "per_axis " << binning.perAxis[0] << " " << binning.perAxis[1] << " "
+                 << binning.perAxis[2] << "\n";
+            meta << "multi_velocity " << (binning.multiVelocity ? 1 : 0) << "\n";
+            meta << "model_sum " << binning.modelSum << "\n";
+            meta << "model_error " << binning.modelError << "\n";
             meta << "wall_seconds " << wallS << "\n";
             meta << "deposit_ms " << times.depositMs << "\n";
             meta << "kernel_ms " << times.kernelMs << "\n";
             meta << "fft_ms " << times.fftMs << "\n";
             meta << "readout_ms " << times.readoutMs << "\n";
             meta << "basis";
-            for(auto const& row : binning->basis)
+            for(auto const& row : binning.basis)
                 meta << " " << row[0] << " " << row[1] << " " << row[2];
             meta << "\n";
-            meta << "u_min " << binning->uMin[0] << " " << binning->uMin[1] << " "
-                 << binning->uMin[2] << "\n";
-            meta << "u_max " << binning->uMax[0] << " " << binning->uMax[1] << " "
-                 << binning->uMax[2] << "\n";
+            meta << "u_min " << binning.uMin[0] << " " << binning.uMin[1] << " "
+                 << binning.uMin[2] << "\n";
+            meta << "u_max " << binning.uMax[0] << " " << binning.uMax[1] << " "
+                 << binning.uMax[2] << "\n";
             meta << "representative_u";
-            for(auto const& u : binning->representativeU)
+            for(auto const& u : binning.representativeU)
                 meta << " " << u[0] << " " << u[1] << " " << u[2];
             meta << "\n";
             meta << "box_of";
@@ -358,20 +381,20 @@ int main(int argc, char** argv)
             }
 
             report << "bins_requested=" << requested << " bins_used=" << B
-                   << " per_axis=" << binning->perAxis[0] << "x" << binning->perAxis[1] << "x"
-                   << binning->perAxis[2] << " model_sum=" << binning->modelSum
-                   << " model_error=" << binning->modelError << " wall_s=" << wallS
+                   << " per_axis=" << binning.perAxis[0] << "x" << binning.perAxis[1] << "x"
+                   << binning.perAxis[2] << " model_sum=" << binning.modelSum
+                   << " model_error=" << binning.modelError << " wall_s=" << wallS
                    << " deposit_ms=" << times.depositMs << " kernel_ms=" << times.kernelMs
                    << " fft_ms=" << times.fftMs << " readout_ms=" << times.readoutMs << "\n";
             std::printf(
                 "B=%zu (%zux%zux%zu) model_sum=%.6e model_error=%.6e wall=%.4f s "
                 "(deposit %.3f ms, kernel %.3f ms, fft %.3f ms, readout %.3f ms)\n",
                 B,
-                binning->perAxis[0],
-                binning->perAxis[1],
-                binning->perAxis[2],
-                binning->modelSum,
-                binning->modelError,
+                binning.perAxis[0],
+                binning.perAxis[1],
+                binning.perAxis[2],
+                binning.modelSum,
+                binning.modelError,
                 wallS,
                 times.depositMs,
                 times.kernelMs,

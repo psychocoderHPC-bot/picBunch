@@ -166,11 +166,11 @@ TEST(VelocityBins, MixedBunchNoLongerThrows)
 {
     Bunch const bunch = axisBunch(gammaLinspace(10.0, 20.0, 8));
     auto options = smallOptions();
-    picBunch::VelocityBinning const* binning = nullptr;
+    picBunch::VelocityBinning binning;
     picBunch::Field const field
         = picBunch::computeField(bunch, options, nullptr, &binning);
-    ASSERT_NE(binning, nullptr);
-    EXPECT_TRUE(binning->multiVelocity);
+    ASSERT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
     for(auto const& component : field.data)
         for(double v : component)
             EXPECT_TRUE(std::isfinite(v));
@@ -184,17 +184,17 @@ TEST(VelocityBins, OneBoxMatchesSingleVelocityAtMeanU)
     auto options = smallOptions();
     options.velocityBinning.mode = VelocityBinningOptions::Mode::Explicit;
     options.velocityBinning.explicitBins = 1;
-    picBunch::VelocityBinning const* binning = nullptr;
+    picBunch::VelocityBinning binning;
     picBunch::Field const mixedField = picBunch::computeField(mixed, options, nullptr, &binning);
-    ASSERT_NE(binning, nullptr);
+    ASSERT_TRUE(binning.derived);
 
-    Bunch const shared = mixed;
+    Bunch shared = mixed;
     for(auto& u : shared.ux)
-        u = binning->representativeU[0][0];
+        u = binning.representativeU[0][0];
     for(auto& u : shared.uy)
-        u = binning->representativeU[0][1];
+        u = binning.representativeU[0][1];
     for(auto& u : shared.uz)
-        u = binning->representativeU[0][2];
+        u = binning.representativeU[0][2];
     picBunch::Field const sharedField = picBunch::computeField(shared, options);
 
     double maxDiff = 0.0;
@@ -213,33 +213,33 @@ TEST(VelocityBins, BinnedFieldEqualsSumOfBoxClassFields)
     auto options = smallOptions();
     options.velocityBinning.mode = VelocityBinningOptions::Mode::Explicit;
     options.velocityBinning.explicitBins = 2;
-    picBunch::VelocityBinning const* binning = nullptr;
+    picBunch::VelocityBinning binning;
     picBunch::Field const bothField = picBunch::computeField(both, options, nullptr, &binning);
-    ASSERT_NE(binning, nullptr);
-    ASSERT_EQ(binning->count, 2u);
+    ASSERT_TRUE(binning.derived);
+    ASSERT_EQ(binning.count, 2u);
 
     picBunch::Field sum{};
     sum.grid = bothField.grid;
     for(auto& component : sum.data)
         component.assign(bothField.grid.size(), 0.0);
 
-    for(std::size_t b = 0; b < binning->count; ++b)
+    for(std::size_t b = 0; b < binning.count; ++b)
     {
         Bunch box;
         for(std::size_t p = 0; p < both.size(); ++p)
-            if(binning->boxOf[p] == b)
+            if(binning.boxOf[p] == b)
                 box.resize(box.size() + 1);
         std::size_t k = 0;
         for(std::size_t p = 0; p < both.size(); ++p)
         {
-            if(binning->boxOf[p] != b)
+            if(binning.boxOf[p] != b)
                 continue;
             box.x[k] = both.x[p];
             box.y[k] = both.y[p];
             box.z[k] = both.z[p];
-            box.ux[k] = binning->representativeU[b][0];
-            box.uy[k] = binning->representativeU[b][1];
-            box.uz[k] = binning->representativeU[b][2];
+            box.ux[k] = binning.representativeU[b][0];
+            box.uy[k] = binning.representativeU[b][1];
+            box.uz[k] = binning.representativeU[b][2];
             box.weight[k] = both.weight[p];
             box.charge[k] = both.charge[p];
             ++k;

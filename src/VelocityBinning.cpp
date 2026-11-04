@@ -316,12 +316,15 @@ namespace picBunch
                             continue;
                         double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
                             + bunch.uz[p] * bunch.uz[p];
+                        double const uMag = std::sqrt(u2);
                         double const cosA
-                            = std::max(
-                                -1.0,
-                                std::min(1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
-                                               + bunch.uz[p] * uRep[2])
-                                             / (particleGamma[p] * repNorm)));
+                            = (uMag > 0.0)
+                            ? std::max(
+                                  -1.0,
+                                  std::min(1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
+                                                 + bunch.uz[p] * uRep[2])
+                                               / (uMag * repNorm)))
+                            : 1.0;
                         maxAngle = std::max(maxAngle, std::acos(cosA));
                     }
                 double const gamma = boxGammaMax[b];

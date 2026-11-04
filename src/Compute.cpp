@@ -696,10 +696,10 @@ namespace picBunch
         Bunch const& bunch,
         ComputeOptions const& options,
         StageTimes* stageTimes,
-        VelocityBinning const** outBinning)
+        VelocityBinning* outBinning)
     {
-        if(options.nearShell.mode == NearShellOptions::Mode::Exact)
-            return computeFieldNearExact(bunch, options, options.nearShell, stageTimes);
+        if(options.nearShell.mode != NearShellOptions::Mode::None)
+            return computeFieldNearExact(bunch, options, options.nearShell, stageTimes, outBinning);
 
         // A multi-velocity bunch is the sum over velocity classes: the kernel
         // is linear in charge, so each velocity box contributes its own
@@ -717,7 +717,7 @@ namespace picBunch
             binningPointer = &derivedBinning;
         }
         if(outBinning)
-            *outBinning = binningPointer;
+            *outBinning = *binningPointer;
         VelocityBinning const& binning = *binningPointer;
         std::size_t const binCount = binning.count;
 
