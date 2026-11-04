@@ -8,10 +8,11 @@ checkpoint is an optional output mode.
 The pipeline is openPMD particles in, free-space hybrid field out, openPMD field written
 back. The reader, TSC deposit, moving point kernel, padded FFT convolution, Yee read-out,
 openPMD writer, and PIConGPU restart writer are implemented. Written field values are SI:
-E in V/m and B in T, with `unitSI = 1.0` and the matching `unitDimension`. v0.1 supports a
-single shared velocity; an input with a momentum spread exits non-zero. `--tolerance` is
-the only accuracy knob. The physics validation gates, the near-source limitation and their
-provenance are recorded in [docs/algorithm.md](docs/algorithm.md).
+E in V/m and B in T, with `unitSI = 1.0` and the matching `unitDimension`. A bunch with a
+momentum spread is split into velocity boxes and summed over the classes; a single shared
+velocity keeps the historical one-box path. `--tolerance` is the only accuracy knob. The
+physics validation gates, the near-source limitation and their provenance are recorded in
+[docs/algorithm.md](docs/algorithm.md).
 
 ## Documentation
 
@@ -210,6 +211,41 @@ time of the CLI. Moving oblique in-support stays at `8.15e-2` (per component Ex 
 Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
 `--near-shell exact` is retained for comparison; its adaptive evaluator is inaccurate
 for moving in-support points at the pinned settings (`1.55e-1` axial interior).
+
+### Velocity binning
+
+The mesh kernel is exact for one shared `u` and linear in charge, so a mixed bunch is the
+sum over velocity classes. `deriveVelocityBinning` aligns a beam frame to the
+charge-weighted mean momentum, partitions the observed `u` extent into a uniform
+`N1 x N2 x N3` box grid, and evaluates each box with its centre velocity. The geometry
+depends only on the `u` extent and the box counts, never on the membership, so the near
+shell can use the same full-bunch binning on every per-tile local mesh and the mesh
+subtraction cancels bin for bin. Nodes inside the shell therefore keep the exact
+per-particle-velocity field and only the outside-shell field carries the binning error.
+
+The error model is
+`modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + Delta_gamma_b/gamma_b)`,
+where `q_b/Q` is the charge fraction of box `b`, `gamma_b` the largest gamma in the box,
+`Delta_theta_b` the largest angle to the box centre, and `Delta_gamma_b` the gamma range.
+The shipped calibration is `C = 1`; `--bin-model-constant` overrides it for diagnostics.
+`--velocity-bins N` requests a fixed count and `--velocity-bins 0` (the default) takes the
+smallest power of two whose estimate is at or below `--tolerance`, capped by
+`--max-velocity-bins` (default 256). When the cap is too small the run exits non-zero and
+names the count the model needs, for example
+`the velocity-bin model requires at least 32 boxes for tolerance 0.001000`.
+The single-velocity case is detected within `1e-12` relative and returns one box, so its
+field is bitwise the unbinned field.
+
+Measured on the multi-velocity campaign (`pr24-20261102`, branch `experimental/multivel`,
+H100, `02891fe6`): a 5% energy spread reaches `1e-3` binning error at 16 boxes
+(`1.12e-3`; `2.72e-4` at 64). A 5 degree angular spread does not reach `1e-3`; the
+measured binning error is `0.421` at 16 boxes and `0.295` at 64, because it scales only
+as `1/sqrt(N_transverse)`. For the 1 mrad x-divergence bunch used for the paper
+(`N = 200`, `64^3` cells, cell `1e-7` m, `--near-shell fast`), the auto policy chooses
+32 boxes (`32x1x1`, estimate `8.35e-4`); the resulting `B_y` peak is `8.57e2 T` against
+`B_z = 2.34e4 T` (ratio `3.7e-2`), while the exact per-particle reference is
+`B_y = 8.24 T`, ratio `3.5e-4`. The angular case is accepted and runs, but binning does
+not reproduce the small `B_y` residual; the reference needs per-particle velocities.
 
 `--tolerance` is the only accuracy knob. It is a relative target for the delivered
 free-space convolution: padding 2 is used for targets at or above the measured padding-2
@@ -435,7 +471,7 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
-The v0.7.0 release tree passes 18/18 CTest entries on all three hosts: rosi_v100
+The v0.8.0 release tree passes 19/19 CTest entries on all three hosts: rosi_v100
 (CUDA 12.6, sm_70), jureca-h100 (CUDA 13.4, sm_90) and hal (HIP, gfx1100, ROCm 7.2).
 The ROCm 7.2 `librocfft` teardown segfault is gone: the HIP build now calls
 `rocfft_cleanup()` after the plans are destroyed while the queue and runtime are still
@@ -445,7 +481,8 @@ The entries are
 (charge-weighted centring, `bbox` and `domain` patches, out-of-domain rejection, dtype and
 `charge`/`mass` records) plus `picBunch.Margin` (margin and far-tail validation) and
 `picBunch.NearShellCli`, which runs the shipped binary with `--near-shell exact` and asserts
-a finite field that changes inside the shell. The `Domain.GridStaysOnBunchBox` test checks
+a finite field that changes inside the shell, and `picBunch.VelocityBins` (binning model,
+single-velocity equivalence, box assignment and the auto-policy error). The `Domain.GridStaysOnBunchBox` test checks
 that a 1024^3 global request keeps the compute box small;
 `Domain.ChunkedWriteZerosAndOffset` documents the zero-fill writer path used by the
 diagnostic flag.
@@ -629,6 +666,15 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.8.0** adds tolerance-driven velocity binning for mixed bunches. A momentum spread
+  no longer exits with the single-shared-velocity error: the field is summed over
+  velocity boxes, the near shell stays bin-free because every pair keeps its own velocity,
+  and the near-shell fast backend and its full mode forwarding, the HIP teardown guard and
+  the MPI component/tile state are preserved. `--velocity-bins`, `--bin-model-constant`
+  and `--max-velocity-bins` expose the policy; an infeasible auto request exits with the
+  number of boxes needed. The shipped calibration is `C = 1`. Measured accuracy: a 5%
+  energy spread reaches `1e-3` at 16 boxes; a 5 degree angular spread does not reach
+  `1e-3`. The `picBunch.VelocityBins` test brings the suite to 19/19 on all three hosts.
 - **v0.7.0** adds `--near-shell fast` (TOML `accuracy.near_shell = "fast"`,
   `--near-shell-fast-order`): the exact eight-term `asinh` box plus a gamma-stretched
   axial box and plain Gauss-Legendre on the subtracted `(S - W*)K` remainder, order 5 by
@@ -714,8 +760,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
   at 24 cells). This is a quantified aspect limit, not a "cubic cells only" restriction. The
   executable also warns on stderr when the largest and smallest spacing differ by a factor of
   2 or more, and computes the request unchanged.
-- **Single shared velocity.** A momentum spread exits non-zero; per-particle velocity is
-  not supported.
+- **Velocity binning.** A momentum spread is supported through velocity boxes with the
+  measured limits above. Binning replaces each particle by its box-centre velocity, so it
+  does not reproduce the small `B_y` residual of an angular spread; that case needs
+  per-particle velocities. An auto request above the box cap exits with the needed count.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
 - **Padding required.** With `fftPadding = 1` the FFT box equals the output box and
   source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**

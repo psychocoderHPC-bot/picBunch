@@ -1,0 +1,22 @@
+\section{Introduction}
+\label{sec:intro}
+
+When a particle-in-cell (PIC) simulation starts, the bunch of particles must
+carry an initial electromagnetic field, or the first push already acts on the
+wrong force. The field of a moving bunch in free space is known in closed form
+for each point charge, but a simulation reads that field on a staggered mesh
+with thousands of observation points, so it is computed by a fast sum over the
+source charges rather than by evaluating the closed form everywhere. We do that
+sum as a TSC deposit onto a zero-padded grid, a sampled exact TSC-convolved
+kernel, and a free-space FFT convolution, with staggered Yee read-out. This
+paper gives the exact discrete recipe a re-implementer needs, and it measures
+the cost and the accuracy of that recipe on a single V100, naming the reference
+for every error statement.
+
+The established workaround avoids computing the initial field altogether: one
+starts from a field-free state and marches the bunch forward, letting the
+fields build up in the first few steps. The present-time field of a uniformly
+moving bunch has no transient, so this history has no physical basis. We
+measure how well the discrete method reproduces that field and how much it
+costs, and we state the conditions under which it fails
+(Section~\ref{sec:limits}).

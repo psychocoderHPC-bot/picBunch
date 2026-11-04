@@ -4,6 +4,7 @@
 
 #include "picBunch/Parallel.hpp"
 #include "picBunch/Types.hpp"
+#include "picBunch/VelocityBinning.hpp"
 
 #include <array>
 #include <optional>
@@ -150,7 +151,18 @@ namespace picBunch
      *
      * ``stageTimes``, when non-null, receives a wall-clock breakdown.  Every
      * boundary waits for the device, so the numbers are comparable across backends.
+     *
+     * A multi-velocity bunch is split by ``options.velocityBinning`` (or the
+     * fixed ``options.fixedBinning``); each velocity box contributes its own
+     * deposit, kernel spectrum and convolution, accumulated into the same
+     * output.  ``outBinning``, when non-null, receives the binning actually
+     * used (a copy; the near shell passes the full-bunch binning down, so the
+     * caller sees the same one).
      */
-    Field computeField(Bunch const& bunch, ComputeOptions const& options = {}, StageTimes* stageTimes = nullptr);
+    Field computeField(
+        Bunch const& bunch,
+        ComputeOptions const& options = {},
+        StageTimes* stageTimes = nullptr,
+        VelocityBinning* outBinning = nullptr);
 
 } // namespace picBunch

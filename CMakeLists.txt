@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     picBunch
-    VERSION 0.7.0
+    VERSION 0.8.0
     DESCRIPTION "Standalone GPU bunch-field initializer: openPMD particles in, free-space hybrid fields out"
     HOMEPAGE_URL "https://github.com/psychocoderHPC-bot/picBunch"
     LANGUAGES CXX
@@ -222,6 +222,7 @@ set(PICBUNCH_SOURCES
     src/Compute.cpp
     src/FarTail.cpp
     src/NearShell.cpp
+    src/VelocityBinning.cpp
 )
 
 if(PICBUNCH_ENABLE_CUDA)
@@ -310,3 +311,9 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 # Measurement driver for the exact near shell (host-only, no openPMD).
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
+
+# Measurement driver for velocity binning: synthetic mixed-velocity bunch,
+# binned fields for a list of box counts, for the continuum reference
+# comparison (tools/velocity-bins/compare_velocity_bins.py).
+add_executable(picBunchVelocityBinsMeasure tools/velocity-bins/measure_velocity_bins.cpp)
+target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)

@@ -1,0 +1,40 @@
+\documentclass[10pt,a4paper]{article}
+
+% ---- packages (pgfplots loaded without the compat option) ----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{siunitx}
+\usepackage{natbib}
+\bibliographystyle{unsrtnat}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+
+\newcommand{\epsz}{\varepsilon}
+\newcommand{\Rthree}{\mathbb{R}^3}
+
+\title{picBunch: a free-space FFT convolution for the initial field of a
+uniformly moving particle bunch, and its measured cost and accuracy}
+\author{picBunch authors}
+\date{Run \texttt{pr24-20261102}}
+
+\begin{document}
+\maketitle
+
+\input{sec_intro}
+\input{sec_fielddef}
+\input{sec_method}
+\input{sec_scaling}
+\input{sec_limits}
+\input{sec_accuracy}
+\input{sec_comparison}
+\input{sec_discussion}
+\input{sec_conclusion}
+
+\bibliography{refs}
+
+\end{document}

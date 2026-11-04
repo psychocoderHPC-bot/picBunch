@@ -99,6 +99,17 @@ namespace
             "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
             "                        (default: 4)\n"
             "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
+            "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
+            "                        0 = auto: smallest count whose error-model\n"
+            "                        estimate is below --tolerance (default: 0)\n"
+            "  --bin-model-constant <C>\n"
+            "                        calibration constant of the bin error model\n"
+            "                        (diagnostic override of the shipped fit)\n"
+            "  --max-velocity-bins <N>\n"
+            "                        box-count cap of the auto policy (default: 256);\n"
+            "                        an infeasible requirement fails with the needed\n"
+            "                        count\n"
+            "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -123,6 +134,9 @@ namespace
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
+        std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
+        double binModelConstant = picBunch::kDefaultVelocityModelConstant;
+        std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
         std::optional<std::array<double, 3>> cellSize;
         std::optional<std::array<std::size_t, 3>> grid;
         std::optional<std::array<double, 3>> origin;
@@ -170,7 +184,7 @@ namespace
     }
 
     //! Strict floating-point parse: reject trailing junk such as "1e-3abc".
-    double parseTolerance(std::string const& text)
+    double parseDoubleStrict(std::string const& text, char const* option)
     {
         std::size_t consumed = 0;
         double value = 0.0;
@@ -181,12 +195,18 @@ namespace
         catch(std::exception const&)
         {
             throw std::invalid_argument(
-                "invalid value '" + text + "' for --tolerance: expected a number");
+                std::string("invalid value '") + text + "' for " + option + ": expected a number");
         }
         if(consumed != text.size())
             throw std::invalid_argument(
-                "invalid value '" + text + "' for --tolerance: trailing characters");
+                std::string("invalid value '") + text + "' for " + option + ": trailing characters");
         return value;
+    }
+
+    //! Strict floating-point parse: reject trailing junk such as "1e-3abc".
+    double parseTolerance(std::string const& text)
+    {
+        return parseDoubleStrict(text, "--tolerance");
     }
 
     //! Split on commas; require either one value (repeated) or exactly three.
@@ -296,6 +316,17 @@ namespace
             else if(option == "--near-shell-fast-order")
                 args.nearShellFastOrder
                     = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
+            else if(option == "--velocity-bins")
+                args.velocityBins = parseIteration(value("--velocity-bins"), "--velocity-bins");
+            else if(option == "--bin-model-constant")
+                args.binModelConstant
+                    = parseDoubleStrict(value("--bin-model-constant"), "--bin-model-constant");
+            else if(option == "--max-velocity-bins")
+                args.maxVelocityBins
+                    = parseIteration(value("--max-velocity-bins"), "--max-velocity-bins");
+            else if(option == "--near-shell-fast-order")
+                args.nearShellFastOrder
+                    = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -353,6 +384,12 @@ namespace
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         if(args.nearShellTile == 0u)
             throw std::invalid_argument("--near-shell-tile must be positive");
+        if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
+            throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
+        if(args.maxVelocityBins < 1u)
+            throw std::invalid_argument("--max-velocity-bins must be >= 1");
+        if(!(args.binModelConstant > 0.0) || !std::isfinite(args.binModelConstant))
+            throw std::invalid_argument("--bin-model-constant must be finite and positive");
         if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
             throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
         if(args.restartFormat != "standard" && args.restartFormat != "picongpu")
@@ -588,6 +625,12 @@ int main(int argc, char** argv)
         options.nearShell.fastOrder = args.nearShellFastOrder;
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
+        options.velocityBinning.mode
+            = (args.velocityBins == 0u) ? picBunch::VelocityBinningOptions::Mode::Auto
+                                        : picBunch::VelocityBinningOptions::Mode::Explicit;
+        options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
+        options.velocityBinning.modelConstant = args.binModelConstant;
+        options.velocityBinning.maxBins = args.maxVelocityBins;
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
@@ -727,18 +770,31 @@ int main(int argc, char** argv)
             args.nearShell.c_str(),
             picBunch::resolveNearShellRadius(options, options.nearShell),
             options.nearShell.tileNodes);
+        picBunch::VelocityBinning binning;
         if(options.nearShell.mode != picBunch::NearShellOptions::Mode::None)
         {
             std::size_t exactPairs = 0;
             options.nearShell.exactPairs = &exactPairs;
-            field = picBunch::computeField(bunchData.bunch, options, &times);
+            field = picBunch::computeField(bunchData.bunch, options, &times, &binning);
             if(root)
                 std::printf(
                     "near shell: %zu exact (source,node,component) evaluations\n",
                     exactPairs);
         }
         else
-            field = picBunch::computeField(bunchData.bunch, options, &times);
+            field = picBunch::computeField(bunchData.bunch, options, &times, &binning);
+        if(binning.derived)
+            std::printf(
+                "velocity bins: %zu box(es) (%zux%zux%zu), model estimate %.3e "
+                "(constant %.3e, tolerance %.3e)%s\n",
+                binning.count,
+                binning.perAxis[0],
+                binning.perAxis[1],
+                binning.perAxis[2],
+                binning.modelError,
+                binning.modelConstant,
+                args.tolerance,
+                binning.multiVelocity ? "" : ", single velocity");
 
         auto fieldPeaks = [](picBunch::Field const& value) {
             std::array<double, 2> peaks{0.0, 0.0};

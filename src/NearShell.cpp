@@ -84,10 +84,22 @@ namespace picBunch
         Bunch const& bunch,
         ComputeOptions const& options,
         NearShellOptions const& nearShell,
-        StageTimes* stageTimes)
+        StageTimes* stageTimes,
+        VelocityBinning* outBinning)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("computeFieldNearExact: empty bunch");
+
+        // The exact near term evaluates every (source, node) pair with the
+        // source's own velocity: bin-free.  The mesh subtraction cancels the
+        // global mesh bin for bin only if both use the same box geometry and
+        // representatives, so the binning is derived once from the full bunch
+        // and fixed for every per-tile local mesh.
+        VelocityBinning binning;
+        if(!options.fixedBinning)
+            binning = deriveVelocityBinning(bunch, options.tolerance, options.velocityBinning);
+        if(outBinning)
+            *outBinning = options.fixedBinning ? *options.fixedBinning : binning;
 
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
@@ -95,6 +107,8 @@ namespace picBunch
         // context is supplied, and computeField already reduced the six arrays
         // onto every rank.  The near-shell tiles below are then partitioned so
         // each rank touches only its own output nodes.
+        if(!options.fixedBinning)
+            plain.fixedBinning = binning;
         Field field = computeField(bunch, plain, stageTimes);
 
         // Each rank owns a disjoint set of output tiles and writes only the

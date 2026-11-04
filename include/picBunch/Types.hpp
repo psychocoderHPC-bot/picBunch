@@ -134,13 +134,128 @@ namespace picBunch
         std::size_t* exactPairs = nullptr;
     };
 
+    /*! Fitted calibration constant of the velocity-bin error model.
+     *
+     * The model (see ``VelocityBinning``) estimates the relative error of the
+     * binned mesh field as ``modelConstant * modelSum``.  The constant is
+     * calibrated against the TSC-convolved continuum reference by running the
+     * mixed bunch with 1, 2, 4, 8 and 16 boxes and fitting the measured
+     * worst-case relative error (``d >= 2`` cells, unfloored) against
+     * ``modelSum``; the MV1 calibration (run ``pr24-20261102``, host
+     * jureca-h100, CUDA 13.4) gives the shipped value.  The CLI exposes
+     * ``--bin-model-constant`` as a diagnostic override.
+     */
+    inline constexpr double kDefaultVelocityModelConstant = 1.0;
+
+    /*! Upper bound of the auto binning policy (box count).
+     *
+     * Every box costs one deposit plus 13 FFTs on the padded grid, so the cap
+     * is a cost guard, not an accuracy limit: the policy reports the box
+     * count the model would need and fails when it exceeds the cap.
+     */
+    inline constexpr std::size_t kDefaultMaxVelocityBins = 256u;
+
+    /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
+     *
+     * The mesh kernel is exact only for a single shared ``u``; it is linear in
+     * charge, so the field of a mixed bunch is the sum over velocity classes
+     * of the field of each class.  The particles are split into boxes in
+     * ``u``-space and each box is evaluated with its box-centre ``u``:
+     *
+     * - the frame is aligned to the charge-weighted mean momentum direction
+     *   ``e3`` (``e1``, ``e2`` complete it deterministically);
+     * - the box geometry is a uniform grid over the observed ``u`` extent in
+     *   that frame, ``N1 x N2 x N3`` boxes, width ``range_i / N_i`` per axis.
+     *   The representative velocity of a box is the box centre; for one box it
+     *   is the charge-weighted mean ``u``.
+     *
+     * The geometry depends only on the bunch ``u`` extent and the box counts,
+     * never on which particles fall where.  That keeps a per-tile mesh
+     * subtraction (the near shell) bin-consistent with the global mesh for
+     * any sub-bunch, so the exact per-pair near term -- which evaluates every
+     * source with its own ``u`` -- cancels the mesh exactly: the near shell
+     * is bin-free.
+     *
+     * Error model.  Replacing a particle ``u`` by its box representative
+     * perturbs the field by two mechanisms: a transverse tilt of the boosted
+     * pattern, of order ``gamma * Delta_theta`` in relative terms, and an
+     * energy shift, of order ``Delta_gamma / gamma``.  With ``q_b`` the charge
+     * in box ``b``, ``Q`` the total absolute charge, ``gamma_b`` the largest
+     * ``gamma`` in the box, ``Delta_theta_b`` the largest angle between a
+     * member and the box representative, and ``Delta_gamma_b`` the ``gamma``
+     * range of the box, the estimated relative error is
+     *
+     *   modelError = modelConstant * Sum_b (q_b / Q) * (gamma_b*Delta_theta_b
+     *                                                        + Delta_gamma_b/gamma_b)
+     *
+     * ``modelSum`` is the uncalibrated sum; ``modelError`` is the calibrated
+     * estimate.  The auto policy chooses the smallest power-of-two box count
+     * whose best axis split drives ``modelError`` below the requested
+     * tolerance; an infeasible requirement fails with the needed count.
+     */
+    struct VelocityBinning
+    {
+        //! True once filled by ``deriveVelocityBinning`` (or by a fixed copy).
+        bool derived = false;
+        //! True when the bunch carries more than one velocity class.
+        bool multiVelocity = false;
+        //! Total box count ``N1*N2*N3`` (1 for a single-velocity bunch).
+        std::size_t count = 1u;
+        //! Box counts per beam-frame axis.
+        std::array<std::size_t, 3> perAxis{1u, 1u, 1u};
+        //! Orthonormal beam-frame basis, rows ``e1, e2, e3`` (lab frame).
+        std::array<std::array<double, 3>, 3> basis{{{1.0, 0.0, 0.0},
+                                                    {0.0, 1.0, 0.0},
+                                                    {0.0, 0.0, 1.0}}};
+        //! Box extent in beam-frame ``u`` units, axis ``i``: ``[uMin[i], uMax[i]]``.
+        std::array<double, 3> uMin{0.0, 0.0, 0.0};
+        std::array<double, 3> uMax{0.0, 0.0, 0.0};
+        //! Representative ``u`` (lab frame) per box, box index order
+        //! ``i1 + N1*(i2 + N2*i3)``.
+        std::vector<std::array<double, 3>> representativeU;
+        //! Box index of each particle; size equals the bunch size the binning
+        //! was derived for.  A fixed binning applied to a sub-bunch must
+        //! re-derive the assignment with ``boxIndex``.
+        std::vector<std::size_t> boxOf;
+        //! Uncalibrated model sum (dimensionless, charge-weighted).
+        double modelSum = 0.0;
+        //! Calibration constant used (``kDefaultVelocityModelConstant`` unless
+        //! overridden).
+        double modelConstant = kDefaultVelocityModelConstant;
+        //! Calibrated estimate ``modelConstant * modelSum``.
+        double modelError = 0.0;
+
+        //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
+        //! fixed binning on a sub-bunch (the near shell tile mesh).
+        [[nodiscard]] std::size_t boxIndex(double u1, double u2, double u3) const;
+    };
+
+    /*! Policy of the velocity binning. */
+    struct VelocityBinningOptions
+    {
+        enum class Mode
+        {
+            Auto,    //!< box count from the error model and ``tolerance``
+            Explicit //!< fixed box count (calibration, diagnostics)
+        };
+
+        Mode mode = Mode::Auto;
+        //! Box count used by ``Explicit`` (must be >= 1).
+        std::size_t explicitBins = 1u;
+        //! Calibration constant ``C`` of the error model (diagnostic override).
+        double modelConstant = kDefaultVelocityModelConstant;
+        //! Box-count cap of the auto policy; exceeded requirements fail with
+        //! the needed count instead of running.
+        std::size_t maxBins = kDefaultMaxVelocityBins;
+    };
+
     /** User-facing knobs of the field computation.
      *
      * The user sets an accuracy target, the physical cell size, and the empty
      * shell margin.  Bin counts, interpolation orders and FFT sizes are never
-     * user input: ``tolerance`` selects the only tunable discretisation choice,
-     * the FFT zero padding, and the remaining values are constants of the
-     * implementation.
+     * user input: ``tolerance`` selects the tunable discretisation choices,
+     * the FFT zero padding and the velocity-box count, and the remaining
+     * values are constants of the implementation.
      */
     struct ComputeOptions
     {
@@ -216,6 +331,14 @@ namespace picBunch
         ParallelContext const* parallel = nullptr;
         //! Opt-in exact near shell.  The default stays the plain mesh.
         NearShellOptions nearShell;
+        //! Velocity-bin policy for multi-velocity bunches (see
+        //! ``VelocityBinning``).  ``Auto`` (default) sizes the boxes from the
+        //! error model and ``tolerance``; ``Explicit`` runs a fixed count.
+        VelocityBinningOptions velocityBinning;
+        //! Precomputed binning to use verbatim instead of deriving it from the
+        //! bunch.  The near shell sets this on every per-tile local mesh so
+        //! the subtraction cancels the global mesh bin for bin.
+        std::optional<VelocityBinning> fixedBinning;
     };
 
     //! openPMD record names and component order: E then B.

@@ -19,7 +19,8 @@ namespace picBunch
         Bunch const& bunch,
         ComputeOptions const& options,
         NearShellOptions const& nearShell,
-        StageTimes* stageTimes = nullptr);
+        StageTimes* stageTimes = nullptr,
+        VelocityBinning* outBinning = nullptr);
 
     /*! Resolve the shell radius policy (exported for tests and reports). */
     double resolveNearShellRadius(ComputeOptions const& options, NearShellOptions const& nearShell);

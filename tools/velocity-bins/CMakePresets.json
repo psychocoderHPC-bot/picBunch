@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "PICBUNCH_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "cuda-v100",
+      "displayName": "CUDA, Tesla V100 (sm_70)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICBUNCH_ENABLE_CUDA": "ON",
+        "PICBUNCH_ARCH": "70"
+      }
+    },
+    {
+      "name": "hip-gfx1100",
+      "displayName": "HIP, Radeon RX 7900 (gfx1100)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICBUNCH_ENABLE_HIP": "ON",
+        "PICBUNCH_ARCH": "gfx1100"
+      }
+    },
+    {
+      "name": "cpu-debug",
+      "displayName": "CPU (host backend), Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "cuda-v100",
+      "configurePreset": "cuda-v100"
+    },
+    {
+      "name": "hip-gfx1100",
+      "configurePreset": "hip-gfx1100"
+    },
+    {
+      "name": "cpu-debug",
+      "configurePreset": "cpu-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "cuda-v100",
+      "configurePreset": "cuda-v100",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "hip-gfx1100",
+      "configurePreset": "hip-gfx1100",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cpu-debug",
+      "configurePreset": "cpu-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

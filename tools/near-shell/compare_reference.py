@@ -27,7 +27,10 @@ def read_meta(prefix):
             p = line.split()
             if not p:
                 continue
-            m[p[0]] = [float(x) for x in p[1:]] if len(p) > 2 else float(p[1])
+            try:
+                m[p[0]] = [float(x) for x in p[1:]] if len(p) > 2 else float(p[1])
+            except ValueError:
+                m[p[0]] = p[1]
     return m
 
 
