@@ -3,6 +3,7 @@
 
 #include "picBunch/Mpi.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <stdexcept>
@@ -62,6 +63,52 @@ namespace picBunch
 #endif
     }
 
+    void MpiParallelContext::allreduceMax(double* values, std::size_t count) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1 && count > 0)
+            MPI_Allreduce(
+                MPI_IN_PLACE,
+                values,
+                static_cast<int>(count),
+                MPI_DOUBLE,
+                MPI_MAX,
+                MPI_COMM_WORLD);
+#else
+        (void)values;
+        (void)count;
+#endif
+    }
+
+    void MpiParallelContext::alltoallv(
+        double* send,
+        int const* sendCounts,
+        int const* sendDispls,
+        double* recv,
+        int const* recvCounts,
+        int const* recvDispls) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            MPI_Alltoallv(
+                send,
+                sendCounts,
+                sendDispls,
+                MPI_DOUBLE,
+                recv,
+                recvCounts,
+                recvDispls,
+                MPI_DOUBLE,
+                MPI_COMM_WORLD);
+            return;
+        }
+#endif
+        // Single rank: the only block is rank 0's own contribution.
+        if(sendCounts != nullptr && recvCounts != nullptr && sendCounts[0] > 0)
+            std::copy_n(send + sendDispls[0], sendCounts[0], recv + recvDispls[0]);
+    }
+
     void mpiBroadcastBunch(Bunch& bunch, int root)
     {
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -109,14 +156,16 @@ namespace picBunch
             0.0,
             0.0,
             0.0};
-        std::uint64_t integers[4] = {
+        std::uint64_t integers[6] = {
             options.fftPadding,
             options.deterministicDeposit ? 1u : 0u,
             static_cast<std::uint64_t>(options.nearShell.mode),
-            static_cast<std::uint64_t>(options.nearShell.tileNodes)};
+            static_cast<std::uint64_t>(options.nearShell.tileNodes),
+            static_cast<std::uint64_t>(options.fftMode),
+            static_cast<std::uint64_t>(options.distributedFftMinNodes)};
         double cell[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         MPI_Bcast(scalars, 8, MPI_DOUBLE, root, MPI_COMM_WORLD);
-        MPI_Bcast(integers, 4, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(integers, 6, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         // Optional arrays: one presence flag, then three values each.
         auto broadcastOptional = [&](std::optional<std::array<std::size_t, 3>>& value) {
@@ -169,6 +218,8 @@ namespace picBunch
             options.deterministicDeposit = integers[1] != 0u;
             options.nearShell.mode = static_cast<NearShellOptions::Mode>(integers[2]);
             options.nearShell.tileNodes = static_cast<std::size_t>(integers[3]);
+            options.fftMode = static_cast<FftMode>(integers[4]);
+            options.distributedFftMinNodes = static_cast<std::size_t>(integers[5]);
             options.cellSize = {cell[0], cell[1], cell[2]};
         }
 #else
@@ -278,6 +329,10 @@ namespace picBunch
 
     void mpiBroadcastField(Field& field, int root)
     {
+        // A broadcast field is always the full grid on every rank.
+        field.zSlab = false;
+        field.slabOffset = 0;
+        field.slabCount = 0;
 #if defined(PICBUNCH_ENABLE_MPI)
         if(!initialized() || mpiSize() <= 1)
             return;

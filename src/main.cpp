@@ -110,6 +110,10 @@ namespace
             "                        an infeasible requirement fails with the needed\n"
             "                        count\n"
             "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
+            "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
+            "                        distributed decomposes the padded box by z-slabs\n"
+            "                        and transposes with MPI_Alltoallv; auto selects it\n"
+            "                        when the padded box exceeds the per-rank limit\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -134,6 +138,7 @@ namespace
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
+        std::string fftMode = "auto";
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
@@ -333,6 +338,8 @@ namespace
                 args.allowFieldTruncation = true;
             else if(option == "--backend")
                 args.backend = value("--backend");
+            else if(option == "--fft-mode")
+                args.fftMode = value("--fft-mode");
             else if(option == "--cell-size")
                 args.cellSize = parseTripleDouble(value("--cell-size"), "--cell-size");
             else if(option == "--grid")
@@ -380,6 +387,8 @@ namespace
                 "--backend " + args.backend + " is not available; this build uses " + compiledBackend());
         if(args.nearShell != "none" && args.nearShell != "exact" && args.nearShell != "fast")
             throw std::invalid_argument("--near-shell must be 'none', 'exact' or 'fast'");
+        if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
+            throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         if(args.nearShellTile == 0u)
@@ -437,10 +446,11 @@ namespace
         std::printf("  %-8s %10.3f\n", "deposit", times.depositMs);
         std::printf("  %-8s %10.3f\n", "kernel", times.kernelMs);
         std::printf("  %-8s %10.3f\n", "fft", times.fftMs);
+        std::printf("  %-8s %10.3f\n", "transpose", times.transposeMs);
         std::printf("  %-8s %10.3f\n", "readout", times.readoutMs);
         std::printf("  %-8s %10.3f\n", "writer", times.writerMs);
         double total = times.readerMs + times.depositMs + times.kernelMs + times.fftMs
-            + times.readoutMs + times.writerMs;
+            + times.transposeMs + times.readoutMs + times.writerMs;
         std::printf("  %-8s %10.3f\n", "total", total);
     }
 
@@ -493,6 +503,8 @@ namespace
             static_cast<unsigned long long>(placed.patchExtent[2]));
 
         picBunch::ComputeOptions options;
+        // The checkpoint writer consumes the full field on rank 0.
+        options.fftMode = picBunch::FftMode::Replicated;
         options.tolerance = config.accuracy.tolerance;
         options.cellSize = config.domain.cellSize;
         options.gridSize = config.domain.cells;
@@ -698,6 +710,21 @@ int main(int argc, char** argv)
         // The mesh extent is the default computation grid; --grid is an explicit
         // override.  A --global-grid must not enlarge the computation, so the
         // mesh extent is ignored for the compute box in that case.
+        if(args.fftMode == "replicated")
+            options.fftMode = picBunch::FftMode::Replicated;
+        else if(args.fftMode == "distributed")
+            options.fftMode = picBunch::FftMode::Distributed;
+        else
+            options.fftMode = picBunch::FftMode::Auto;
+        if(args.restartFormat == "picongpu")
+        {
+            // The checkpoint writer needs all six full components on rank 0;
+            // a slab-decomposed field cannot feed it without a gather.
+            options.fftMode = picBunch::FftMode::Replicated;
+            if(root && args.fftMode != "replicated")
+                std::printf(
+                    "fft mode: replicated (PIConGPU checkpoint needs the full field)\n");
+        }
         options.meshGridSize = args.globalGrid ? std::nullopt : meshGridExtent;
         if(args.grid)
         {
@@ -796,11 +823,15 @@ int main(int argc, char** argv)
                 args.tolerance,
                 binning.multiVelocity ? "" : ", single velocity");
 
-        auto fieldPeaks = [](picBunch::Field const& value) {
+        auto fieldPeaks = [&](picBunch::Field const& value) {
             std::array<double, 2> peaks{0.0, 0.0};
             for(int c = 0; c < 6; ++c)
                 for(double entry : value.data[c])
                     peaks[c < 3 ? 0 : 1] = std::max(peaks[c < 3 ? 0 : 1], std::abs(entry));
+            // A distributed field holds one z-slab per rank; the physical peak
+            // is the maximum over all slabs.
+            if(options.parallel && options.parallel->distributed())
+                options.parallel->allreduceMax(peaks.data(), peaks.size());
             return peaks;
         };
         auto peaks = fieldPeaks(field);
@@ -926,8 +957,9 @@ int main(int argc, char** argv)
             std::printf("compute wall (all stages, rank 0): %.3f ms\n", computeWallMs);
         }
 
-        // Every rank computed the component it owns and the all-reduce left the
-        // full bunch-box field on all ranks, so no full-field broadcast is needed.
+        // A distributed run leaves only the rank's output z-slab on each rank;
+        // a replicated run leaves the full bunch-box field on every rank.  The
+        // writer consumes either form without a full-field broadcast.
         double scalarMeta[6] = {
             bunchData.time,
             bunchData.timeUnitSI,
@@ -1046,6 +1078,16 @@ int main(int argc, char** argv)
                     *args.globalGrid,
                     globalOriginResolved,
                     farTail ? &*farTail : nullptr);
+            else if(field.zSlab)
+                // Distributed output: every rank holds its own z-slab.  The
+                // chunked writer writes it collectively without materialising
+                // the full domain.
+                picBunch::writeFieldToDomain(
+                    field,
+                    *args.output,
+                    writeOptions,
+                    field.grid.n,
+                    field.grid.origin);
             else if(root)
                 picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);
