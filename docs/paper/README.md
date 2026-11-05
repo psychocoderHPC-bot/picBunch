@@ -24,9 +24,8 @@ that produced them lives outside this documentation tree.
 `paper.pdf` is the rendered result. Rebuild it with the commands above and copy
 `main.pdf` over `paper.pdf` when the sources change.
 
-## Retained unreferenced figure
+## Multi-velocity distribution figure
 
-`figs/F_multivel_dist.pdf` is kept on purpose although the manuscript no longer
-includes it. The figure was replaced when the multi-velocity section was
-rewritten around the binned-peak table (`tab:multivel`), so the source PDF stays
-in the tree to keep that measurement traceable instead of dropping it again.
+`figs/F_multivel_dist.pdf` is the sampled velocity distribution behind
+`tab:multivel` and is included as `fig:multivel` in `sec_accuracy.tex`. It is
+rendered through the shared `figstyle` module at the paper inclusion width.

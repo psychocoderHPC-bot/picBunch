@@ -738,7 +738,27 @@ $\gamma$ & $\beta$ & worst relative error \\
    \end{tabular}
    \end{table}
 
-   With a 5\% energy spread and $+y$ drift the $B_z$ peak is
+   \begin{figure}[t]
+   \centering
+   \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
+   \caption{Sampled multi-velocity bunches ($\gamma=10$, 512 sources, seeds
+   100 and 103); the $B=16$ edges in (a) and the velocity boxes that produce
+   the field come from the same \texttt{VelocityBinning} per-axis min/max
+   path. (a) $\gamma$ histogram for the 5\% energy spread with the 16
+   adaptive edges drawn and the mean and standard deviation annotated;
+   (b) $u_\parallel$--$u_\perp$ density for the $5^\circ$ angular spread
+   with the nominal $5^\circ$ divergence and the measured median
+   $|\theta|=101.8$\,mrad marked. (c) Relative deviation of the $B=16$
+   peaks from the $B=64$ reference, $4.3\times10^{-6}$ (energy $B_z$),
+   $4.4\times10^{-5}$ (angular $B_z$) and $5.6\times10^{-4}$ (angular
+   $B_y$), with $B_y\equiv0$ for the energy case, so the post-fix field is
+   bin-independent at the stated $2.32050\times10^{4}$/$2.32049\times10^{4}$\,T
+   and $5.22\times10^{-2}$ ratio.}
+   \label{fig:multivel}
+   \end{figure}
+
+   Figure~\ref{fig:multivel} shows the sampled distributions and the
+   post-fix bin comparison. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
    $2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
    bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
    longitudinal current. With a $5^\circ$ angular spread the
