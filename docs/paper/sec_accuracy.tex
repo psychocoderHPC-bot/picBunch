@@ -206,9 +206,11 @@ one colour scale and one colour bar at its right edge, the error row is
 logarithmic and masked where the reference is below $10^{-3}$ of its own
 peak. The forward case compares the shipped mesh plus fast shell against the
 order-4 adaptive Gauss--Legendre driver; that driver
-overestimates moving oblique in-support points by about $10\times$, so the
-solid white outline marks the TSC support and the in-support error pixels are
-shown against a reference that is itself unreliable there. The trustworthy
+overestimates the worst moving oblique in-support point of this forward case
+by $7.2\times$, a localised failure at a specific node-particle configuration,
+so the solid white outline marks the TSC support and the in-support error
+pixels are shown against a reference that is itself unreliable at that node.
+The trustworthy
 in-support statement is the fast-versus-arbiter $1.6\%$ at the worst node
 (Section~\ref{sec:fastacc}). The fluctuation reference is complete, but
 picBunch v0.7.0 rejects a momentum spread, so only its reference field panels
