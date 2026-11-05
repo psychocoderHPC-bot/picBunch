@@ -313,6 +313,49 @@ add_executable(picBunchDfftCheck tools/dfft-check/check.cpp)
 target_link_libraries(picBunchDfftCheck PRIVATE picBunch::picBunch picBunch::openPMD)
 alpaka_finalize(picBunchDfftCheck)
 
+# FFT-extent characterisation driver: replicated pipeline vs an independent
+# FFTW reference, per padded extent (tools/fft-size).
+find_package(PkgConfig QUIET)
+pkg_check_modules(PBFFTW3 REQUIRED fftw3)
+add_library(PBFFTW3_pc INTERFACE)
+target_include_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_INCLUDE_DIRS})
+if(PBFFTW3_LIBRARY_DIRS)
+    target_link_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARY_DIRS})
+endif()
+target_link_libraries(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARIES})
+add_library(PBFFTW3::PBFFTW3 ALIAS PBFFTW3_pc)
+
+# ABI probe: classic FFTW 3.3 plan constructors take a `sign` argument; the
+# newer FFTW-compatible builds (e.g. the MLIR-derived 3.6 on hal) omit it and
+# transform forward.  The driver compiles both forms under one macro.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${PBFFTW3_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_LINK_DIRECTORIES ${PBFFTW3_LIBRARY_DIRS})
+set(CMAKE_REQUIRED_LIBRARIES ${PBFFTW3_LIBRARIES})
+check_cxx_source_compiles(
+    "
+    #include <fftw3.h>
+    int main()
+    {
+        int const n[3] = {4, 4, 4};
+        fftw_plan const p = fftw_plan_many_dft_r2c(
+            3, n, 1, nullptr, n, 1, 1, nullptr, n, 1, 1, FFTW_FORWARD, FFTW_ESTIMATE);
+        fftw_destroy_plan(p);
+        return 0;
+    }"
+    PBFFTW3_PLAN_TAKES_SIGN
+)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_LINK_DIRECTORIES)
+unset(CMAKE_REQUIRED_LIBRARIES)
+message(STATUS "picBunch: FFTW plan constructor takes sign argument: ${PBFFTW3_PLAN_TAKES_SIGN}")
+add_executable(picBunchFftSizeCheck tools/fft-size/check.cpp)
+if(PBFFTW3_PLAN_TAKES_SIGN)
+    target_compile_definitions(picBunchFftSizeCheck PRIVATE PBFFTW3_PLAN_TAKES_SIGN=1)
+endif()
+target_link_libraries(picBunchFftSizeCheck PRIVATE picBunch::picBunch PBFFTW3::PBFFTW3)
+alpaka_finalize(picBunchFftSizeCheck)
+
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 
