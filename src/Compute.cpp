@@ -806,11 +806,23 @@ namespace picBunch
             grid.spacing[1] / kRefinement,
             grid.spacing[2] / kRefinement};
 
-        auto rhoReal = alpaka::onHost::allocUnified<double>(device, realExt);
-        auto rhoSpec = alpaka::onHost::allocUnified<Complex>(device, specExt);
-        auto kernelReal = alpaka::onHost::allocUnified<double>(device, realExt);
-        auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, specExt);
-        auto outReal = alpaka::onHost::allocUnified<double>(device, realExt);
+        std::uint64_t const paddedNodes = static_cast<std::uint64_t>(Mx) * My * Mz;
+        std::uint32_t const spectrumCount = Mz * My * CP;
+        // The replicated path keeps its FFT buffers as flat 1-D allocations.
+        // Every access in this path (deposit, kernel build, spectrum
+        // multiply, read-out) and the vendor plans (contiguous layout,
+        // inembed == extents) use the dense x-fastest layout.  A 3-D
+        // allocUnified instead pads each innermost row to the 128-byte
+        // boundary whenever Mx is not a multiple of 16; alpaka's pitched
+        // memset then leaves the padding bytes uncleared, and those bytes sit
+        // inside the flat prefix the FFT reads.  Reused across the velocity
+        // bins below, the stale padding carried the previous bin's charge
+        // into the transform (characterised in tools/fft-size).
+        auto rhoReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
+        auto rhoSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
+        auto kernelReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
+        auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
+        auto outReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
 
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
@@ -949,8 +961,6 @@ namespace picBunch
         double const eFactor = kCoulombConstant;
         double const bFactor = kCoulombConstant / kSpeedOfLight;
 
-        std::uint32_t const spectrumCount = Mz * My * CP;
-
         // Component/bin parallelism.  Every rank deposits and transforms the
         // same source spectrum, then owns a disjoint subset of the six output
         // components.  The replicated path keeps the whole transform on each
@@ -962,8 +972,6 @@ namespace picBunch
         int const parSize = (par && par->distributed()) ? par->size : 1;
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
-        std::uint64_t const paddedNodes
-            = static_cast<std::uint64_t>(Mx) * My * Mz;
         bool const distributedRequested = options.fftMode == FftMode::Distributed
             || (options.fftMode == FftMode::Auto
                 && paddedNodes > options.distributedFftMinNodes);
