@@ -88,7 +88,9 @@ namespace
     std::vector<Complex> fftwReferenceR2C(std::vector<double> const& in, std::uint32_t M)
     {
         std::uint32_t const CP = M / 2u + 1u;
-        std::vector<fftw_complex> out(static_cast<std::size_t>(M) * M * CP);
+        // Portable complex buffer: std::vector<fftw_complex> is invalid when
+        // fftw_complex is the classic double[2] typedef (nvcc rejects it).
+        std::vector<std::array<double, 2>> out(static_cast<std::size_t>(M) * M * CP);
         std::array<int, 3> n{static_cast<int>(M), static_cast<int>(M), static_cast<int>(M)};
         std::array<int, 3> inembed{static_cast<int>(M), static_cast<int>(M), static_cast<int>(M)};
         std::array<int, 3> onembed{static_cast<int>(M), static_cast<int>(M), static_cast<int>(CP)};
@@ -106,7 +108,7 @@ namespace
             inembed.data(),
             1,
             static_cast<int>(M * M * M),
-            out.data(),
+            reinterpret_cast<fftw_complex*>(out.data()),
             onembed.data(),
             1,
             static_cast<int>(M * M * CP),
@@ -121,7 +123,7 @@ namespace
             inembed.data(),
             1,
             static_cast<int>(M * M * M),
-            out.data(),
+            reinterpret_cast<fftw_complex*>(out.data()),
             onembed.data(),
             1,
             static_cast<int>(M * M * CP),
@@ -141,7 +143,7 @@ namespace
     {
         std::uint32_t const CP = M / 2u + 1u;
         std::size_t const specCount = static_cast<std::size_t>(M) * M * CP;
-        std::vector<fftw_complex> inC(specCount);
+        std::vector<std::array<double, 2>> inC(specCount);
         for(std::size_t l = 0; l < specCount; ++l)
         {
             inC[l][0] = in[l].real();
@@ -157,7 +159,7 @@ namespace
             3,
             n.data(),
             1,
-            inC.data(),
+            reinterpret_cast<fftw_complex*>(inC.data()),
             inembed.data(),
             1,
             static_cast<int>(M * M * CP),
@@ -172,7 +174,7 @@ namespace
             3,
             n.data(),
             1,
-            inC.data(),
+            reinterpret_cast<fftw_complex*>(inC.data()),
             inembed.data(),
             1,
             static_cast<int>(M * M * CP),
