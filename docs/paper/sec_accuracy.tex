@@ -197,14 +197,13 @@ cases share the positions and differ only in a $1.045$\,mrad rms transverse
 divergence in $x$ (Figs.~\ref{fig:valforwardE}, \ref{fig:valforwardB}, \ref{fig:valfluctE}, \ref{fig:valfluctB}); a
 separate $32\times32$ plane carries the binned $1$\,mrad case
 (Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal
-and increases left to right, so the bunch moves rightwards; the vertical axis
-is $x$ in the x-y cut and $z$ in the z-y cut. Each figure has a field row with
-four columns ($E_x,E_y,E_z$ and the magnitude $\sqrt{\sum_i E_i^2}$) and an
-error row underneath; the magnitude is the square root of
-$E_x^2+E_y^2+E_z^2$ so that it shares the components' linear scale. A row has
-one colour scale and one colour bar at its right edge, the error row is
-logarithmic and masked where the reference is below $10^{-3}$ of its own
-peak. The forward case compares the shipped mesh plus fast shell against the
+and increases left to right, so the bunch moves rightwards and $y$ is the
+beam axis; the vertical axis is $x$ in the x-y cut and $z$ in the z-y cut.
+Each figure has a field row with four columns ($E_x,E_y,E_z,E^2$) and an
+error row underneath. The three components share one linear colour scale and
+bar; $E^2$ (or $B^2$) has its own scale and bar with its own unit label. The
+error row is logarithmic and masked where the reference is below $10^{-3}$ of
+its own peak. The forward case compares the shipped mesh plus fast shell against the
 order-4 adaptive Gauss--Legendre driver; that driver
 overestimates the worst moving oblique in-support point of this forward case
 by $7.2\times$, a localised failure at a specific node-particle configuration,
@@ -231,7 +230,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_forward_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_E.pdf}
-\caption{Forward-case electric validation ($N=200$, $Q=-100$\,pC, $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m. x-y plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row; the lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the white outline marks the TSC support. The in-support fast-versus-arbiter error against the order-12 independent continuum reference (this work) is $1.6\%$ at the worst node.}
+\caption{Forward-case electric validation ($N=200$, $Q=-100$\,pC, $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m; x-y plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal, the beam axis. Each image shows four columns $E_x,E_y,E_z,E^2$: the three components share one linear scale and bar, while $E^2$ has its own scale and unit label; the lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the white outline marks the TSC support. The in-support fast-versus-arbiter error against the order-12 independent continuum reference (this work) is $1.6\%$ at the worst node.}
 \label{fig:valforwardE}
 \end{figure}
 
@@ -239,7 +238,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_forward_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_B.pdf}
-\caption{Magnetic companion to Fig.~\ref{fig:valforwardE} with the same planes and layout, showing four columns $B_x,B_y,B_z,|B|$; $B_y\equiv0$ for motion along $+y$ is marked in its panel. Each row has one shared linear field scale and one logarithmic error scale and colour bar, with the same TSC-support outline as the electric figure. The magnetic field is about $10^{-10}$ of the E-dominated local field at $\gamma=10$.}
+\caption{Magnetic companion to Fig.~\ref{fig:valforwardE} with the same planes and layout, showing four columns $B_x,B_y,B_z,B^2$: the three components share one linear bar and $B^2$ has its own scale and unit label; $B_y\equiv0$ for motion along $+y$ is marked in its panel. $y$ is horizontal and is the beam axis, and the same TSC-support outline is drawn as in the electric figure. The magnetic field is about $10^{-10}$ of the E-dominated local field at $\gamma=10$.}
 \label{fig:valforwardB}
 \end{figure}
 
@@ -247,7 +246,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_E.pdf}
-\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence, showing four columns $E_x,E_y,E_z,|E|$ from the order-12 independent continuum reference (this work). Each row uses one shared linear scale and one colour bar. picBunch v0.7.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
+\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence, showing four columns $E_x,E_y,E_z,E^2$ from the order-12 independent continuum reference (this work): the three components share one linear scale and bar, while $E^2$ has its own scale and unit label. $y$ is horizontal and is the beam axis. picBunch v0.7.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
 \label{fig:valfluctE}
 \end{figure}
 
@@ -255,7 +254,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_B.pdf}
-\caption{Magnetic reference for the fluctuation case, with the same planes, four columns $B_x,B_y,B_z,|B|$, and one shared scale and colour bar per row as Fig.~\ref{fig:valfluctE}. The $x$-divergence lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the dominant component. Only reference fields from the order-12 independent continuum reference (this work) are shown; the picBunch panels are unavailable.}
+\caption{Magnetic reference for the fluctuation case, with the same planes, four columns $B_x,B_y,B_z,B^2$: the three components share one linear bar and $B^2$ has its own scale and unit label, as in Fig.~\ref{fig:valfluctE}; $y$ is horizontal and is the beam axis. The $x$-divergence lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the dominant component. Only reference fields from the order-12 independent continuum reference (this work) are shown; the picBunch panels are unavailable.}
 \label{fig:valfluctB}
 \end{figure}
 
@@ -263,7 +262,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_B.pdf}
-   \caption{Binned $1$\,mrad case ($N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against the order-12 independent continuum reference (this work). The upper image is electric and the lower magnetic, each with four columns, one shared scale and one colour bar per row; error rows are logarithmic and masked below $10^{-3}$ of the reference peak. The solid white outline marks the TSC support.}
+   \caption{Binned $1$\,mrad case ($N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against the order-12 independent continuum reference (this work). The upper image is electric and the lower magnetic, each with four columns: three components on one shared scale and bar, and $E^2$ or $B^2$ on its own scale and bar; $y$ is horizontal and is the beam axis, and error rows are logarithmic and masked below $10^{-3}$ of the reference peak. The solid white outline marks the TSC support.}
 \label{fig:val1mrad}
 \end{figure}
 
@@ -493,7 +492,7 @@ speed feature.
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\linewidth]{figs/SCHEM1_field_evaluation_schematic.pdf}
- \caption{Where each method evaluates the field around a single source at $h=1$ and aspect $1$: TSC support to $1.5$ nodes, the near shell out to $R_{\rm shell}$, and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The lower panel plots the measured worst per-component error against distance for both $\gamma$, with the same regions shaded and the $10^{-3}$ gate marked. Field components sit at staggered Yee positions; the staggering is not drawn.}
+ \caption{Where each method evaluates the field around a single source at $h=1$ and aspect $1$: TSC support to $1.5$ nodes, the near shell out to $R_{\rm shell}$, and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The lower panel plots the measured worst per-component error against distance for both $\gamma$, with the same regions shaded and the $10^{-3}$ gate marked. Field components sit at staggered Yee positions; panel (a) draws the in-plane offsets and labels the component pairs (for example $E_x$ with $B_y$), while the out-of-plane $E_z$ offset is not drawn.}
  \label{fig:schem}
  \end{figure}
 
@@ -603,7 +602,7 @@ would grow with $N$, and it does not.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g10_E.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g10_E.pdf}
-  \caption{Large-domain electric slices ($\gamma=10$, $128\times128\times64$, cell $2\times10^{-7}$\,m, $N=100$, \texttt{jureca-h100}) from the earlier axial-$x$ data set (not the $+y$ beam-axis set); $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Upper and lower images are x-y and z-y planes, each showing four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row above a logarithmic error row against the order-4 driver reference. The boundary field is $10.3\%$ of the peak (worst component, z-y $E_z$), so the colour scale is set by the bunch.}
+  \caption{Large-domain electric slices ($\gamma=10$, $128\times128\times64$, cell $2\times10^{-7}$\,m, $N=100$, \texttt{jureca-h100}) from the earlier axial-$x$ data set (not the $+y$ beam-axis set); $x$ is horizontal in the x-y cut and is the beam axis there, while $z$ is horizontal in the z-y cut. Upper and lower images are x-y and z-y planes, each showing four columns $E_x,E_y,E_z,E^2$: the three components share one linear scale and bar, and $E^2$ has its own scale and unit label, above a logarithmic error row against the order-4 driver reference. The boundary field is $10.3\%$ of the peak (worst component, z-y $E_z$), so the colour scale is set by the bunch.}
   \label{fig:large}
   \end{figure}
 
@@ -611,7 +610,7 @@ would grow with $N$, and it does not.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g10_B.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g10_B.pdf}
-  \caption{Magnetic companion to Fig.~\ref{fig:large} at $\gamma=10$, same planes and earlier axial-$x$ geometry; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut, and $B_x\equiv0$ is marked in its panel. Each image shows four columns $B_x,B_y,B_z,|B|$ with one shared linear scale and one colour bar per row, and the same logarithmic error convention as the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
+  \caption{Magnetic companion to Fig.~\ref{fig:large} at $\gamma=10$, same planes and earlier axial-$x$ geometry; $x$ is horizontal in the x-y cut and is the beam axis there, while $z$ is horizontal in the z-y cut, and $B_x\equiv0$ is marked in its panel. Each image shows four columns $B_x,B_y,B_z,B^2$: the three components share one linear bar and $B^2$ has its own scale and unit label, with the same logarithmic error convention as the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
   \label{fig:largeB}
   \end{figure}
 
@@ -619,7 +618,7 @@ would grow with $N$, and it does not.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g1_E.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g1_E.pdf}
-  \caption{Large-domain electric slices for the stationary bunch ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large}; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row, above a logarithmic error row. The core error reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference floor.}
+  \caption{Large-domain electric slices for the stationary bunch ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large}; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut (the bunch is stationary, so there is no beam axis). Each image shows four columns $E_x,E_y,E_z,E^2$: the three components share one linear bar and $E^2$ has its own scale and unit label, above a logarithmic error row. The core error reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference floor.}
   \label{fig:largeg1}
   \end{figure}
 
@@ -651,7 +650,7 @@ $\gamma$ & $\beta$ & worst relative error \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figs/gp_g1p0.pdf}
-\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0$ ($\gamma=1.0$) on the $128^3$ grid, cell $5\times10^{-8}$\,m. The $E$ block and the $B$ block each put $E_x,E_y,E_z$ (or $B_x,B_y,B_z$) on one shared colour scale with its own bar and $E^2$ (or $B^2$) on a separate colour scale with its own bar, so the squared-magnitude scale never dominates the component scale. Error rows are logarithmic, carry the $10^{-3}$ contour, and are masked below $10^{-3}$ of the reference peak; the worst component error is $3.474\times10^{-3}$.}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0$ ($\gamma=1.0$) on the $128^3$ grid, cell $5\times10^{-8}$\,m. The $E$ block and the $B$ block each put $E_x,E_y,E_z$ (or $B_x,B_y,B_z$) on one shared colour scale with its own bar and $E^2$ (or $B^2$) on a separate colour scale with its own bar, so the squared-magnitude scale never dominates the component scale. Error rows are logarithmic, carry the $10^{-3}$ contour, and are masked below $10^{-3}$ of the reference peak; at $\gamma=1.0$ the $B$ error bars are omitted because no pixel exceeds the mask threshold; the worst component error is $3.474\times10^{-3}$.}
 \label{fig:gpvalid-g1p0}
 \end{figure}
 
