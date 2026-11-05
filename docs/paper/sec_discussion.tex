@@ -6,16 +6,16 @@ bunch as a free-space FFT convolution. It is a far-field method.
 
 \paragraph{What it is good for.} In the far field the relative error against
 the point field is below $10^{-3}$ on the beam axis from $d=6$ for every
-$\gamma$ \citep{N2b}. Against the TSC-convolved continuum: $\gamma=1$, aspect
+$\gamma$. Against the TSC-convolved continuum: $\gamma=1$, aspect
 1 crosses $3\times10^{-4}$ at $d=12$ ($1.1\times10^{-4}$); $\gamma=1$, aspect
  4 at $d=32$ ($2.6\times10^{-4}$); $\gamma=10$, aspect 1, is
 $6.5\times10^{-3}$ at $d=32$ and $1.8\times10^{-3}$ at $d=48$
-\citep{W4b,V2b}. At
+At
 $2\times10^{6}$ particles in a $20$-cell box the compute-only total is
 $64.8$\,ms, dominated by the deposit ($56.5$\,ms), and flat in $\gamma$
-\citep{SB1}. Repeated runs are bit-identical (md5 \texttt{d3641d64\ldots});
+Repeated runs are bit-identical (md5 \texttt{d3641d64\ldots});
 the Coulomb limit reproduces the TSC-convolved Coulomb field to
-$4.88\times10^{-14}$ \citep{W4b,coulomb}.
+$4.88\times10^{-14}$.
 
   \paragraph{Measured error in the bunch core.} The mesh alone, on the
 $N=1000$ slice geometry, has a worst per-component plane error of
@@ -29,37 +29,37 @@ roundoff; at the measured $R=3/4$ radii on the $h=1$ slice grid the
 residual is the mesh contribution outside the shell, not the tile
 subtraction (Section~\ref{sec:slices-runs}). The arbiter-validated in-support
 accuracy of the fast backend is $1.6\%$ at the closest moving node, not the
-$0.31$ the driver-based slices reported (Section~\ref{sec:slices},
-\citep{indfield}). In the perpendicular
+$0.31$ the driver-based slices reported (Section~\ref{sec:slices}, this
+work). In the perpendicular
 direction at $\gamma=10$, aspect 1, the measured $M\!-\!T$ error at $d=48$ is
 $2.6\times10^{-4}$, the $M\!-\!P$ error is $1.5\times10^{-2}$, and the TSC
 smoothing $T\!-\!P$ is $1.48\times10^{-2}$; the $M\!-\!P$ error is the TSC
-smoothing, not the deposit (Table~\ref{tab:d48}) \citep{N2b,D12}. At $r=8$ cells the node spacing
+smoothing, not the deposit (Table~\ref{tab:d48}). At $r=8$ cells the node spacing
 for $10^{-3}$ perpendicular error at $\gamma=10$ is $h\approx1/29$, a
 $2.4\times10^{4}$-fold increase in $M^{3}$ FFT work relative to the $h=1$
-run \citep{N2b,D11}. At aspect 4, $\gamma=1$, the perpendicular
-$M\!-\!T$ error at $d=48$ is $2.4\times10^{-3}$ \citep{N2b}. The
+run. At aspect 4, $\gamma=1$, the perpendicular
+$M\!-\!T$ error at $d=48$ is $2.4\times10^{-3}$. The
 cross-validation confirms the same structure: the measured disagreement with
 the exact reference is per-source, local to the TSC support, and
-independent of particle count \citep{W7t,D13}.
+independent of particle count.
 
  \paragraph{Performance.} The cost is two regimes with a crossover set by the
- box, not the particle count \citep{SB1}. At large $N$ the deposit dominates,
+ box, not the particle count. At large $N$ the deposit dominates,
  linear in $N$, $52$--$57$\,ms on the $2\times10^{6}$ rows. At large boxes the
- FFT and kernel dominate: from $M=60$ to $M=220$ the total goes from
- $64.8$\,ms to $233$\,ms, and halving $h$ costs $1.07\times$ and $2.35\times$
- \citep{SB1}. The compute timings are single-GPU on one \texttt{rosi\_v100}
- host; the same mesh is $0.052$\,s on one H100 (Section~\ref{sec:scaling})
- \citep{INT4}. The rank scaling is measured on an idle V100 window: the
+  FFT and kernel dominate: from $M=60$ to $M=220$ the total goes from
+  $64.8$\,ms to $233$\,ms, and halving $h$ costs $1.07\times$ and $2.35\times$
+The compute timings are single-GPU on one \texttt{rosi\_v100}
+  host; the same mesh is $0.052$\,s on one H100 (Section~\ref{sec:scaling})
+The rank scaling is measured on an idle V100 window: the
  component-parallel mesh plateaus at $1.20\times$ (replicated deposit and
  source FFT), the tile-parallel near shell at $1.34\times$ (static tile split
  plus all-reduce), and the collective writer improves to $1.71\times$ at two
  ranks and falls to $0.48\times$ at four, where it is I/O-bound
-  (Section~\ref{sec:mpi-scale}) \citep{INT3,MPI2}. The near-field cost is a
+  (Section~\ref{sec:mpi-scale}). The near-field cost is a
   separate wall, measured end-to-end through the CLI on one H100: $281.0$\,s
   for the support-only shell ($R=1.5$) and $1510.7$\,s for the four-cell shell
   ($R=4$) at $2\times10^{6}$, against a mesh-only wall of $2.48$\,s
-  (Section~\ref{sec:cost}) \citep{INT4}. The shell radius is the dominant cost
+  (Section~\ref{sec:cost}). The shell radius is the dominant cost
   lever, and the device backend runs the same fast algebra on the CUDA device,
   agreeing with the host fast path to $5.4\times10^{-16}$--$8.0\times10^{-16}$
   (Section~\ref{sec:fastgpu}); the distributed FFT makes the output field
@@ -72,14 +72,14 @@ independent of particle count \citep{W7t,D13}.
  relative per-component error against the TSC-convolved continuum, the measured
  values at $d=12$ are $1.1\times10^{-4}$ for $\gamma=1$ aspect 1 and
  $2.6\times10^{-4}$ for $\gamma=1$ aspect 4; the axial component is below
- $3\times10^{-4}$ from $d=6$ for every $\gamma$ \citep{W4b,N2b,D11}. The perpendicular direction at
- $\gamma=10$, aspect 1, is $6.5\times10^{-3}$ at $d=32$ and
- $1.8\times10^{-3}$ at $d=48$, the measured values at those distances
- \citep{W4b,N2b,V2b}. The fast near backend, against the same continuum, is
+ $3\times10^{-4}$ from $d=6$ for every $\gamma$. The perpendicular direction at
+  $\gamma=10$, aspect 1, is $6.5\times10^{-3}$ at $d=32$ and
+  $1.8\times10^{-3}$ at $d=48$, the measured values at those distances
+The fast near backend, against the same continuum, is
  $7.99\times10^{-4}$ stationary interior, $1.96\times10^{-5}$ face,
  $1.57\times10^{-7}$ outside; $1.69\times10^{-4}$ moving axial interior; and
  $8.15\times10^{-2}$ moving oblique interior, the measured limit of the
- fast backend (Section~\ref{sec:fastacc}) \citep{CFPORT,INT4}. Each statement
+ fast backend (Section~\ref{sec:fastacc}). Each statement
  in Section~\ref{sec:accuracy} names which metric (floored, unfloored,
  absolute) supports it; the floored column is electric-only at $\gamma=10$
  because the floor excludes the magnetic field, and the judge metric
@@ -89,7 +89,7 @@ independent of particle count \citep{W7t,D13}.
  distance in cells the controlling length is the beaming cone width
   $d/\gamma$; for $\gamma\ge50$ the cone is sub-cell and the h-refinement
   exponent $p$ (error $\sim h^p$, fitted from the two spacings) falls to about
-  $1$ (Section~\ref{sec:gamma-landscape}) \citep{ER1b}.
+  $1$ (Section~\ref{sec:gamma-landscape}).
 
 \paragraph{Structural assumptions.} The method assumes a single shared
 velocity (or a set of binned velocity classes, one convolution per class,

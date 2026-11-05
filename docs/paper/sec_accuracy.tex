@@ -13,11 +13,11 @@ $O(1)$ effect at $\gamma h \gg 1$. $M$ against $P$ is the total.
 
 The arbiter is an independent TSC-convolved continuum, a tensor
 Gauss--Legendre quadrature with a TSC-knot split and a singularity-cancelling
-power map \citep{indfield}. Its quadrature error is below the
-$3\times10^{-4}$ gate in every configuration measured here \citep{N2b}.
+power map. Its quadrature error is below the
+$3\times10^{-4}$ gate in every configuration measured here.
 
 Three metrics are reported and are not interchangeable, and each claim in this
-section names which one supports it \citep{V2b}.
+section names which one supports it.
 
 \emph{Floored.} $|\mathrm{ref}-\mathrm{mesh}|/\max(|\mathrm{ref}|,|\mathrm{mesh}|)$,
 over points where $|\mathrm{ref}|\ge10^{-3}$ of the local (six-component) field
@@ -33,14 +33,14 @@ The judge metric
 $|\mathrm{ref}-\mathrm{mesh}|/(1+\max(|\mathrm{ref}|,\mathrm{mesh}|))$ is
 absolute-dominated: for fields of order $10^{-9}$ V/m the $+1$ denominator
 swamps the error, so it reports a crossover at $d=2$ for every case and does
-not discriminate \citep{W4b}.
+not discriminate.
 
 \paragraph{The floor hides the magnetic field.} For $\gamma=10$ every B point
 is excluded by the floor: $|\mathbf{B}|$ is about $10^{-10}$ of the
 E-dominated local field, far below the $10^{-3}$ threshold, so the floored
 metric reports no magnetic accuracy at all. The unfloored B relative error is
 $9.7\times10^{-4}$ at $d=32$ (single particle, aspect 1), against a B peak that
-the floored column never sees \citep{V2b}. The floored column of
+the floored column never sees. The floored column of
 Table~\ref{tab:w4b} is therefore electric-only at $\gamma=10$.
 
 \subsection{Reference-separated error at 48 cells}
@@ -51,7 +51,7 @@ Table~\ref{tab:w4b} is therefore electric-only at $\gamma=10$.
 \caption{L2-pooled relative error at $d=48$ cells, $h=1$, perpendicular
 direction (L2 over the six components; single-component worst:
 $\gamma=1$, aspect 4, $M\!-\!T$ $2.65\times10^{-5}$; $\gamma=10$, aspect 1,
-$1.4\times10^{-3}$) \citep{N2b}. $M\!-\!T$: mesh vs TSC-convolved continuum;
+$1.4\times10^{-3}$). $M\!-\!T$: mesh vs TSC-convolved continuum;
 $M\!-\!P$: mesh vs point field; $T\!-\!P$: TSC smoothing, mesh-independent.
 At $\gamma=10$, aspect 1 the $M\!-\!P$ vs $M\!-\!T$ gap is the smoothing
 (L2 ratio $58\times$), not the mesh.}
@@ -79,14 +79,15 @@ not the discretization error. Second, the $M\!-\!T$ error is not converged
 perpendicular to the beam at $\gamma h \gg 1$: at aspect 1 it is acceptable
 only for $\gamma=10$ and not for $\gamma=100$; at aspect 4 it is not
 converged at any $\gamma$. Only the axial direction is clean at every
-$\gamma$ \citep{N2b}.
+$\gamma$.
 
 \subsection{The independent validation}
 
 A second, independent pass measured the shipped CLI end to end:
-\texttt{picBunch} at \texttt{bfaa1e26}, rosi\_v100, the order-12
-\texttt{indfield} reference (refine $3$), $d=2$ to $32$ cells, $\gamma\in\{1,10\}$, aspect 1
-and 4, single particle and three-particle cloud \citep{W4b}.
+\texttt{picBunch} on \texttt{rosi\_v100}, against the order-12
+independent continuum reference (refine $3$), this work, $d=2$ to $32$
+cells, $\gamma\in\{1,10\}$, aspect 1
+and 4, single particle and three-particle cloud.
 
 \begin{table}[t]
 \centering
@@ -94,7 +95,7 @@ and 4, single particle and three-particle cloud \citep{W4b}.
 \caption{Worst per-component relative error (over $x,y$, $|\mathrm{ref}|
 \ge10^{-3}$ of the local field) of the shipped CLI against the
 TSC-convolved continuum, at $d=16$ and $d=32$ cells; rosi\_v100,
-the order-12 \texttt{indfield} reference (refine $3$) \citep{W4b}. ``s/c'' = single /
+the order-12 independent continuum reference (refine $3$), this work. ``s/c'' = single /
  cloud. Measured values at $d=48$: $\gamma=10$, $1.8\times10^{-3}$
 ($d=32$: $6.5\times10^{-3}$); $\gamma=1$ is below $3\times10^{-4}$ from
 $d=12$ (aspect 1) and $d=32$ (aspect 4).}
@@ -120,12 +121,12 @@ floored electric values; the unfloored magnetic error at $\gamma=10$ is
 $9.7\times10^{-4}$ at $d=32$. The window starts at $d=2$, so the TSC-support
 interior ($|s|<1.5$ cells) is not covered by these sweeps; it is what the near
 shell measures (Sections~\ref{sec:nearsheet}, \ref{sec:cost})
-\citep{W4b,V2b,NS4b}.
+
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.95\linewidth]{figs/F_w4b_rel_error.pdf}
-\caption{Worst per-component relative error against source-target distance $d$ for the single-particle floored electric series on \texttt{rosi\_v100}, both axes logarithmic; hue is $\gamma$ (blue $\gamma=1$, vermillion $\gamma=10$) and line style is aspect (solid 1, dashed 4), against the order-12 \texttt{indfield} reference (refine 3) \citep{W4b}. The error falls from $1.2\times10^{-1}$ at $d=2$ to $2.2\times10^{-6}$ at $d=32$ for $\gamma=1$, aspect 1.}
+\caption{Worst per-component relative error against source-target distance $d$ for the single-particle floored electric series on \texttt{rosi\_v100}, both axes logarithmic; hue is $\gamma$ (blue $\gamma=1$, vermillion $\gamma=10$) and line style is aspect (solid 1, dashed 4), against the order-12 independent continuum reference (refine 3), this work. The error falls from $1.2\times10^{-1}$ at $d=2$ to $2.2\times10^{-6}$ at $d=32$ for $\gamma=1$, aspect 1.}
 \label{fig:Fw4b}
 \end{figure}
 
@@ -147,13 +148,12 @@ never agrees with $M\!-\!T$ for $\gamma h \gg 1$.
 \caption{Crossover radius in cells: first $d$ at which every larger $d$ is at
 or below the gate, $h=1$, L2 over the six components, per axis direction,
  worst over the three positive axis directions ($>$48: beyond the measured
-window)
-\citep{N2b}. $T$: TSC-convolved continuum; $P$: point field. Oblique
+window), this work. $T$: TSC-convolved continuum; $P$: point field. Oblique
 directions are $\sim1.5\times$ larger. The $\gamma=1$ aspect 1 row is $d=8$
 against both references here, versus the $d=12$ of the shipped-CLI series in
 Table~\ref{tab:w4b}: the two use different component sets (six axis
 directions, L2-pooled, versus per-component over $x,y$) and different
-implementations \citep{N2b,W4b}.}
+implementations (this work).}
 \label{tab:crossover}
 \begin{tabular}{lcc|cc|cc}
 \toprule
@@ -184,7 +184,7 @@ $6.5\times10^{-3}$ ($\gamma=10$, aspect 1); against the TSC-convolved
 continuum the perpendicular crossover is $d=48$ ($\gamma=10$, aspect 1), and
 for the remaining configurations the measured value at $d=48$ exceeds the
 gate. The axial direction is $6$ against the continuum at every
-$\gamma$ \citep{N2b}.
+$\gamma$.
 
 \subsection{Mid-bunch slices: field and error side by side}
 \label{sec:slices}
@@ -192,11 +192,11 @@ $\gamma$ \citep{N2b}.
  The distance sweeps above sample the far field. To measure the mesh in the
 bunch core we slice through it and compare, pixel by pixel, with an exact
 TSC-convolved reference: $64\times64$ planes, cell $10^{-7}$\,m, $N=200$,
-$Q=-100$\,pC, $\gamma=10$ with momentum along $+y$ (\texttt{BDATA2}). Two
+$Q=-100$\,pC, $\gamma=10$ with momentum along $+y$. Two
 cases share the positions and differ only in a $1.045$\,mrad rms transverse
 divergence in $x$ (Figs.~\ref{fig:valforwardE}, \ref{fig:valforwardB}, \ref{fig:valfluctE}, \ref{fig:valfluctB}); a
 separate $32\times32$ plane carries the binned $1$\,mrad case
-(\texttt{VAR1b}, Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal
+(Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal
 and increases left to right, so the bunch moves rightwards; the vertical axis
 is $x$ in the x-y cut and $z$ in the z-y cut. Each figure has a field row with
 four columns ($E_x,E_y,E_z$ and the magnitude $\sqrt{\sum_i E_i^2}$) and an
@@ -205,19 +205,19 @@ $E_x^2+E_y^2+E_z^2$ so that it shares the components' linear scale. A row has
 one colour scale and one colour bar at its right edge, the error row is
 logarithmic and masked where the reference is below $10^{-3}$ of its own
 peak. The forward case compares the shipped mesh plus fast shell against the
-order-4 adaptive Gauss--Legendre driver \citep{DIR1}; that driver
+order-4 adaptive Gauss--Legendre driver; that driver
 overestimates moving oblique in-support points by about $10\times$, so the
 solid white outline marks the TSC support and the in-support error pixels are
 shown against a reference that is itself unreliable there. The trustworthy
 in-support statement is the fast-versus-arbiter $1.6\%$ at the worst node
 (Section~\ref{sec:fastacc}). The fluctuation reference is complete, but
-picBunch v0.9.0 rejects a momentum spread, so only its reference field panels
+picBunch v0.7.0 rejects a momentum spread, so only its reference field panels
 are shown and the picBunch panels are labelled unavailable.
 
  \paragraph{Shell radius unit.} The earlier $N=1000$ slices run the default
 mesh with no near shell. The near-shell envelope measured in the crossover work, ``3 to 4 PIC
 cells,'' assumed a mesh spacing $h=1/4$ of the PIC cell, so $R=3$ and $R=4$
-are 12 and 16 mesh nodes \citep{NS2,SL3}. On this grid the node spacing is
+are 12 and 16 mesh nodes. On this grid the node spacing is
 $h=1$ PIC cell ($2\times10^{-7}$\,m), so the same $R=3/4$ is 3/4 mesh nodes,
 four times smaller in physical units than the envelope configuration. At
 $R=3$ on an $h=1$ grid the shell covers 3 mesh nodes; the TSC support extends
@@ -229,7 +229,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_forward_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_E.pdf}
-\caption{Forward-case electric validation ($N=200$, $Q=-100$\,pC, $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m, \texttt{BDATA2}): x-y plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row; the lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the white outline marks the TSC support. The in-support fast-versus-arbiter error against the order-12 \texttt{indfield} reference is $1.6\%$ at the worst node.}
+\caption{Forward-case electric validation ($N=200$, $Q=-100$\,pC, $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m. x-y plane at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row; the lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the white outline marks the TSC support. The in-support fast-versus-arbiter error against the order-12 independent continuum reference (this work) is $1.6\%$ at the worst node.}
 \label{fig:valforwardE}
 \end{figure}
 
@@ -245,7 +245,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_E.pdf}
-\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence (\texttt{BDATA2}), showing four columns $E_x,E_y,E_z,|E|$ from the order-12 \texttt{indfield} reference. Each row uses one shared linear scale and one colour bar. picBunch v0.9.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
+\caption{Fluctuation-case electric reference with the same geometry and bunch as Fig.~\ref{fig:valforwardE} but a $1.045$\,mrad rms $x$-divergence, showing four columns $E_x,E_y,E_z,|E|$ from the order-12 independent continuum reference (this work). Each row uses one shared linear scale and one colour bar. picBunch v0.7.0 rejects a momentum spread, so only the reference field is shown and the mesh panels are labelled unavailable.}
 \label{fig:valfluctE}
 \end{figure}
 
@@ -253,7 +253,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_B.pdf}
-\caption{Magnetic reference for the fluctuation case, with the same planes, four columns $B_x,B_y,B_z,|B|$, and one shared scale and colour bar per row as Fig.~\ref{fig:valfluctE}. The $x$-divergence lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the dominant component. Only reference fields from the order-12 \texttt{indfield} reference are shown; the picBunch panels are unavailable.}
+\caption{Magnetic reference for the fluctuation case, with the same planes, four columns $B_x,B_y,B_z,|B|$, and one shared scale and colour bar per row as Fig.~\ref{fig:valfluctE}. The $x$-divergence lifts $B_y$ off zero, although it remains about $3\times10^{-4}$ of the dominant component. Only reference fields from the order-12 independent continuum reference (this work) are shown; the picBunch panels are unavailable.}
 \label{fig:valfluctB}
 \end{figure}
 
@@ -261,7 +261,7 @@ Section~\ref{sec:slices-runs}.
 \centering
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_B.pdf}
-\caption{Binned $1$\,mrad case (\texttt{VAR1b}: $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against the order-12 \texttt{indfield} reference. The upper image is electric and the lower magnetic, each with four columns, one shared scale and one colour bar per row; error rows are logarithmic and masked below $10^{-3}$ of the reference peak. The solid white outline marks the TSC support.}
+   \caption{Binned $1$\,mrad case ($N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at $z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against the order-12 independent continuum reference (this work). The upper image is electric and the lower magnetic, each with four columns, one shared scale and one colour bar per row; error rows are logarithmic and masked below $10^{-3}$ of the reference peak. The solid white outline marks the TSC support.}
 \label{fig:val1mrad}
 \end{figure}
 
@@ -279,7 +279,7 @@ component and fraction of unmasked plane pixels above $10^{-3}$, x-y plane at
 $z=1.60\,\si{\micro\metre}$ and z-y plane at $x=3.20\,\si{\micro\metre}$,
 $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m, mesh against the
 independent exact TSC driver (FP64 quadrature, order $4$, max level $5$,
-tolerance $10^{-3}$) \citep{DIR1,SL2}. The $\gamma=10$ bunch moves along
+tolerance $10^{-3}$). The $\gamma=10$ bunch moves along
 $+y$; $y$ is the horizontal axis in every map. Node spacing $h=1$ PIC cell;
 no near shell. The $\gamma=1$ reference uses the archived tolerance
 $10^{-4}$ (driver floor $9.075\times10^{-4}$, 14 not converged).}
@@ -323,7 +323,7 @@ is measured at the same geometry in Section~\ref{sec:slices-runs}.
 
 Table~\ref{tab:fast} gives the worst per-component relative error of the fast
 evaluator against the independent continuum, by region and by
-$\gamma$ \citep{CFPORT}. The metric is the artifact formula
+$\gamma$. The metric is the artifact formula
 $\max|\mathrm{mesh}-\mathrm{ref}|/(1+\max|\mathrm{ref}|)$
 over $20$ interior, $16$ face and $16$ outside points, cells $10^{-7}$\,m.
 ``Interior'' is inside the TSC support, ``face'' is on its boundary, and
@@ -331,14 +331,14 @@ over $20$ interior, $16$ face and $16$ outside points, cells $10^{-7}$\,m.
 order $5$; the moving axial case is order $8$; the moving oblique interior is
 order $5$. The oblique value is the measured limit of the fast backend: the
 rest-frame singular box of the oblique direction measures
-$8.15\times10^{-2}$ at its default order \citep{CFPORT,INT4}.
+$8.15\times10^{-2}$ at its default order.
 
 \begin{table}[t]
 \centering
 \small
 \caption{Fast near evaluator, worst per-component relative error against the
-order-12 \texttt{indfield} reference, cells $10^{-7}$\,m, \texttt{jureca-h100}
-\citep{CFPORT,INT4}. Regions: interior (inside the TSC support), face (on its
+order-12 independent continuum reference, cells $10^{-7}$\,m, \texttt{jureca-h100}
+(this work). Regions: interior (inside the TSC support), face (on its
 boundary), outside ($1.6$--$3.6$ cells). The ``remainder order'' column is the
 Gauss--Legendre order of the smooth remainder; the singular \texttt{asinh}
 box is $\mathrm{O}(1)$ in every row (moving axial uses the
@@ -365,9 +365,9 @@ $1.69\times10^{-4}$, $1.68\times10^{-4}$, $1.36\times10^{-5}$,
 $1.67\times10^{-4}$, $1.69\times10^{-4}$, $0$; the moving oblique interior row
 is $2.43\times10^{-2}$, $7.42\times10^{-2}$, $6.32\times10^{-2}$,
 $8.15\times10^{-2}$, $2.96\times10^{-2}$, $3.89\times10^{-2}$
-\citep{CFPORT,INT4}. The stationary case meets $10^{-3}$ in every region; the
+
 moving axial case meets $10^{-3}$ in every region; the moving oblique interior
-is $8.15\times10^{-2}$ \citep{CFPORT,INT4}.
+is $8.15\times10^{-2}$.
 
 \subsection{Near-shell accuracy and cost on the slice geometry}
 \label{sec:slices-runs}
@@ -375,7 +375,7 @@ is $8.15\times10^{-2}$ \citep{CFPORT,INT4}.
 On the same $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m geometry,
 the exact near shell was run through the library path at the radius the
 envelope case assumed, $R=3$ for $\gamma=1$ and $R=4$ for $\gamma=10$, in mesh
-nodes of this $h=1$ grid \citep{SL3}. The mesh-only plane errors
+nodes of this $h=1$ grid. The mesh-only plane errors
 (Table~\ref{tab:slices}) are
  $0.12$--$0.415$ for $\gamma=1$ and $0.11$--$4.60$ for $\gamma=10$: these
 planes cut the sources, the region where the spectral convolution is not
@@ -391,14 +391,14 @@ normalised to the peak deposited $\rho/\varepsilon_0$, moves from
 $0.3534$ to $0.0895$ for $\gamma=1$ and from $5.026$ to $0.399$ for
 $\gamma=10$, against reference values $0.0904$ and $0.0814$: $\gamma=1$
 reaches the reference value, $\gamma=10$ drops $12.6\times$ and stays
-$4.9\times$ above it \citep{SL3,V2b}.
+$4.9\times$ above it.
 
 The assembly itself is not the limiting term: the tests of
 Section~\ref{sec:nearsheet} show the tiled subtraction exact to roundoff, so
-the residuals above are the mesh outside the shell \citep{NS4b}.
+the residuals above are the mesh outside the shell.
 
 Runtime at $N=1000$ is $4.3$ min for $\gamma=1$ and $59$ min for $\gamma=10$
-(one 16-thread socket) \citep{SL3,NS2}; the exact evaluator costs about
+(one 16-thread socket); the exact evaluator costs about
 $8\times$ more per pair at $\gamma=10$ than at $\gamma=1$.
 
 \subsection{Cost at $2\times10^{6}$ particles, one H100}
@@ -408,7 +408,7 @@ Table~\ref{tab:cost} gives the measured CLI wall times at $2\times10^{6}$
 particles in a $20$-cell bunch, grid $66\times68\times66$, cell
 $2.5\times10^{-7}$\,m, near-shell tile $4$, on one \texttt{H100}
 (\texttt{jrc0880}, \texttt{sm\_90}), with the achieved near error for each
-configuration \citep{INT4,CFPORT}. The near shell is the dominant term in every
+configuration. The near shell is the dominant term in every
 shell row; the mesh-only wall is $2.48$\,s, of which the compute is $0.116$\,s
 (deposit $34.8$--$40.5$\,ms, kernel $1.1$\,ms, FFT $7.3$--$7.6$\,ms, read-out
 $8.0$--$8.5$\,ms, writer $48.8$--$254.5$\,ms). The near evaluator is the
@@ -417,19 +417,19 @@ not as a standalone kernel. Pair counts are quoted in source-node pairs and in
 components: support $4.319\times10^{8}$ / $2.59\times10^{9}$, three-cell
 $1.458\times10^{9}$ / $8.75\times10^{9}$, four-cell
 $2.662\times10^{9}$ / $1.60\times10^{10}$, the neighbour counts of the
-$20$-cell geometry \citep{CF1}.
+$20$-cell geometry.
 
 \begin{table}[t]
 \centering
 \small
 \caption{Measured CLI wall at $2\times10^{6}$ particles, $20$-cell bunch,
 $66\times68\times66$, cell $2.5\times10^{-7}$\,m, tile $4$, one \texttt{H100}
-(\texttt{sm\_90}) \citep{INT4,CFPORT}. ``near-shell wall'' excludes the mesh,
+(\texttt{sm\_90}). ``near-shell wall'' excludes the mesh,
 ``end-to-end wall'' includes it. The mesh-only compute inside its $2.48$\,s
 wall is $0.116$\,s; the per-stage split (deposit, kernel, FFT, read-out,
 writer) is in the text.}
 \label{tab:cost}
-\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{lrrl}
 \toprule
 configuration & near-shell wall (s) & end-to-end wall (s) & worst near error \\
@@ -439,20 +439,21 @@ support-only shell, $R=1.5$, order $5$ & $278.28$ & $281.0$ & $7.99\times10^{-4}
 three-cell shell, $R=3$, order $5$ & $908.14$ & $955.4$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
 four-cell shell, $R=4$, order $5$ & $1508.12$ & $1510.7$ & $7.99\times10^{-4}$ in, $\le1.6\times10^{-7}$ out \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
   The support-only shell costs $281.0$\,s end-to-end at
   $7.99\times10^{-4}$ interior error, the three-cell shell $955.4$\,s, and the
   four-cell shell $1510.7$\,s, at the same interior error
-  \citep{INT4}. The shell radius is the dominant cost lever: going from
+
   $R=1.5$ to $R=4$ multiplies the end-to-end wall by $5.4\times$ at fixed
   particle count and grid, while the accuracy of the in-shell region is already
   at $7.99\times10^{-4}$ at $R=1.5$. The shell rate on the integrated path is
   $1.55\times10^{6}$, $1.61\times10^{6}$ and $1.76\times10^{6}$ pairs/s
   (source-node pairs) for the three radii, about $2\times$ slower per
   component than the standalone kernel, the overhead of the per-tile local FFT
-  and launch in the integrated path \citep{INT4}.
+  and launch in the integrated path
   Fig.~\ref{fig:schem} places the three evaluated regions
   (TSC support, near shell, mesh) around one source and shows the measured
   error against distance for the $\gamma=1$ and $\gamma=10$ axial cases.
@@ -460,38 +461,37 @@ four-cell shell, $R=4$, order $5$ & $1508.12$ & $1510.7$ & $7.99\times10^{-4}$ i
 \subsection{Device backend for the fast near evaluator}
 \label{sec:fastgpu}
 
-\texttt{v0.9.1} carries a device backend, \texttt{--near-shell fast-gpu}: the
+\texttt{v0.7.0} carries a device backend, \texttt{--near-shell fast-gpu}: the
 same algebra as the host fast path, one thread per (pair, component), on the
-CUDA device \citep{CFPORT,INT4}. Against the host fast path it agrees to
+CUDA device. Against the host fast path it agrees to
 $5.4\times10^{-16}$ to $8.0\times10^{-16}$; when no CUDA device is present the
 run falls back to the host path with a warning, so the flag is safe on
-host-only builds \citep{CFPORT,INT4}. The device backend is the fast path of
+host-only builds. The device backend is the fast path of
 Section~\ref{sec:nearsheet} moved to the device; the lid slice run, one
 near-shell tile of the shipped problem, is $14.13$\,s on the device versus
 $25.68$\,s on the host, a $1.82\times$ speed-up for that stage
-\citep{CFPORT,INT4}.
+
 
 \subsection{Distributed FFT}
 \label{sec:distfft}
 
-A distributed FFT (\texttt{experimental/distributed-fft},
-\texttt{d602484d}) decomposes the output field in $z$ slabs, one slab per
-rank, and moves the $z$ rows of each 2-D slice between ranks with
+A distributed FFT decomposes the output field in $z$ slabs, one
+slab per rank, and moves the $z$ rows of each 2-D slice between ranks with
 \texttt{MPI\_Alltoallv} transposes around each 2-D transform
-\citep{DIST1,INT3}. Against the replicated path it agrees to
+Against the replicated path it agrees to
 $2.2\times10^{-16}$, and the written outputs are bitwise equal at $1$, $2$ and
-$4$ ranks, so the decomposition changes no value
-\citep{DIST1,INT3}. At a $640^{3}$ output the per-rank host memory is
+$4$ ranks, so the decomposition changes no value.
+At a $640^{3}$ output the per-rank host memory is
 $41.1$\,GB at $2$ ranks and $20.6$\,GB at $4$, the quantity the decomposition
 buys: the output field is slab-local, while the bunch remains replicated on
-every rank \citep{DIST1,INT3}. The transposes are $74$--$85\%$ of the FFT-plus-
+every rank. The transposes are $74$--$85\%$ of the FFT-plus-
 transpose time, so the distributed path is a memory feature rather than a
-speed feature \citep{DIST1,INT3}.
+speed feature.
 
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\linewidth]{figs/SCHEM1_field_evaluation_schematic.pdf}
- \caption{Where the algorithm evaluates the field: real space around one source (top) and the measured error against distance (bottom) at $h=1$, aspect 1, \texttt{rosi\_v100} \citep{SB1,SCHEM1}. Shaded regions are the TSC support (to $1.5$ nodes), the near shell (to $R_{\rm shell}$), and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The $\gamma=1$ error crosses $3\times10^{-4}$ at $d=8$ nodes, while the $\gamma=10$ curve stays above it to $d=48$.}
+ \caption{Where each method evaluates the field around a single source at $h=1$ and aspect $1$: TSC support to $1.5$ nodes, the near shell out to $R_{\rm shell}$, and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The lower panel plots the measured worst per-component error against distance for both $\gamma$, with the same regions shaded and the $10^{-3}$ gate marked. Field components sit at staggered Yee positions; the staggering is not drawn.}
  \label{fig:schem}
  \end{figure}
 
@@ -500,53 +500,47 @@ speed feature \citep{DIST1,INT3}.
 On a $64\times64\times32$, cell $10^{-7}$\,m, stationary bunch ($\gamma=1$),
 the disagreement with the exact-quadrature reference does not grow with
 particle count: the band is flat in $N$ from $1$ to $1000$
-($10^{-3}$--$3\times10^{-2}$) \citep{W7t}. The $O(1)$ values at $N\ge10$
+($10^{-3}$--$3\times10^{-2}$). The $O(1)$ values at $N\ge10$
 occur only because the global worst sample point falls $0.415$--$0.65$ cells
 from a source, inside that source's TSC support; a charge-weighting defect
-would grow with $N$, and it does not \citep{W7t}.
+would grow with $N$, and it does not.
 
 \subsection{Anisotropic cells: the gap is the TSC convolution}
 \label{sec:anisotropic}
 
   At anisotropic spacing the accuracy is quantified per geometry, not inherited
-  from the cubic case \citep{A1b,A1c}. On a grid with per-axis cell spacing
+  from the cubic case. On a grid with per-axis cell spacing
   $(1,1,4)$ the stretched $z$ axis matches the continuum to
   $\approx10^{-3}$--$10^{-7}$ across the in-grid distances, the same scale as
   the cubic control; the short $x$/$y$ axes sit in the near-field TSC regime at
   a short physical distance ($d=4$ cells is only $4$\,m along $x$/$y$, so
   $E_z\approx0.19$ stationary and $E_x$/$E_y$ up to $\approx0.9$ at $d=4$
-  for the $\gamma=10$ case) \citep{A1c}. The mesh is not wrong because the
+  for the $\gamma=10$ case). The mesh is not wrong because the
   spacings differ; the near points on the short axes are physically closer to
-  the source. A reported triplet for this geometry, ``the exact TSC
-  convolution is $0.9638\times$ the point Coulomb field ($3.2\%$ offset) and
-  the mesh matches the continuum to $0.44\%$ at $12$ cells,'' does not appear
-  in \texttt{A1b/RESULTS.md} or \texttt{A1c/RESULTS.md} and is not repeated
-  here as a measured value \citep{A1b,A1c}.
+  the source.
 
  \paragraph{The $h^{3}$ factor.}
  The sampled convolution carries the Riemann volume of the continuum integral
  of Eq.~\eqref{eq:Fc}: each sample covers $h^3$ cells, so the read-out applies
- $h_x h_y h_z/(M_x M_y M_z)$ (Section~\ref{sec:method}) \citep{S1-spec}.
+ $h_x h_y h_z/(M_x M_y M_z)$ (Section~\ref{sec:method}).
 
  \subsection{The $\gamma$ landscape: $10$ to $100$}
  \label{sec:gamma-landscape}
 
   The error landscape for a single particle at $\gamma=10,50,100$ is measured
   on a $96$-cell box, cell $10^{-7}$\,m, aspect $1$, at $h=1$ and $h=1/4$,
-  axial and oblique ($45^\circ$), against the independent continuum
-  \citep{ER1b}. The metric is the peak-normalised absolute error
+  axial and oblique ($45^\circ$), against the independent continuum (this work). The metric is the peak-normalised absolute error
   $\max|\mathrm{mesh}-\mathrm{ref}|/\max|\mathrm{ref}|$ per component, at
-  $d=8$ cells for the $h$-comparison. These runs used the $v0.5.0$ tree at
-  padding $1$ (padding $2$ was infeasible for the $384^3$ $h=1/4$ grid); the
+  $d=8$ cells for the $h$-comparison. These runs used padding $1$ (padding
+  $2$ was infeasible for the $384^3$ $h=1/4$ grid); the
   $d=48$ rows carry a small padding-$1$ periodic-wraparound floor of order
   $10^{-4}$ to $10^{-3}$, so the $d=48$ values are not padding-clean
-  \citep{ER1b}.
 
  \begin{table}[t]
  \centering
  \small
   \caption{Single-particle mesh error at $d=8$ cells, $96$-cell box, cell
-  $10^{-7}$\,m, aspect $1$, axial, \texttt{jureca-h100} \citep{ER1b}.
+  $10^{-7}$\,m, aspect $1$, axial, \texttt{jureca-h100}.
   Peak-normalised absolute error, worst per component, at $h=1$ and $h=1/4$.
   The error grows with $\gamma$; at $h=1$ the $\gamma=50$ and $\gamma=100$
   values exceed the peak field, and the h-refinement exponent $p$ (error
@@ -567,7 +561,7 @@ would grow with $N$, and it does not \citep{W7t}.
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.62\linewidth]{figs/F_gamma_err_dist.pdf}
- \caption{Peak-normalised absolute error against distance on log-log axes, single particle, $96$-cell box, cell $10^{-7}$\,m, aspect 1, axial, \texttt{jureca-h100} \citep{ER1b}. Solid/dashed is $h=1$/$1/4$ and hue is $\gamma=10$ (vermillion), $50$ (purple), $100$ (orange). At $h=1$ the error exceeds the peak field by $d=8$ cells for $\gamma=50$ and $\gamma=100$.}
+ \caption{Peak-normalised absolute error against distance on log-log axes, single particle, $96$-cell box, cell $10^{-7}$\,m, aspect 1, axial, \texttt{jureca-h100}. Solid/dashed is $h=1$/$1/4$ and hue is $\gamma=10$ (vermillion), $50$ (purple), $100$ (orange). At $h=1$ the error exceeds the peak field by $d=8$ cells for $\gamma=50$ and $\gamma=100$.}
  \label{fig:gamma-dist}
  \end{figure}
 
@@ -575,33 +569,33 @@ would grow with $N$, and it does not \citep{W7t}.
   Fig.~\ref{fig:gamma-dist} shows the same quantities against distance. The
   error grows steeply with $\gamma$: $4.4\times10^{-2}$ at $\gamma=10$,
   $1.05$ at $\gamma=50$, $5.47$ at $\gamma=100$, at $h=1$ and $d=8$ cells
-  \citep{ER1b}. Refining to $h=1/4$
+ (this work). Refining to $h=1/4$
  brings these to $6.9\times10^{-5}$, $5.6\times10^{-2}$, and $0.82$. The
   controlling length is the beaming cone width $d/\gamma$: for $\gamma\ge50$ the
   cone is sub-cell, the h-refinement exponent $p$ (error $\sim h^p$, fitted
   from the two spacings) collapses to about $1$, and refinement stops paying
-  off \citep{ER1b}.   The $h$ targets for $10^{-2}$ derive from the dominant $d=2$ near-charge
+  off.   The $h$ targets for $10^{-2}$ derive from the dominant $d=2$ near-charge
   band (the error $\sim h^p$ fit uses the $d=2$ band, not the $d=8$ rows in
   Table~\ref{tab:gamma}). The oblique ($45^\circ$) target is $h\le0.002$ at
   $\gamma=50$; the axial ($0^\circ$) target is $h\le0.001$ at $\gamma=50$
   ($5.6\times10^{8}$ times the nodes). For $\gamma\ge50$ the cone is
   sub-cell and $10^{-2}$ needs $h\le0.002$ ($\ge10^{8}$ times the nodes);
   $10^{-3}$ is out of reach ($>10^{9}$ to $10^{12}$ times the nodes)
-  \citep{ER1b}. A shell of radius of order $\gamma$ cells is what the
-  near-charge error requires at $\gamma=50$ to $100$ \citep{ER1b}. These are
+  (this work). A shell of radius of order $\gamma$ cells is what the
+  near-charge error requires at $\gamma=50$ to $100$. These are
   measured limits of the mesh at a fixed distance in cells, stated as the
   behaviour the data show.
 
   \clearpage
   Fig.~\ref{fig:large} shows the $\gamma=10$ field and error on a
  $128\times128\times64$ domain, cell $2\times10^{-7}$\,m, $N=100$, against
- the independent continuum at tolerance $10^{-3}$ \citep{LARGE1};
+ the independent continuum at tolerance $10^{-3}$;
  Fig.~\ref{fig:largeB} is its magnetic companion, and
  Fig.~\ref{fig:largeg1} is the stationary-bunch electric case. The boundary field is about $10.3\%$ of the peak (worst
  per-component, $\gamma=10$ z-y $E_z$), so the colour scale is set by the bunch
  and the far decay is visible inside the frame. The core error is the method
  error of the mesh where the planes cut the bunch, far above the
- $10^{-3}$ reference floor \citep{LARGE1}.
+ $10^{-3}$ reference floor.
 
    \begin{figure}[H]
    \centering
@@ -623,103 +617,94 @@ would grow with $N$, and it does not \citep{W7t}.
    \centering
    \includegraphics[width=0.92\linewidth]{figs/large_sxy_g1_E.pdf}\\[1pt]
    \includegraphics[width=0.92\linewidth]{figs/large_szy_g1_E.pdf}
-  \caption{Large-domain electric slices for the stationary bunch ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large} \citep{LARGE1}; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row, above a logarithmic error row. The core error reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference floor.}
+  \caption{Large-domain electric slices for the stationary bunch ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large}; $x$ is horizontal in the x-y cut and $z$ is horizontal in the z-y cut. Each image shows four columns $E_x,E_y,E_z,|E|$ with one shared linear scale and one colour bar per row, above a logarithmic error row. The core error reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference floor.}
   \label{fig:largeg1}
   \end{figure}
 
-\subsection{Six-velocity single-particle validation}
+\subsection{Single-particle validation at seven velocities ($\gamma=1.0$, $1.1$, $1.5$, $2$, $10$, $50$, $100$)}
 \label{sec:gpvalid}
 
-Figures~\ref{fig:gpvalid-xy-e}, \ref{fig:gpvalid-xy-b},
-\ref{fig:gpvalid-xy-err}, \ref{fig:gpvalid-zy-e}, \ref{fig:gpvalid-zy-b} and
-\ref{fig:gpvalid-zy-err} show the shipped mesh field for one electron on a $64^3$ grid, cell $10^{-7}$\,m, against the
-independent order-12 continuum reference on the two mid planes. The six rows
-are the velocity cases $\beta=0.1$, $\beta=0.5$, $\gamma=1$, $\gamma=10$,
-$\gamma=30$ and $\gamma=100$, with $y$ horizontal and increasing left to
-right. The measured worst relative errors are $3.49\times10^{-3}$,
-$3.73\times10^{-3}$, $3.47\times10^{-3}$, $1.20\times10^{-1}$,
-$7.39\times10^{-1}$ and $3.21$ in that order. The error grows with $\gamma$
-because the field is compressed into a fraction of a cell: at $\gamma=30$ and
-$\gamma=100$ the Lorentz pancake is thinner than the mesh spacing, so those
-rows show the geometric sub-cell limit of the mesh, not a solver defect.
+Figures~\ref{fig:gpvalid-g1p0}--\ref{fig:gpvalid-g100} show the shipped mesh field for one electron on the final $128^3$ grid, cell $5\times10^{-8}$\,m over the same $6.4\,\mu$m domain, against the independent order-12 continuum reference on the mid-$z$ x-y plane. The seven velocities are $\gamma=1.0$, $1.1$, $1.5$, $2$, $10$, $50$ and $100$. Each figure is one velocity case, with $y$ horizontal and increasing left to right, and its rows are labelled with $\gamma$, $\beta$ and the particle count $N=1$. Table~\ref{tab:gpvalid} lists the measured worst relative errors: $3.474\times10^{-3}$, $3.669\times10^{-3}$, $3.719\times10^{-3}$, $5.098\times10^{-3}$, $1.197\times10^{-1}$, $1.426$ and $3.213$ in velocity order. The error grows with $\gamma$ because the field is compressed into a fraction of a cell: at $\gamma=50$ and $\gamma=100$ the Lorentz pancake is thinner than the mesh spacing, so those cases show the geometric sub-cell limit of the mesh, not a solver defect. Raising the resolution from $64^3$ to $128^3$ at the same physical domain left the relative errors unchanged, so the growth with $\gamma$ is the field compression rather than a discretisation that finer cells remove. The $\sim3.5\times10^{-3}$ floor at low $\gamma$ is the reference/quadrature floor at the settings used, not the solver's limit. The peak squared fields scale as $1/\text{cell}^2$ compared with the $64^3$ series (a factor $16$ for the halved cell), a consistency check on the two campaigns.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Seven-velocity single-particle validation on the final $128^3$ grid, cell $5\times10^{-8}$\,m, $6.4\,\mu$m domain, against the order-12 continuum reference. Worst is the maximum relative error over the six components on the mid-$z$ x-y plane.}
+\label{tab:gpvalid}
+\begin{tabular}{rrr}
+\toprule
+$\gamma$ & $\beta$ & worst relative error \\
+\midrule
+1.0   & 0       & $3.474\times10^{-3}$ \\
+1.1   & 0.4166  & $3.669\times10^{-3}$ \\
+1.5   & 0.7454  & $3.719\times10^{-3}$ \\
+2.0   & 0.8660  & $5.098\times10^{-3}$ \\
+10    & 0.9950  & $1.197\times10^{-1}$ \\
+50    & 0.99980 & $1.426$ \\
+100   & 0.99995 & $3.213$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figs/gp_xy_E.pdf}
-\caption{Single-electron electric field on the x-y plane at mid-$z$ for the
-six velocity cases $\beta=0.1$, $\beta=0.5$, $\gamma=1$, $\gamma=10$,
-$\gamma=30$ and $\gamma=100$ (rows). The columns are $E_x$, $E_y$, $E_z$ and
-$E_x^2+E_y^2+E_z^2$; each row has one shared symmetric-log colour scale and
-one colour bar, and $y$ increases left to right in $\mu$m. The measured worst
-relative error over the six rows is $3.21$ at $\gamma=100$.}
-\label{fig:gpvalid-xy-e}
+\includegraphics[width=\linewidth]{figs/gp_g1p0.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0$ ($\gamma=1.0$) on the $128^3$ grid, cell $5\times10^{-8}$\,m. The $E$ block and the $B$ block each put $E_x,E_y,E_z$ (or $B_x,B_y,B_z$) on one shared colour scale with its own bar and $E^2$ (or $B^2$) on a separate colour scale with its own bar, so the squared-magnitude scale never dominates the component scale. Error rows are logarithmic, carry the $10^{-3}$ contour, and are masked below $10^{-3}$ of the reference peak; the worst component error is $3.474\times10^{-3}$.}
+\label{fig:gpvalid-g1p0}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figs/gp_zy_E.pdf}
-\caption{Same six-velocity electric data as Fig.~\ref{fig:gpvalid-xy-e} on
-the z-y plane at mid-$x$, with $y$ horizontal and $z$ vertical, four columns
-$E_x$, $E_y$, $E_z$ and $E_x^2+E_y^2+E_z^2$, and one shared colour scale and
-one colour bar per row. The measured worst relative error is again $3.21$ at
-$\gamma=100$.}
-\label{fig:gpvalid-zy-e}
+\includegraphics[width=\linewidth]{figs/gp_g1p1.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.4166$ ($\gamma=1.1$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $3.669\times10^{-3}$.}
+\label{fig:gpvalid-g1p1}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figs/gp_xy_B.pdf}
-\caption{Magnetic companion to Fig.~\ref{fig:gpvalid-xy-e}: x-y plane, six
-velocity rows, columns $B_x$, $B_y$, $B_z$ and $B_x^2+B_y^2+B_z^2$, one shared
-symmetric-log colour scale and one colour bar per row. The field is
-identically zero at $\gamma=1$, and the measured worst magnetic relative error
-over the six rows is $0.694$ at $\gamma=100$.}
-\label{fig:gpvalid-xy-b}
+\includegraphics[width=\linewidth]{figs/gp_g1p5.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.7454$ ($\gamma=1.5$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $3.719\times10^{-3}$.}
+\label{fig:gpvalid-g1p5}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figs/gp_zy_B.pdf}
-\caption{Magnetic companion on the z-y plane at mid-$x$, same six velocity
-rows and columns $B_x$, $B_y$, $B_z$ and $B_x^2+B_y^2+B_z^2$, each row on one
-shared colour scale with one colour bar. The field is identically zero at
-$\gamma=1$, and the measured worst magnetic relative error is $0.694$ at
-$\gamma=100$.}
-\label{fig:gpvalid-zy-b}
+\includegraphics[width=\linewidth]{figs/gp_g2p0.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.8660$ ($\gamma=2.0$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $5.098\times10^{-3}$.}
+\label{fig:gpvalid-g2p0}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figs/gp_xy_err.pdf}
-\caption{Relative error $|\mathrm{mesh}-\mathrm{ref}|/\mathrm{peak}(\mathrm{ref})$
-on the x-y plane for the six velocity rows, with columns $E_x$, $E_y$, $E_z$,
-$E^2$, $B_x$, $B_y$, $B_z$ and $B^2$. Each row is logarithmic, has one colour
-bar, and is masked where the reference is below $10^{-3}$ of its own peak. The
-worst component error is $3.21$ at $\gamma=100$.}
-\label{fig:gpvalid-xy-err}
+\includegraphics[width=\linewidth]{figs/gp_g10.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.9950$ ($\gamma=10$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $1.197\times10^{-1}$.}
+\label{fig:gpvalid-g10}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figs/gp_zy_err.pdf}
-\caption{Same error convention on the z-y plane at mid-$x$, with the six
-velocity rows and the same eight columns. Each row is logarithmic, has one
-colour bar, and is masked where the reference is below $10^{-3}$ of its own
-peak. The worst component error is $3.21$ at $\gamma=100$.}
-\label{fig:gpvalid-zy-err}
+\includegraphics[width=\linewidth]{figs/gp_g50.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.99980$ ($\gamma=50$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $1.426$.}
+\label{fig:gpvalid-g50}
 \end{figure}
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{figs/gp_g100.pdf}
+\caption{Single-electron field and error on the x-y plane at mid-$z$ for $\beta=0.99995$ ($\gamma=100$) on the $128^3$ grid, cell $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions as Fig.~\ref{fig:gpvalid-g1p0}. The worst component error is $3.213$.}
+\label{fig:gpvalid-g100}
+\end{figure}
 
  \subsection{Determinism}
 
  Repeated runs of the shipped CLI are bit-identical: two runs of the same
  input produce byte-identical E/B mesh payloads (md5 \texttt{d3641d64\ldots},
- $15\,092\,736$ bytes) \citep{W4b}. The CLI also rejects a below-floor
- \texttt{--tolerance} ($10^{-15}$) with a nonzero exit \citep{W4b}. The
+ $15\,092\,736$ bytes). The CLI also rejects a below-floor
+ \texttt{--tolerance} ($10^{-15}$) with a nonzero exit. The
  \texttt{gridUnitSI} is applied once, in the reader
  (\texttt{OpenPMD.cpp}), and the mesh geometry follows
  \texttt{gridSpacing}\,$\cdot$\,\texttt{gridUnitSI}; a mesh without a positive
-  \texttt{gridUnitSI} is rejected \citep{S1-spec}.
+  \texttt{gridUnitSI} is rejected.
 
    \subsection{Binned multi-velocity binning, measured}
    \label{sec:multivel}
@@ -727,20 +712,19 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
    The single-velocity scope of Section~\ref{sec:fielddef} is extended by
    splitting the velocity distribution into $B$ classes and running one
    convolution per class; the near shell needs no binning, because each pair
-   carries its own velocity \citep{MV2,MVR2}. The measurements below are
+   carries its own velocity. The measurements below are
    on a $64^3$ grid with $200$ sources on \texttt{hal} (NVIDIA A30,
-   \texttt{sm\_80}, CUDA 13.4.92), picBunch \texttt{v0.9.1} (commit
-   \texttt{c0bf82c}, tag \texttt{262927ba}) \citep{MVR2,INT7}.
+   \texttt{sm\_80}, CUDA 13.4.92), picBunch \texttt{v0.9.1}.
 
    \paragraph{Single-velocity sanity.} With zero spread the binned path is
    bitwise equal to the unbinned path: $B=1$ and $B=16$ give bit-identical
-   fields in all six components ($\max|\Delta|=0$) \citep{MVR2}.
+   fields in all six components ($\max|\Delta|=0$).
 
    \begin{table}[t]
    \centering
    \small
    \caption{Binned multi-velocity peaks, $64^3$ grid, $200$ sources,
-   $\gamma=10$, picBunch \texttt{v0.9.1} \citep{MVR2}.}
+   $\gamma=10$, picBunch \texttt{v0.9.1}.}
    \label{tab:multivel}
    \begin{tabular}{lrrrr}
    \toprule
@@ -752,34 +736,20 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
    \end{tabular}
    \end{table}
 
-   \begin{figure}[t]
-   \centering
-   \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
-   \caption{Sampled multi-velocity bunches used by the campaign
-   ($\gamma=10$, 512 sources, seeds 100/103, generator \texttt{02891fe6})
-   \citep{MV2}. (a) $\gamma$ histogram for the 5\% energy spread with the
-   $B=16$ adaptive edges and labelled mean and standard deviation;
-   (b) $u_\parallel$ versus $u_\perp$ density for the $5^\circ$ angular spread
-   with the $5^\circ$ and median-divergence lines; (c) measured per-bin error
-   $T_b-T$ against the model for both spread cases.}
-   \label{fig:multivel}
-   \end{figure}
-
-   Figure~\ref{fig:multivel} shows the sampled distributions behind these
-   cases. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
+   With a 5\% energy spread and $+y$ drift the $B_z$ peak is
    $2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
    bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
-   longitudinal current \citep{MVR2}. With a $5^\circ$ angular spread the
+   longitudinal current. With a $5^\circ$ angular spread the
    $B_z$ peak moves from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T
    and $B_y$ from $1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is
    $5.22\times10^{-2}$, and the two bin counts agree to $0.0043\%$ in $B_z$
-   and $0.056\%$ in $B_y$ \citep{MVR2}.
+   and $0.056\%$ in $B_y$.
 
    \paragraph{1\,mrad case against the arbiter.} The fluctuation bunch
    ($N=200$, $\gamma=10$, $+y$ drift, 1.046\,mrad rms $x$-divergence,
-   \texttt{BDATA2}) was re-run at 64 bins and compared against the order-12
+   ) was re-run at 64 bins and compared against the 
    Gauss--Legendre arbiter (unbinned, per-particle $u$, 698-node slice
-   subset) measured before the fix \citep{MVR3,FLUC1}. On the x-y slice
+   subset) measured before the fix. On the x-y slice
    ($z=32$) picBunch gives $B_y=7.835$\,T and $B_z=2.3336\times10^{4}$\,T,
    against arbiter values of $7.759$\,T and $2.344\times10^{4}$\,T
    (factors $1.010\times$ and $0.996\times$); on the z-y slice ($x=32$) the
@@ -790,7 +760,7 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
    $1.4\%$ (x-y ratio); every component on every slice is within $1.0\%$.
    Before the fix the same 64-bin run gave $B_y=1.196\times10^{3}$\,T,
    $154\times$ the arbiter, and $B_z=4.002\times10^{4}$\,T, $1.71\times$ the
-   arbiter \citep{MVR3,FLUC1}.
+   arbiter.
 
    \paragraph{FFT buffer defect (fixed in \texttt{v0.9.1}).} The replicated
    mesh path allocated its five transform buffers with 3-D
@@ -805,16 +775,16 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
    exactly that case: more than one non-empty velocity bin on CUDA or HIP
    with a padded $M_x$ that is not a multiple of 16. A single-velocity run
    clears a fresh buffer once and is unaffected. \texttt{v0.9.1} allocates
-   all five buffers as flat 1-D counts \citep{INT7}. The \texttt{picBunchFftSizeCheck}
+   all five buffers as flat 1-D counts. The \texttt{picBunchFftSizeCheck}
    tool (one allocation, a pitched \texttt{memset} and a forward/inverse pass
    per bin, summed against the direct free-space reference) confirms the fix:
    at the two failing local-box sizes $M=24$ and $M=40$ the free-space
    relative error is $3.5\times10^{-16}$ to $7.0\times10^{-16}$ at every
    bin count, versus $91.6$ and $48.9$ with the old 3-D buffers at 128 bins
-   \citep{INT7}. Single-velocity fields are bitwise unchanged between the
+   (this work). Single-velocity fields are bitwise unchanged between the
    v0.9.0 and v0.9.1 builds (SHA-256 verified on the 20-cell mesh-only case
    and the accuracy anchor), so no previously published single-velocity result
-   moves \citep{INT7}.
+   moves.
 
    Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
-   ($R=3$, tile 4, order 5), 248\,s on the A30 \citep{MVR3}.
+   ($R=3$, tile 4, order 5), 248\,s on the A30.

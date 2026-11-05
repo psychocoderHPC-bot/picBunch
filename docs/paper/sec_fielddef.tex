@@ -25,7 +25,8 @@ evaluation of this one integral.
 \subsection{The moving point kernel}
 
 The kernel is the present-time Li\'enard--Wiechert field of a uniformly moving
-charge \citep{S1-spec}. For constant velocity the field points to the
+charge, in the present-position form of Jackson and of Landau and Lifshitz
+ (this work). 
 instantaneous position. In the lab frame, with
 $\mathbf{R}=\mathbf{x}_{\mathrm{obs}}-\mathbf{x}_{\mathrm{src}}$,
 \begin{align}
@@ -47,7 +48,7 @@ $\mathbf{u}$.
 
 The reference normalizes the per-unit-charge field as
 $E_n = 4\pi\varepsilon_0\,E/q$ and $B_n = 4\pi\varepsilon_0 c\,B/q$, so
-$B_n=\boldsymbol{\beta}\times E_n$ \citep{S1-spec}. The mesh produces the
+$B_n=\boldsymbol{\beta}\times E_n$ (this work). The mesh produces the
 per-unit-charge field with $\mathbf{R}$ in metres, already summed over the
 deposited charge $q_p$ in coulombs. The chain to physical SI is
 \begin{equation}
@@ -56,13 +57,13 @@ B_{\mathrm{SI}}[c] = F_c[c]\,h^3/(4\pi\varepsilon_0 c),
 \end{equation}
 with $\varepsilon_0=8.8541878128\times10^{-12}$ F/m and
 $c=299792458$ m/s. The $h^3$ factor (Section~\ref{sec:method}) is the Riemann
-volume of the sampled continuum integral \citep{S1-spec}.
+volume of the sampled continuum integral
 
 \subsection{The TSC shape}
 
 $W$ is the quadratic B-spline, with argument in cell units, support
-$[-1.5,1.5]$ per axis, and unit integral per axis
-\citep{S1-spec}:
+$[-1.5,1.5]$ per axis, and unit integral per axis, the standard TSC shape of
+the PIC literature \citep{birdsall1985,hockney1988}:
 \begin{equation}
 W(x) =
 \begin{cases}

@@ -4,12 +4,10 @@
 \subsection{The operator interface}
 \label{sec:interface}
 
- {\raggedright
- \setlength{\emergencystretch}{5em}
- \texttt{v0.9.1} (commit \texttt{c0bf82c}, tag \texttt{262927ba}) is driven by
+ \texttt{v0.7.0} is driven by
  \texttt{picBunch --input bunch.h5} \texttt{--destination <checkpoint>}
- \texttt{--config params.toml}, with every unit and conversion parameter in the
- TOML file \citep{INT2}. The \texttt{[picongpu]} section carries
+  \texttt{--config params.toml}, with every unit and conversion parameter in the
+  TOML file. The \texttt{[picongpu]} section carries
  \texttt{unit\_length}, \texttt{unit\_e}, \texttt{unit\_b}, \texttt{dt},
  \texttt{step}, \texttt{precision}, \texttt{species}; \texttt{[domain]}
  carries \texttt{cells}, \texttt{cell\_size}, \texttt{origin};
@@ -23,34 +21,33 @@
   by its charge-weighted centroid and placed at the requested offset from the
   domain origin; a placement leaving the bunch outside the domain is rejected
   at start-up. \texttt{patch\_count} in \texttt{[placement]} splits
- the species into one particle patch per output rank, with cumulative,
- disjoint \texttt{numParticlesOffset} ranges, for multi-rank restarts
- (Section~\ref{sec:comparison}) \citep{INT2,INT3}.
- \par}
+  the species into one particle patch per output rank, with cumulative,
+  disjoint \texttt{numParticlesOffset} ranges, for multi-rank restarts
+  (Section~\ref{sec:comparison}).
 
 The default \texttt{precision} is uniform \texttt{float32} for every field and
 particle record, and such a checkpoint restarts under a stock
-single-precision PIConGPU; \texttt{float64} is a uniform opt-in that records
-a warning attribute because stock PIConGPU cannot load double records
-\citep{IMPL3}. The \texttt{charge} and \texttt{mass} records are written
-rather than omitted, and the species is a single particle patch,
-\texttt{patch} = \texttt{"bbox"} or \texttt{"domain"} \citep{INT2}.
+  single-precision PIConGPU; \texttt{float64} is a uniform opt-in that records
+  a warning attribute because stock PIConGPU cannot load double records. The
+  \texttt{charge} and \texttt{mass} records are written
+  rather than omitted, and the species is a single particle patch,
+  \texttt{patch} = \texttt{"bbox"} or \texttt{"domain"}.
 
 The mesh evaluates Eq.~\eqref{eq:Fc} by a discrete deposit, a sampled kernel,
 and a free-space FFT convolution. Let $N$ be the bunch-box nodes per axis,
 $M=\mathrm{pad}\cdot N$ the padded FFT grid per axis, $h$ the node spacing in
 cell units (node $i$ sits at $i h\,\mathbf{cell}$), and $\mathbf{cell}=(dx,dy,dz)$.
-All precision-critical work is in double \citep{SB1,S1-spec}.
+All precision-critical work is in double
 
 \subsection{Deposit}
 
 Each source charge is deposited onto the zero-padded $M^3$ grid with the TSC
 shape, at the cell-unit spline argument $W((\mathbf{x}_i-\mathbf{x}_p)/\mathbf{cell})$,
-which is correct for any $h$ \citep{S1-spec}. The result
+which is correct for any $h$ (this work). The result
 $\rho[i]=\sum_p q_p\,W(i h-\mathbf{p}_{\mathrm{cell}})$ lives in the $N^3$
 sub-box of the padded grid, indexed with $M$-stride; the rest is zero. A
 fixed reduction order is required for MPI-layout invariance; the single-rank
-path uses \texttt{atomicAdd} \citep{S1-spec}.
+path uses \texttt{atomicAdd}.
 
 \subsection{Kernel sampling}
 
@@ -63,49 +60,51 @@ kernel is evaluated at the physical separation
 \end{equation}
 where $\delta_c$ is the Yee staggered offset (Section~\ref{sec:readout}). The
 kernel is therefore sampled at the same node spacing $h$ as the deposit, with
-the shape one grid cell of its own axis wide
-\citep{N2b}. Non-finite samples are set to zero to avoid $0\times\infty$ in
-the FFT \citep{S1-spec}.
+the shape one grid cell of its own axis wide (this work). Non-finite samples
+are set to zero to avoid $0\times\infty$ in the FFT.
 
 \subsection{FFT convolution and normalization}
 
-The convolution is a free-space, zero-padded FFT convolution. The vendor plan
+The convolution is a free-space, zero-padded FFT convolution, with the
+discrete convolution theorem applied in the unnormalized form of the vendor
+library documentation \citep{press1986,cudacc2024}. The vendor plan
 is built once, unnormalized, and reused for all thirteen transforms: one
 forward for $\rho$, six forwards for the kernels, and six inverse
-transformations \citep{S1-spec}. The unnormalized round trip is scaled by
+transformations. The unnormalized round trip is scaled by
 $M^3$; the code divides by $h^3 M^3$ in the read-out
-\citep{S1-spec}.
+
 
 \paragraph{Padding.}
-The grid must be zero-padded to $\mathrm{pad}\ge 2$. With $\mathrm{pad}=1$ the
+The grid must be zero-padded to $\mathrm{pad}\ge 2$ so that the cyclic
+convolution does not wrap \citep{press1986}. With $\mathrm{pad}=1$ the
 cyclic convolution wraps and a $9.275\times10^{-3}$ periodic-image artefact
-appears for a single stationary particle in a $20^3$ box
-\citep{N1b}. For a single stationary particle the $\mathrm{pad}=2$ result
+appears for a single stationary particle in a $20^3$ box (this work). For a
+single stationary particle the $\mathrm{pad}=2$ result
 agrees with the direct non-cyclic sum to $3.811\times10^{-16}$ and the
-$\mathrm{pad}=3$ result to $1.905\times10^{-16}$ \citep{N1b}. At
+$\mathrm{pad}=3$ result to $1.905\times10^{-16}$. At
 $\mathrm{pad}\ge2$ the error is at machine precision
-($\le 10^{-15}$) \citep{N1b}. The artefact grows for beamed sources: at
+($\le 10^{-15}$). The artefact grows for beamed sources: at
 $\mathrm{pad}=1$ the $100$-source $\gamma=10$ cloud shows a
-$7.5\times10^{-1}$ worst-component error \citep{N1b}.
+$7.5\times10^{-1}$ worst-component error
 
 \paragraph{DC and Nyquist.}
 For the R2C/C2R half-spectra the DC bin and the seven self-conjugate even
 Nyquist corners must be exactly real; the intermediate Nyquist planes are
-Hermitian-paired, not real \citep{N1b}. The R2C/C2R path matches the C2C path
-to $1.665\times10^{-16}$ over all six components \citep{N1b}.
+Hermitian-paired, not real (this work). The R2C/C2R path matches the C2C path
+to $1.665\times10^{-16}$ over all six components.
 
 \paragraph{The $h^3$ factor.}
 The sampled convolution evaluates the continuum integral of
 Eq.~\eqref{eq:Fc} by a Riemann sum whose nodes are spaced $h$ cells apart, so
 each sample covers a physical volume $h^3$ (in cell units); the read-out
 therefore applies the factor
-$h_x h_y h_z/(M_x M_y M_z)$ \citep{S1-spec}.
+$h_x h_y h_z/(M_x M_y M_z)$
 
 \subsection{Read-out}
 \label{sec:readout}
 
 The six field components live at the staggered Yee positions, in cell units
-\citep{S1-spec}:
+(this work):
 \begin{equation}
 \begin{array}{llllll}
 E_x & (0.5,0,0) & E_y & (0,0.5,0) & E_z & (0,0,0.5)\\
@@ -115,32 +114,31 @@ B_x & (0,0.5,0.5) & B_y & (0.5,0,0.5) & B_z & (0.5,0.5,0).
 The kernel is sampled at these offsets, so the convolution is already
 evaluated on the Yee grid. The read-out compacts the $M^3$ FFT result to the
 $N^3$ bunch box and applies the $h^3/M^3$ scale and the SI factor
-(Section~\ref{sec:fielddef}). No further interpolation is needed
-\citep{S1-spec}.
+(Section~\ref{sec:fielddef}). No further interpolation is needed.
 
 \subsection{Scale invariance}
 \label{sec:scaleinvariance}
 
 The kernel is homogeneous of degree $-2$, the deposit shape width equals the
  node spacing, and the Yee offsets are in cell units, so every relative metric
- depends only on $r/h$, the distance in cell units \citep{N2b}. At a fixed
+ depends only on $r/h$, the distance in cell units (this work). At a fixed
  distance in cells the error is therefore independent of $h$: refining $h$
  with the distance held in cells changes nothing, and the measured relative
  errors at $h=1,\,1/2,\,1/4,\,1/8$ are identical to machine precision for
- $\gamma\in\{1,10,100\}$, aspect 1 and 4 \citep{N2b}. At a fixed physical
+ $\gamma\in\{1,10,100\}$, aspect 1 and 4. At a fixed physical
  distance $r$, refining $h$ increases $r/h$ and does reduce the error, at the
  cost of $M^{3}$ FFT work in $1/h$. The controlling length for a beamed source
  is the beaming cone width $d/\gamma$: where that width is sub-cell, the error
  is set by the cone, not by the mesh, and refinement stops paying off
- (Section~\ref{sec:gamma-landscape}) \citep{ER1b}.
+ (Section~\ref{sec:gamma-landscape}).
 
 \subsection{The near shell and the fast evaluator}
 \label{sec:nearsheet}
 
-The default mesh is the whole field. \texttt{v0.9.1} carries an opt-in near
+The default mesh is the whole field. \texttt{v0.7.0} carries an opt-in near
 shell (\texttt{[accuracy]} in the TOML config,
 Section~\ref{sec:interface}), with a radius and a tile
-\citep{NS2,FIX1,CFPORT}. A distributed-FFT option
+A distributed-FFT option
 (Section~\ref{sec:distfft}) makes the output field slab-local. It computes
 \begin{equation}
 \label{eq:nearshell}
@@ -150,17 +148,17 @@ F = F_{\mathrm{mesh}}(\mathrm{all}) - F_{\mathrm{mesh}}(\mathrm{near})
 where the subtraction uses a per-tile local zero-padded FFT of the near sources
 (padding 2) and the near term is evaluated per (source, node, component) by one
 of two backends selected by \texttt{near\_shell}: \texttt{exact}, a vendored
-adaptive FP64 TSC-convolution quadrature \citep{NS2}, or \texttt{fast}, the
+adaptive FP64 TSC-convolution quadrature, or \texttt{fast}, the
 closed-form evaluator below. The default remains \texttt{none}; the radius is in
 mesh nodes of the compute grid, and the envelope it must cover depends on
 $h$ (Section~\ref{sec:slices}). The fast backend is the accurate one: its
 measured accuracy and cost are in Sections~\ref{sec:accuracy} and
-\ref{sec:cost} \citep{CFPORT}. The \texttt{exact} evaluator shares its vendored
+\ref{sec:cost} (this work). The \texttt{exact} evaluator shares its vendored
 adaptive Gauss--Legendre quadrature with the independent driver reference, and
 that path overestimates moving oblique in-support points by a factor of
 $\sim 10$ at the closest node, so \texttt{exact} is retained for comparison
-rather than as a moving in-support truth (Section~\ref{sec:slices},
-\citep{CFPORT,indfield}).
+rather than as a moving in-support truth (Section~\ref{sec:slices}, this
+work).
 
 The fast evaluator splits the in-support integral of
 Eq.~\eqref{eq:Fc} into a singular part and a smooth remainder. The singular
@@ -183,21 +181,19 @@ A\,\mathrm{asinh}\!\bigl(B/\sqrt{u^2+A^2}\bigr)
 with $A,B>0$ (each box face has $8$ corners, $24$ such calls per component,
 so the eight-term box is $\mathrm{O}(1)$ per pair). The form is even in $u$,
 so the $|u|\to0$ branch must fire on $|u|$, not $u$ (a negative $u$ is a field
-point beyond a box face) \citep{CFPORT}. Verified against a converged
+point beyond a box face) (this work). Verified against a converged
 midpoint trapezoid reference ($-2.6348$ converged; the naive trapezoid
 $-2.6333$ is $1.5\times10^{-3}$ low, a trapezoid singularity artefact
-\citep{CFPORT}). The primitive is implemented in the fast evaluator header
+(this work)). The primitive is implemented in the fast evaluator header
 \texttt{include/picBunch/detail/FastNear.hpp} and the device reference
-\texttt{tools/closed-form/gpu\allowbreak \_extract.cu} at picongpu
-\texttt{b3699df} \citep{CFPORT,CF1}. The remainder is a plain tensor
+\texttt{tools/closed-form/gpu\allowbreak \_extract.cu}. The remainder is a plain tensor
 Gauss--Legendre quadrature on the subtracted integrand
 $(S-W^\ast)K$ over the TSC knot panels, each axis split at the TSC knots and at
 the anchor point $s^\ast$; the default order is $5$, $8000$ nodes per
-in-support pair \citep{CFPORT,K3}. For a moving bunch the box is
+in-support pair (this work). For a moving bunch the box is
 $\gamma$-stretched for the axial direction, and the oblique direction uses a
 rest-frame octant quadrature of the singular box at order $8$, $4096$ nodes,
-plus the same remainder. Host and device use the same algebra
-\citep{CFPORT}.
+plus the same remainder. Host and device use the same algebra.
 
 \paragraph{The assembly is exact.} Single-source tests at a tile centre and a
 tile boundary give an assembly residual of $2\!\times\!10^{-12}$ to
@@ -208,35 +204,35 @@ accounting shows the same near set feeding the exact sum and the subtracted
 mesh (field identity $3.6\!\times\!10^{-13}$). A direct reproduction with
 $100$ particles at radius $3$ gives an assembled field exact to
 $4.6\!\times\!10^{-13}$ over the whole grid, while the plain mesh on the same
-plane is wrong by $5.6\!\times\!10^{-1}$ \citep{NS4b}.
+plane is wrong by $5.6\!\times\!10^{-1}$
 
 The fast backend changes no far number: the mesh-only field from the fast and
 the exact backends is bitwise identical (same md5), and the total field outside
 the near tiles is bitwise equal, so the tile subtraction stays intact
-\citep{CFPORT}. The seam jump excess at the fast/exact crossing, on a $16^3$
+The seam jump excess at the fast/exact crossing, on a $16^3$
 grid, $R=3$ cells, tile $4$, cells $10^{-7}$\,m, is $2.03\!\times\!10^{-10}$
 per component for a stationary single particle ($2.02\!\times\!10^{-10}$ on
 $E_x$/$E_y$/$E_z$, zero on $B$) and $2.8\!\times\!10^{-10}$ for the
-$64$-source cloud \citep{CFPORT,INT4}.
+$64$-source cloud.
 
 \input{sec_config}
 
 \subsection{MPI parallelism}
 \label{sec:mpi}
 
-\texttt{v0.9.1} writes a global output domain larger than the compute box
-\citep{M1,FIX1}, and computes the field in parallel across ranks
-\citep{MPI2}. The written extent is set by \texttt{--global-grid} and
+\texttt{v0.7.0} writes a global output domain larger than the compute box
+(this work), and computes the field in parallel across ranks
+The written extent is set by \texttt{--global-grid} and
 \texttt{--global-origin}. The global array is never allocated: each rank owns
 a contiguous $z$-slab split into tiles of about $128$ MiB, zero-filled, then
 filled with the compute-box overlap, the rest exact $0.0$. All ranks open one
-openPMD series with \texttt{MPI\_COMM\_WORLD} and write disjoint
+openPMD series \citep{openpmd} with \texttt{MPI\_COMM\_WORLD} and write disjoint
 \texttt{storeChunk} regions with collective flushes, so the output is a single
 dataset, not per-rank files. A \texttt{--deterministic-deposit} flag gives a
-serial host deposit for bitwise comparisons \citep{M1}.
+serial host deposit for bitwise comparisons.
 
 The compute is parallel in two ways, neither of which is a domain-decomposed
-FFT \citep{MPI2}. The mesh runs six independent component convolutions: every
+FFT (this work). The mesh runs six independent component convolutions: every
 rank deposits and transforms the same $\rho$ spectrum (replicated), rank $r$
 evaluates the components $c$ with $c \bmod \mathrm{size} = r$, and one
 \texttt{MPI\_Allreduce} sums the six arrays. The near shell partitions the
@@ -246,13 +242,13 @@ one \texttt{MPI\_Allreduce} sums the correction arrays. The bunch is read once
 on rank $0$ and broadcast, not redistributed. Because the mesh components are
 disjoint and each near correction element is owned by exactly one rank, the
 all-reduce order cannot change a value: the outputs are bitwise identical at
-$1$, $2$ and $4$ ranks (Section~\ref{sec:mpi-scale}) \citep{MPI2,INT3}.
+$1$, $2$ and $4$ ranks (Section~\ref{sec:mpi-scale}).
 
 \subsection{The far-tail margin}
 \label{sec:margin}
 
  For a global domain that extends beyond the compute box, the zero fill must not
- start until the field is below tolerance. \texttt{v0.9.1} places that boundary at
+ start until the field is below tolerance. \texttt{v0.7.0} places that boundary at
  the smallest centre distance $d$ where
 \begin{equation}
 \label{eq:tail}
@@ -265,10 +261,10 @@ E_{\mathrm{tail}}(d)
 with $Q$ the total charge, $\mathbf{p}$ the dipole, $D_{ij}=\sum q\,(3x_i x_j
 - |\mathbf{x}|^{2}\delta_{ij})$ the traceless quadrupole from the actual
 particle positions, $\lVert D\rVert_{2}$ its largest absolute eigenvalue, and
-$\gamma_{\max}=\max\sqrt{1+|\mathbf{u}|^{2}}$ \citep{FIX1}. Beyond a measured
+$\gamma_{\max}=\max\sqrt{1+|\mathbf{u}|^{2}}$ (this work). Beyond a measured
 switch radius the writer instead evaluates the multipole field directly
-(\texttt{FarTail.hpp}), so the shipped file has no interior zero fill
-\citep{FIX1}. The margin is reported at run time as a bound in V/m.
+(\texttt{FarTail.hpp}), so the shipped file has no interior zero fill.
+The margin is reported at run time as a bound in V/m.
 
  For the documented 20-cell, 4096-electron bunch (source radius $R=16.85$
 cells, peak $45722.5$ V/m, tolerance level $45.72$ V/m), the quadrupole margin is
@@ -276,7 +272,7 @@ $350$ cells, which exceeds the $2^{28}$ padded-node cap, so the code falls
 back to the measured far-tail switch. Table~\ref{tab:margin} gives the
 switch error: the worst per-component
 $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$ against an
-independent direct charge sum in $13$ directions \citep{FIX1}.
+independent direct charge sum in $13$ directions
 
 \begin{table}[t]
 \centering
@@ -286,7 +282,7 @@ $R=16.85$ cells, tolerance level $45.72$ V/m ($10^{-3}$ of the peak
 $45722.5$ V/m). Worst per-component
 $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$
 against an independent direct charge sum over $13$ directions
-\citep{FIX1}. The switch at $6R$ is the one shipped: the error is
+The switch at $6R$ is the one shipped: the error is
 $1.87\times10^{-3}$ of the tolerance level.}
 \label{tab:margin}
 \begin{tabular}{lrr}
@@ -304,5 +300,5 @@ $8R$ ($134.8$ cells) & $1.66\times10^{-2}$ & $3.63\times10^{-4}$ \\
  A shipped $512^{3}$ output sampled outside the compute box confirms the
 switch in practice: $36$ nodes including corners, worst
 $|\mathbf{E}_{\mathrm{file}}-\mathbf{E}_{\mathrm{direct}}| = 2.8\times10^{-3}$
- V/m against the $45.7$ V/m tolerance level ($6.1\times10^{-5}$ of it), and
- every sample nonzero, i.e. no interior zero fill \citep{FIX1}.
+  V/m against the $45.7$ V/m tolerance level ($6.1\times10^{-5}$ of it), and
+  every sample nonzero, i.e. no interior zero fill

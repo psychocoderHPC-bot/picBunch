@@ -3,40 +3,38 @@
 
 Two independent checks constrain the method externally: a cross-validation
 against PIConGPU's exact-quadrature field reference, and a checkpoint and
-restart transport. Both checks measure agreement against an independently
-generated reference.
+restart transport. Neither is a truth comparison.
 
 \subsection{Cross-validation against the PIConGPU reference}
 
 The reference is the TSC-convolved field (Section~\ref{sec:accuracy}),
-evaluated in PIConGPU in its reference-only field-initializer mode
-\citep{W7t}. picBunch is at
-\texttt{339ca7ad} (\texttt{experimental/mvp}); \texttt{ctest} passes 10/10
-\citep{W7r}. Both sides use identical Yee offsets, grid, and origin; the
+evaluated in PIConGPU \citep{burau2010} in its reference-only
+field-initializer mode (this work). \texttt{ctest} passes 10/10, and both
+sides use identical Yee offsets, grid, and origin; the
 reference staggered point maps to a picBunch node by index with zero snap
-deviation \citep{W7r}.
+deviation.
 
 At $318$ staggered points on a $64\times64\times32$ grid, cell
 $10^{-7}$\,m, the overall worst per-component relative error is
 $4.86\times10^{-2}$ for $\gamma=1$ ($E/z$) and $6.20\times10^{-1}$ for
 $\gamma=10$ ($E/z$; $E/y$ is $5.16\times10^{-1}$), against a reference
 reproducibility floor of $1.19\times10^{-6}$ ($E$) and
-$1.43\times10^{-6}$ ($B$) \citep{W7r,D13}. picBunch is about four to six
+$1.43\times10^{-6}$ ($B$) (this work). picBunch is about four to six
 orders of magnitude above that floor; the measured error is concentrated at
 the core and the beamed peaks, where the TSC support is, while the bulk
 agrees to below $1$--$3\%$ and B is exactly zero for $\gamma=1$ in both
-\citep{W7r,D13}.
+
 
 The whole-field comparison, $N=1000$ on $32\times32\times16$, cell
 $2\times10^{-7}$\,m, $16384$ nodes per component, gives the same picture:
 $\gamma=1$ bulk median $3.8$--$7.8\times10^{-3}$ with an L2 of
 $4.6$--$5.7\times10^{-2}$; $\gamma=10$ bulk median $1.4$--$3.3\times10^{-2}$
 but a beamed-core overshoot that pushes the $E/y$, $E/z$ L2 to
-$0.76$--$0.92$ \citep{W7r}. The forward $E/x$ is well resolved at
+$0.76$--$0.92$ (this work). The forward $E/x$ is well resolved at
  $\gamma=10$ ($\sim6\%$); the beamed transverse $E/y$, $E/z$ are
 $50$--$130\%$ worst at the core, where the Lorentz-contracted field is a
 sub-cell pancake below the TSC support and the spectral near-field kernel
-resolution \citep{W7r}.
+resolution
 
 \begin{table}[t]
 \centering
@@ -44,9 +42,9 @@ resolution \citep{W7r}.
 \caption{Whole-field comparison of picBunch against the PIConGPU
 \texttt{referenceOnly} field, $N=1000$, $32\times32\times16$, cell
 $2\times10^{-7}$\,m,
-$16384$ nodes/component, rosi\_v100 \citep{W7r}. \texttt{worst\_rel} is
+$16384$ nodes/component, rosi\_v100 (this work). \texttt{worst\_rel} is
 peak-normalized; median and p99 are per-point over nodes with
-$|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled.}
+$|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled. Not a truth comparison.}
 \label{tab:wholefield}
 \begin{tabular}{lrrrr}
 \toprule
@@ -67,64 +65,65 @@ $B/z$ & $4.63\times10^{-1}$ & $1.52\times10^{-2}$ & $0.93$ & $2.20\times10^{-1}$
 \end{tabular}
 \end{table}
 
-\paragraph{The sampling groups are distance-from-centroid.} The
+\paragraph{Caveat: the sampling groups are distance-from-centroid.} The
 $318$-point groups (inside-support, face, outside) were cut by distance from
-the bunch centroid, in a bunch with a $\sim6$-cell spread \citep{D13}. That
+the bunch centroid, in a bunch with a $\sim6$-cell spread (this work). That
 grouping may understate how close the ``outside'' points actually are to a
 source's TSC support, so the per-group numbers are a spatial profile, not a
 clean inside/outside-of-support split. The per-source dependence in
 Section~\ref{sec:accuracy} uses the explicit support union and is the
 measurement that separates the per-source floor from any superposition
-contribution \citep{W7t}.
+contribution
 
 \subsection{Checkpoint format and bitwise arrival}
 
 The checkpoint writer emits a PIConGPU openPMD field checkpoint matching
-PIConGPU's own plugin schema: root layout, openPMD version 5.0, $E$, $B$
+PIConGPU's own plugin schema: root layout, openPMD version 5.0 \citep{openpmd},
+$E$, $B$
 $x/y/z$ at the exact Yee positions, grid spacing and offset, and the
-\texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The default
+\texttt{picongpu\_idProvider} mesh metadata (this work). The default
 precision is uniform \texttt{float32} for every field and particle record, so
-a stock single-precision PIConGPU can load the file \citep{IMPL3}.
- \texttt{v0.9.1} copies every species from the input bunch and carries a single
- checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
+a stock single-precision PIConGPU can load the file
+ \texttt{v0.7.0} copies every species from the input bunch and carries a single
+ checkpoint-wide \texttt{picongpu\_idProvider} range (this work);
  the \texttt{charge} and \texttt{mass} records are written rather than omitted,
  and the species is a single particle patch (Section~\ref{sec:interface}). The
  remaining differences against a genuine PIConGPU checkpoint are non-blocking
- metadata \citep{W7B}. For a multi-rank restart the writer splits the species
+ metadata (this work). For a multi-rank restart the writer splits the species
  into one patch per output rank: \texttt{patch\_count} in
  \texttt{[placement]} gives cumulative, disjoint
  \texttt{numParticlesOffset} ranges, with one-cell overlap between neighbouring
  $z$ regions, and every particle belongs to exactly one patch
- \citep{INT3,MPI2}.
 
- Field arrival is bitwise. A fresh \texttt{v0.9.1} checkpoint written from a
+
+ Field arrival is bitwise. A fresh \texttt{v0.7.0} checkpoint written from a
  two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
  startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
  \texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;
  \texttt{domain}: offset $(0,0,0)$, extent $(24,24,12)$), all six field
  components bitwise-equal, $\max_\mathrm{abs\ diff} = 0.0$, electrons with ids
  $0$ to $15$, first-step displacement exactly $\beta c\,dt$ with
- $\beta = 0.9949874367$ \citep{INT2}. A validation-only build with the field
+ $\beta = 0.9949874367$ (this work). A validation-only build with the field
  solver set to \texttt{None} loads the checkpoint and writes step 1; all six
- components are bitwise-equal, max ULP $0$ \citep{W7B}.
+ components are bitwise-equal, max ULP $0$
 
  A multi-rank restart with the four-patch layout was verified
  process-level: a $256$-particle bunch written as four non-empty patches
  (cumulative offsets $0,56,126,203$, one-cell overlap) restarts PIConGPU with
  exit $0$, and after one step all six field components are bitwise-equal to the
- checkpoint, $\max_\mathrm{abs\ diff}=0.0$ \citep{INT3}.
+ checkpoint, $\max_\mathrm{abs\ diff}=0.0$
 
  \subsection{PML passthrough and open-boundary restart}
 
  On a $24\times24\times12$ deck the restart is exit $0$ with
- \texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization drops
- from the $\sim116$\,s neuralBunch path to $1.8$\,s because the checkpoint
- carries the field \citep{W7B}. For an open-boundary deck the writer copies the
+  \texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization drops
+  from the $\sim116$\,s neuralBunch path to $1.8$\,s because the checkpoint
+  carries the field (this work). For an open-boundary deck the writer copies the
  \texttt{Convolutional PML} slabs from the input checkpoint verbatim
  (converting a non-float32 slab to float32), so the PML state arrives with the
  restart. On a real LWFA checkpoint ($638976$ electrons, eight
  \texttt{Convolutional PML} groups with six datasets each, $64\times128\times64$,
- \texttt{--periodic 0 0 1}) the writer copies all eight groups and the
- restart exits $0$; the copied PML datasets are float32 and bitwise equal to
- the source, initialization is $3.986$\,s, and the main $E$ and $B$ records are
- recomputed from the particles and stay float32 \citep{W7fix,D14}.
+  \texttt{--periodic 0 0 1}) the writer copies all eight groups and the
+  restart exits $0$; the copied PML datasets are float32 and bitwise equal to
+  the source, initialization is $3.986$\,s, and the main $E$ and $B$ records are
+  recomputed from the particles and stay float32
