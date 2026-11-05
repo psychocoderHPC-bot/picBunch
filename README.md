@@ -334,6 +334,55 @@ transform by default and the transposed z-slab transform when selected.
 Without MPI both paths run serially, and the results are unchanged. `--deterministic-deposit`
 is still required for bitwise repeatability of the deposit itself.
 
+### Replicated FFT buffer allocation (v0.9.1)
+
+The replicated mesh path allocated its five transform buffers (`rhoReal`, `rhoSpec`,
+`kernelReal`, `kernelSpec`, `outReal`) with 3-D `allocUnified` extents. On CUDA and HIP
+that allocation pads every innermost row to 128 bytes when `Mx` is not a multiple of 16
+doubles. The per-bin `memset` is pitched: it clears the row data but not the padding
+bytes. Those bytes lie inside the flat prefix that the contiguous FFT plan and the flat
+deposit, kernel and read-out loops read as data. The velocity-bin loop reuses the buffers,
+so the second and later non-empty bins read the previous bin's charge from the gaps, and
+the field grows with the bin count. The scope is exactly that case: more than one
+non-empty velocity bin on CUDA or HIP with a padded `Mx` that is not a multiple of 16.
+A single-velocity run clears a fresh buffer once and is unaffected; the distributed path
+already used flat 1-D buffers.
+
+v0.9.1 allocates all five buffers as flat 1-D `std::size_t` counts. Every consumer in
+this path already uses the dense x-fastest layout and the vendor plans are built with
+`inembed == extents`, so the 3-D allocation added padding that nothing used.
+
+The `picBunchFftSizeCheck` tool reproduces the production buffer lifetime (one
+allocation, a pitched `memset` and a forward/inverse pass per bin) and compares the
+summed multi-bin field with the direct free-space sum of the same deposits. With the
+flat buffers the relative error is a round-off constant at every bin count, at both
+failing local-box sizes:
+
+| local box M | bins | HIP gfx1100 free-space rel | CUDA sm_70 free-space rel |
+| --- | ---: | ---: | ---: |
+| 24 | 32 | 5.37e-16 | 4.30e-16 |
+| 24 | 64 | 6.38e-16 | 5.32e-16 |
+| 24 | 128 | 6.38e-16 | 5.32e-16 |
+| 40 | 32 | 3.72e-16 | 6.37e-16 |
+| 40 | 64 | 3.51e-16 | 7.01e-16 |
+| 40 | 128 | 3.51e-16 | 7.01e-16 |
+
+The same tool with the old 3-D buffers and 128 bins gives 91.6 (M = 24) and 48.9
+(M = 40) relative error, so the failure is the allocation and not the FFT.
+
+End to end, the `64^3`, 200-source, 5% energy-spread, 0.1 degree case with
+`--near-shell fast` gives `E_x` peaks 1.6118e6, 1.6118e6 and 1.6120e6 V/m at 32, 64 and
+128 bins. Before the fix the same case gave 2.30e7 to 2.35e7 V/m for 32 bins and more, a
+14x growth.
+
+Single-velocity regression: the 20-cell mesh-only case (one stationary electron,
+padding 1, `20^3`) and the accuracy anchor (one electron, `u_z = 10`, `10^3`, padding 2)
+produce bitwise-identical field arrays before and after the change (SHA-256 `ad84e38b…`
+and `eb379368…`; the anchor stays at 1.65e-7 of the point scale at node (4,4,9)). No
+published single-velocity number changes. The power-of-two rounding of near-shell local
+boxes used on an earlier diagnostic branch is not needed and is not merged: the flat
+allocation alone makes every tested local size exact.
+
 #### Distributed FFT measurements (v0.9.0)
 
 Measured on `jureca-h100` (one H100 PCIe per rank, CUDA 13.4). The distributed path was
@@ -573,7 +622,9 @@ recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 The v0.9.0 release tree passes 19/19 CTest entries on rosi_v100 (CUDA 12.6,
 sm_70) and hal (HIP, gfx1100, ROCm 7.2); jureca-h100 (CUDA 13.4, sm_90) passes
-19/19 on each merged source branch.
+19/19 on each merged source branch. The v0.9.1 tree passes 19/19 on hal and on
+fwk394 (CUDA 12.5, sm_70). The rosi_v100 route was unavailable during the v0.9.1
+release, so the v0.9.1 CUDA checklist ran on the sm_70 node fwk394.
 The ROCm 7.2 `librocfft` teardown segfault is gone: the HIP build now calls
 `rocfft_cleanup()` after the plans are destroyed while the queue and runtime are still
 alive. The previously failing `picBunch.Io` entry passed five consecutive repeats on hal.
@@ -767,6 +818,16 @@ table above covers the compute stages of the large-N sweep, not the write path.
 
 ## Changelog
 
+- **v0.9.1** fixes the replicated FFT buffer allocation. Five transform buffers were
+  3-D `allocUnified` extents, which pad each innermost row to 128 bytes when the padded
+  `Mx` is not a multiple of 16; the pitched per-bin `memset` left those bytes uncleared,
+  and the contiguous plan read them as data. Reused across the velocity-bin loop, the
+  gaps carried the previous bin's charge into the transform and the field grew with the
+  bin count. The buffers are now flat 1-D counts. The defect affected only multi-bin runs
+  on CUDA/HIP; single-velocity fields are bitwise unchanged, and the power-of-two local-box
+  rounding from the diagnostic branch is not merged. Adds `picBunchFftSizeCheck`. The
+  v0.9.1 tree passes 19/19 CTest on hal (HIP) and fwk394 (CUDA 12.5, sm_70); the rosi_v100
+  route was unavailable at release time.
 - **v0.9.0** adds the optional z-slab distributed FFT (`--fft-mode distributed|auto`)
   and the device near-field backend (`--near-shell fast-gpu`). The distributed path
   keeps the six-component output slab-local, exchanges the output planes once per
