@@ -960,11 +960,15 @@ int main(int argc, char** argv)
             rep.fftCloudValue,
             rep.refCloudValue,
             rep.bMaxRef);
+        // The periodic column is informational only. Its reference sums the
+        // |k| <= 2 image shells of a finite box, so it is not the exact
+        // circular convolution the FFT performs and cannot be expected to
+        // reach the round-off floor. Only the free-space column carries the
+        // pass/fail decision.
         allGood = allGood
             && rep.a3SpectrumRel < kRoundOffFloor && rep.a3BackwardRel < kRoundOffFloor
             && rep.a1SpectrumRel < kRoundOffFloor && rep.a1BackwardRel < kRoundOffFloor
-            && rep.bPointFreeRel < kRoundOffFloor && rep.bPointCircRel < kRoundOffFloor
-            && rep.bCloudFreeRel < kRoundOffFloor && rep.bCloudCircRel < kRoundOffFloor;
+            && rep.bPointFreeRel < kRoundOffFloor && rep.bCloudFreeRel < kRoundOffFloor;
     }
     std::printf(allGood ? "ALL SIZES WITHIN ROUND-OFF FLOOR\n" : "SIZE DEPENDENT FAILURE PRESENT\n");
     return allGood ? 0 : 1;

@@ -422,6 +422,7 @@ $20$-cell geometry \citep{CF1}.
 \begin{table}[t]
 \centering
 \small
+\setlength{\tabcolsep}{3pt}
 \caption{Measured CLI wall at $2\times10^{6}$ particles, $20$-cell bunch,
 $66\times68\times66$, cell $2.5\times10^{-7}$\,m, tile $4$, one \texttt{H100}
 (\texttt{sm\_90}) \citep{INT4,CFPORT}. ``near-shell wall'' excludes the mesh,
@@ -490,7 +491,7 @@ speed feature \citep{DIST1,INT3}.
   \begin{figure}[H]
   \centering
   \includegraphics[width=0.98\linewidth]{figs/SCHEM1_field_evaluation_schematic.pdf}
- \caption{Where the algorithm evaluates the field: real space around one source (top) and the measured error against distance (bottom) at $h=1$, aspect 1, \texttt{rosi\_v100} \citep{SB1,SCHEM1}. Shaded regions are the TSC support (to $1.5$ nodes), the near shell (to $R_{\rm shell}$), and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ at the $3\times10^{-4}$ tolerance. The $\gamma=1$ error crosses $3\times10^{-4}$ at $d=8$ nodes, while the $\gamma=10$ curve stays above it to $d=48$.}
+ \caption{Where the algorithm evaluates the field: real space around one source (top) and the measured error against distance (bottom) at $h=1$, aspect 1, measured on \texttt{rosi\_v100}. Shaded regions are the TSC support (to $1.5$ nodes), the near shell (to $R_{\rm shell}$), and the mesh beyond, with $R_{\rm shell}=11.8$ nodes for $\gamma=1$ and $8.8$ nodes for $\gamma=10$ set at the $3\times10^{-4}$ tolerance, while the $10^{-3}$ gate is a reference line. The $\gamma=1$ error crosses $3\times10^{-4}$ at $d=8$ nodes, while the $\gamma=10$ curve stays above it to $d=48$.}
  \label{fig:schem}
  \end{figure}
 
