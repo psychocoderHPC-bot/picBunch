@@ -22,11 +22,10 @@ $-e$ for the electron bunches with one unit weight, where $e =
 1.602176634\times10^{-19}$\,C; the kinetic energy is
 $(\gamma-1)\,m_ec^2$ with $m_ec^2 = 510.999$ keV.
 
-\begin{table*}[t]
-\centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.05}
+\begin{longtable}{@{}p{2.3cm}cp{2.5cm}p{2.9cm}p{2.9cm}p{2.9cm}@{}}
 \caption{Configurations of every measured case and the section that uses it
 (recorded values only; ``not recorded'' means no artifact records the value).
 Sources: mid-bunch slices \texttt{B1}; large-domain \texttt{LARGE1};
@@ -38,8 +37,7 @@ the second block. Kinetic energy is $(\gamma-1)\,m_ec^2$; the multi-velocity
 driver cell size is the \texttt{MV1b} value ($10^{-6}$\,m). The \texttt{VAR1b}
 $N=200$ subset exists but its independent reference is pending, so it is not
 a row here.}
-\label{tab:configs}
-\begin{longtable}{@{}p{2.3cm}cp{2.5cm}p{2.9cm}p{2.9cm}p{2.9cm}@{}}
+\label{tab:configs}\\
 \toprule
 case & $N$ & total charge ($-e$ each) & size ($\si{\micro\metre}$; cells/axis) & spread & used in \\
 \midrule
@@ -128,7 +126,6 @@ landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 \citep{N2b} & axis-ali
  multi-velocity, both (v0.9.1) & 10 / 5.06\,MeV & 1 each; $10^{-7}$\,m & $64^3$, hal (A30, \texttt{sm\_80}) \citep{MVR2,MVR3} \\
  divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2\,\si{\micro\metre}$), rosi\_v100 \\
 \end{longtable}
-\end{table*}
 
 The mid-bunch bunches are mono-energetic: the read-back records
 $\gamma_{\min}=\gamma_{\max}=1$ for the $\gamma=1$ bunch and

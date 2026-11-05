@@ -4,6 +4,8 @@
 \subsection{The operator interface}
 \label{sec:interface}
 
+ {\raggedright
+ \setlength{\emergencystretch}{5em}
  \texttt{v0.9.1} (commit \texttt{c0bf82c}, tag \texttt{262927ba}) is driven by
  \texttt{picBunch --input bunch.h5} \texttt{--destination <checkpoint>}
  \texttt{--config params.toml}, with every unit and conversion parameter in the
@@ -24,6 +26,7 @@
  the species into one particle patch per output rank, with cumulative,
  disjoint \texttt{numParticlesOffset} ranges, for multi-rank restarts
  (Section~\ref{sec:comparison}) \citep{INT2,INT3}.
+ \par}
 
 The default \texttt{precision} is uniform \texttt{float32} for every field and
 particle record, and such a checkpoint restarts under a stock

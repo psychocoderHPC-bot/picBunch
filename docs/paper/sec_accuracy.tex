@@ -429,6 +429,7 @@ $66\times68\times66$, cell $2.5\times10^{-7}$\,m, tile $4$, one \texttt{H100}
 wall is $0.116$\,s; the per-stage split (deposit, kernel, FFT, read-out,
 writer) is in the text.}
 \label{tab:cost}
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{lrrl}
 \toprule
 configuration & near-shell wall (s) & end-to-end wall (s) & worst near error \\
@@ -751,7 +752,21 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
    \end{tabular}
    \end{table}
 
-   With a 5\% energy spread and $+y$ drift the $B_z$ peak is
+   \begin{figure}[t]
+   \centering
+   \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
+   \caption{Sampled multi-velocity bunches used by the campaign
+   ($\gamma=10$, 512 sources, seeds 100/103, generator \texttt{02891fe6})
+   \citep{MV2}. (a) $\gamma$ histogram for the 5\% energy spread with the
+   $B=16$ adaptive edges and labelled mean and standard deviation;
+   (b) $u_\parallel$ versus $u_\perp$ density for the $5^\circ$ angular spread
+   with the $5^\circ$ and median-divergence lines; (c) measured per-bin error
+   $T_b-T$ against the model for both spread cases.}
+   \label{fig:multivel}
+   \end{figure}
+
+   Figure~\ref{fig:multivel} shows the sampled distributions behind these
+   cases. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
    $2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
    bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
    longitudinal current \citep{MVR2}. With a $5^\circ$ angular spread the
