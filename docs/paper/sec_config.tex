@@ -82,18 +82,30 @@ landscape, aspect 4 & 1 & $1.602\times10^{-19}$\,C
   & single particle at the origin \citep{N2b}
   & none
   & Table~\ref{tab:d48} \\
-multi-velocity, E 5\% & 512 & not recorded
-  & 3-cell position cloud \citep{MV2}
-  & 5\% energy (seed 100) \citep{MV2}
-  & \S\ref{sec:multivel} \\
-multi-velocity, A $5^\circ$ & 512 & not recorded
-  & 3-cell position cloud \citep{MV2}
-  & $5^\circ$ angular (seed 103) \citep{MV2}
-  & \S\ref{sec:multivel} \\
-divergence, 1\,mrad & 1000 & $1.602\times10^{-16}$\,C
-  & $\sigma\!=\!0.6$ each axis, centroid $(3.197,3.208,1.615)$ \citep{VAR1}
-  & 1\,mrad paraxial, $+y$ (seed 43) \citep{VAR1}
-  & \S\ref{sec:accuracy} (reference pending) \\
+ multi-velocity, E 5\% & 512 & not recorded
+   & 3-cell position cloud \citep{MV2}
+   & 5\% energy (seed 100) \citep{MV2}
+   & \S\ref{sec:multivel} (superseded) \\
+ multi-velocity, A $5^\circ$ & 512 & not recorded
+   & 3-cell position cloud \citep{MV2}
+   & $5^\circ$ angular (seed 103) \citep{MV2}
+   & \S\ref{sec:multivel} (superseded) \\
+ multi-velocity, E 5\% (v0.9.1) & 200 & $3.2\times10^{-17}$\,C
+   & $\sigma\!=\!6$ cells, centroid $(32,32,32)$ \citep{MVR2}
+   & 5\% energy, $+y$ drift \citep{MVR2}
+   & \S\ref{sec:multivel} \\
+ multi-velocity, A $5^\circ$ (v0.9.1) & 200 & $3.2\times10^{-17}$\,C
+   & $\sigma\!=\!6$ cells, centroid $(32,32,32)$ \citep{MVR2}
+   & $5^\circ$ angular, $+y$ drift \citep{MVR2}
+   & \S\ref{sec:multivel} \\
+ 1\,mrad, binned (v0.9.1) & 200 & $3.2\times10^{-17}$\,C
+   & $\sigma\!=\!6$ cells, centroid $(32,32,32)$, 1.046\,mrad rms $x$-div \citep{MVR3}
+   & 1\,mrad, $+y$ drift \citep{MVR3}
+   & \S\ref{sec:multivel} \\
+ divergence, 1\,mrad & 1000 & $1.602\times10^{-16}$\,C
+   & $\sigma\!=\!0.6$ each axis, centroid $(3.197,3.208,1.615)$ \citep{VAR1}
+   & 1\,mrad paraxial, $+y$ (seed 43) \citep{VAR1}
+   & \S\ref{sec:accuracy} (reference pending) \\
 \end{longtable}
 
 \begin{longtable}{@{}p{2.3cm}p{3.4cm}p{4.5cm}p{4.4cm}@{}}
@@ -112,21 +124,22 @@ large-domain, both & 10 / 5.06\,MeV; 1 / 0 & not recorded; $2\times10^{-7}$\,m &
 cost, both & 1 / 0; 10 / 5.06\,MeV & not recorded; $2.5\times10^{-7}$\,m & $66\times68\times66$, jureca-h100 \\
 landscape, aspect 1 & 10/50/100 & 1; $10^{-7}$\,m & $96^3$ ($h\!=\!1$), $384^3$ ($h\!=\!1/4$), jureca-h100 (ref: rosi\_v100) \\
 landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 \citep{N2b} & axis-aligned, $h\!=\!1$, host not recorded \citep{N2b} \\
-multi-velocity, both & 10 / 5.06\,MeV & not recorded; $10^{-6}$\,m \citep{MV1b} & $48^3$, jureca-h100 \\
-divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2\,\si{\micro\metre}$), rosi\_v100 \\
+ multi-velocity, both & 10 / 5.06\,MeV & not recorded; $10^{-6}$\,m \citep{MV1b} & $48^3$, jureca-h100 \\
+ multi-velocity, both (v0.9.1) & 10 / 5.06\,MeV & 1 each; $10^{-7}$\,m & $64^3$, hal (A30, \texttt{sm\_80}) \citep{MVR2,MVR3} \\
+ divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2\,\si{\micro\metre}$), rosi\_v100 \\
 \end{longtable}
 \end{table*}
 
 The mid-bunch bunches are mono-energetic: the read-back records
 $\gamma_{\min}=\gamma_{\max}=1$ for the $\gamma=1$ bunch and
 $\gamma_{\min}=\gamma_{\max}=10$ for the $\gamma=10$ bunch \citep{B1}.
-The multi-velocity cases carry a 5\% energy spread and a $5^\circ$ angular
-spread; \texttt{MV2} stores only the per-box sums of the error model, but its
-bunch generator (the driver block at \texttt{02891fe6}) and the seeds
-(100, 103) survive, so the per-particle sample and the adaptive bin edges
-were regenerated and are shown in Fig.~\ref{fig:multivel}. The campaign
-bunch files were unavailable, so the sample was reproduced from that
-generator on \texttt{rosi\_v100} (the \texttt{jrc0880} route was down);
-the LCG state and draw count are identical to the campaign, and only last-bit
+The MV2 multi-velocity cases ($48^3$, 512 sources, \texttt{02891fe6}) were
+superseded by the v0.9.1 re-measurement on a $64^3$ grid with 200 sources
+(\texttt{BDATA2} bunches, $10^{-7}$\,m cell, \texttt{hal} A30)
+\citep{MVR2,MVR3}; the v0.9.1 numbers in Section~\ref{sec:multivel} replace
+the MV2 binning-error table. The MV2 campaign bunch files were unavailable;
+the per-particle sample was regenerated from the surviving driver block at
+\texttt{02891fe6} (seeds 100, 103) on \texttt{rosi\_v100}; the LCG state
+and draw count are identical to the campaign, and only last-bit
 \texttt{libm} differences between hosts are possible, so the sampled
 distributions are statistically identical.

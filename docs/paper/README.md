@@ -1,8 +1,8 @@
 # picBunch paper
 
 Sources and rendered PDF for the picBunch method, cost, and accuracy paper.
-The manuscript reports the shipped v0.9.0 state (tag `v0.9.0`, commit
-`970fc52f8fb5b150f2d3f777b4c9d6e99da0fc6b`). Individual measurements name the
+The manuscript reports the shipped v0.9.1 state (tag `v0.9.1`, commit
+`c0bf82c2251448abfaad66aa03b18ab3a9ab9322`). Individual measurements name the
 commit they used.
 
 ## Build

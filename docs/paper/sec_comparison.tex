@@ -85,7 +85,7 @@ $x/y/z$ at the exact Yee positions, grid spacing and offset, and the
 \texttt{picongpu\_idProvider} mesh metadata \citep{W7B}. The default
 precision is uniform \texttt{float32} for every field and particle record, so
 a stock single-precision PIConGPU can load the file \citep{IMPL3}.
- \texttt{v0.9.0} copies every species from the input bunch and carries a single
+ \texttt{v0.9.1} copies every species from the input bunch and carries a single
  checkpoint-wide \texttt{picongpu\_idProvider} range \citep{INT1,FIX1,INT2};
  the \texttt{charge} and \texttt{mass} records are written rather than omitted,
  and the species is a single particle patch (Section~\ref{sec:interface}). The
@@ -97,7 +97,7 @@ a stock single-precision PIConGPU can load the file \citep{IMPL3}.
  $z$ regions, and every particle belongs to exactly one patch
  \citep{INT3,MPI2}.
 
- Field arrival is bitwise. A fresh \texttt{v0.9.0} checkpoint written from a
+ Field arrival is bitwise. A fresh \texttt{v0.9.1} checkpoint written from a
  two-species input (16 electrons and 16 ions, \texttt{picongpu\_idProvider}
  startId $0$, nextId $32$) restarts in PIConGPU with exit $0$ under both
  \texttt{patch} modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;

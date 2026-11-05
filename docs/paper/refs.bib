@@ -444,7 +444,7 @@
  }
 
 @misc{MV2,
-  title  = {Multi-velocity campaign provenance (MV2)},
+  title  = {Binned multi-velocity binning: measured binning error and model calibration (MV2)},
   author = {MV2 multi-velocity worker},
   year   = {2026},
     note   = {Run pr24-20261102. MV2/RESULTS.md. Branch experimental/multivel at
@@ -452,8 +452,12 @@
               jureca\_h100 jrc0880, H100 PCIe, CUDA 13.4, sm\_90. $48^3$ grid,
               512 sources, seed 100 (energy) and 103 (angular). Four defect
               fixes (dangling pointer, parse\_bands, model floor, unit-test
-              build); single-velocity bitwise sanity. The binned field path is
-              excluded from the reported results. ctest 19/19.},
+              build); comparison-artefact diagnosis; single-velocity bitwise
+              sanity; Tb-T binning error and total error with fast shell
+              R=3 vs bin count; model calibration C=1.09 (energy, predicts to
+              10--55\%) vs C=124 non-monotonic (angular); runtime mesh-only
+              5.26/5.62 s at 1e6/2e6 in $48^3$ with 64 bins, 184 s for the
+              4-cell fast shell at 2e6 in a 20-cell bunch. ctest 19/19.},
  }
 
   @misc{DIST1,
@@ -511,13 +515,92 @@
   }
 
  @misc{MV1b,
-   title  = {Multi-velocity campaign configuration and provenance (MV1b)},
+   title  = {Multi-velocity binning: comparison artefact and calibrated error (MV1b)},
    author = {MV1b multi-velocity worker},
    year   = {2026},
      note   = {Run pr24-20261102. MV1b/RESULTS.md. Measurement driver
                picBunchVelocityBinsMeasure, 48x48x48 grid, cell 1e-6 m, 512
                sources, 3-cell position cloud; cases g10\_e5 (sigma\_g/g=0.05,
                seed 100), g50\_e5 (seed 101), g10\_a1 (seed 102), g10\_a5
-               (5 deg angular spread, seed 103). The binned field path is
-               excluded from the reported results.},
+               (5 deg angular spread, seed 103); comparison artefact diagnosis
+               and per-box model sums.},
   }
+
+@misc{MVR2,
+  title  = {Minimal multi-velocity bin-independence re-measurement on v0.9.1 (MVRERUN2)},
+  author = {MVRERUN2 multi-velocity worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. MVRERUN2/RESULTS.md. picBunch v0.9.1
+              (commit c0bf82c2251448abfaad66aa03b18ab3a9ab9322), tag v0.9.1
+              (262927baf42f26bd3fae21ac86732c3f84960bbd). hal (c692209a108c,
+              NVIDIA A30 24 GB, sm\_80, CUDA 13.4.92). $64^3$ grid, cell 1e-7 m,
+              200 sources, BDATA2 bunches (sigma=6 cells, centroid (32,32,32),
+              gamma=10, +y drift), --near-shell fast R=3 tile 4 order 5,
+              --deterministic-deposit. Cases: mono (zero spread), e5 (5% energy
+              spread), a5 (5 deg angular spread). Peaks in T: e5 Bz 2.32050e4 /
+              2.32049e4 (16 / 64 bins), By = 0 exactly; a5 Bz 2.48202e4 /
+              2.48213e4, By 1.2948e3 / 1.2955e3; ratio By/Bz 5.22e-2,
+              bin-independent to 0.0043% (Bz) and 0.056% (By). Mono B=1 and
+              B=16 bitwise equal, all 6 components, max|diff|=0. Wall: mono
+              195.8 s, e5 224.7 / 250.1 s, a5 229.2 / 250.0 s.},
+ }
+
+@misc{MVR3,
+  title  = {1 mrad case: v0.9.1 64-bin field vs the pre-fix order-12 arbiter (MVRERUN3)},
+  author = {MVRERUN3 multi-velocity worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. MVRERUN3/RESULTS.md. picBunch v0.9.1
+              (c0bf82c), hal A30 sm\_80. Bunch: fluc1mrad.bunch.h5 (BDATA2
+              fluctuation, N=200, -100 pC, gamma=10, +y drift, centroid
+              (32,32,32) cells, sigma=6 cells, x-only 1.046 mrad rms
+              divergence). $64^3$ grid, cell 1e-7 m, 64 bins (64x1x1),
+              --near-shell fast R=3 tile 4 order 5. 3-D peaks: By = 8.734 T,
+              Bz = 2.33363e4 T, ratio 3.74e-4. Slice peaks (xy z=32):
+              By = 7.8346 T, Bz = 2.33363e4 T, ratio 3.357e-4; (zy x=32):
+              By = 7.5615 T, Bz = 2.31587e4 T, ratio 3.265e-4. Arbiter
+              (FLUC1, order-12 Gauss-Legendre, unbinned, 698-node subset):
+              xy By = 7.759 T, Bz = 2.344e4 T, ratio 3.31e-4; zy By = 7.519 T,
+              Bz = 2.327e4 T, ratio 3.23e-4. Worst deviation 1.42% (xy ratio);
+              every component/plane within 1.0%. Pre-fix 64-bin: By = 1.196e3 T
+              (154x arbiter), Bz = 4.002e4 T (1.71x arbiter). Compute wall
+              247.98 s.},
+ }
+
+@misc{FLUC1,
+  title  = {Fluctuation-case multi-velocity binning, 32/64/128 bins (FLUC1)},
+  author = {FLUC1 fluctuation worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. FLUC1/RESULTS.md. Pre-fix v0.8.0. BDATA2
+              fluctuation bunch (N=200, -100 pC, gamma=10, +y drift, 1.046
+              mrad rms x-divergence), $64^3$ grid, cell 1e-7 m. 32/64/128
+              velocity bins (32x1x1, 64x1x1, 128x1x1). 64-bin 3-D peaks:
+              By = 1.196e3 T, Bz = 4.002e4 T (growing with bin count: Bz
+              2.344e4 at 32 bins to 5.581e4 T at 128 bins). Order-12 arbiter
+              (unbinned, per-particle u, 698-node slice subset): xy By =
+              7.759 T, Bz = 2.3436e4 T; zy By = 7.519 T, Bz = 2.327e4 T.
+              The 64-bin binned field was 154x the arbiter in By and 1.71x
+              in Bz due to the replicated FFT buffer defect fixed in v0.9.1.},
+ }
+
+@misc{INT7,
+  title  = {Replicated FFT buffer fix integration and v0.9.1 release (INT7)},
+  author = {INT7 integration worker},
+  year   = {2026},
+    note   = {Run pr24-20261102. INT7/RESULTS.md. Repository
+              psychocoderHPC-bot/picBunch. Fixed commit 6c81ecae, merge
+              9963881178, follow-up 8270bb8, release c0bf82c2251448abfaad66aa03b18ab3a9ab9322,
+              tag v0.9.1 (annotated 262927baf42f26bd3fae21ac86732c3f84960bbd).
+              Defect: 3-D allocUnified pads innermost row to 128 B when padded
+              Mx is not a multiple of 16 doubles; pitched per-bin memset leaves
+              gap bytes uncleared; contiguous FFT plan reads them as data;
+              buffer reuse across velocity bins feeds bin 0 charge into later
+              bins; field grows with bin count. Fix: allocate all five
+              replicated-path transform buffers as flat 1-D std::size\_t counts.
+              Scope: multi-bin CUDA/HIP only; single-velocity unaffected.
+              picBunchFftSizeCheck validation: M=24 and M=40 free-space
+              relative error 3.5e-16 to 7.0e-16 at all bin counts (was 91.6
+              and 48.9 at 128 bins with 3-D buffers). Single-velocity
+              regression: 20-cell mesh-only and accuracy anchor bitwise
+              unchanged (SHA-256 verified). 19/19 CTest on hal (HIP gfx1100)
+              and fwk394 (CUDA 12.5, sm\_70).},
+ }

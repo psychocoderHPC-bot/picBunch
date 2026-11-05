@@ -459,7 +459,7 @@ four-cell shell, $R=4$, order $5$ & $1508.12$ & $1510.7$ & $7.99\times10^{-4}$ i
 \subsection{Device backend for the fast near evaluator}
 \label{sec:fastgpu}
 
-\texttt{v0.9.0} carries a device backend, \texttt{--near-shell fast-gpu}: the
+\texttt{v0.9.1} carries a device backend, \texttt{--near-shell fast-gpu}: the
 same algebra as the host fast path, one thread per (pair, component), on the
 CUDA device \citep{CFPORT,INT4}. Against the host fast path it agrees to
 $5.4\times10^{-16}$ to $8.0\times10^{-16}$; when no CUDA device is present the
@@ -631,9 +631,8 @@ would grow with $N$, and it does not \citep{W7t}.
 
 Figures~\ref{fig:gpvalid-xy-e}, \ref{fig:gpvalid-xy-b},
 \ref{fig:gpvalid-xy-err}, \ref{fig:gpvalid-zy-e}, \ref{fig:gpvalid-zy-b} and
-\ref{fig:gpvalid-zy-err} show the shipped mesh field for one electron on a
-$64^3$ grid, cell $10^{-7}$\,m, against the independent order-12 continuum
-reference on the two mid planes. The six rows
+\ref{fig:gpvalid-zy-err} show the shipped mesh field for one electron on a $64^3$ grid, cell $10^{-7}$\,m, against the
+independent order-12 continuum reference on the two mid planes. The six rows
 are the velocity cases $\beta=0.1$, $\beta=0.5$, $\gamma=1$, $\gamma=10$,
 $\gamma=30$ and $\gamma=100$, with $y$ horizontal and increasing left to
 right. The measured worst relative errors are $3.49\times10^{-3}$,
@@ -721,35 +720,86 @@ peak. The worst component error is $3.21$ at $\gamma=100$.}
  \texttt{gridSpacing}\,$\cdot$\,\texttt{gridUnitSI}; a mesh without a positive
   \texttt{gridUnitSI} is rejected \citep{S1-spec}.
 
-  \subsection{Binned multi-velocity binning}
-  \label{sec:multivel}
+   \subsection{Binned multi-velocity binning, measured}
+   \label{sec:multivel}
 
-  The single-velocity scope of Section~\ref{sec:fielddef} is extended by
-  splitting the velocity distribution into $B$ classes and running one
-  convolution per class; the near shell needs no binning, because each pair
-  carries its own velocity \citep{MV2}. The campaign ran on a $48^3$ grid
-  with $512$ sources on \texttt{jureca-h100} (\texttt{jrc0880}, H100 PCIe,
-  \texttt{sm\_90}), branch \texttt{experimental/multivel} at
-  \texttt{02891fe6} \citep{MV2}.
+   The single-velocity scope of Section~\ref{sec:fielddef} is extended by
+   splitting the velocity distribution into $B$ classes and running one
+   convolution per class; the near shell needs no binning, because each pair
+   carries its own velocity \citep{MV2,MVR2}. The measurements below are
+   on a $64^3$ grid with $200$ sources on \texttt{hal} (NVIDIA A30,
+   \texttt{sm\_80}, CUDA 13.4.92), picBunch \texttt{v0.9.1} (commit
+   \texttt{c0bf82c}, tag \texttt{262927ba}) \citep{MVR2,INT7}.
 
-  \paragraph{Single-velocity sanity.} With a single velocity the binned path
-  is bitwise equal to the unbinned path: the binning error $T_b\!-\!T$ is
-  exactly zero, and the field difference is bitwise zero in the unit test
-  \citep{MV2}.
+   \paragraph{Single-velocity sanity.} With zero spread the binned path is
+   bitwise equal to the unbinned path: $B=1$ and $B=16$ give bit-identical
+   fields in all six components ($\max|\Delta|=0$) \citep{MVR2}.
 
-  \paragraph{Binned field.} The binned field is excluded from the reported
-  results: it grows with the bin count, while the order-12 arbiter is
-  bin-independent for the same bunch. This section therefore reports the
-  method and the bitwise single-velocity check only.
+   \begin{table}[t]
+   \centering
+   \small
+   \caption{Binned multi-velocity peaks, $64^3$ grid, $200$ sources,
+   $\gamma=10$, picBunch \texttt{v0.9.1} \citep{MVR2}.}
+   \label{tab:multivel}
+   \begin{tabular}{lrrrr}
+   \toprule
+   spread & $B\!=\!16$ $|B_z|$ (T) & $B\!=\!64$ $|B_z|$ (T) & $B\!=\!16$ $|B_y|$ (T) & $B\!=\!64$ $|B_y|$ (T) \\
+   \midrule
+   energy 5\%      & $2.32050\times10^{4}$ & $2.32049\times10^{4}$ & $0$ & $0$ \\
+   angular $5^\circ$ & $2.48202\times10^{4}$ & $2.48213\times10^{4}$ & $1.2948\times10^{3}$ & $1.2955\times10^{3}$ \\
+   \bottomrule
+   \end{tabular}
+   \end{table}
 
-  \begin{figure}[t]
-  \centering
-  \includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
-  \caption{Sampled multi-velocity distributions used by the campaign
-  ($\gamma=10$, 512 sources, seeds 100/103, generator \texttt{02891fe6})
-  \citep{MV2}: (a) $\gamma$ histogram for the 5\% energy spread with the
-  $B=16$ adaptive edges and labelled mean and standard deviation;
-  (b) $u_\parallel$ versus $u_\perp$ density for the $5^\circ$ angular spread
-  with the $5^\circ$ and median-divergence lines.}
-  \label{fig:multivel}
-  \end{figure}
+   With a 5\% energy spread and $+y$ drift the $B_z$ peak is
+   $2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
+   bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
+   longitudinal current \citep{MVR2}. With a $5^\circ$ angular spread the
+   $B_z$ peak moves from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T
+   and $B_y$ from $1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is
+   $5.22\times10^{-2}$, and the two bin counts agree to $0.0043\%$ in $B_z$
+   and $0.056\%$ in $B_y$ \citep{MVR2}.
+
+   \paragraph{1\,mrad case against the arbiter.} The fluctuation bunch
+   ($N=200$, $\gamma=10$, $+y$ drift, 1.046\,mrad rms $x$-divergence,
+   \texttt{BDATA2}) was re-run at 64 bins and compared against the order-12
+   Gauss--Legendre arbiter (unbinned, per-particle $u$, 698-node slice
+   subset) measured before the fix \citep{MVR3,FLUC1}. On the x-y slice
+   ($z=32$) picBunch gives $B_y=7.835$\,T and $B_z=2.3336\times10^{4}$\,T,
+   against arbiter values of $7.759$\,T and $2.344\times10^{4}$\,T
+   (factors $1.010\times$ and $0.996\times$); on the z-y slice ($x=32$) the
+   corresponding values are $7.561$\,T / $7.519$\,T and
+   $2.3159\times10^{4}$\,T / $2.327\times10^{4}$\,T
+   ($1.006\times$ and $0.995\times$). The 3-D $B_y$ peak is $8.734$\,T and
+   $B_z$ is $2.3336\times10^{4}$\,T. The worst component deviation is
+   $1.4\%$ (x-y ratio); every component on every slice is within $1.0\%$.
+   Before the fix the same 64-bin run gave $B_y=1.196\times10^{3}$\,T,
+   $154\times$ the arbiter, and $B_z=4.002\times10^{4}$\,T, $1.71\times$ the
+   arbiter \citep{MVR3,FLUC1}.
+
+   \paragraph{FFT buffer defect (fixed in \texttt{v0.9.1}).} The replicated
+   mesh path allocated its five transform buffers with 3-D
+   \texttt{allocUnified} extents. On CUDA and HIP that allocation pads every
+   innermost row to 128\,B when the padded $M_x$ is not a multiple of 16
+   doubles. The per-bin \texttt{memset} is pitched: it clears the row data
+   but not the gap bytes, which lie inside the flat prefix the contiguous FFT
+   plan and the flat deposit, kernel, and read-out loops read as data. The
+   velocity-bin loop reuses the buffers, so the second and later non-empty
+   bins read the previous bin's charge from the gaps, and the field grew with
+   the bin count while the deposited charge summed correctly. The scope is
+   exactly that case: more than one non-empty velocity bin on CUDA or HIP
+   with a padded $M_x$ that is not a multiple of 16. A single-velocity run
+   clears a fresh buffer once and is unaffected. \texttt{v0.9.1} allocates
+   all five buffers as flat 1-D counts \citep{INT7}. The \texttt{picBunchFftSizeCheck}
+   tool (one allocation, a pitched \texttt{memset} and a forward/inverse pass
+   per bin, summed against the direct free-space reference) confirms the fix:
+   at the two failing local-box sizes $M=24$ and $M=40$ the free-space
+   relative error is $3.5\times10^{-16}$ to $7.0\times10^{-16}$ at every
+   bin count, versus $91.6$ and $48.9$ with the old 3-D buffers at 128 bins
+   \citep{INT7}. Single-velocity fields are bitwise unchanged between the
+   v0.9.0 and v0.9.1 builds (SHA-256 verified on the 20-cell mesh-only case
+   and the accuracy anchor), so no previously published single-velocity result
+   moves \citep{INT7}.
+
+   Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
+   ($R=3$, tile 4, order 5), 248\,s on the A30 \citep{MVR3}.

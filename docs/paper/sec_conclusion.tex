@@ -1,12 +1,12 @@
  \section{Conclusion}
  \label{sec:conclusion}
 
- \texttt{picBunch} \texttt{v0.9.0} computes the present-time field of a
+ \texttt{picBunch} \texttt{v0.9.1} computes the present-time field of a
  uniformly moving, TSC-shaped bunch as a zero-padded free-space FFT convolution
  with staggered Yee read-out, driven by a single TOML configuration
  (Section~\ref{sec:interface}), and writes a uniform float32 checkpoint that
  restarts under a stock PIConGPU, periodic and open-boundary, single- and
- multi-patch. The release passes $18/18$ ctest with zero compiler warnings on
+ multi-patch. The release passes $19/19$ ctest with zero compiler warnings on
  a V100 \texttt{sm\_70}, an H100 \texttt{sm\_90}, and a gfx1100 HIP build
  \citep{INT4}.
 
