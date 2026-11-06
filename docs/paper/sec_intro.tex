@@ -1,33 +1,39 @@
 \section{Introduction}
 \label{sec:intro}
 
-When a particle-in-cell (PIC) simulation starts, the bunch of particles must
-carry an initial electromagnetic field, or the first push already acts on the
-wrong force. The need is sharpest for laser wakefield acceleration
-simulations, where a driven bunch moves relativistically through the wake
-\citep{esarey2009} and the first push acts on whatever field the start state
-supplies. The field of a moving bunch in free space is known in closed form
-for each point charge, but a simulation reads that field on a staggered mesh
-with thousands of observation points, so it is computed by a fast sum over the
-source charges rather than by evaluating the closed form everywhere. We compute
-it as a free-space FFT convolution of a TSC deposit with the sampled
-TSC-convolved point-charge kernel \citep{birdsall1985,hockney1988}. The
-field is the present-time field of uniformly moving charges, with no radiation
-term and no history \citep{jackson2007,landau1975}. This paper gives the exact
-discrete recipe a re-implementer needs, and it measures the cost and the
-accuracy of \texttt{picBunch} \texttt{v0.7.0} on a V100, an H100 and a
-gfx1100, naming the reference for every error statement. The release is driven by a single TOML configuration
-(input file, destination, config; Section~\ref{sec:interface}), and it carries
-the capabilities the measurements below exercise: an opt-in near shell with a
-fast closed-form evaluator, MPI component-parallel mesh and tile-parallel near
-shell with bitwise equality across rank counts, a tolerance-derived far-tail
-margin for zero fill, and a float32 openPMD checkpoint that restarts under a
-stock PIConGPU \citep{burau2010,openpmd}.
+When a particle-in-cell (PIC) simulation of laser wakefield acceleration
+starts, the driven bunch already moves relativistically through the
+plasma~\citep{esarey2009}, so the first push must act on the correct
+electromagnetic force. In practice the start state carries no field:
+simulation frameworks either start field-free and let the wake build up in
+the first few steps, or compute the initial field by evaluating the
+closed-form expression of each source charge at every observation point.
+The first option inserts a transient that the physics of a uniformly moving
+bunch does not contain, and the second is too slow once the staggered mesh
+holds thousands of observation points per source.
 
-The established workaround avoids computing the initial field altogether: one
-starts from a field-free state and marches the bunch forward, letting the
-fields build up in the first few steps. The present-time field of a uniformly
-moving bunch has no transient, so this history has no physical basis. We
-measure how well the discrete method reproduces that field and how much it
-costs, and we state the conditions under which the measured error is
-largest (Section~\ref{sec:limits}).
+The present-time field of a uniformly moving charge is known in closed
+form~\citep{jackson2007,landau1975}, and the field of a bunch of $N$ such
+charges is the linear sum over sources. Evaluated on a mesh that also
+carries a TSC deposit~\citep{birdsall1985,hockney1988}, the sum becomes a
+discrete convolution between the deposited charge and the TSC-convolved
+point-charge kernel. A zero-padded free-space FFT evaluates that
+convolution in $\mathrm{O}(M^3\log M)$ transforms with $M$ the padded grid
+size, independent of $N$ in the transform itself. \texttt{picBunch}
+implements exactly this operation, with staggered Yee read-out, an opt-in
+near shell that evaluates the in-support integral in closed form, an
+MPI-parallel component- and tile-parallel design, and a checkpoint writer
+that restarts under a stock PIConGPU~\citep{burau2010,openpmd}.
+
+This paper gives the discrete recipe, its physical consistency checks, and
+measured accuracy and cost. Section~\ref{sec:fielddef} defines the field
+and Section~\ref{sec:method} the algorithm. Section~\ref{sec:consistency}
+checks the kernel against the Li\'enard--Wiechert solution, Lorentz
+contraction, Gauss's law, the Yee staggering, and the
+$B = \boldsymbol{v}\times\boldsymbol{E}/c^2$ limit.
+Section~\ref{sec:accuracy} separates the error into mesh/deposit, velocity
+binning, near-source quadrature, far-tail, and output-precision terms, and
+states the domain of validity of each near-shell mode.
+Section~\ref{sec:scaling} measures cost and MPI scaling.
+Appendices give the full derivations, the secondary validation sweeps, the
+large-domain slices, and the multi-velocity measurements.

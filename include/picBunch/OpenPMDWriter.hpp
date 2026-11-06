@@ -100,6 +100,13 @@ namespace picBunch
      * ``p/(m c)``, weights are the statistical weights and ``restMass`` is the
      * SI rest mass per macro particle.  The conversion to PIConGPU internal
      * units happens in the writer with the supplied units.
+     *
+     * ``momentum`` follows the PIConGPU openPMD convention: it is the
+     * macro-particle momentum ``u * restMass * c * weight`` with
+     * ``macroWeighted = true`` and ``weightingPower = 1``.  PIConGPU's
+     * ``speciesAttributes.unitless`` defines the momentum attribute that way
+     * and its restart loader assigns the stored record value directly, while
+     * its consumers recover the per-particle ``u`` by dividing by ``weight``.
      */
     struct GeneratedParticles
     {

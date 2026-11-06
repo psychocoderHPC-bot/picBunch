@@ -150,6 +150,20 @@ int main(int argc, char** argv)
 
         if(shell != "exact" && shell != "fast")
             throw std::runtime_error("--shell must be 'exact' or 'fast'");
+        bool const moving = u[0] != 0.0 || u[1] != 0.0 || u[2] != 0.0;
+        if(shell == "exact" && moving)
+        {
+            // The adaptive reference is the right arbiter for stationary and
+            // oblique cases; its moving in-support quadrature is not a truth.
+            // Say so at the point of use instead of letting the output file
+            // name imply otherwise.
+            std::fprintf(
+                stderr,
+                "measure_near_shell: note: --shell exact integrates moving in-support\n"
+                "  points in Lorentz-contracted coordinates.  Tested agreement is about\n"
+                "  1e-4 off-axis and about 2%% at the closest axial node for gamma 10;\n"
+                "  cross-check production points with tools/velocity-bins/indfield.py.\n");
+        }
         picBunch::NearShellOptions ns;
         ns.mode = (shell == "fast") ? picBunch::NearShellOptions::Mode::Fast
                                     : picBunch::NearShellOptions::Mode::Exact;
@@ -176,6 +190,10 @@ int main(int argc, char** argv)
         meta << "radius " << radius << "\n";
         meta << "tile " << tile << "\n";
         meta << "shell " << shell << "\n";
+        meta << "evaluator " << (shell == "fast" ? "pbfast-asinh+GL" : "nbref-adaptive")
+             << "\n";
+        meta << "moving_in_support_truth " << (moving ? "reference-with-residual" : "yes")
+             << "\n";
         meta << "order " << fastOrder << "\n";
         meta << "sources " << sources << "\n";
         meta << "cloud_cells " << cloudCells << "\n";

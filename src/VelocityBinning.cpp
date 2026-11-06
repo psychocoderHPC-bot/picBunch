@@ -200,7 +200,6 @@ namespace picBunch
             Bunch const& bunch,
             BeamFrame const& frame,
             std::array<std::size_t, 3> const& N,
-            std::vector<double> const& signedCharge,
             std::vector<double> const& absCharge,
             double totalAbsoluteCharge,
             double modelConstant,
@@ -276,9 +275,12 @@ namespace picBunch
             }
             out.boxOf = boxOf;
 
-            // Content model: per box, charge fraction, gamma range and the
-            // largest member angle against the representative.
-            std::vector<double> boxCharge(boxes, 0.0);
+            // Content model: per box, absolute-charge fraction, gamma range, the
+            // largest member angle against the representative, and the largest
+            // member-vs-representative gamma deviation.  The boxes are weighted
+            // by their absolute-charge content (never the signed sum) so that
+            // opposite charges cannot erase a local error.
+            std::vector<double> boxAbsCharge(boxes, 0.0);
             std::vector<double> boxGammaMin(boxes, 0.0), boxGammaMax(boxes, 0.0);
             std::vector<bool> boxUsed(boxes, false);
             std::vector<double> particleGamma(count);
@@ -288,7 +290,7 @@ namespace picBunch
                     + bunch.uz[p] * bunch.uz[p];
                 particleGamma[p] = std::sqrt(1.0 + u2);
                 std::size_t const b = boxOf[p];
-                boxCharge[b] += signedCharge[p];
+                boxAbsCharge[b] += absCharge[p];
                 if(boxUsed[b])
                 {
                     boxGammaMin[b] = std::min(boxGammaMin[b], particleGamma[p]);
@@ -308,28 +310,45 @@ namespace picBunch
                     continue;
                 Vec3 const& uRep = out.representativeU[b];
                 double const repNorm = norm(uRep);
+                double const gammaRep = std::sqrt(1.0 + repNorm * repNorm);
                 double maxAngle = 0.0;
-                if(repNorm > 0.0)
-                    for(std::size_t p = 0; p < count; ++p)
+                double maxGammaDev = 0.0;
+                bool anyMoving = false;
+                for(std::size_t p = 0; p < count; ++p)
+                {
+                    if(boxOf[p] != b)
+                        continue;
+                    double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
+                        + bunch.uz[p] * bunch.uz[p];
+                    double const uMag = std::sqrt(u2);
+                    if(uMag > 0.0)
                     {
-                        if(boxOf[p] != b)
-                            continue;
-                        double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
-                            + bunch.uz[p] * bunch.uz[p];
-                        double const uMag = std::sqrt(u2);
-                        double const cosA
-                            = (uMag > 0.0)
-                            ? std::max(
-                                  -1.0,
-                                  std::min(1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
+                        anyMoving = true;
+                        // The angle against the representative is only defined
+                        // when the representative is itself moving.
+                        if(repNorm > 0.0)
+                        {
+                            double const cosA
+                                = std::max(
+                                      -1.0,
+                                      std::min(
+                                          1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
                                                  + bunch.uz[p] * uRep[2])
-                                               / (uMag * repNorm)))
-                            : 1.0;
-                        maxAngle = std::max(maxAngle, std::acos(cosA));
+                                                / (uMag * repNorm)));
+                            maxAngle = std::max(maxAngle, std::acos(cosA));
+                        }
                     }
+                    maxGammaDev = std::max(
+                        maxGammaDev, std::abs(particleGamma[p] - gammaRep) / gammaRep);
+                }
+                // A stationary representative for a moving member is a full
+                // angular mismatch: the representative kernel is a static one.
+                if(repNorm == 0.0 && anyMoving)
+                    maxAngle = std::acos(-1.0);
                 double const gamma = boxGammaMax[b];
-                modelSum += (std::abs(boxCharge[b]) / totalAbsoluteCharge)
-                    * (gamma * maxAngle + (boxGammaMax[b] - boxGammaMin[b]) / gamma);
+                modelSum += (boxAbsCharge[b] / totalAbsoluteCharge)
+                    * (gamma * maxAngle + (boxGammaMax[b] - boxGammaMin[b]) / gamma
+                       + maxGammaDev);
             }
             out.modelSum = modelSum;
             out.modelConstant = modelConstant;
@@ -376,7 +395,7 @@ namespace picBunch
             throw std::invalid_argument("deriveVelocityBinning: explicitBins must be >= 1");
 
         std::vector<Vec3> uLab(count);
-        std::vector<double> signedCharge(count), absCharge(count);
+        std::vector<double> absCharge(count);
         double totalAbsoluteCharge = 0.0;
         double scaleU = 1.0;
         for(std::size_t p = 0; p < count; ++p)
@@ -391,7 +410,6 @@ namespace picBunch
             double const q = bunch.weight[p] * bunch.charge[p];
             if(!std::isfinite(q))
                 throw std::invalid_argument("deriveVelocityBinning: a particle charge is not finite");
-            signedCharge[p] = q;
             absCharge[p] = std::abs(q);
             totalAbsoluteCharge += std::abs(q);
         }
@@ -441,7 +459,7 @@ namespace picBunch
         };
         auto modelSumFor = [&](std::size_t B, VelocityBinning& probe) {
             return evaluateSplit(
-                bunch, frame, splitsFor(B), signedCharge, absCharge, totalAbsoluteCharge,
+                bunch, frame, splitsFor(B), absCharge, totalAbsoluteCharge,
                 policy.modelConstant, probe);
         };
 
@@ -490,7 +508,7 @@ namespace picBunch
         }
 
         evaluateSplit(
-            bunch, frame, splitsFor(targetBins), signedCharge, absCharge, totalAbsoluteCharge,
+            bunch, frame, splitsFor(targetBins), absCharge, totalAbsoluteCharge,
             policy.modelConstant, out);
         return out;
     }

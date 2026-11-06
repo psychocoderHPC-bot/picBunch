@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -26,6 +29,70 @@ namespace picBunch
 #else
             return false;
 #endif
+        }
+
+        //! Version of the compute-options wire layout and fingerprint.
+        constexpr std::uint64_t kComputeOptionsWireVersion = 2u;
+
+        /*! Deterministic FNV-1a hasher over the logical option fields.
+         *
+         * Only fixed-width values are fed in, so no struct padding or endianness
+         * dependent byte range leaks into the digest.  All ranks run the same
+         * binary, so double bit patterns are comparable.
+         */
+        class OptionsHasher
+        {
+        public:
+            void bytes(void const* data, std::size_t size)
+            {
+                auto const* begin = static_cast<unsigned char const*>(data);
+                for(std::size_t i = 0; i < size; ++i)
+                {
+                    m_hash ^= static_cast<std::uint64_t>(begin[i]);
+                    m_hash *= 1099511628211ull;
+                }
+            }
+
+            void u64(std::uint64_t value)
+            {
+                bytes(&value, sizeof(value));
+            }
+
+            void real(double value)
+            {
+                std::uint64_t bits = 0;
+                static_assert(sizeof(bits) == sizeof(value));
+                std::memcpy(&bits, &value, sizeof(bits));
+                u64(bits);
+            }
+
+            [[nodiscard]] std::uint64_t value() const
+            {
+                return m_hash;
+            }
+
+        private:
+            std::uint64_t m_hash = 1469598103934665603ull;
+        };
+
+        void hashOptionalSizes(
+            OptionsHasher& hasher,
+            std::optional<std::array<std::size_t, 3>> const& value)
+        {
+            hasher.u64(value ? 1u : 0u);
+            if(value)
+                for(auto const entry : *value)
+                    hasher.u64(static_cast<std::uint64_t>(entry));
+        }
+
+        void hashOptionalReals(
+            OptionsHasher& hasher,
+            std::optional<std::array<double, 3>> const& value)
+        {
+            hasher.u64(value ? 1u : 0u);
+            if(value)
+                for(auto const entry : *value)
+                    hasher.real(entry);
         }
     } // namespace
 
@@ -142,30 +209,70 @@ namespace picBunch
 #endif
     }
 
+    std::uint64_t computeOptionsFingerprint(ComputeOptions const& options)
+    {
+        OptionsHasher hasher;
+        hasher.u64(kComputeOptionsWireVersion);
+        // Physics scalars.
+        hasher.real(options.tolerance);
+        hasher.real(options.marginCells);
+        hasher.real(options.nearShell.radiusCells);
+        hasher.real(options.velocityBinning.modelConstant);
+        // Integer / enum policy fields.  Every value is cast through a fixed
+        // width so the digest cannot depend on the in-memory enum size.
+        hasher.u64(static_cast<std::uint64_t>(options.fftPadding));
+        hasher.u64(options.deterministicDeposit ? 1u : 0u);
+        hasher.u64(static_cast<std::uint64_t>(options.nearShell.mode));
+        hasher.u64(static_cast<std::uint64_t>(options.nearShell.tileNodes));
+        hasher.u64(static_cast<std::uint64_t>(options.nearShell.fastOrder));
+        hasher.u64(static_cast<std::uint64_t>(options.nearShell.fastObliqueOrder));
+        hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.mode));
+        hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.explicitBins));
+        hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.maxBins));
+        hasher.u64(static_cast<std::uint64_t>(options.fftMode));
+        hasher.u64(static_cast<std::uint64_t>(options.distributedFftMinNodes));
+        for(auto const entry : options.cellSize)
+            hasher.real(entry);
+        // Optional grid overrides: presence plus values.
+        hashOptionalSizes(hasher, options.meshGridSize);
+        hashOptionalReals(hasher, options.meshGridOrigin);
+        hashOptionalSizes(hasher, options.gridSize);
+        hashOptionalReals(hasher, options.gridOrigin);
+        hashOptionalSizes(hasher, options.globalGridSize);
+        hashOptionalReals(hasher, options.globalGridOrigin);
+        hashOptionalReals(hasher, options.marginCellsPerAxis);
+        return hasher.value();
+    }
+
     void mpiBroadcastComputeOptions(ComputeOptions& options, int root)
     {
 #if defined(PICBUNCH_ENABLE_MPI)
         if(!initialized() || mpiSize() <= 1)
             return;
-        double scalars[8] = {
+        double scalars[4] = {
             options.tolerance,
             options.marginCells,
             options.nearShell.radiusCells,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0};
-        std::uint64_t integers[6] = {
-            options.fftPadding,
+            options.velocityBinning.modelConstant};
+        std::uint64_t integers[11] = {
+            static_cast<std::uint64_t>(options.fftPadding),
             options.deterministicDeposit ? 1u : 0u,
             static_cast<std::uint64_t>(options.nearShell.mode),
             static_cast<std::uint64_t>(options.nearShell.tileNodes),
+            static_cast<std::uint64_t>(options.nearShell.fastOrder),
+            static_cast<std::uint64_t>(options.nearShell.fastObliqueOrder),
+            static_cast<std::uint64_t>(options.velocityBinning.mode),
+            static_cast<std::uint64_t>(options.velocityBinning.explicitBins),
+            static_cast<std::uint64_t>(options.velocityBinning.maxBins),
             static_cast<std::uint64_t>(options.fftMode),
             static_cast<std::uint64_t>(options.distributedFftMinNodes)};
         double cell[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
-        MPI_Bcast(scalars, 8, MPI_DOUBLE, root, MPI_COMM_WORLD);
-        MPI_Bcast(integers, 6, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        std::uint64_t version = kComputeOptionsWireVersion;
+        MPI_Bcast(&version, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        if(version != kComputeOptionsWireVersion)
+            throw std::runtime_error("MPI compute-options wire version mismatch");
+        MPI_Bcast(scalars, 4, MPI_DOUBLE, root, MPI_COMM_WORLD);
+        MPI_Bcast(integers, 11, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         // Optional arrays: one presence flag, then three values each.
         auto broadcastOptional = [&](std::optional<std::array<std::size_t, 3>>& value) {
@@ -173,8 +280,7 @@ namespace picBunch
             MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
             if(present == 0u)
             {
-                if(mpiRank() != root)
-                    value.reset();
+                value.reset();
                 return;
             }
             std::uint64_t data[3] = {};
@@ -192,8 +298,7 @@ namespace picBunch
             MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
             if(present == 0u)
             {
-                if(mpiRank() != root)
-                    value.reset();
+                value.reset();
                 return;
             }
             double data[3] = {};
@@ -209,22 +314,94 @@ namespace picBunch
         broadcastOptionalDouble(options.gridOrigin);
         broadcastOptional(options.globalGridSize);
         broadcastOptionalDouble(options.globalGridOrigin);
+        broadcastOptionalDouble(options.marginCellsPerAxis);
         if(mpiRank() != root)
         {
             options.tolerance = scalars[0];
             options.marginCells = scalars[1];
             options.nearShell.radiusCells = scalars[2];
+            options.velocityBinning.modelConstant = scalars[3];
             options.fftPadding = static_cast<unsigned>(integers[0]);
             options.deterministicDeposit = integers[1] != 0u;
             options.nearShell.mode = static_cast<NearShellOptions::Mode>(integers[2]);
             options.nearShell.tileNodes = static_cast<std::size_t>(integers[3]);
-            options.fftMode = static_cast<FftMode>(integers[4]);
-            options.distributedFftMinNodes = static_cast<std::size_t>(integers[5]);
+            options.nearShell.fastOrder = static_cast<int>(integers[4]);
+            options.nearShell.fastObliqueOrder = static_cast<int>(integers[5]);
+            options.velocityBinning.mode = static_cast<VelocityBinningOptions::Mode>(integers[6]);
+            options.velocityBinning.explicitBins = static_cast<std::size_t>(integers[7]);
+            options.velocityBinning.maxBins = static_cast<std::size_t>(integers[8]);
+            options.fftMode = static_cast<FftMode>(integers[9]);
+            options.distributedFftMinNodes = static_cast<std::size_t>(integers[10]);
             options.cellSize = {cell[0], cell[1], cell[2]};
+        }
+        // Verify that every rank ended up with root's effective options.
+        std::uint64_t reference = (mpiRank() == root) ? computeOptionsFingerprint(options) : 0u;
+        MPI_Bcast(&reference, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        std::uint64_t const local = computeOptionsFingerprint(options);
+        int const localMismatch = (local == reference) ? 0 : 1;
+        int mismatch = 0;
+        MPI_Allreduce(&localMismatch, &mismatch, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if(mismatch != 0)
+        {
+            int rank = 0;
+            MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+            char detail[160];
+            std::snprintf(
+                detail,
+                sizeof(detail),
+                "rank %d local fingerprint %016llx differs from root %016llx",
+                rank,
+                static_cast<unsigned long long>(local),
+                static_cast<unsigned long long>(reference));
+            throw std::runtime_error(
+                std::string("MPI compute-options broadcast produced different physics "
+                            "options on different ranks: ")
+                + detail);
         }
 #else
         (void)options;
         (void)root;
+#endif
+    }
+
+    int mpiBroadcastRootSetupStatus(std::string& message, int root)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            int status = 0;
+            int length = 0;
+            if(mpiRank() == root)
+            {
+                status = message.empty() ? 0 : 1;
+                length = static_cast<int>(message.size());
+            }
+            MPI_Bcast(&status, 1, MPI_INT, root, MPI_COMM_WORLD);
+            MPI_Bcast(&length, 1, MPI_INT, root, MPI_COMM_WORLD);
+            if(mpiRank() != root)
+                message.resize(length > 0 ? static_cast<std::size_t>(length) : 0u);
+            if(length > 0)
+                MPI_Bcast(message.data(), length, MPI_CHAR, root, MPI_COMM_WORLD);
+            return status;
+        }
+#else
+        (void)root;
+#endif
+        return message.empty() ? 0 : 1;
+    }
+
+    void mpiAbort(int errorCode)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized())
+        {
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+            if(!finalized && mpiSize() > 1)
+                MPI_Abort(MPI_COMM_WORLD, errorCode);
+        }
+#else
+        (void)errorCode;
 #endif
     }
 

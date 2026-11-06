@@ -6,6 +6,7 @@
 #include "picBunch/Types.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace picBunch
@@ -14,9 +15,12 @@ namespace picBunch
      *
      * Built only with ``PICBUNCH_ENABLE_MPI``.  Without that option every
      * function below behaves as a single rank: ``mpiRank()`` is 0,
-     * ``mpiSize()`` is 1, broadcasts and barriers are no-ops.  The field
-     * computation always runs on rank 0; the other ranks receive the computed
-     * bunch-box field by broadcast and only participate in the chunked write.
+     * ``mpiSize()`` is 1, broadcasts and barriers are no-ops.  Rank 0 reads the
+     * input, resolves the geometry and broadcasts the bunch and the resolved
+     * options; every rank then computes its component or output-tile share of
+     * the field.  The result is either replicated (component-parallel mesh) or
+     * left as one z-slab per rank (distributed FFT and chunked writer).  All
+     * ranks participate in the collective stages and the disjoint writes.
      */
 
     //! Initialise MPI once for the process.  No-op when MPI is not compiled in.
@@ -57,10 +61,42 @@ namespace picBunch
     void mpiBroadcastBunch(Bunch& bunch, int root);
 
     /*! Broadcast the resolved compute options (grid, margins, near-shell
-     * policy) from root.  Pointers are never sent; the receiver keeps its own
-     * ``parallel`` pointer, which the caller sets after this call.
+     * policy, velocity binning) from root.  Pointers are never sent; the
+     * receiver keeps its own ``parallel`` pointer, which the caller sets after
+     * this call.
+     *
+     * Every effective physics option travels in a versioned fixed-width wire
+     * format.  After the transfer each rank recomputes
+     * ``computeOptionsFingerprint`` and the rank set verifies it against root;
+     * a mismatch throws on every rank instead of letting components run with
+     * different physics.
      */
     void mpiBroadcastComputeOptions(ComputeOptions& options, int root);
+
+    /*! Deterministic fingerprint of every broadcast physics option.
+     *
+     * Covers the near-shell policy (including ``fastOrder`` and
+     * ``fastObliqueOrder``) and all ``velocityBinning`` fields, together with
+     * the grid, margin, FFT and determinism options.  The value is identical on
+     * every rank after a correct broadcast and is independent of MPI.
+     */
+    std::uint64_t computeOptionsFingerprint(ComputeOptions const& options);
+
+    /*! Broadcast the outcome of root-only setup (reader, config, geometry).
+     *
+     * On root ``message`` carries the error text (empty on success); on every
+     * rank the return value is 0 on success and nonzero on failure, with
+     * ``message`` holding root's text.  The call is collective and must be made
+     * by all ranks before any data broadcast.
+     */
+    int mpiBroadcastRootSetupStatus(std::string& message, int root);
+
+    //! Abort the MPI job when MPI is initialised with more than one rank.
+    //!
+    //! Serial builds and single-rank runs are a no-op so the caller can keep
+    //! returning a nonzero status.  Used by the top-level failure path after a
+    //! collective has started, where a local ``return`` would strand peers.
+    void mpiAbort(int errorCode);
 
     //! True when this build has MPI and the runtime is initialised.
     bool mpiActive();

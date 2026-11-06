@@ -1,0 +1,169 @@
+\section*{Methods}
+\label{sec:methods}
+
+\subsection{Bunch and grid configurations}
+\label{sec:configs}
+
+Table~\ref{tab:configs} lists every measured case with the bunch and the
+grid, and the section that uses it. The entries are the recorded
+configuration values of this work. The generation line for the mid-bunch
+bunches is
+\seqsplit{generate\_bunch.py --model gamma --gamma G --seed 42 --grid 64 64 32
+--cell-size 1e-7 1e-7 1e-7 --centroid 32 32 16 --sigma 6 6 6 --weights
+uniform}. The total charge is $N$ times $-e$ for the electron bunches with
+one unit weight, where $e = 1.602176634\times10^{-19}$\,C; the kinetic
+energy is $(\gamma-1)\,m_ec^2$ with $m_ec^2 = 510.999$\,keV. The mid-bunch
+bunches are mono-energetic: the read-back records
+$\gamma_{\min}=\gamma_{\max}=1$ for the $\gamma=1$ bunch and
+$\gamma_{\min}=\gamma_{\max}=10$ for the $\gamma=10$ bunch.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.05}
+\caption{Configurations of every measured case and the section that uses it
+(recorded values of this work; ``not recorded'' means no value was
+recorded). The two mid-slice entries give the bunch generation grid; the
+field grid for those cases ($32\times32\times16$ @ $2\times10^{-7}$ m) is
+in the second block. Kinetic energy is $(\gamma-1) m_ec^2$; the
+multi-velocity driver cell size is $10^{-6}$ m.}
+\label{tab:configs}
+\begin{longtable}{@{}p{1.9cm}cp{2.2cm}p{2.7cm}p{2.7cm}p{2.7cm}@{}}
+\toprule
+case & $N$ & total charge ($-e$ each) & size (cells/axis) & spread & used in \\
+\midrule
+\endfirsthead
+\toprule
+case & $N$ & total charge ($-e$ each) & size (cells/axis) & spread & used in \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+mid slices, g10 & 1000 & $1.602\times10^{-16}$\,C
+  & bunch generation grid $64\times64\times32$ @ $10^{-7}$\,m ($6.4\times6.4\times3.2$), $\sigma\!=\!6$ cells/axis
+  & none ($\gamma_{\min}\!=\!\gamma_{\max}\!=\!10$)
+  & \S\ref{app:slices}, \S\ref{sec:validation} \\
+mid slices, g1 & 1000 & $1.602\times10^{-16}$\,C
+  & bunch generation grid $64\times64\times32$ @ $10^{-7}$\,m ($6.4\times6.4\times3.2$), $\sigma\!=\!6$ cells/axis
+  & none ($\gamma_{\min}\!=\!\gamma_{\max}\!=\!1$)
+  & \S\ref{app:slices}, \S\ref{sec:validation} \\
+large-domain, g10 & 100 & $1.602\times10^{-17}$\,C
+  & extent $2.74\times3.78\times2.65$
+  & not recorded
+  & \S\ref{app:slices} (Fig.~\ref{fig:large}) \\
+large-domain, g1 & 100 & $1.602\times10^{-17}$\,C
+  & extent $2.74\times3.78\times2.65$
+  & not recorded
+  & \S\ref{app:slices} (Fig.~\ref{fig:largeg1}) \\
+cost, stationary & $2\times10^6$ & not recorded
+  & 20-cell bunch
+  & none
+  & \S\ref{sec:cost} \\
+cost, moving axial & $2\times10^6$ & not recorded
+  & 20-cell bunch
+  & none
+  & \S\ref{sec:cost} \\
+landscape, aspect 1 & 1 & $1.602\times10^{-19}$\,C
+  & single particle, 96-cell box
+  & none
+  & \S\ref{sec:gamma-landscape} \\
+landscape, aspect 4 & 1 & $1.602\times10^{-19}$\,C
+  & single particle at the origin
+  & none
+  & Table~\ref{tab:d48} \\
+ multi-velocity, E 5\% & 200 & $3.2\times10^{-17}$\,C
+    & $\sigma\!=\!6$ cells, centroid $(32,32,32)$
+    & 5\% energy, $+y$ drift
+    & \S\ref{app:multivel} \\
+ multi-velocity, A $5^\circ$ & 200 & $3.2\times10^{-17}$\,C
+    & $\sigma\!=\!6$ cells, centroid $(32,32,32)$
+    & $5^\circ$ angular, $+y$ drift
+    & \S\ref{app:multivel} \\
+ 1\,mrad, binned & 200 & $3.2\times10^{-17}$\,C
+    & $\sigma\!=\!6$ cells, centroid $(32,32,32)$, 1.046\,mrad rms $x$-div
+    & 1\,mrad, $+y$ drift
+    & \S\ref{app:multivel} \\
+ divergence, 1\,mrad & 1000 & $1.602\times10^{-16}$\,C
+    & $\sigma\!=\!0.6$ each axis, centroid $(3.197,3.208,1.615)$
+    & 1\,mrad paraxial, $+y$ (seed 43)
+    & \S\ref{app:slices} (reference pending) \\
+\end{longtable}
+
+\begin{longtable}{@{}p{2.3cm}p{3.4cm}p{4.5cm}p{4.4cm}@{}}
+\toprule
+case & $\gamma$, kinetic E ($m_ec^2\!=\!510.999$\,keV) & weight, cell & field grid (domain), host \\
+\midrule
+\endfirsthead
+\toprule
+case & $\gamma$, kinetic E ($m_ec^2\!=\!510.999$\,keV) & weight, cell & field grid (domain), host \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+mid slices, both & 10 / 5.06\,MeV; 1 / 0 & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
+large-domain, both & 10 / 5.06\,MeV; 1 / 0 & not recorded; $2\times10^{-7}$\,m & $128\times128\times64$ ($25.6\times25.6\times12.8$), jureca-h100 \\
+cost, both & 1 / 0; 10 / 5.06\,MeV & not recorded; $2.5\times10^{-7}$\,m & $66\times68\times66$, jureca-h100 \\
+landscape, aspect 1 & 10/50/100 & 1; $10^{-7}$\,m & $96^3$ ($h\!=\!1$), $384^3$ ($h\!=\!1/4$), jureca-h100 (ref: rosi\_v100) \\
+landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\!1$, host not recorded \\
+ multi-velocity, both & 10 / 5.06\,MeV & 1 each; $10^{-7}$\,m & $64^3$, hal (A30, \texttt{sm\_80}) \\
+ divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
+\end{longtable}
+\end{table}
+
+\subsection{Command and software versions}
+\label{sec:commands}
+
+The shipped binary is invoked as
+\seqsplit{picBunch --input bunch.h5 --destination <checkpoint> --config params.toml},
+with every unit and conversion parameter in the TOML file. The
+\texttt{[picongpu]} section carries \texttt{unit\_length},
+\texttt{unit\_e}, \texttt{unit\_b}, \texttt{dt}, \texttt{step},
+\texttt{precision}, \texttt{species}; \texttt{[domain]} carries
+\texttt{cells}, \texttt{cell\_size}, \texttt{origin};
+\texttt{[placement]} carries \texttt{offset\_unit} and the
+\texttt{left}/\texttt{front}/\texttt{top} fractions; \texttt{[accuracy]}
+carries \texttt{tolerance} and the near-shell settings
+(\texttt{near\_shell} \texttt{none}/\texttt{exact}/\texttt{fast}/
+\texttt{fast-gpu}, plus \texttt{near\_shell\_radius} and
+\texttt{near\_shell\_tile}); \texttt{patch\_count} in \texttt{[placement]}
+splits the species into one particle patch per output rank for multi-rank
+restarts. A missing conversion key causes a clear error at start-up. The
+input bunch is centred by its charge-weighted centroid and placed at the
+requested offset from the domain origin; a placement leaving the bunch
+outside the domain is rejected at start-up.
+
+The measurement hosts and toolchains are: \texttt{rosi\_v100} (node
+\texttt{gv002}, V100 \texttt{sm\_70}, CUDA 12.6,
+\texttt{PICBUNCH\_ARCH=70}, Release); \texttt{jrc0880} (H100
+\texttt{sm\_90}, CUDA 13.4); \texttt{hal} (NVIDIA A30, \texttt{sm\_80},
+CUDA 13.4.92). The openPMD standard is version 5.0~\citep{openpmd}; the
+reference PIConGPU is the release whose \texttt{referenceOnly}
+field-initializer mode is used in
+Section~\ref{sec:validation}. The FFT library is cuFFT in the unnormalized
+form of the vendor documentation~\citep{cudacc2024}. The release passes
+$18/18$ ctest with zero compiler warnings on a V100 \texttt{sm\_70}, an
+H100 \texttt{sm\_90}, and a gfx1100 HIP build.
+
+\subsection{Data and code availability}
+\label{sec:availability}
+
+The source of \texttt{picBunch} \texttt{v0.9.1} (tag \texttt{v0.9.1},
+commit \texttt{c0bf82c2251448abfaad66aa03b18ab3a9ab9322}) is available at
+\url{https://github.com/psychocoderHPC/picBunch}. The measurement data
+referenced by name in this paper are the files recorded in
+\texttt{docs/measurements/} of the repository: \texttt{matrix.csv} (the
+bench sweep behind Table~\ref{tab:matrix}), \texttt{w4b\_rel\_error.csv}
+(Fig.~\ref{fig:Fw4b}, Table~\ref{tab:w4b}), \texttt{coulomb.csv} (the
+Coulomb anchor), and the
+per-case \texttt{accuracy\_results.json} and \texttt{n1b\_padding\_*.csv}
+files (Appendix~\ref{app:padding}), with SHA-256 checksums in
+\texttt{MANIFEST.sha256}. The field-slice \texttt{.npz} arrays behind
+Figs.~\ref{fig:valforwardE}--\ref{fig:val1mrad} and
+Figs.~\ref{fig:large}--\ref{fig:largeg1} are recorded in the measurement
+campaign (Appendix~\ref{app:slices}); individual measurements name the
+artifact they used. The figures are rendered at their print width from the
+recorded data with the shared style module described in the repository
+documentation; every figure PDF in \texttt{figs/} was regenerated from
+recorded inputs, and the figure audit records the minimum printed font size
+and colour-bar label of each.

@@ -176,6 +176,20 @@ TEST(Config, StrictAcceptsKnownKeys)
     EXPECT_TRUE(config.warnings.empty());
 }
 
+TEST(Config, StrictAcceptsNearShellFastOrder)
+{
+    ConfigTest fixture;
+    // The key lives in the [accuracy] table, which is the last table in
+    // fullConfig, so appending inherits that table.
+    std::string text
+        = "strict = true\n" + fullConfig + "near_shell_fast_order = 8\n";
+    auto const config
+        = picBunch::loadConfig(fixture.write("strict-fast-order.toml", text));
+    EXPECT_TRUE(config.strict);
+    EXPECT_EQ(config.accuracy.nearShellFastOrder, 8);
+    EXPECT_TRUE(config.warnings.empty());
+}
+
 TEST(Config, ParsesDomainPatch)
 {
     ConfigTest fixture;

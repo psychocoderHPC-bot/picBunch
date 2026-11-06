@@ -1,0 +1,65 @@
+\section{Derivations}
+\label{app:deriv}
+
+\subsection{The singular box}
+
+The in-support integral of Eq.~\eqref{eq:Fc} is split by writing the kernel
+as its divergence plus a smooth remainder. The divergence part is the
+eight-term $\mathrm{asinh}$ box
+\begin{equation}
+\begin{split}
+T(A,B,u)&=\int_0^A\!\int_0^B\frac{\mathrm{d}X\,\mathrm{d}Y}
+{\sqrt{u^2+X^2+Y^2}}\\
+&=\begin{cases}
+A\,\mathrm{asinh}(B/A)+B\,\mathrm{asinh}(A/B), & |u|<10^{-300},\\[2pt]
+A\,\mathrm{asinh}\!\bigl(B/\sqrt{u^2+A^2}\bigr)
++B\,\mathrm{asinh}\!\bigl(A/\sqrt{u^2+B^2}\bigr)\\
+\qquad
+-u\,\arctan\!\bigl(AB/(u\sqrt{A^2+u^2+B^2})\bigr), & \text{otherwise.}
+\end{cases}
+\end{split}
+\end{equation}
+with $A,B>0$ (Eq.~\eqref{eq:Tprimitive}). Each box face has $8$ corners and
+$24$ such calls per component, so the eight-term box is $\mathrm{O}(1)$ per
+pair. The form is even in $u$: $u$ is the distance from the field point to
+the face plane, so a field point beyond a box face gives negative $u$, and
+the $|u|\to0$ branch must fire on $|u|$, not $u$. The branch at
+$|u|<10^{-300}$ is the $u\to0$ limit, which is finite; it is not a
+regularization, it is the limit of the second branch as $|u|\to0$.
+
+The primitive is verified against a converged midpoint trapezoid reference:
+the double integral of the integrand over the unit box with $u=1$ is
+$-2.6348$ for the converged midpoint trapezoid; the naive trapezoid gives
+$-2.6333$, $1.5\times10^{-3}$ low, a trapezoid singularity artefact at the
+corner where the integrand is not smooth. The primitive is implemented in
+the fast evaluator header \texttt{include/picBunch/detail/FastNear.hpp} and
+the device reference
+\texttt{tools/closed-form/gpu\allowbreak \_extract.cu}.
+
+\subsection{The smooth remainder}
+
+The remainder integrates $(S-W^\ast)K$ over the TSC knot panels, where $S$
+is the step function of the kernel's support and $W^\ast$ is the TSC shape
+subtracted so that the integrand is smooth inside the support. Each axis is
+split at the TSC knots ($-1.5, -0.5, 0.5, 1.5$) and at the anchor point
+$s^\ast$, the projection of the source onto the axis; on each panel a plain
+tensor Gauss--Legendre quadrature is applied. The default order is $5$ per
+axis, $8000$ nodes per in-support pair. For a moving bunch the box is
+$\gamma$-stretched for the axial direction: the beaming cone compresses the
+field into a pancake of width $d/\gamma$, and the stretched box matches
+that compression so the singular part stays $\mathrm{O}(1)$. The oblique
+direction uses a rest-frame octant quadrature of the singular box at order
+$8$ ($4096$ nodes) plus the same remainder, because the octant structure of
+the rest-frame kernel does not map to the stretched box.
+
+\subsection{The $h^3$ Riemann factor}
+
+The sampled convolution evaluates the continuum integral of
+Eq.~\eqref{eq:Fc} by a Riemann sum whose nodes are spaced $h$ cells apart,
+so each sample covers a physical volume $h^3$ (in cell units). The
+unnormalized FFT round trip scales by $M^3$, so the read-out applies the
+factor $h_x h_y h_z/(M_x M_y M_z)$ to convert the sum to the integral.
+This is the only place where the mesh spacing enters the amplitude; the
+scale-invariance of Section~\ref{sec:scaleinvariance} follows from it,
+together with the homogeneity of degree $-2$ of the kernel and the cell-unit
+Yee offsets.

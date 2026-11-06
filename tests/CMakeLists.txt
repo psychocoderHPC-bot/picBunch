@@ -37,6 +37,9 @@ if(PICBUNCH_BUILD_GTESTS)
         test_config.cpp
         test_placement.cpp
         test_velocity_bins.cpp
+        test_mpi_options.cpp
+        test_mpi_failure.cpp
+        test_near_shell_accuracy.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -53,12 +56,40 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins MpiOptions MpiFailure NearShellAccuracy)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
         )
     endforeach()
+
+    if(PICBUNCH_ENABLE_MPI)
+        if(NOT MPIEXEC_EXECUTABLE)
+            find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
+        endif()
+        if(MPIEXEC_EXECUTABLE)
+            add_test(
+                NAME picBunch.MpiOptionsBroadcast
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MpiOptions.BroadcastDeliversRootPhysicsToEveryRank
+            )
+            add_test(
+                NAME picBunch.MpiFailureStatus
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MpiFailure.SetupStatusReportsRootErrorOnEveryRank
+            )
+            add_test(
+                NAME picBunch.MpiInvalidInput
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchApp>
+                    --input ${CMAKE_CURRENT_BINARY_DIR}/missing-input.h5
+                    --cell-size 1e-6
+            )
+            set_tests_properties(picBunch.MpiInvalidInput PROPERTIES WILL_FAIL TRUE TIMEOUT 30)
+        endif()
+    endif()
 endif()
 
 # Independent openPMD/HDF5 consumer check: a small writer plus a Python reader

@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: Rene Widera
 //
 // picBunch command line: openPMD particles in, free-space E/B out.
-// The only accuracy knob is --tolerance; bin counts, interpolation orders and
-// FFT sizes are implementation details and are never exposed.
+// --tolerance sizes the FFT padding and the velocity bin count.  It is not an
+// end-to-end error guarantee: near-source quadrature, far-tail and checkpoint
+// precision have separate budgets (README, "Accuracy and error budget").
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Config.hpp"
@@ -68,7 +69,8 @@ namespace
             "  --global-grid <nx>[,<ny>[,<nz>]]\n"
             "                        written domain node counts (even); the computation\n"
             "                        stays on the padded bunch box and cells outside it\n"
-            "                        are written as exact zero\n"
+            "                        are filled by the far-tail multipole (zero only with\n"
+            "                        --allow-field-truncation)\n"
             "  --global-origin <x>[,<y>[,<z>]]\n"
             "                        written domain origin in metres (default: mesh\n"
             "                        gridGlobalOffset, else 0)\n"
@@ -92,7 +94,8 @@ namespace
             "                        convolution (default: 1e-3; floor 1e-14)\n"
             "  --near-shell <mode>   none|exact|fast|fast-gpu (default: none).  exact\n"
             "                        replaces the mesh contribution of every source\n"
-            "                        within the shell by the adaptive reference; fast\n"
+            "                        within the shell by the adaptive reference (a\n"
+            "                        comparison mode, not a moving in-support truth); fast\n"
             "                        uses the asinh box + subtracted-GL remainder\n"
             "                        evaluator on the host; fast-gpu runs the same\n"
             "                        evaluator on the accelerator and falls back to\n"
@@ -609,7 +612,10 @@ int main(int argc, char** argv)
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
 
+        std::string rootSetupError;
         if(root)
+        {
+        try
         {
         // ---------------------------------------------------------------- reader
         auto const readerStart = Clock::now();
@@ -656,7 +662,8 @@ int main(int argc, char** argv)
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
         try
         {
-            auto const geometry = picBunch::readMeshGeometry(args.input);
+            auto const geometry
+                = picBunch::readMeshGeometry(args.input, "E", 0, bunchData.iteration);
             // readMeshGeometry already returns physical SI spacing and offset
             // (raw gridSpacing/gridGlobalOffset times gridUnitSI) and the shape
             // mapped to x,y,z.  Applying gridUnitSI again here is the v0.1
@@ -776,6 +783,25 @@ int main(int argc, char** argv)
         }
 
         } // root: reader and geometry resolution
+        catch(std::exception const& error)
+        {
+            rootSetupError = error.what();
+        }
+        catch(...)
+        {
+            rootSetupError = "unknown error during root setup";
+        }
+        }
+        // Publish the root setup outcome to every rank before the first data
+        // collective.  Without this a root-only reader/config/geometry failure
+        // leaves the other ranks waiting in the broadcast.
+        {
+            std::string setupMessage = rootSetupError;
+            int const setupStatus = picBunch::mpiBroadcastRootSetupStatus(setupMessage, 0);
+            if(setupStatus != 0)
+                throw std::runtime_error(
+                    setupMessage.empty() ? "root setup failed" : setupMessage);
+        }
 
         // The bunch is replicated, not redistributed: the near shell and the
         // component-parallel mesh both need every source on every rank.  Only
@@ -800,11 +826,38 @@ int main(int argc, char** argv)
         // --------------------------------------------------------------- compute
         auto const computeStart = Clock::now();
         if(root)
-        std::printf(
-            "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
-            args.nearShell.c_str(),
-            picBunch::resolveNearShellRadius(options, options.nearShell),
-            options.nearShell.tileNodes);
+        {
+            std::printf(
+                "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
+                args.nearShell.c_str(),
+                picBunch::resolveNearShellRadius(options, options.nearShell),
+                options.nearShell.tileNodes);
+            // The near shell is an opt-in correction with a regime-dependent
+            // accuracy envelope.  State it instead of letting --tolerance imply
+            // an in-support guarantee it does not provide.
+            bool moving = false;
+            for(std::size_t p = 0; p < bunchData.bunch.size() && !moving; ++p)
+                moving = bunchData.bunch.ux[p] != 0.0 || bunchData.bunch.uy[p] != 0.0
+                    || bunchData.bunch.uz[p] != 0.0;
+            if(options.nearShell.mode == picBunch::NearShellOptions::Mode::Exact && moving)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: --near-shell exact integrates moving in-support\n"
+                    "  points in Lorentz-contracted coordinates.  Tested agreement is about\n"
+                    "  1e-4 at cells (1,0,0) and (0,0.5,0) and about 2%% at the closest\n"
+                    "  in-support node for gamma 10; it is not a blanket 1e-3 path.  Validate\n"
+                    "  production in-support points with tools/velocity-bins/indfield.py.\n");
+            if((options.nearShell.mode == picBunch::NearShellOptions::Mode::Fast
+                || options.nearShell.mode == picBunch::NearShellOptions::Mode::FastGpu)
+               && options.tolerance < 1.0e-3)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: --near-shell fast order %d has a fixed in-support\n"
+                    "  envelope (about 8e-4 stationary, 1.7e-4 moving axial, 8e-2 moving\n"
+                    "  oblique); --tolerance %g is not met inside the TSC support.\n",
+                    options.nearShell.fastOrder,
+                    options.tolerance);
+        }
         picBunch::VelocityBinning binning;
         if(options.nearShell.mode != picBunch::NearShellOptions::Mode::None)
         {
@@ -1114,6 +1167,16 @@ int main(int argc, char** argv)
     catch(std::exception const& error)
     {
         std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+        // After any collective has started a local return would strand the
+        // peers; a nonzero abort is the only safe terminal action when more
+        // than one rank is running.  Serial runs keep their exit status.
+        picBunch::mpiAbort(1);
+        return 1;
+    }
+    catch(...)
+    {
+        std::fprintf(stderr, "picBunch: error: unknown exception\n");
+        picBunch::mpiAbort(1);
         return 1;
     }
     return 0;

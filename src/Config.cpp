@@ -291,7 +291,8 @@ namespace picBunch
             {"accuracy.tolerance",
              "accuracy.near_shell",
              "accuracy.near_shell_radius",
-             "accuracy.near_shell_tile"},
+             "accuracy.near_shell_tile",
+             "accuracy.near_shell_fast_order"},
             config.warnings);
         for(auto const& [key, node] : document)
         {

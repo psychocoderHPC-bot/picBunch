@@ -10,8 +10,9 @@ back. The reader, TSC deposit, moving point kernel, padded FFT convolution, Yee 
 openPMD writer, and PIConGPU restart writer are implemented. Written field values are SI:
 E in V/m and B in T, with `unitSI = 1.0` and the matching `unitDimension`. A bunch with a
 momentum spread is split into velocity boxes and summed over the classes; a single shared
-velocity keeps the historical one-box path. `--tolerance` is the only accuracy knob. The
-physics validation gates, the near-source limitation and their provenance are recorded in
+velocity keeps the historical one-box path. `--tolerance` sizes the padded FFT; it is not
+a global accuracy target (see [Error budget](#error-budget)). The physics validation
+gates, the near-source limitation and their provenance are recorded in
 [docs/algorithm.md](docs/algorithm.md).
 
 ## Documentation
@@ -24,7 +25,8 @@ physics validation gates, the near-source limitation and their provenance are re
 
 ```
 include/picBunch/   public headers (types, TSC deposit, point-field kernel, FFT self test)
-src/                host implementation, per-backend device sources under src/cuda, src/hip
+src/                host sources with inline ALPAKA_FN_ACC device functors;
+                    the separate CUDA near-shell kernel is src/cuda/*.cu
 tests/              smoke test (CTest), GoogleTest unit tests and reference CSVs
 tools/verify/       independent HDF5 consumer checks (h5py, no openPMD binding)
 docs/               algorithm and validation notes
@@ -64,7 +66,8 @@ env -u LD_PRELOAD ctest --preset cuda-v100
 ```
 
 `nvcc` must be on `PATH`. An explicit `-DCMAKE_CUDA_ARCHITECTURES=...` takes precedence
-over `PICBUNCH_ARCH`. Device sources are picked up only from `src/cuda/*.cu`.
+over `PICBUNCH_ARCH`. Device functors are inline in the host sources; the only separate
+device translation unit is picked up from `src/cuda/*.cu`.
 
 ### HIP, Radeon RX 7900 (gfx1100)
 
@@ -157,6 +160,18 @@ the grid is the particle bounding box plus the margin and `--cell-size` is requi
 outside the resulting grid is an error that names the count and the bounds; it is never dropped
 silently.
 
+**Near-shell regime limits.** The default `--near-shell none` is the safest choice: it
+keeps the plain mesh field and makes no regime-specific accuracy claim. `fast` is the
+accurate backend for stationary and near-axial motion. At the default order it gives
+`1.69e-4` for moving axial gamma 10 but `8.15e-2` for moving oblique in-support (per
+component `2.43e-2` to `8.15e-2`), so the oblique case is not a `1e-3` path. `exact`
+integrates moving in-support points in Lorentz-contracted coordinates, where the
+beaming anisotropy moves out of the kernel into a smooth density; against the order-12
+`indfield` arbiter it reaches about `1e-4` at cells (1,0,0) and (0,0.5,0) and about
+`3%` at the closest in-support node for gamma 10, and agrees to about `1e-3` for the
+oblique points. It is therefore a usable reference, but the closest node is not a
+blanket `1e-3` path; validate production in-support points against `indfield`.
+
 The default `--near-shell none` keeps the plain padded-FFT mesh, whose
 near-source field is only mesh-accurate. `--near-shell exact` replaces the mesh
 contribution of every source within the shell by the exact TSC-convolved field
@@ -213,10 +228,10 @@ measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; 
 earlier conservative figure was `0.136 s`. The fast evaluator measures `1.8466e7`
 pairs/s stationary at order 5 and `3.9977e6` pairs/s axial gamma 10 at order 8. Pair
 counts are `1.7e8` support-only, `1.7e9` for the 3-cell shell and `3.4e9` for the
-4-cell shell. The wall times below add the measured mesh time to the near-evaluator
-time:
+4-cell shell. The projected wall times below add the measured mesh time to the
+near-evaluator time:
 
-| configuration | wall | worst per component (Ex, Ey, Ez, Bx, By, Bz) |
+| configuration | projected wall (cost floor) | worst per component (Ex, Ey, Ez, Bx, By, Bz) |
 | --- | --- | --- |
 | mesh only | 0.052 s | no near correction (in-support O(1)) |
 | support-only shell, o5 | 9.26 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 |
@@ -224,18 +239,22 @@ time:
 | 4-cell shell, o5 | 184.2 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 (<=1.6e-7 out) |
 | moving axial support, o8 | 42.6 s | 1.69e-4, 1.68e-4, 1.36e-5, 1.67e-4, 1.69e-4, 0 |
 
-So `1e-3` is reached in `9.26 s` support-only and in `184.2 s` with the full 4-cell
-shell, below 300 s. Moving axial gamma 10 reaches `1.69e-4` in `42.6 s` support-only;
-its 3- and 4-cell shells exceed 300 s. The near wall times are the measured standalone
-H100 kernel rate times the pair count: the shipped `--near-shell fast` path evaluates
-the same algebra on the host, so they are an algorithm cost floor, not the CPU wall
-time of the CLI. Moving oblique in-support stays at `8.15e-2` (per component Ex 2.43e-2,
-Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
-`--near-shell exact` is retained for comparison. Its adaptive evaluator and the
-driver reference share one vendored adaptive Gauss-Legendre path, and that path
-mishandles the moving oblique in-support singularity: at the closest in-support node
-it is about `10x` too high, and its `1.55e-1` axial interior is not a moving
-in-support truth at the pinned settings.
+So `1e-3` is reached in a projected `9.26 s` support-only and `184.2 s` with the full
+4-cell shell, below a projected `300 s`. Moving axial gamma 10 reaches `1.69e-4` in a
+projected `42.6 s` support-only; its 3- and 4-cell shells exceed a projected `300 s`.
+These near wall times are the measured standalone H100 kernel rate times the pair
+count: the shipped `--near-shell fast` path evaluates the same algebra on the host, so
+they are an algorithm cost floor, not the CPU wall time of the CLI. Moving oblique
+in-support stays at `8.15e-2` (per component Ex 2.43e-2, Ey 7.42e-2, Ez 6.32e-2, Bx
+8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
+`--near-shell exact` evaluates in-support points in Lorentz-contracted coordinates:
+the Li'enard kernel becomes a Coulomb kernel and the beaming structure moves into a
+smooth TSC density, so the pyramid singularity cancellation is exact for any velocity.
+Tested against the order-12 `indfield` arbiter at gamma 10, the axial points
+(1,0,0) and (0,0.5,0) agree to about `1e-4`, the oblique points to about `1e-3`, and
+the closest axial node retains about `2%`. The driver uses the same evaluator, so its
+moving output is a reference again, but the residual at the closest node is reported
+rather than hidden.
 
 ### Velocity binning
 
@@ -252,7 +271,9 @@ The error model is
 `modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + Delta_gamma_b/gamma_b)`,
 where `q_b/Q` is the charge fraction of box `b`, `gamma_b` the largest gamma in the box,
 `Delta_theta_b` the largest angle to the box centre, and `Delta_gamma_b` the gamma range.
-The shipped calibration is `C = 1`; `--bin-model-constant` overrides it for diagnostics.
+The shipped value `C = 1` is an assumption, not a refitted calibration; the archived
+accuracy points are in `docs/measurements/velocity_bin_calibration.csv` and the original
+model sums were not committed. `--bin-model-constant` overrides it for diagnostics.
 `--velocity-bins N` requests a fixed count and `--velocity-bins 0` (the default) takes the
 smallest power of two whose estimate is at or below `--tolerance`, capped by
 `--max-velocity-bins` (default 256). When the cap is too small the run exits non-zero and
@@ -262,9 +283,10 @@ The single-velocity case is detected within `1e-12` relative and returns one box
 field is bitwise the unbinned field.
 
 Measured on the multi-velocity campaign (`pr24-20261102`, branch `experimental/multivel`,
-H100, `02891fe6`): a 5% energy spread reaches `1e-3` binning error at 16 boxes
-(`1.12e-3`; `2.72e-4` at 64). A 5 degree angular spread does not reach `1e-3`; the
-measured binning error is `0.421` at 16 boxes and `0.295` at 64, because it scales only
+H100, `02891fe6`): a 5% energy spread gives `1.12e-3` binning error at 16 boxes and
+`2.72e-4` at 64, so it meets `1e-3` at 64 boxes. A 5 degree angular spread does not
+reach `1e-3`; the measured binning error is `0.421` at 16 boxes and `0.295` at 64,
+because it scales only
 as `1/sqrt(N_transverse)`. For the 1 mrad x-divergence bunch used for the paper
 (`N = 200`, `64^3` cells, cell `1e-7` m, `--near-shell fast`), the auto policy chooses
 32 boxes (`32x1x1`, estimate `8.35e-4`); the resulting `B_y` peak is `8.57e2 T` against
@@ -272,11 +294,23 @@ as `1/sqrt(N_transverse)`. For the 1 mrad x-divergence bunch used for the paper
 `B_y = 8.24 T`, ratio `3.5e-4`. The angular case is accepted and runs, but binning does
 not reproduce the small `B_y` residual; the reference needs per-particle velocities.
 
-`--tolerance` is the only accuracy knob. It is a relative target for the delivered
-free-space convolution: padding 2 is used for targets at or above the measured padding-2
-bound (`1e-12`), padding 3 for targets between that bound and the measured double-precision
-floor (`1e-14`), and smaller targets are rejected with a non-zero exit. It does not change
-the interpolation order, the deposit scheme or the node refinement.
+### Error budget
+
+`--tolerance` bounds only the padded-FFT free-space convolution. The delivered error is
+the sum of independent terms, and a run that meets `--tolerance` does not automatically
+meet the same number end to end:
+
+| term | controlled by | scope and recorded behaviour |
+| --- | --- | --- |
+| mesh / TSC deposit | `--tolerance` (padding), fixed `kRefinement = 1`, TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order, deposit scheme or refinement. Near-source continuum error is not bounded by this term. |
+| velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed, not refitted. A 5% energy spread measures `1.12e-3` at 16 boxes and `2.72e-4` at 64; a 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. See `docs/measurements/velocity_bin_calibration.csv`. |
+| near quadrature | `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order` | `fast` gives `7.99e-4` stationary and `1.69e-4` moving axial gamma 10, but `8.15e-2` moving oblique in-support. `exact` uses Lorentz-contracted in-support quadrature: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. |
+| far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the static dipole/quadrupole transformed by `1/gamma^2` along and `gamma` across the motion. It is exact for a single point source; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
+| output precision | checkpoint `precision` | the field pipeline is float64; the default checkpoint stores float32 (`6e-8` fractional resolution) unless `precision = "float64"` is requested. |
+
+The mesh term is the only one `--tolerance` controls directly. Pick the near-shell mode
+from the near-shell regime limits above, check the binning term for a momentum spread,
+and account for the checkpoint dtype when a downstream consumer is single precision.
 
 ## Global output domains and MPI
 
@@ -323,6 +357,14 @@ source on every rank. Two stages are rank-parallel.
 * **Near shell by output tile.** The tile loop is partitioned by linear tile index. Each
   rank builds the near-source list and the local subtraction FFT for its own tiles, writes
   the correction only there, and one all-reduce sums the corrections.
+
+**MPI limitations.** The bunch is replicated, so particle memory does not fall with rank
+count. Component parallelism saturates at six ranks (one component per rank); beyond that
+the near-shell tile split is the only additional decomposition. There is no
+domain-decomposed deposit or distributed particle read. The distributed FFT keeps one
+work array per rank on the padded grid, so it needs the box to fit in aggregate memory.
+Rank-count comparisons are not bitwise unless `--deterministic-deposit` is set and the
+same FFT path is used.
 
 The two FFT paths must not be confused with a third, invalid one. A rank that transforms
 only its own subdomain without communication computes a cyclic convolution on the truncated
@@ -499,8 +541,13 @@ For a charged, extended bunch the monopole alone can still require a large exact
 documented 20-cell, 4096-electron bunch (R = 16.85 cells, 1e-6 m cells, peak 45722.5 V/m)
 needs 350 cells from the new quadrupole bound and 360 cells from the old one, so the exact
 box would exceed the `2^28` padded-node cap at tolerance `1e-3`. Therefore the writer does
-not zero-fill the global domain. Beyond a measured switch radius it evaluates the actual
-monopole + dipole + quadrupole field (`include/picBunch/FarTail.hpp`). The switch is `6R`;
+not zero-fill the global domain. Beyond a measured switch radius it evaluates an asymptotic
+moving multipole (`include/picBunch/FarTail.hpp`): the exact Liénard monopole of the total
+charge moving at the charge-weighted mean velocity, plus the static dipole and quadrupole
+with their component parallel to the motion scaled by `1/gamma^2` and their perpendicular
+component by `gamma`. For `beta = 0` this reduces exactly to the static multipole; for one
+particle it reproduces `pointFieldNormalized` in every direction. For an extended bunch it
+is the leading moving multipole, not a full Liénard multipole sum. The switch is `6R`;
 the measured worst per-component deviation from an independent direct charge sum is
 `0.0853 V/m` at `6R` (target `45.7 V/m`, ratio `1.9e-3`) and `0.0166 V/m` at `8R`.
 At `2R` it is `48 V/m` and fails, which is why `6R` is the floor. The exact compute box
@@ -513,7 +560,10 @@ to the whole domain and no interior hole is written. The margin and switch are r
 The margin rule is checked by `Margin.MarginBoxMatchesLargerReference`: for a dense 4096
 particle bunch the field on a box extended by exactly the derived margin differs from a
 3x larger reference box by at most `146.5 V/m` per component at `tolerance*field_peak =
-2576.8 V/m`. `Margin.FarTailMatchesDirectSum` checks the expansion against the direct sum.
+2576.8 V/m`. `Margin.FarTailMatchesDirectSum` checks the stationary expansion against the
+direct sum; `Margin.MovingFarTailMatchesPointKernel` checks the gamma-10 axial, transverse
+and oblique directions against `pointFieldNormalized` to `1e-12`, and
+`Margin.NeutralBunchUsesTotalChargeForMeanVelocity` pins the neutral-bunch weighting.
 
 PIConGPU restart on a domain larger than the written one must still treat the written file
 as a finite-domain field. The bound above applies inside the written domain; it says nothing
@@ -845,9 +895,10 @@ table above covers the compute stages of the large-N sweep, not the write path.
   and the near-shell fast backend and its full mode forwarding, the HIP teardown guard and
   the MPI component/tile state are preserved. `--velocity-bins`, `--bin-model-constant`
   and `--max-velocity-bins` expose the policy; an infeasible auto request exits with the
-  number of boxes needed. The shipped calibration is `C = 1`. Measured accuracy: a 5%
-  energy spread reaches `1e-3` at 16 boxes; a 5 degree angular spread does not reach
-  `1e-3`. The `picBunch.VelocityBins` test brings the suite to 19/19 on all three hosts.
+  number of boxes needed. The shipped value `C = 1` is an assumption, not a
+  refitted calibration. Measured accuracy: a 5% energy spread is `1.12e-3` at 16 boxes
+  and `2.72e-4` at 64, so it meets `1e-3` at 64 boxes; a 5 degree angular spread does
+  not reach `1e-3`. The `picBunch.VelocityBins` test brings the suite to 19/19 on all three hosts.
 - **v0.7.0** adds `--near-shell fast` (TOML `accuracy.near_shell = "fast"`,
   `--near-shell-fast-order`): the exact eight-term `asinh` box plus a gamma-stretched
   axial box and plain Gauss-Legendre on the subtracted `(S - W*)K` remainder, order 5 by

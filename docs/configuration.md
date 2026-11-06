@@ -85,10 +85,17 @@ the input checkpoint. `patch_count = 1` is the previous layout.
 
 | key | required | meaning |
 | --- | --- | --- |
-| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. |
-| `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (comparison only; not trustworthy for moving in-support points). |
+| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. It sizes the FFT padding and velocity boxes, not the near-source, far-tail or checkpoint-precision error. |
+| `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (Lorentz-contracted adaptive reference; about `1e-4` axial and `1e-3` oblique at gamma 10, about `2%` at the closest axial node). |
 | `near_shell_radius` | no | Shell radius in PIC cells; `0` (default) derives it from `tolerance`. |
 | `near_shell_tile` | no | Tile edge in nodes; default `4`. |
+
+The accuracy target is not an end-to-end guarantee. The README error-budget table
+separates mesh/deposit, velocity binning, near quadrature, far tail and output
+precision. For a moving bunch with angular spread no near-shell mode is uniformly
+accurate in-support: `none` is the safest default, `fast` is validated for stationary
+and near-axial motion, and `exact` is an adaptive reference that is accurate except for
+a measured few-percent residual at the closest axial node.
 
 ## Particle patch and records
 

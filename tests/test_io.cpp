@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -897,5 +898,88 @@ TEST(Io, NoMeshRequiresCellSizeAndUsesBunchAabb)
     std::array<double, 3> const expectedOrigin{-3.0e-6, -2.0e-6, -1.0e-6};
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(origin[a], expectedOrigin[a], 1.0e-15) << result.output;
+    std::filesystem::remove(path);
+}
+
+TEST(Io, FarTailUsesYeeComponentPositions)
+{
+    // One moving charge at the centre of the exact box.  Outside the box the
+    // writer evaluates the multipole tail; each written component must use its
+    // own Yee-staggered observation point, matching the advertised `position`.
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 3.5;
+    bunch.y[0] = 3.5;
+    bunch.z[0] = 3.5;
+    bunch.ux[0] = 1.0;
+    bunch.uy[0] = 0.0;
+    bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = picBunch::kElementaryCharge;
+    auto const tail = picBunch::deriveFarTail(bunch);
+
+    picBunch::Field field;
+    field.grid.n = {4, 4, 4};
+    field.grid.spacing = {1.0, 1.0, 1.0};
+    field.grid.origin = {2.0, 2.0, 2.0};
+    field.grid.fftPadding = 2;
+    for(auto& component : field.data)
+        component.assign(field.grid.size(), 0.0);
+
+    std::array<std::size_t, 3> const globalN{16, 16, 16};
+    std::array<double, 3> const globalOrigin{0.0, 0.0, 0.0};
+    auto const path = temporaryPath();
+    std::filesystem::remove(path);
+    picBunch::FieldWriteOptions options;
+    options.iteration = 1;
+    picBunch::writeFieldToDomain(
+        field, path.string(), options, globalN, globalOrigin, &tail);
+
+    openPMD::Series series(path.string(), openPMD::Access::READ_ONLY);
+    auto& iteration = series.iterations[1];
+    std::array<std::vector<double>, 6> values;
+    for(std::size_t c = 0; c < 3u; ++c)
+    {
+        std::string const name(1, "xyz"[c]);
+        values[c] = loadComponent(series, iteration.meshes["E"][name], globalN);
+        values[c + 3u] = loadComponent(series, iteration.meshes["B"][name], globalN);
+    }
+    series.flush();
+
+    // A node outside the exact box [2,6)^3.
+    std::array<std::size_t, 3> const node{11, 12, 13};
+    std::size_t const index = node[0] + globalN[0] * (node[1] + globalN[1] * node[2]);
+    for(std::size_t c = 0; c < 6u; ++c)
+    {
+        std::array<double, 3> position{};
+        std::array<double, 3> unshifted{};
+        for(int a = 0; a < 3; ++a)
+        {
+            unshifted[static_cast<std::size_t>(a)]
+                = globalOrigin[static_cast<std::size_t>(a)]
+                + static_cast<double>(node[static_cast<std::size_t>(a)])
+                    * field.grid.spacing[static_cast<std::size_t>(a)];
+            position[static_cast<std::size_t>(a)] = unshifted[static_cast<std::size_t>(a)]
+                + picBunch::kYeeOffset[c][static_cast<std::size_t>(a)]
+                    * field.grid.spacing[static_cast<std::size_t>(a)]
+                    / picBunch::kRefinement;
+        }
+        auto const expected = c < 3u ? picBunch::evaluateFarTailE(tail, position)
+                                     : picBunch::evaluateFarTailB(tail, position);
+        auto const separate = c < 3u ? picBunch::evaluateFarTailE(tail, unshifted)
+                                     : picBunch::evaluateFarTailB(tail, unshifted);
+        std::size_t const component = c < 3u ? c : c - 3u;
+        double const tolerance = 1.0e-9 * std::max(1.0, std::abs(expected[component]));
+        EXPECT_NEAR(values[c][index], expected[component], tolerance)
+            << "component " << c << " is not evaluated at its Yee offset";
+        bool const hasOffset = picBunch::kYeeOffset[c][0] != 0.0
+            || picBunch::kYeeOffset[c][1] != 0.0 || picBunch::kYeeOffset[c][2] != 0.0;
+        if(hasOffset && std::abs(expected[component]) > 0.0)
+            EXPECT_GT(
+                std::abs(expected[component] - separate[component]),
+                1.0e-6 * std::abs(expected[component]))
+                << "component " << c << " offset is not observable in this setup";
+    }
+    series.flush();
     std::filesystem::remove(path);
 }

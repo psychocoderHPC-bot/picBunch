@@ -3,6 +3,9 @@
 % ---- packages (pgfplots loaded without the compat option) ----
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
+% T1 maps \ttfamily to cmr (texttt with underscores then breaks); restore the
+% typewriter face so \texttt renders as intended.
+\renewcommand{\ttdefault}{cmtt}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
@@ -14,7 +17,6 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{float}
 \usepackage{seqsplit}
-\usepackage{multicol}
 \usepackage{longtable}
 \usepackage{needspace}
 \usepackage{hyperref}
@@ -22,25 +24,52 @@
 \newcommand{\epsz}{\varepsilon}
 \newcommand{\Rthree}{\mathbb{R}^3}
 
- \title{picBunch \texttt{v0.7.0}: a free-space FFT convolution for the initial
- field of a uniformly moving particle bunch, and its measured cost and
- accuracy}
- \author{picBunch authors}
- \date{Release \texttt{v0.7.0}}
+\title{A free-space convolution on a staggered mesh for the initial field of a uniformly moving particle bunch}
+\author{Author list\\[2pt]
+\small Affiliation list}
+\date{picBunch \texttt{v0.9.2}}
 
 \setlength{\emergencystretch}{3em}
 \begin{document}
 \maketitle
 
+\begin{abstract}
+Particle-in-cell simulations of laser wakefield acceleration need the
+initial electromagnetic field of a relativistic bunch before the first push,
+and the current workaround, a few field-free steps from a zero-field state,
+has no physical basis. We compute the present-time field of a uniformly
+moving bunch as a zero-padded free-space FFT convolution of a TSC charge
+deposit with the sampled TSC-convolved Li\'enard--Wiechert kernel, read out
+on the staggered Yee grid, and we measure its accuracy and cost. Against an
+independent quadrature reference the mesh reaches $3\times10^{-4}$ relative
+error within eight cells of the bunch axis for a stationary particle and
+within forty-eight cells for $\gamma=10$ perpendicular to the beam. The
+deposit dominates the compute time at large particle counts, linear in $N$,
+while the FFT scales with the padded grid; the total for $2\times10^{6}$
+particles in a $20$-cell box is $64.8$\,ms on one V100. An opt-in near
+shell replaces the mesh inside the TSC support with a closed-form evaluator,
+assembles exactly to roundoff, and is bitwise independent of the MPI rank
+count. The method writes a float32 openPMD checkpoint that restarts under a
+stock PIConGPU.
+\end{abstract}
+
 \input{sec_intro}
 \input{sec_fielddef}
 \input{sec_method}
-\input{sec_scaling}
-\input{sec_limits}
+\input{sec_consistency}
 \input{sec_accuracy}
-\input{sec_comparison}
+\input{sec_validation}
+\input{sec_scaling}
 \input{sec_discussion}
 \input{sec_conclusion}
+
+\input{sec_methods}
+
+\appendix
+\input{app_derivations}
+\input{app_sweep}
+\input{app_slices}
+\input{app_multivel}
 
 {\footnotesize\bibliography{refs}}
 

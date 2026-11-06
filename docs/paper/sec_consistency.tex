@@ -1,0 +1,57 @@
+\section{Physical consistency}
+\label{sec:consistency}
+
+Five checks constrain the implementation against the physics it is built to
+reproduce. Each check names its measured value.
+
+\paragraph{Li\'enard--Wiechert kernel.}
+The kernel of Section~\ref{sec:fielddef} is the present-time
+Li\'enard--Wiechert field of a uniformly moving charge~\citep{jackson2007}.
+The mesh reproduces the TSC-convolved Coulomb field of a single stationary
+particle to a worst relative error of $4.88\times10^{-14}$
+($2.28\times10^{-25}$ absolute) at $d=8,16,24,32$ along all six axis
+directions, against the direct TSC stencil sum of the analytic Coulomb
+kernel (Coulomb anchor, Section~\ref{sec:scaling}).
+
+\paragraph{Lorentz contraction.}
+The field of a uniformly moving charge is compressed into a pancake of
+width $d/\gamma$ perpendicular to the motion. The seven-velocity
+measurement (Appendix~\ref{app:sweep}, Fig.~\ref{fig:gp10}) tracks the
+pancake: at $\gamma=10$ the mesh resolves the contracted field to
+$1.2\times10^{-1}$ worst relative error on the mid-$z$ plane of a
+$128^3$ grid with $5\times10^{-8}$\,m cells, and the error grows with
+$\gamma$ because the pancake becomes thinner than the mesh spacing
+($1.43$ and $3.21$ at $\gamma=50$ and $100$), not because of a solver
+defect. Raising the resolution from $64^3$ to $128^3$ at the same physical
+domain leaves the relative errors unchanged.
+
+\paragraph{Gauss's law.}
+The discrete Gauss-law indicator, the Yee backward-difference
+$\mathrm{div}\,E$ residual normalised to the peak deposited
+$\rho/\varepsilon_0$, is $0.3534$ for the mesh alone on the $N=1000$ slice
+geometry ($\gamma=1$) and $5.026$ for $\gamma=10$, against reference values
+$0.0904$ and $0.0814$. With the near shell enabled it moves to $0.0895$ for
+$\gamma=1$, reaching the reference value, and to $0.399$ for $\gamma=10$,
+a $12.6\times$ drop that still leaves it $4.9\times$ above the reference
+because the shell radius covers a fraction of the TSC support
+(Appendix~\ref{app:slices}).
+
+\paragraph{Yee staggering.}
+The six field components are evaluated at the staggered positions of
+Section~\ref{sec:readout}; the kernel sampling uses the same offsets, so the
+convolution is already on the Yee grid and the read-out applies no
+interpolation. The cross-validation against the PIConGPU
+\texttt{referenceOnly} field uses identical Yee offsets, grid, and origin,
+and the reference staggered point maps to a picBunch node by index with zero
+snap deviation (Section~\ref{sec:validation}).
+
+\paragraph{The $B = \boldsymbol{v}\times\boldsymbol{E}/c^2$ limit.}
+The kernel satisfies $\mathbf{B}_n = \boldsymbol{\beta}\times\mathbf{E}_n$
+exactly, and the mesh inherits it component by component. For a stationary
+bunch ($\gamma=1$) every measured $B$ component is exactly zero
+(Tables~\ref{tab:wholefield} and \ref{tab:multivel}); for motion along
+$+y$ the component $B_y$ is identically zero in the measured fields
+($B_y\equiv 0$ in Figs.~\ref{fig:valforwardB} and
+\ref{fig:gp10}). The magnetic field at $\gamma=10$ is about $10^{-10}$ of
+the $E$-dominated local field in the floored metric, which is why the
+floored error metric is electric-only there (Section~\ref{sec:accuracy}).

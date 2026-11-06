@@ -11,16 +11,14 @@
 //      compared with the TSC-deposited charge density;
 //   3. high-density accumulation: 1000 sources inside one 2-cell cube against
 //      an independent direct convolution;
-//   4. seam continuity across a not-yet-implemented near-source shell;
-//   5. multi-rank determinism across a not-yet-implemented MPI decomposition.
-//
-// Tests 4 and 5 are disabled scaffolds.  The v0.1 main branch has neither a
-// near-source shell nor a multi-rank compute path, so there is nothing to run
-// yet; the TODO above each test names the missing feature.
+//   4. seam continuity across the near-shell boundary;
+//   5. deterministic-deposit bitwise reproducibility (the cross-rank check is
+//      registered as a separate MPI CTest when MPI is enabled).
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Deposit.hpp"
 #include "picBunch/Kernel.hpp"
+#include "picBunch/NearShell.hpp"
 #include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
@@ -492,23 +490,97 @@ TEST(Audit, HighDensityOverlappingSources)
     EXPECT_LT(growth, 100.0) << "per-source errors grow coherently from N=1 to N=1000";
 }
 
-// TODO(TST1 seam): enable once a near-source shell exists in main.  The test
-// needs a shell radius r_shell and a field query at nodes just inside and just
-// outside it; it must assert |E_in - E_out| / max(|E|) below a stated
-// continuity tolerance.  v0.1 main has no near-shell correction, so there is
-// no inner/outer field pair to compare.
-TEST(Audit, DISABLED_SeamContinuityAcrossNearShell)
+TEST(Audit, SeamContinuityAcrossNearShell)
 {
-    GTEST_SKIP() << "near-source shell not implemented in main; scaffold only";
+    // A single stationary source at the centre of a 16^3 grid.  The near-shell
+    // correction (fast mode) must be concentrated inside the shell and decay to
+    // roundoff at the seam, otherwise the assembly leaves a visible jump.
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    double const h = 1.0e-6;
+    bunch.x = {8.0 * h};
+    bunch.y = {8.0 * h};
+    bunch.z = {8.0 * h};
+    bunch.ux = {0.0};
+    bunch.uy = {0.0};
+    bunch.uz = {0.0};
+    bunch.weight = {1.0};
+    bunch.charge = {-picBunch::kElementaryCharge};
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {h, h, h};
+    options.gridSize = {16, 16, 16};
+    options.gridOrigin = {0.0, 0.0, 0.0};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+
+    auto const mesh = picBunch::computeField(bunch, options);
+    picBunch::NearShellOptions shell;
+    shell.mode = picBunch::NearShellOptions::Mode::Fast;
+    shell.radiusCells = 3.0;
+    shell.tileNodes = 4;
+    shell.fastOrder = 5;
+    auto const total = picBunch::computeFieldNearExact(bunch, options, shell);
+
+    double peak = 0.0;
+    for(int c = 0; c < 6; ++c)
+        for(double value : total.data[c])
+            peak = std::max(peak, std::abs(value));
+
+    double inside = 0.0;
+    double outside = 0.0;
+    std::size_t const n = 16u;
+    for(std::size_t k = 0; k < n; ++k)
+        for(std::size_t j = 0; j < n; ++j)
+            for(std::size_t i = 0; i < n; ++i)
+            {
+                double const dx = (static_cast<double>(i) - 8.0) * h;
+                double const dy = (static_cast<double>(j) - 8.0) * h;
+                double const dz = (static_cast<double>(k) - 8.0) * h;
+                double const radius = std::sqrt(dx * dx + dy * dy + dz * dz) / h;
+                std::size_t const idx = i + n * (j + n * k);
+                for(int c = 0; c < 6; ++c)
+                {
+                    double const correction = std::abs(total.data[c][idx] - mesh.data[c][idx]);
+                    if(radius <= 2.0)
+                        inside = std::max(inside, correction);
+                    if(radius >= 4.0 && radius <= 5.0)
+                        outside = std::max(outside, correction);
+                }
+            }
+    ASSERT_GT(inside, 0.0) << "the near shell must change the field inside its support";
+    EXPECT_GT(peak, 0.0);
+    EXPECT_LT(outside, 1.0e-2 * peak) << "seam correction must decay at the shell boundary";
+    EXPECT_LT(outside, 0.25 * inside) << "correction must be concentrated inside the shell";
 }
 
-// TODO(TST1 rank): enable in an MPI build (PICBUNCH_ENABLE_MPI) once the test
-// suite has a multi-rank CTest harness.  The test must run the same bunch on 1
-// and 2 ranks and assert identical field output to 1e-12 relative.  Current
-// main has an optional MPI output layer (v0.3.0), but computeField still runs
-// on rank 0 only and the default test configuration is built without MPI, so
-// there is no multi-rank compute result to compare here yet.
-TEST(Audit, DISABLED_RankDeterminismOneVersusTwoRanks)
+TEST(Audit, DeterministicDepositIsBitwiseReproducible)
 {
-    GTEST_SKIP() << "MPI compute decomposition and multi-rank CTest harness not enabled in this build; scaffold only";
+    auto const bunch = [] {
+        picBunch::Bunch b;
+        b.resize(64);
+        std::mt19937 rng(7u);
+        std::uniform_real_distribution<double> u(-1.0e-6, 1.0e-6);
+        for(std::size_t p = 0; p < b.size(); ++p)
+        {
+            b.x[p] = 8.0e-6 + u(rng);
+            b.y[p] = 8.0e-6 + u(rng);
+            b.z[p] = 8.0e-6 + u(rng);
+            b.ux[p] = b.uy[p] = b.uz[p] = 0.0;
+            b.weight[p] = 1.0;
+            b.charge[p] = -picBunch::kElementaryCharge;
+        }
+        return b;
+    }();
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
+    options.gridSize = {16, 16, 16};
+    options.gridOrigin = {0.0, 0.0, 0.0};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+    auto const first = picBunch::computeField(bunch, options);
+    auto const second = picBunch::computeField(bunch, options);
+    for(int c = 0; c < 6; ++c)
+        ASSERT_EQ(first.data[c], second.data[c]) << "component " << c;
 }

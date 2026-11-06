@@ -6,10 +6,11 @@ output are stored here. Each entry gives the measured quantity, the host, the
 code revision it belongs to, the measurement date and the file SHA256. The same
 hashes are listed in `MANIFEST.sha256`.
 
-The campaign was run as `pr24-20261102` on `rosi_v100` (node `gv002`). The
-original working copies live under `/home/ubuntu/pr24/<task>-20261102/` on that
-host; that path is the reproduction hint, not a requirement for reading the
-data.
+The campaign was run as `pr24-20261102` on `rosi_v100` (node `gv002`), except for
+the MV1 velocity-binning points, which come from `jureca-h100`; each entry states
+its own host. The original working copies live under
+`/home/ubuntu/pr24/<task>-20261102/`; that path is the reproduction hint, not a
+requirement for reading the data.
 
 ## Performance and Coulomb limit (SB1)
 
@@ -35,6 +36,11 @@ data.
 
 - `w7t_reference_and_scaling.md` — Q1 answer (what the exact-quadrature reference computes, with source line references) and Q2 N-scaling verdict. Host `rosi_v100`; picBunch `339ca7ad3903249ebf3859f5e106d63db4dc3df5`. Date 2026-11-03. SHA256 `35a3a77f59cc3618d2d16548dd9b81616171ebd39a618fc868b0f433c7331590`.
 - `w7t_q2_table.log` — raw N-scaling table printed by the Q2 script. Same host, revision and date. SHA256 `064c18771003e9b42ae7cf30698131afa98bd208ef86ab89526595eda71d4216`.
+
+## Velocity binning (MV1)
+
+- `velocity_bin_calibration.csv` — recorded 16- and 64-box worst-case binning errors for the 5% energy-spread and 5 degree angular-spread cases, with host, campaign commit, date and source. Host `jureca-h100`, CUDA 13.4; campaign `pr24-20261102`, commit `02891fe6`; date 2026-11-02. These are the endpoints quoted in the root README; the original 1/2/4/8-box rows, per-box model sums and `--fit` output were not archived, so `C = 1` is an assumption, not a refitted calibration. SHA256 `a4efd91976d2fb8d7d6f350ae6790fa8c4f3cf17a121bb550e9e407208557774`.
+- `velocity_bin_calibration_fit.txt` — output of `tools/velocity-bins/calibrate_velocity_bins.py` from the CSV. It records the archived points, the target verdict and the statement that `C = 1` is assumed. Generated at repository commit `6fab4a3` on 2026-11-06. SHA256 `a370973c3b892263a57557a32d304c1d6b0c574c0f1ab8cb35909cd0e7ce004d`.
 
 ## Padding and R2C/C2R (N1b)
 

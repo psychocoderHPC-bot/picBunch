@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     picBunch
-    VERSION 0.9.1
+    VERSION 0.9.2
     DESCRIPTION "Standalone GPU bunch-field initializer: openPMD particles in, free-space hybrid fields out"
     HOMEPAGE_URL "https://github.com/psychocoderHPC-bot/picBunch"
     LANGUAGES CXX
@@ -27,7 +27,7 @@ option(PICBUNCH_ENABLE_HIP "Compile the HIP backend through alpaka (AMD GPUs)." 
 option(PICBUNCH_BUILD_GTESTS "Build the GoogleTest unit tests (system package or FetchContent)." ON)
 option(
     PICBUNCH_ENABLE_MPI
-    "Build MPI support: rank 0 computes the bunch box, all ranks write disjoint global chunks."
+    "Build MPI support: rank 0 reads and broadcasts; all ranks compute component or tile shares and write disjoint global chunks."
     OFF
 )
 
@@ -213,9 +213,11 @@ endif()
 # ---------------------------------------------------------------------------
 # Library
 #
-# Host-only sources stay C++20.  Device sources live under src/cuda/*.cu or
-# src/hip/*.hip and are added only when the matching backend is enabled.
-# alpaka_finalize() propagates the backend flags and the language switch.
+# Host sources stay C++20.  Most device code is written as inline
+# ALPAKA_FN_ACC functors in those sources and compiled by nvcc/hipcc through
+# alpaka.  The only separate device translation unit is the CUDA near-shell
+# kernel in src/cuda/*.cu; there is no src/hip tree.  alpaka_finalize()
+# propagates the backend flags and the language switch.
 # ---------------------------------------------------------------------------
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
@@ -228,9 +230,6 @@ set(PICBUNCH_SOURCES
 if(PICBUNCH_ENABLE_CUDA)
     file(GLOB PICBUNCH_CUDA_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/*.cu")
     list(APPEND PICBUNCH_SOURCES ${PICBUNCH_CUDA_SOURCES})
-elseif(PICBUNCH_ENABLE_HIP)
-    file(GLOB PICBUNCH_HIP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/hip/*.hip")
-    list(APPEND PICBUNCH_SOURCES ${PICBUNCH_HIP_SOURCES})
 endif()
 
 add_library(picBunch ${PICBUNCH_SOURCES})

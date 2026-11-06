@@ -1,2 +1,0 @@
-commit,host,worst_rel,gate,gate_pass,raw
-fef43bbd231595fed2795d26affd5d55b9ebd379+prefix_scale_1_over_M3,gv002,2.4760000000e-01,2e-3,FAIL,REFINE worst |h1-h05|/(1+max) = 2.476e-01 (gate 2e-3): FAIL

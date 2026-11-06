@@ -10,6 +10,14 @@
 // (Gauss-Legendre with adaptive per-axis grading near support) and the
 // staggered Yee tile in the serialized order c + 6*(i + 8*(j + 8*k)).
 //
+// In-support points (observer inside the TSC support) are integrated in
+// Lorentz-contracted coordinates d = (I - beta^2 n n^T) R: the Liénard kernel
+// becomes the plain Coulomb kernel and the beaming anisotropy moves into the
+// smooth density, so the pyramid r^2 cancellation is exact and the angular
+// integrand is smooth for any velocity.  This keeps the moving axial and
+// oblique in-support field accurate instead of under-integrating the beamed
+// peak (see box_support_integral).
+//
 // Conventions
 //   u          = p/(m_e c), gamma = sqrt(1+|u|^2), beta = u/gamma
 //   E_n        = 4*pi*eps0*E/q
@@ -363,7 +371,7 @@ namespace nbref
         //! t is split further at t into corner boxes, each covered by three
         //! pyramids with t as the apex; r^2 cancels the 1/r^2 kernel and W is a
         //! single polynomial on each sub-box.
-        inline void box_support_integral(
+        inline void box_support_integral_static(
             Vec3 const& R0,
             Vec3 const& u,
             Vec3 const& cells,
@@ -501,6 +509,214 @@ namespace nbref
             Bout = {acc[3], acc[4], acc[5]};
         }
 
+
+        //! Error-controlled box/pyramid quadrature for t inside the support,
+        //! integrated in Lorentz-contracted coordinates for moving sources.
+        //!
+        //! The present-time Liénard kernel is K(R) = (1-beta^2) R / |M R|^3
+        //! with M = I - beta^2 n n^T (eigenvalue 1 - beta^2 = 1/gamma^2 along
+        //! the beam direction n = beta/|beta|).  Under d = M R the Jacobian
+        //! is 1/det(M) = 1/(1 - beta^2), which cancels the prefactor, so
+        //!
+        //!   int W(s) K(R) ds = int W(s(d)) M^{-1} d / |d|^3 dd
+        //!
+        //! is a plain Coulomb integral over the transformed support: the
+        //! singularity stays at d = 0 (the image of t = R0/cells, independent
+        //! of the velocity) and the beaming anisotropy moves into the smooth
+        //! factors M^{-1} and the density W(s(d)), never into the kernel.
+        //!
+        //! The support is split into the 27 TSC sub-boxes; every box that has
+        //! t on its closure is split at t along the strictly interior axes so
+        //! each resulting corner box has t as a vertex.  In d-space a corner
+        //! box is a parallelepiped with the origin as a vertex (edge vectors
+        //! e_a = -sgn_a L_a M(c_a a_a)), covered by three pyramids with the
+        //! origin as apex.  With d = r q the r^2 Jacobian cancels the 1/r^2
+        //! Coulomb singularity exactly: with d = r q the integrand becomes
+        //! W(t - M^{-1} r q / c) M^{-1} q / |q|^3, a polynomial in r of
+        //! degree at most 6 (product of three TSC quadratics) times a
+        //! smooth angular factor, so the radial rule of order 4 is exact and
+        //! the remaining angular integrand is analytic in the face
+        //! parameters (|q|^2 is a positive definite quadratic, no 1/gamma
+        //! narrow structure).  Boxes whose closure does not contain t
+        //! integrate the moving kernel by plain tensor Gauss-Legendre in
+        //! s-space (the kernel is finite there).
+        //!
+        //! For u = 0, M = I and this reduces to the original axis-aligned
+        //! pyramid quadrature (identical nodes and integrand up to the
+        //! evaluation order of R/|R|^3).
+        inline void box_support_integral(
+            Vec3 const& R0,
+            Vec3 const& u,
+            Vec3 const& cells,
+            int nang,
+            int nr,
+            Vec3& Eout,
+            Vec3& Bout)
+        {
+            Vec3 const t{R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
+            double const tb[3] = {t.x, t.y, t.z};
+            double const box_lo[3] = {-1.5, -1.5, -1.5};
+
+            std::vector<double> xa, wa, xr, wr, xg, wg;
+            gauss_legendre(nang, xa, wa);
+            gauss_legendre(nr, xr, wr);
+            gauss_legendre(nang, xg, wg);
+            std::array<double, 6> acc{};
+
+            double const uu2 = dot(u, u);
+            bool const moving = uu2 != 0.0;
+            Vec3 const beta = moving ? u / std::sqrt(1.0 + uu2) : Vec3{};
+            Vec3 const nhat = moving ? u / std::sqrt(uu2) : Vec3{};
+            double const gam = moving ? std::sqrt(1.0 + uu2) : 1.0;
+            // D = |R|^2 (1 - beta^2) + (R.beta)^2 = |M R|^2 with M scaling the
+            // component transverse to the beam by 1/gamma (the field of a
+            // moving charge is a pancake): M = n n^T + (1/gamma)(I - n n^T),
+            // M^{-1} = n n^T + gamma (I - n n^T);  det(M) = 1 - beta^2.
+            auto applyM = [&](Vec3 const& v) -> Vec3 {
+                return moving ? v - (1.0 - 1.0 / gam) * (v - dot(v, nhat) * nhat) : v;
+            };
+            auto applyMinv = [&](Vec3 const& v) -> Vec3 {
+                return moving ? v + (gam - 1.0) * (v - dot(v, nhat) * nhat) : v;
+            };
+            // Edge vectors of the d-space parallelepipeds: image of the
+            // physical axis vectors c_a a_a under M.
+            Vec3 mev[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                double const ax[3] = {a == 0 ? 1.0 : 0.0, a == 1 ? 1.0 : 0.0, a == 2 ? 1.0 : 0.0};
+                mev[a] = applyM(Vec3{ax[0] * cells[0], ax[1] * cells[1], ax[2] * cells[2]});
+            }
+
+            // Plain tensor Gauss-Legendre over one TSC sub-box (far boxes:
+            // t strictly outside the closure, kernel finite at every node).
+            auto accumulate_box = [&](double const lo[3], double const hi[3])
+            {
+                for(int a0 = 0; a0 < nang; ++a0)
+                {
+                    double const s0 = 0.5 * (lo[0] + hi[0]) + 0.5 * (hi[0] - lo[0]) * xg[a0];
+                    double const w0 = 0.5 * (hi[0] - lo[0]) * wg[a0];
+                    for(int a1 = 0; a1 < nang; ++a1)
+                    {
+                        double const s1 = 0.5 * (lo[1] + hi[1]) + 0.5 * (hi[1] - lo[1]) * xg[a1];
+                        double const w1 = 0.5 * (hi[1] - lo[1]) * wg[a1];
+                        for(int a2 = 0; a2 < nang; ++a2)
+                        {
+                            double const s2 = 0.5 * (lo[2] + hi[2]) + 0.5 * (hi[2] - lo[2]) * xg[a2];
+                            double const w2 = 0.5 * (hi[2] - lo[2]) * wg[a2];
+                            double const W = tsc_shape(s0) * tsc_shape(s1) * tsc_shape(s2);
+                            if(W == 0.0)
+                                continue;
+                            Vec3 const R = R0 - Vec3{s0 * cells[0], s1 * cells[1], s2 * cells[2]};
+                            Vec3 E, B;
+                            point_field(R, u, E, B);
+                            double const ww = w0 * w1 * w2 * W;
+                            acc[0] += ww * E.x;
+                            acc[1] += ww * E.y;
+                            acc[2] += ww * E.z;
+                            acc[3] += ww * B.x;
+                            acc[4] += ww * B.y;
+                            acc[5] += ww * B.z;
+                        }
+                    }
+                }
+            };
+
+            // Three-pyramid decomposition of one corner box (t as a vertex)
+            // in d-space.  seg[a] = {lo, hi, sgn}: the box extends from t in
+            // direction sgn_a by L_a on axis a.
+            auto accumulate_corner = [&](std::array<std::array<double, 3>, 3> const& seg)
+            {
+                double const L[3] = {
+                    seg[0][1] - seg[0][0], seg[1][1] - seg[1][0], seg[2][1] - seg[2][0]};
+                double const sgn[3] = {seg[0][2], seg[1][2], seg[2][2]};
+                if(L[0] <= 0.0 || L[1] <= 0.0 || L[2] <= 0.0)
+                    return;
+                Vec3 const e[3] = {-sgn[0] * L[0] * mev[0], -sgn[1] * L[1] * mev[1],
+                                   -sgn[2] * L[2] * mev[2]};
+                // Parallelepiped volume |det[e0 e1 e2]| (Jacobian of d = u0 e0 + u1 e1 + u2 e2),
+                // divided by the cell volume: the shape integral is over the
+                // dimensionless s, ds^3 = dd^3 / (cx cy cz).
+                double const V = std::abs(dot(cross(e[0], e[1]), e[2]))
+                                 / (cells[0] * cells[1] * cells[2]);
+                for(int face = 0; face < 3; ++face)
+                {
+                    int const o0 = (face + 1) % 3;
+                    int const o1 = (face + 2) % 3;
+                    for(int iu = 0; iu < nang; ++iu)
+                    {
+                        double const uu = 0.5 * (xa[iu] + 1.0);
+                        double const wu = 0.5 * wa[iu];
+                        for(int iv = 0; iv < nang; ++iv)
+                        {
+                            double const vv = 0.5 * (xa[iv] + 1.0);
+                            double const wv = 0.5 * wa[iv];
+                            Vec3 const q{e[face].x + uu * e[o0].x + vv * e[o1].x,
+                                          e[face].y + uu * e[o0].y + vv * e[o1].y,
+                                          e[face].z + uu * e[o0].z + vv * e[o1].z};
+                            double const q2 = dot(q, q);
+                            if(q2 <= 0.0)
+                                continue;
+                            Vec3 const qm = applyMinv(q); // M^{-1} q
+                            // Kernel factor M^{-1} d / |d|^3 with d = r q: the r^2
+                            // Jacobian cancels two powers, leaving 1/|q|^3.
+                            double const qf = 1.0 / (q2 * std::sqrt(q2));
+                            for(int ir = 0; ir < nr; ++ir)
+                            {
+                                double const r = 0.5 * (xr[ir] + 1.0);
+                                // s = t - M^{-1}(r q)/c; W is a single TSC
+                                // polynomial on this corner box.
+                                double const s0 = t.x - r * qm.x / cells[0];
+                                double const s1 = t.y - r * qm.y / cells[1];
+                                double const s2 = t.z - r * qm.z / cells[2];
+                                double const W = tsc_shape(s0) * tsc_shape(s1) * tsc_shape(s2);
+                                if(W == 0.0)
+                                    continue;
+                                double const w = 0.5 * wr[ir] * wu * wv * V * W * qf;
+                                acc[0] += w * qm.x;
+                                acc[1] += w * qm.y;
+                                acc[2] += w * qm.z;
+                            }
+                        }
+                    }
+                }
+            };
+
+            for(int ix = 0; ix < 3; ++ix)
+                for(int iy = 0; iy < 3; ++iy)
+                    for(int iz = 0; iz < 3; ++iz)
+                    {
+                        double const lo[3] = {box_lo[0] + ix, box_lo[1] + iy, box_lo[2] + iz};
+                        double const hi[3] = {lo[0] + 1.0, lo[1] + 1.0, lo[2] + 1.0};
+                        // t on the closure of the box?
+                        bool on_closure = true;
+                        for(int a = 0; a < 3; ++a)
+                            on_closure = on_closure && lo[a] <= tb[a] && tb[a] <= hi[a];
+                        if(!on_closure)
+                        {
+                            accumulate_box(lo, hi);
+                            continue;
+                        }
+
+                        // Split the box at t along the strictly interior axes;
+                        // every corner box then has t as a vertex.
+                        std::array<std::vector<std::array<double, 3>>, 3> choices;
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            if(lo[a] < tb[a])
+                                choices[a].push_back({lo[a], tb[a], -1.0});
+                            if(tb[a] < hi[a])
+                                choices[a].push_back({tb[a], hi[a], 1.0});
+                        }
+                        for(auto const& cx : choices[0])
+                            for(auto const& cy : choices[1])
+                                for(auto const& cz : choices[2])
+                                    accumulate_corner({cx, cy, cz});
+                    }
+            Vec3 const E{acc[0], acc[1], acc[2]};
+            Eout = E;
+            Bout = moving ? cross(beta, E) : Vec3{};
+        }
+
         inline std::array<std::vector<Panel>, 3> panels_for(Vec3 const& target, int level)
         {
             return {graded_panels(target.x, level), graded_panels(target.y, level), graded_panels(target.z, level)};
@@ -533,31 +749,76 @@ namespace nbref
 
         if(support_dist == 0.0)
         {
-            // Singular point inside the TSC support: split into TSC sub-boxes
-            // and use pyramid coordinates in the box containing t.
-            int nang = settings.sphere_n;
-            int ng = 8;
-            Vec3 E1, B1, E2, B2;
-            detail::box_support_integral(R0, u, cells, nang, settings.sphere_radial_order, ng, E1, B1);
-            for(;;)
+            // Stationary sources keep the original validated r^2-cancelling
+            // pyramid quadrature; the Lorentz-contracted branch below is for
+            // moving sources, where it removes the beamed singularity.
+            if(dot(u, u) == 0.0)
             {
-                int const nang2 = std::min(nang + 4, settings.sphere_max_n);
-                int const ng2 = std::min(ng + 2, 16);
-                detail::box_support_integral(R0, u, cells, nang2, settings.sphere_radial_order, ng2, E2, B2);
-                std::array<double, 6> a{E1.x, E1.y, E1.z, B1.x, B1.y, B1.z};
-                std::array<double, 6> b{E2.x, E2.y, E2.z, B2.x, B2.y, B2.z};
-                err = detail::richardson_error(a, b);
-                if(err <= settings.tol || (nang2 >= settings.sphere_max_n && ng2 >= 16))
+                int nang = settings.sphere_n;
+                int ng = 8;
+                Vec3 E1, B1, E2, B2;
+                detail::box_support_integral_static(
+                    R0, u, cells, nang, settings.sphere_radial_order, ng, E1, B1);
+                for(;;)
                 {
-                    converged = err <= settings.tol;
-                    E = E2;
-                    B = B2;
-                    break;
+                    int const nang2 = std::min(nang + 4, settings.sphere_max_n);
+                    int const ng2 = std::min(ng + 2, 16);
+                    detail::box_support_integral_static(
+                        R0, u, cells, nang2, settings.sphere_radial_order, ng2, E2, B2);
+                    std::array<double, 6> a{E1.x, E1.y, E1.z, B1.x, B1.y, B1.z};
+                    std::array<double, 6> b{E2.x, E2.y, E2.z, B2.x, B2.y, B2.z};
+                    err = detail::richardson_error(a, b);
+                    if(err <= settings.tol
+                       || (nang2 >= settings.sphere_max_n && ng2 >= 16))
+                    {
+                        converged = err <= settings.tol;
+                        E = E2;
+                        B = B2;
+                        break;
+                    }
+                    E1 = E2;
+                    B1 = B2;
+                    nang = nang2;
+                    ng = ng2;
                 }
-                E1 = E2;
-                B1 = B2;
-                nang = nang2;
-                ng = ng2;
+                level = nang;
+            }
+            else
+            {
+                // Singular point inside the TSC support: pyramid quadrature in
+                // Lorentz-contracted coordinates (see box_support_integral).
+                int nang = settings.sphere_n;
+                Vec3 E1, B1;
+                detail::box_support_integral(
+                    R0, u, cells, nang, settings.sphere_radial_order, E1, B1);
+                for(;;)
+                {
+                    int const nang2 = std::min(nang + 4, settings.sphere_max_n);
+                    if(nang2 == nang)
+                        break;
+                    Vec3 E2, B2;
+                    detail::box_support_integral(
+                        R0, u, cells, nang2, settings.sphere_radial_order, E2, B2);
+                    std::array<double, 6> a{E1.x, E1.y, E1.z, B1.x, B1.y, B1.z};
+                    std::array<double, 6> b{E2.x, E2.y, E2.z, B2.x, B2.y, B2.z};
+                    err = detail::richardson_error(a, b);
+                    if(err <= settings.tol)
+                    {
+                        converged = true;
+                        E = E2;
+                        B = B2;
+                        break;
+                    }
+                    E1 = E2;
+                    B1 = B2;
+                    nang = nang2;
+                }
+                if(!converged)
+                {
+                    E = E1;
+                    B = B1;
+                }
+                level = nang;
             }
         }
         else

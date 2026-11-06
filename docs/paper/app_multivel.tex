@@ -1,0 +1,142 @@
+\section{Multi-velocity binning, measured}
+\label{app:multivel}
+
+\subsection{Binned convolution}
+\label{sec:multivel}
+
+The single-velocity scope of Section~\ref{sec:fielddef} is extended by
+splitting the velocity distribution into $B$ classes and running one
+convolution per class; the near shell needs no binning, because each pair
+carries its own velocity. The measurements below are on a $64^3$ grid with
+$200$ sources on \texttt{hal} (NVIDIA A30, \texttt{sm\_80}, CUDA 13.4.92),
+picBunch \texttt{v0.9.1}.
+
+\paragraph{Single-velocity sanity.}
+With zero spread the binned path is bitwise equal to the unbinned path:
+$B=1$ and $B=16$ give bit-identical fields in all six components
+($\max|\Delta|=0$).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Binned multi-velocity peaks, $64^3$ grid, $200$ sources,
+$\gamma=10$, picBunch \texttt{v0.9.1}.}
+\label{tab:multivel}
+\begin{tabular}{lrrrr}
+\toprule
+spread & $B\!=\!16$ $|B_z|$ (T) & $B\!=\!64$ $|B_z|$ (T) & $B\!=\!16$ $|B_y|$ (T) & $B\!=\!64$ $|B_y|$ (T) \\
+\midrule
+energy 5\%      & $2.32050\times10^{4}$ & $2.32049\times10^{4}$ & $0$ & $0$ \\
+angular $5^\circ$ & $2.48202\times10^{4}$ & $2.48213\times10^{4}$ & $1.2948\times10^{3}$ & $1.2955\times10^{3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{figs/F_multivel_dist.pdf}
+\caption{Sampled multi-velocity bunches ($\gamma=10$, 512 sources, seeds
+100 and 103); the $B=16$ edges in (a) and the velocity boxes that produce
+the field come from the same \texttt{VelocityBinning} per-axis min/max
+path. (a) $\gamma$ histogram for the 5\% energy spread with the 16
+adaptive edges drawn and the mean and standard deviation annotated;
+(b) $u_\parallel$--$u_\perp$ density for the $5^\circ$ angular spread
+with the nominal $5^\circ$ divergence and the measured median
+$|\theta|=101.8$\,mrad marked; (c) relative deviation of the $B=16$ peaks
+from the $B=64$ reference, $4.3\times10^{-6}$ (energy $B_z$),
+$4.4\times10^{-5}$ (angular $B_z$) and $5.6\times10^{-4}$ (angular $B_y$),
+with $B_y\equiv0$ for the energy case, so the post-fix field is
+bin-independent at the stated $2.32050\times10^{4}$/$2.32049\times10^{4}$\,T
+and $5.22\times10^{-2}$ ratio.}
+\label{fig:multivel}
+\end{figure}
+
+Figure~\ref{fig:multivel} shows the sampled distributions and the post-fix
+bin comparison. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
+$2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
+bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
+longitudinal current. With a $5^\circ$ angular spread the $B_z$ peak moves
+from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T and $B_y$ from
+$1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is $5.22\times10^{-2}$, and
+the two bin counts agree to $0.0043\%$ in $B_z$ and $0.056\%$ in $B_y$.
+
+\paragraph{1\,mrad case against the arbiter.}
+The fluctuation bunch ($N=200$, $\gamma=10$, $+y$ drift, 1.046\,mrad rms
+$x$-divergence) was re-run at 64 bins and compared against the
+Gauss--Legendre arbiter (unbinned, per-particle $u$, 698-node slice
+subset) measured before the fix. On the x-y slice ($z=32$) picBunch gives
+$B_y=7.835$\,T and $B_z=2.3336\times10^{4}$\,T, against arbiter values of
+$7.759$\,T and $2.344\times10^{4}$\,T (factors $1.010\times$ and
+$0.996\times$); on the z-y slice ($x=32$) the corresponding values are
+$7.561$\,T / $7.519$\,T and $2.3159\times10^{4}$\,T /
+$2.327\times10^{4}$\,T ($1.006\times$ and $0.995\times$). The 3-D $B_y$
+peak is $8.734$\,T and $B_z$ is $2.3336\times10^{4}$\,T. The worst
+component deviation is $1.4\%$ (x-y ratio); every component on every slice
+is within $1.0\%$. Before the fix the same 64-bin run gave
+$B_y=1.196\times10^{3}$\,T, $154\times$ the arbiter, and
+$B_z=4.002\times10^{4}$\,T, $1.71\times$ the arbiter.
+
+\paragraph{FFT buffer defect (fixed in \texttt{v0.9.1}).}
+The replicated mesh path allocated its five transform buffers with 3-D
+\texttt{allocUnified} extents. On CUDA and HIP that allocation pads every
+innermost row to 128\,B when the padded $M_x$ is not a multiple of $16$
+doubles. The per-bin \texttt{memset} is pitched: it clears the row data but
+not the gap bytes, which lie inside the flat prefix the contiguous FFT plan
+and the flat deposit, kernel, and read-out loops read as data. The
+velocity-bin loop reuses the buffers, so the second and later non-empty
+bins read the previous bin's charge from the gaps, and the field grew with
+the bin count while the deposited charge summed correctly. The scope is
+exactly that case: more than one non-empty velocity bin on CUDA or HIP with
+a padded $M_x$ that is not a multiple of $16$. A single-velocity run
+clears a fresh buffer once and is unaffected. \texttt{v0.9.1} allocates all
+five buffers as flat 1-D counts. The \texttt{picBunchFftSizeCheck} tool
+(one allocation, a pitched \texttt{memset} and a forward/inverse pass per
+bin, summed against the direct free-space reference) confirms the fix: at
+the two failing local-box sizes $M=24$ and $M=40$ the free-space relative
+error is $3.5\times10^{-16}$ to $7.0\times10^{-16}$ at every bin count,
+versus $91.6$ and $48.9$ with the old 3-D buffers at 128 bins. Single-velocity
+fields are bitwise unchanged between the v0.9.0 and v0.9.1 builds (SHA-256
+verified on the 20-cell mesh-only case and the accuracy anchor), so no
+previously published single-velocity result moves.
+
+Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
+($R=3$, tile 4, order 5), 248\,s on the A30.
+
+\section*{Far-tail switch validation}
+\label{app:far-tail}
+
+For the documented 20-cell, 4096-electron bunch (source radius $R=16.85$
+cells, peak $45722.5$ V/m, tolerance level $45.72$ V/m), the quadrupole
+margin of Eq.~\eqref{eq:tail} is $350$ cells, which exceeds the
+$2^{28}$ padded-node cap, so the code falls back to the measured far-tail
+switch. Table~\ref{tab:margin} gives the switch error: the worst
+per-component $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$
+against an independent direct charge sum in $13$ directions.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Far-tail switch validation, 20-cell 4096-electron bunch,
+$R=16.85$ cells, tolerance level $45.72$ V/m ($10^{-3}$ of the peak
+$45722.5$ V/m). Worst per-component
+$|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$ against an
+independent direct charge sum over $13$ directions. The switch at $6R$ is
+the one shipped: the error is $1.87\times10^{-3}$ of the tolerance level.}
+\label{tab:margin}
+\begin{tabular}{lrr}
+\toprule
+switch radius & worst err (V/m) & / tolerance level \\
+\midrule
+$2R$ ($33.7$ cells) & $4.80\times10^{1}$ & $1.05$ \\
+$4R$ ($67.4$ cells) & $8.77\times10^{-1}$ & $1.92\times10^{-2}$ \\
+$6R$ ($101.1$ cells) & $8.53\times10^{-2}$ & $1.87\times10^{-3}$ \\
+$8R$ ($134.8$ cells) & $1.66\times10^{-2}$ & $3.63\times10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A shipped $512^{3}$ output sampled outside the compute box confirms the
+switch in practice: $36$ nodes including corners, worst
+$|\mathbf{E}_{\mathrm{file}}-\mathbf{E}_{\mathrm{direct}}| = 2.8\times10^{-3}$
+V/m against the $45.7$ V/m tolerance level ($6.1\times10^{-5}$ of it), and
+every sample nonzero, i.e. no interior zero fill.

@@ -8,13 +8,24 @@
 
 namespace picBunch
 {
-    /** Monopole + dipole + quadrupole far field of a compact bunch.
+    /** Asymptotic moving-multipole far field of a compact bunch.
      *
-     * The moments are taken about the bounding-box centre in the lab frame.
-     * ``quadrupole`` is the traceless tensor
-     * ``D_ij = sum q (3 x_i x_j - |x|^2 delta_ij)`` (row-major).  The electric
-     * field is the static multipole field multiplied by ``gammaMax`` for the
-     * boosted transverse component; the magnetic field uses the charge-weighted
+     * The moments (charge, dipole, traceless quadrupole ``D_ij = sum q (3 x_i
+     * x_j - |x|^2 delta_ij)``) are taken about the bounding-box centre in the
+     * lab frame.  The electric field is the asymptotic field of the bunch
+     * moving uniformly at ``meanVelocity``: the monopole is the exact Lienard
+     * point field of the total charge at the mean velocity, and the dipole and
+     * quadrupole keep their static shape with the component parallel to the
+     * mean velocity scaled by ``1/gamma^2`` and the perpendicular component by
+     * ``gamma``.  This is an asymptotic moving multipole, not an exact Lienard
+     * multipole sum, so it is exact only in the limit of a point source (it
+     * reproduces ``pointFieldNormalized`` for one particle in every direction).
+     * For an extended bunch the error grows with the bunch size over the
+     * observation distance; the component transverse to the motion of a bunch
+     * with extent along the beam axis is the least accurate (the beamed field
+     * is very sensitive to the source position along the motion).  For a
+     * stationary bunch (``meanVelocity = 0``) it reduces exactly to the
+     * static monopole + dipole + quadrupole field.  The magnetic field uses the
      * mean velocity, ``B = v x E / c^2``.  This is the tail used where the FFT
      * mesh is not computed, i.e. outside the exact compute box of a global
      * output domain.  It replaces the former exact-zero fill.

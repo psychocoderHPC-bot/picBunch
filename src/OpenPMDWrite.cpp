@@ -389,10 +389,17 @@ namespace picBunch
                             && j >= lo[1] && j < hi[1] && k >= lo[2] && k < hi[2];
                         if(inside)
                             continue;
+                        // The component metadata advertises its Yee offset in
+                        // PIC-cell units.  Evaluate the tail at the same
+                        // staggered point as the exact compute box, whose node
+                        // spacing is kRefinement * cellSize.
                         std::array<double, 3> const position{
-                            globalOrigin[0] + static_cast<double>(i) * spacing[0],
-                            globalOrigin[1] + static_cast<double>(j) * spacing[1],
-                            globalOrigin[2] + static_cast<double>(k) * spacing[2]};
+                            globalOrigin[0] + static_cast<double>(i) * spacing[0]
+                                + kYeeOffset[component][0] * spacing[0] / kRefinement,
+                            globalOrigin[1] + static_cast<double>(j) * spacing[1]
+                                + kYeeOffset[component][1] * spacing[1] / kRefinement,
+                            globalOrigin[2] + static_cast<double>(k) * spacing[2]
+                                + kYeeOffset[component][2] * spacing[2] / kRefinement};
                         double value = 0.0;
                         if(component < 3)
                             value = evaluateFarTailE(*tail, position)[component];
@@ -1567,8 +1574,6 @@ namespace picBunch
             // Regions may overlap; ownership is disjoint, so every particle is
             // written exactly once and the numParticles offsets are cumulative.
             std::vector<std::vector<std::size_t>> owned(patches.size());
-            std::vector<std::size_t> order;
-            order.reserve(count);
             for(std::size_t p = 0; p < count; ++p)
             {
                 double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
@@ -1598,7 +1603,6 @@ namespace picBunch
                     if(inside)
                     {
                         owned[q].push_back(p);
-                        order.push_back(p);
                         found = true;
                     }
                 }
@@ -1607,6 +1611,14 @@ namespace picBunch
                         "PicOnGPU restart writer: particle " + std::to_string(p)
                         + " lies outside every generated patch; enlarge the patch extent");
             }
+            // Dataset order must match the patch slices: concatenate the
+            // disjoint per-patch ownership lists in patch order.  Keeping the
+            // original input order here would make numParticlesOffset describe
+            // ranges that hold particles of another patch.
+            std::vector<std::size_t> order;
+            order.reserve(count);
+            for(auto const& patchParticles : owned)
+                order.insert(order.end(), patchParticles.begin(), patchParticles.end());
             std::vector<std::uint64_t> patchCount(patches.size());
             std::vector<std::uint64_t> patchOffsetCumulative(patches.size());
             std::uint64_t running = 0;
@@ -1628,6 +1640,7 @@ namespace picBunch
                 std::size_t const p = order[slot];
                 double const xyz[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
                 double const u[3] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
+                double const weight = bunch.weight[p];
                 double const restMass = (!bunch.restMass.empty() && bunch.restMass[p] > 0.0)
                     ? bunch.restMass[p]
                     : (generated.fallbackMass > 0.0
@@ -1641,10 +1654,16 @@ namespace picBunch
                     position[static_cast<std::size_t>(a)][slot] = cells - cellIndex;
                     positionOffset[static_cast<std::size_t>(a)][slot]
                         = static_cast<std::int32_t>(cellIndex);
+                    // PIConGPU openPMD momentum is the macro-particle
+                    // momentum: u*m*c*weight with macroWeighted=true and
+                    // weightingPower=1 (speciesAttributes.unitless).  Its
+                    // restart loader assigns the record value directly, so the
+                    // weight must be part of the stored data.
                     momentum[static_cast<std::size_t>(a)][slot]
-                        = u[a] * restMass * kSpeedOfLight / generated.unitMassSpeed;
+                        = u[a] * restMass * weight * kSpeedOfLight
+                        / generated.unitMassSpeed;
                 }
-                weighting[slot] = bunch.weight[p];
+                weighting[slot] = weight;
                 charge[slot] = bunch.charge[p] / generated.unitCharge;
                 mass[slot] = restMass / generated.unitMass;
             }

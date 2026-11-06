@@ -366,3 +366,69 @@ TEST(Physics, OddExtentR2cParity)
         << "odd padded extent (Mx=93) disagrees with the even extent (Mx=62) by "
         << maxRel << " relative; the R2C path is not parity-correct for an odd last axis";
 }
+
+// Regression for P1-2: a source on the boundary of a small compute box must
+// deliver the same field as the same physical source placed well inside a
+// larger box.  Before the source-halo fix the small box clipped the TSC support
+// at node 0, so the field at the boundary nodes was off by the missing halo
+// weight (about 1/8 of the charge at the nearest nodes).
+TEST(Physics, BoundarySourceMatchesLargerComputeBox)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 0.0;
+    bunch.y[0] = 0.0;
+    bunch.z[0] = 0.0;
+    bunch.ux[0] = 0.0;
+    bunch.uy[0] = 0.0;
+    bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = -picBunch::kElementaryCharge;
+
+    auto const fieldFor = [&](std::array<std::size_t, 3> const& n,
+                              std::array<double, 3> const& origin,
+                              bool deterministic) {
+        picBunch::ComputeOptions options;
+        options.tolerance = 1e-3; // padding 2
+        options.cellSize = {1.0, 1.0, 1.0};
+        options.gridSize = n;
+        options.gridOrigin = origin;
+        options.deterministicDeposit = deterministic;
+        return picBunch::computeField(bunch, options);
+    };
+
+    // Check both the accelerator deposit and the serial host deposit: the
+    // source halo must be identical in the two paths.
+    for(bool const deterministic : {false, true})
+    {
+        // The particle sits on node (0,0,0) of the small box.  In the large
+        // box it sits on node (8,8,8), so every small node (i,j,k) maps to
+        // (i+8,j+8,k+8).
+        picBunch::Field const small = fieldFor({8, 8, 8}, {0.0, 0.0, 0.0}, deterministic);
+        picBunch::Field const large
+            = fieldFor({32, 32, 32}, {-8.0, -8.0, -8.0}, deterministic);
+        ASSERT_EQ(small.grid.n, (std::array<std::size_t, 3>{8, 8, 8}));
+        ASSERT_EQ(large.grid.n, (std::array<std::size_t, 3>{32, 32, 32}));
+
+        double const scale = picBunch::kCoulombConstant * std::abs(bunch.charge[0]);
+        std::array<std::array<std::size_t, 3>, 5> const nodes{{
+            {0, 0, 0},
+            {1, 0, 0},
+            {0, 1, 0},
+            {0, 0, 1},
+            {1, 1, 1},
+        }};
+        for(auto const& node : nodes)
+        {
+            std::size_t const si = node[0]
+                + small.grid.n[0] * (node[1] + small.grid.n[1] * node[2]);
+            std::size_t const li = (node[0] + 8u)
+                + large.grid.n[0] * ((node[1] + 8u) + large.grid.n[1] * (node[2] + 8u));
+            for(int c = 0; c < 6; ++c)
+                EXPECT_NEAR(small.data[c][si], large.data[c][li], 2.0e-2 * scale)
+                    << "deterministic=" << deterministic << " node (" << node[0] << ","
+                    << node[1] << "," << node[2] << ") component " << c << " small "
+                    << small.data[c][si] << " large " << large.data[c][li];
+        }
+    }
+}

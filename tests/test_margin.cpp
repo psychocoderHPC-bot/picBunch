@@ -6,6 +6,7 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/FarTail.hpp"
+#include "picBunch/Kernel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
@@ -54,6 +55,77 @@ namespace
         options.deterministicDeposit = true;
         options.marginCellsPerAxis = std::array<double, 3>{margin, margin, margin};
         return options;
+    }
+
+    using Vec3 = std::array<double, 3>;
+
+    double vnorm(Vec3 const& v)
+    {
+        return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    }
+    double relErr(Vec3 const& a, Vec3 const& b)
+    {
+        return vnorm({a[0] - b[0], a[1] - b[1], a[2] - b[2]}) / (vnorm(b) + 1e-300);
+    }
+    //! Electric field of a point charge ``Q`` (dimensionless momentum ``u``) at
+    //! displacement ``R``, i.e. the exact ``Q * pointFieldNormalized``.
+    Vec3 ePoint(Vec3 const& R, double Q, Vec3 const& u)
+    {
+        double out[6];
+        picBunch::pointFieldNormalized(R[0], R[1], R[2], u[0], u[1], u[2], out);
+        return {picBunch::kCoulombConstant * Q * out[0],
+                picBunch::kCoulombConstant * Q * out[1],
+                picBunch::kCoulombConstant * Q * out[2]};
+    }
+    //! Magnetic field of the same point charge.
+    Vec3 bPoint(Vec3 const& R, double Q, Vec3 const& u)
+    {
+        double out[6];
+        picBunch::pointFieldNormalized(R[0], R[1], R[2], u[0], u[1], u[2], out);
+        double const s = picBunch::kCoulombConstant * Q / picBunch::kSpeedOfLight;
+        return {s * out[3], s * out[4], s * out[5]};
+    }
+    //! The pre-fix static multipole formula (monopole + dipole + quadrupole,
+    //! ``gammaMax = 1``): the reference the moving tail must reduce to at
+    //! ``meanVelocity = 0``.
+    Vec3 staticMultipole(picBunch::FarTail const& t, Vec3 const& pos)
+    {
+        Vec3 const r{pos[0] - t.centre[0], pos[1] - t.centre[1], pos[2] - t.centre[2]};
+        double const d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        double const d = std::sqrt(d2);
+        Vec3 const n{r[0] / d, r[1] / d, r[2] / d};
+        double const pDotN = t.dipole[0] * n[0] + t.dipole[1] * n[1] + t.dipole[2] * n[2];
+        Vec3 dN{};
+        for(int i = 0; i < 3; ++i)
+            dN[i] = t.quadrupole[i * 3] * n[0] + t.quadrupole[i * 3 + 1] * n[1]
+                + t.quadrupole[i * 3 + 2] * n[2];
+        double const nDotDn = n[0] * dN[0] + n[1] * dN[1] + n[2] * dN[2];
+        double const mono = picBunch::kCoulombConstant * t.charge / d2;
+        double const ds = picBunch::kCoulombConstant * 2.0 / (d2 * d);
+        double const qs = picBunch::kCoulombConstant * 0.5 / (d2 * d2);
+        Vec3 f{};
+        for(int a = 0; a < 3; ++a)
+        {
+            double const dipoleTerm = 1.5 * pDotN * n[a] - 0.5 * t.dipole[a];
+            double const quadrupoleTerm = 5.0 * nDotDn * n[a] - 2.0 * dN[a];
+            f[a] = mono * n[a] + ds * dipoleTerm + qs * quadrupoleTerm;
+        }
+        return f;
+    }
+    //! One macro particle at the origin with charge ``q`` and momentum ``u``.
+    picBunch::Bunch pointBunch(double q, Vec3 const& u)
+    {
+        picBunch::Bunch b;
+        b.resize(1);
+        b.x = {0.0};
+        b.y = {0.0};
+        b.z = {0.0};
+        b.ux = {u[0]};
+        b.uy = {u[1]};
+        b.uz = {u[2]};
+        b.weight = {1.0};
+        b.charge = {q};
+        return b;
     }
 } // namespace
 
@@ -201,4 +273,169 @@ TEST(Margin, MarginBoxMatchesLargerReference)
         std::printf("  component %d worst |small-reference| = %g V/m\n", c, worst[c]);
         EXPECT_LE(worst[c], target);
     }
+}
+
+TEST(Margin, FarTailStaticReductionExact)
+{
+    // A stationary bunch (meanVelocity = 0) must reduce EXACTLY to the static
+    // monopole + dipole + quadrupole field (the pre-fix formula, gammaMax = 1).
+    picBunch::Bunch bunch;
+    bunch.resize(4);
+    bunch.x = {0.5, -0.5, 0.0, 0.0};
+    bunch.y = {0.0, 0.0, 0.5, -0.5};
+    bunch.z = {0.0, 0.0, 0.0, 0.0};
+    bunch.ux = {0.0, 0.0, 0.0, 0.0};
+    bunch.uy = {0.0, 0.0, 0.0, 0.0};
+    bunch.uz = {0.0, 0.0, 0.0, 0.0};
+    bunch.weight = {1.0, 1.0, 1.0, 1.0};
+    double const e = picBunch::kElementaryCharge;
+    bunch.charge = {e, e, -e, -e};
+    auto const tail = picBunch::deriveFarTail(bunch);
+    EXPECT_DOUBLE_EQ(vnorm(tail.meanVelocity), 0.0);
+    Vec3 dirs[3] = {{0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}, {1.0, 1.0, 1.0}};
+    for(auto const& d : dirs)
+        for(double const rad : {3.0, 5.0, 8.0})
+        {
+            double const n = vnorm(d);
+            Vec3 const P{tail.centre[0] + d[0] / n * rad,
+                         tail.centre[1] + d[1] / n * rad,
+                         tail.centre[2] + d[2] / n * rad};
+            EXPECT_NEAR(
+                relErr(picBunch::evaluateFarTailE(tail, P), staticMultipole(tail, P)), 0.0,
+                1.0e-14)
+                << "beta=0 must reduce exactly to the static multipole field";
+        }
+}
+
+TEST(Margin, MovingFarTailMatchesPointKernel)
+{
+    // A one-particle bunch is a pure monopole: the moving far tail must equal
+    // the exact ``Q * pointFieldNormalized`` Lienard point field in every
+    // direction.  The old isotropic gammaMax scaling was 1000x too high on axis
+    // at gamma=10, so this fails on the pre-fix code.
+    double const e = picBunch::kElementaryCharge;
+    Vec3 dirs[3] = {{0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}, {1.0, 1.0, 1.0}}; // axial, transverse, oblique
+    for(double const gamma : {1.0, 10.0, 100.0})
+    {
+        double const u = std::sqrt(gamma * gamma - 1.0);
+        auto const tail = picBunch::deriveFarTail(pointBunch(-e, {0.0, 0.0, u}));
+        for(auto const& d : dirs)
+        {
+            double const n = vnorm(d);
+            Vec3 const Rv{d[0] / n, d[1] / n, d[2] / n}; // unit distance from centre
+            EXPECT_NEAR(
+                relErr(picBunch::evaluateFarTailE(tail, Rv), ePoint(Rv, -e, {0.0, 0.0, u})),
+                0.0, 1.0e-8)
+                << "gamma=" << gamma << " direction not reproduced by the point kernel";
+        }
+    }
+}
+
+TEST(Margin, FarTailMovingMagneticField)
+{
+    // B = v x E / c^2; for a one-particle bunch it also equals the exact point B.
+    double const e = picBunch::kElementaryCharge;
+    double const u = std::sqrt(100.0 - 1.0);
+    auto const tail = picBunch::deriveFarTail(pointBunch(-e, {0.0, 0.0, u}));
+    Vec3 const Rv{0.4, 0.0, 1.0};
+    Vec3 const E = picBunch::evaluateFarTailE(tail, Rv);
+    Vec3 const B = picBunch::evaluateFarTailB(tail, Rv);
+    double const i2 = 1.0 / (picBunch::kSpeedOfLight * picBunch::kSpeedOfLight);
+    Vec3 const Bexp{(tail.meanVelocity[1] * E[2] - tail.meanVelocity[2] * E[1]) * i2,
+                    (tail.meanVelocity[2] * E[0] - tail.meanVelocity[0] * E[2]) * i2,
+                    (tail.meanVelocity[0] * E[1] - tail.meanVelocity[1] * E[0]) * i2};
+    EXPECT_NEAR(vnorm({B[0] - Bexp[0], B[1] - Bexp[1], B[2] - Bexp[2]}), 0.0, 1e-300)
+        << "B must equal meanVelocity x E / c^2";
+    EXPECT_NEAR(relErr(B, bPoint(Rv, -e, {0.0, 0.0, u})), 0.0, 1.0e-8)
+        << "B must equal the exact point-kernel B";
+}
+
+TEST(Margin, FarTailMovingCloudApproximatesDirectSum)
+{
+    // A compact cloud moving uniformly: the far tail must approximate the direct
+    // sum of the per-particle Lienard fields.  The axial field is the decisive
+    // case (the old code was 1000x off there).  The component transverse to the
+    // motion of a bunch with beam-axis extent is the least accurate part of the
+    // asymptotic point multipole, so it is checked with a looser bound plus a
+    // convergence check rather than a tight tolerance.
+    double const e = picBunch::kElementaryCharge;
+    double const u = std::sqrt(100.0 - 1.0); // gamma 10
+    double const w = 1.0e-6;
+    picBunch::Bunch bunch;
+    bunch.resize(27);
+    int k = 0;
+    for(int ix = -1; ix <= 1; ++ix)
+        for(int iy = -1; iy <= 1; ++iy)
+            for(int iz = -1; iz <= 1; ++iz)
+            {
+                bunch.x[k] = ix * w * 0.9;
+                bunch.y[k] = iy * w * 0.9;
+                bunch.z[k] = iz * w * 0.9;
+                bunch.ux[k] = 0.0;
+                bunch.uy[k] = 0.0;
+                bunch.uz[k] = u;
+                bunch.weight[k] = 1.0;
+                bunch.charge[k] = -e;
+                ++k;
+            }
+    bunch.resize(k);
+    auto const tail = picBunch::deriveFarTail(bunch);
+    auto directAt = [&](Vec3 const& P) {
+        Vec3 s{0.0, 0.0, 0.0};
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            Vec3 const Rv{P[0] - bunch.x[p], P[1] - bunch.y[p], P[2] - bunch.z[p]};
+            Vec3 const pe = ePoint(Rv, -e, {0.0, 0.0, u});
+            s = {s[0] + pe[0], s[1] + pe[1], s[2] + pe[2]};
+        }
+        return s;
+    };
+    Vec3 dirs[3] = {{0.0, 0.0, 1.0}, {1.0, 0.0, 0.0}, {1.0, 1.0, 1.0}}; // axial, transverse, oblique
+    double const tol[3] = {0.02, 0.30, 0.10};
+    for(int i = 0; i < 3; ++i)
+    {
+        double const n = vnorm(dirs[i]);
+        auto at = [&](double f) {
+            Vec3 const P{tail.centre[0] + dirs[i][0] / n * f * tail.supportRadius,
+                         tail.centre[1] + dirs[i][1] / n * f * tail.supportRadius,
+                         tail.centre[2] + dirs[i][2] / n * f * tail.supportRadius};
+            return relErr(picBunch::evaluateFarTailE(tail, P), directAt(P));
+        };
+        EXPECT_TRUE(std::isfinite(at(12.0))) << "direction " << i;
+        EXPECT_LT(at(12.0), tol[i]) << "direction " << i << " (axial=0, transverse=1)";
+        EXPECT_LT(at(12.0), at(8.0)) << "must converge, direction " << i;
+    }
+}
+
+TEST(Margin, NeutralCounterstreamingUsesAbsoluteChargeMeanVelocity)
+{
+    // Net charge zero with counterstreaming members.  The mean velocity must use
+    // the absolute-charge weights decided from the TOTAL charge after the loop;
+    // the old running-partial-sum logic produced a different (charge-weighted,
+    // and here ill-defined) direction.
+    double const e = picBunch::kElementaryCharge;
+    double const c = picBunch::kSpeedOfLight;
+    picBunch::Bunch bunch;
+    bunch.resize(3);
+    bunch.x = {0.0, 0.0, 0.0};
+    bunch.y = {0.0, 0.0, 0.0};
+    bunch.z = {0.0, 0.0, 0.0};
+    // p0: +2e u=+3 ; p1: -e u=-3 ; p2: -e u=+1  -> net charge 0, counterstreaming
+    bunch.ux = {3.0, -3.0, 1.0};
+    bunch.uy = {0.0, 0.0, 0.0};
+    bunch.uz = {0.0, 0.0, 0.0};
+    bunch.weight = {1.0, 1.0, 1.0};
+    bunch.charge = {2.0 * e, -e, -e};
+    auto const tail = picBunch::deriveFarTail(bunch);
+    EXPECT_NEAR(tail.charge, 0.0, 1.0e-12 * 4.0 * e) << "bunch must be neutral";
+    double const v0 = c * 3.0 / std::sqrt(10.0);
+    double const v1 = -c * 3.0 / std::sqrt(10.0);
+    double const v2 = c * 1.0 / std::sqrt(2.0);
+    double const expected = (2.0 * v0 + v1 + v2) / 4.0; // absolute-charge weighted
+    EXPECT_NEAR(tail.meanVelocity[0], expected, 1.0e-9 * c);
+    EXPECT_NEAR(tail.meanVelocity[1], 0.0, 1.0e-12 * c);
+    EXPECT_NEAR(tail.meanVelocity[2], 0.0, 1.0e-12 * c);
+    // the old running-partial-sum value was c*0.888; the correct one is c*0.414
+    EXPECT_GT(std::abs(tail.meanVelocity[0] - c * 0.888290), 1.0e-2 * c)
+        << "must use the absolute-charge weights, not the running partial sum";
 }

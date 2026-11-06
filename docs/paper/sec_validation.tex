@@ -1,0 +1,117 @@
+\section{Cross-validation and checkpoint transport}
+\label{sec:validation}
+
+Two independent checks constrain the method externally: a cross-validation
+against PIConGPU's exact-quadrature field reference, and a checkpoint and
+restart transport. Neither is a truth comparison.
+
+\subsection{Cross-validation against the PIConGPU reference}
+
+The reference is the TSC-convolved field (Section~\ref{sec:accuracy}),
+evaluated in PIConGPU~\citep{burau2010} in its reference-only
+field-initializer mode. The cross-validation suite passes 10/10, and both
+sides use identical Yee offsets, grid, and origin; the reference staggered
+point maps to a picBunch node by index with zero snap deviation.
+
+At $318$ staggered points on a $64\times64\times32$ grid, cell
+$10^{-7}$\,m, the overall worst per-component relative error is
+$4.86\times10^{-2}$ for $\gamma=1$ ($E/z$) and $6.20\times10^{-1}$ for
+$\gamma=10$ ($E/z$; $E/y$ is $5.16\times10^{-1}$), against a reference
+reproducibility floor of $1.19\times10^{-6}$ ($E$) and
+$1.43\times10^{-6}$ ($B$). picBunch is about four to six orders of
+magnitude above that floor; the measured error is concentrated at the core
+and the beamed peaks, where the TSC support is, while the bulk agrees to
+below $1$--$3\%$ and $B$ is exactly zero for $\gamma=1$ in both components.
+
+The whole-field comparison, $N=1000$ on $32\times32\times16$, cell
+$2\times10^{-7}$\,m, $16384$ nodes per component, gives the same picture:
+$\gamma=1$ bulk median $3.8$--$7.8\times10^{-3}$ with an L2 of
+$4.6$--$5.7\times10^{-2}$; $\gamma=10$ bulk median $1.4$--$3.3\times10^{-2}$
+but a beamed-core overshoot that pushes the $E/y$, $E/z$ L2 to
+$0.76$--$0.92$. The forward $E/x$ is well resolved at $\gamma=10$
+($\sim6\%$); the beamed transverse $E/y$, $E/z$ are $50$--$130\%$ worst at
+the core, where the Lorentz-contracted field is a sub-cell pancake below
+the TSC support and the spectral near-field kernel resolution.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Whole-field comparison of picBunch against the PIConGPU
+\texttt{referenceOnly} field, $N=1000$, $32\times32\times16$, cell
+$2\times10^{-7}$\,m, $16384$ nodes/component, rosi\_v100.
+\texttt{worst\_rel} is peak-normalized; median and p99 are per-point over
+nodes with $|\mathrm{ref}|>10^{-3}\times$peak; L2 is pooled. Not a truth
+comparison.}
+\label{tab:wholefield}
+\begin{tabular}{lrrrr}
+\toprule
+component & worst\_rel & median & p99 & L2 \\
+\midrule
+\multicolumn{5}{l}{\emph{$\gamma=1$} (B identically 0)} \\
+$E/x$ & $1.48\times10^{-1}$ & $3.92\times10^{-3}$ & $3.20\times10^{-1}$ & $4.62\times10^{-2}$ \\
+$E/y$ & $1.49\times10^{-1}$ & $3.76\times10^{-3}$ & $2.93\times10^{-1}$ & $4.75\times10^{-2}$ \\
+$E/z$ & $1.22\times10^{-1}$ & $7.81\times10^{-3}$ & $3.65\times10^{-1}$ & $5.67\times10^{-2}$ \\
+\midrule
+\multicolumn{5}{l}{\emph{$\gamma=10$} (B/x identically 0)} \\
+$E/x$ & $1.36\times10^{-1}$ & $4.80\times10^{-3}$ & $1.23\times10^{-1}$ & $4.44\times10^{-2}$ \\
+$E/y$ & $1.98$  & $1.36\times10^{-2}$ & $7.25$ & $7.63\times10^{-1}$ \\
+$E/z$ & $1.93$  & $3.33\times10^{-2}$ & $10.1$ & $9.19\times10^{-1}$ \\
+$B/y$ & $4.42\times10^{-1}$ & $3.12\times10^{-2}$ & $1.41$ & $2.58\times10^{-1}$ \\
+$B/z$ & $4.63\times10^{-1}$ & $1.52\times10^{-2}$ & $0.93$ & $2.20\times10^{-1}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The disagreement is per-source, local to the TSC support, and independent
+of particle count: on a $64\times64\times32$, cell $10^{-7}$\,m, stationary
+bunch ($\gamma=1$) the band is flat in $N$ from $1$ to $1000$
+($10^{-3}$--$3\times10^{-2}$). The $O(1)$ values at $N\ge10$ occur only
+because the global worst sample point falls $0.415$--$0.65$ cells from a
+source, inside that source's TSC support; a charge-weighting defect would
+grow with $N$, and it does not.
+
+\subsection{Checkpoint format and bitwise arrival}
+
+The checkpoint writer emits a PIConGPU openPMD field checkpoint matching
+PIConGPU's own plugin schema: root layout, openPMD version 5.0
+\citep{openpmd}, $E$, $B$ $x/y/z$ at the exact Yee positions, grid spacing
+and offset, and the \texttt{picongpu\_idProvider} mesh metadata. The
+default precision is uniform \texttt{float32} for every field and particle
+record, so a stock single-precision PIConGPU can load the file;
+\texttt{float64} is a uniform opt-in that records a warning attribute
+because stock PIConGPU cannot load double records. Every species from the
+input bunch is copied, the \texttt{charge} and \texttt{mass} records are
+written rather than omitted, and the species is a single particle patch,
+\texttt{patch} = \texttt{"bbox"} or \texttt{"domain"}. For a multi-rank
+restart the writer splits the species into one patch per output rank:
+\texttt{patch\_count} in \texttt{[placement]} gives cumulative, disjoint
+\texttt{numParticlesOffset} ranges, with one-cell overlap between
+neighbouring $z$ regions, and every particle belongs to exactly one patch.
+
+Field arrival is bitwise. A fresh checkpoint written from a two-species
+input (16 electrons and 16 ions, \texttt{picongpu\_idProvider} startId $0$,
+nextId $32$) restarts in PIConGPU with exit 0 under both \texttt{patch}
+modes (\texttt{bbox}: offset $(7,8,3)$, extent $(8,10,6)$;
+\texttt{domain}: offset $(0,0,0)$, extent $(24,24,12)$), all six field
+components bitwise-equal, $\max_\mathrm{abs\,diff} = 0.0$, electrons with
+ids $0$ to $15$, first-step displacement exactly $\beta c\,dt$ with
+$\beta = 0.9949874367$. A multi-rank restart with the four-patch layout was
+verified process-level: a $256$-particle bunch written as four non-empty
+patches (cumulative offsets $0,56,126,203$, one-cell overlap) restarts
+PIConGPU with exit 0, and after one step all six field components are
+bitwise-equal to the checkpoint,
+$\max_\mathrm{abs\,diff}=0.0$.
+
+On a $24\times24\times12$ deck the restart is exit 0 with
+\texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization
+drops from the $\sim116$\,s neuralBunch path to $1.8$\,s because the
+checkpoint carries the field. For an open-boundary deck the writer copies
+the \texttt{Convolutional PML} slabs from the input checkpoint verbatim
+(converting a non-float32 slab to float32), so the PML state arrives with
+the restart. On a real LWFA checkpoint ($638976$ electrons, eight
+\texttt{Convolutional PML} groups with six datasets each,
+$64\times128\times64$, \texttt{--periodic 0 0 1}) the writer copies all
+eight groups and the restart exits 0; the copied PML datasets are float32
+and bitwise equal to the source, initialization is $3.986$\,s, and the
+main $E$ and $B$ records are recomputed from the particles and stay
+float32.

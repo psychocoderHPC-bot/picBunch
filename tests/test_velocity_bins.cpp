@@ -262,3 +262,106 @@ TEST(VelocityBins, BinnedFieldEqualsSumOfBoxClassFields)
     // FFT roundoff only: same transforms, same order of operations per node.
     EXPECT_LT(maxDiff / scale, 1e-12);
 }
+
+TEST(VelocityBins, CounterstreamingDoesNotReportZeroError)
+{
+    // Equal and opposite gamma-10 velocities: the one-box mean is zero, so the
+    // old estimator skipped the angular term and returned zero error.  The one
+    // box must now carry a nonzero error, and auto mode must split the bunch
+    // instead of accepting one wrong bin.
+    Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {4.0, 4.0};
+    bunch.y = {4.0, 4.0};
+    bunch.z = {4.0, 4.0};
+    double const u = std::sqrt(100.0 - 1.0);
+    bunch.ux = {0.0, 0.0};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {u, -u};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {kElectronCharge, kElectronCharge};
+
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    VelocityBinning const oneBox = picBunch::deriveVelocityBinning(bunch, 1.0e-3, one);
+    EXPECT_GT(oneBox.modelSum, 0.0)
+        << "a stationary mean for moving members is a full angular mismatch";
+    EXPECT_GT(oneBox.modelError, 1.0e-12)
+        << "one box must not report zero error (old estimator: 0)";
+    // auto at a target that converges quickly: one box is rejected (above), so
+    // it must pick more than one bin with a nonzero estimate.  A 1e-12 target
+    // would force the O(maxBoxes) infeasible search, so it is not used here.
+    VelocityBinning const autoB = picBunch::deriveVelocityBinning(bunch, 0.5);
+    EXPECT_GT(autoB.count, 1u);
+    EXPECT_GT(autoB.modelError, 0.0);
+    EXPECT_TRUE(std::isfinite(autoB.modelError));
+}
+
+TEST(VelocityBins, NeutralCounterstreamingBinsViaAbsoluteCharge)
+{
+    // Opposite charges with opposite velocities cancel the net charge, so a
+    // signed-charge weight would erase the local error (abs of the signed sum is
+    // zero).  The estimator must use the absolute-charge content and still see
+    // the one-box mismatch.
+    Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {4.0, 4.0};
+    bunch.y = {4.0, 4.0};
+    bunch.z = {4.0, 4.0};
+    double const u = std::sqrt(100.0 - 1.0);
+    bunch.ux = {0.0, 0.0};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {u, -u};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {kElectronCharge, -kElectronCharge};
+
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    VelocityBinning const oneBox = picBunch::deriveVelocityBinning(bunch, 1.0e-3, one);
+    EXPECT_GT(oneBox.modelSum, 0.0)
+        << "a neutral bunch must not cancel the local error";
+    EXPECT_GT(oneBox.modelError, 0.0)
+        << "the absolute-charge weight keeps the estimate nonzero";
+}
+
+TEST(VelocityBins, BoxCentreRepresentativeCountsItsGammaDeviation)
+{
+    // Two widely separated classes force one particle per explicit box.  The
+    // geometric box centre is not the particle, so the member-vs-representative
+    // gamma deviation must keep the estimate non-zero.
+    Bunch bunch = axisBunch({10.0, 100.0});
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 2;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(binning.count, 2u);
+    EXPECT_GT(binning.modelError, 0.0);
+}
+
+TEST(VelocityBins, SparseBinsModelIsFinite)
+{
+    // Widely separated velocity classes leave most boxes empty.  The model must
+    // stay finite and non-negative, counting only the occupied boxes, so a
+    // sparse occupation cannot drive the estimate to zero or to a non-finite
+    // value.
+    Bunch bunch;
+    bunch.resize(4);
+    bunch.x = {4.0, 4.0, 4.0, 4.0};
+    bunch.y = {4.0, 4.0, 4.0, 4.0};
+    bunch.z = {4.0, 4.0, 4.0, 4.0};
+    bunch.ux = {0.0, 0.0, 0.0, 0.0};
+    bunch.uy = {0.0, 0.0, 0.0, 0.0};
+    bunch.uz = {0.5, 5.0, 9.5, 14.0};
+    bunch.weight = {1.0, 1.0, 1.0, 1.0};
+    bunch.charge = {kElectronCharge, kElectronCharge, kElectronCharge, kElectronCharge};
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 16;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(binning.count, 16u);
+    EXPECT_TRUE(std::isfinite(binning.modelSum));
+    EXPECT_GE(binning.modelSum, 0.0);
+    EXPECT_GE(binning.modelError, 0.0);
+}

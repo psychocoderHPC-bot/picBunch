@@ -1,0 +1,19 @@
+# MV1 velocity-binning accuracy points recorded in README.md and docs/algorithm.md.
+#
+# Model (docs/algorithm.md, "Velocity binning"):
+#   modelError = C * sum_b (|q_b|/Q) * (gamma_b*Delta_theta_b + Delta_gamma_b/gamma_b + delta_gamma_b)
+#
+# Only the 16- and 64-box worst-case errors were archived in the repository.
+# The original 1/2/4/8-box rows, the per-box model sums and the --fit output from
+# campaign pr24-20261102 were not committed, so C cannot be refitted here.
+# The shipped value kDefaultVelocityModelConstant = 1.0 is therefore an
+# assumption, not a reproduced fit. See velocity_bin_calibration_fit.txt.
+#
+# The measured errors are the worst-case relative errors of the binned mesh
+# field against the TSC-convolved continuum reference, with d >= 2 cells and no
+# relative floor, as reported in README.md ("Velocity binning").
+case,box_count,measured_worst_rel_error,regime,host,campaign_commit,campaign,date,source
+energy_spread_5pct,16,1.12e-3,energy,H100 (jureca-h100),02891fe6,pr24-20261102,2026-11-02,README.md velocity-binning section
+energy_spread_5pct,64,2.72e-4,energy,H100 (jureca-h100),02891fe6,pr24-20261102,2026-11-02,README.md velocity-binning section
+angular_spread_5deg,16,4.21e-1,angular,H100 (jureca-h100),02891fe6,pr24-20261102,2026-11-02,README.md velocity-binning section
+angular_spread_5deg,64,2.95e-1,angular,H100 (jureca-h100),02891fe6,pr24-20261102,2026-11-02,README.md velocity-binning section

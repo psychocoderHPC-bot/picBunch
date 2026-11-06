@@ -145,3 +145,69 @@ TEST(Deposit, PaddedDepositConservesChargeForRefinement)
                 << "refinement=" << refinement << " position=" << label[p];
         }
 }
+
+TEST(Deposit, PaddedSourceHaloConservesChargeAtBoundaries)
+{
+    // Regression for P1-2: a particle whose TSC support crosses the physical
+    // 0..n-1 boundary must still deposit its full charge.  The support outside
+    // the physical box belongs in the padded FFT extent (negative logical nodes
+    // wrap to M-1.., nodes >= n land in the upper padding).  The pre-fix code
+    // clipped at the physical boundary, so a particle at node (0,0,0)
+    // deposited only 0.669921875.
+    picBunch::Grid grid;
+    grid.n = {8, 8, 8};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    grid.fftPadding = 2;
+
+    // Each coordinate is either a face node (0 or 7) or an interior node (3).
+    // The 27 combinations cover every corner, edge, face and the interior.
+    for(std::size_t kk = 0; kk < 3; ++kk)
+        for(std::size_t jj = 0; jj < 3; ++jj)
+            for(std::size_t ii = 0; ii < 3; ++ii)
+            {
+                double const coord[3] = {ii == 0 ? 0.0 : (ii == 1 ? 3.0 : 7.0),
+                                         jj == 0 ? 0.0 : (jj == 1 ? 3.0 : 7.0),
+                                         kk == 0 ? 0.0 : (kk == 1 ? 3.0 : 7.0)};
+                picBunch::Bunch bunch;
+                bunch.resize(1);
+                bunch.x[0] = coord[0];
+                bunch.y[0] = coord[1];
+                bunch.z[0] = coord[2];
+                bunch.weight[0] = 1.0;
+                bunch.charge[0] = 1.0;
+
+                auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, 1.0);
+                EXPECT_EQ(rho.size(), 16u * 16u * 16u);
+                double const sum = std::accumulate(rho.begin(), rho.end(), 0.0);
+                EXPECT_NEAR(sum, 1.0, 1.0e-14)
+                    << "node (" << coord[0] << "," << coord[1] << "," << coord[2] << ")";
+            }
+}
+
+TEST(Deposit, PaddedSourceHaloWrapsNegativeSupport)
+{
+    // A particle exactly on node zero has support at logical node -1.  With the
+    // halo that weight must appear in the upper padded plane, not be dropped.
+    picBunch::Grid grid;
+    grid.n = {8, 8, 8};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    grid.fftPadding = 2;
+
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 0.0;
+    bunch.y[0] = 3.0;
+    bunch.z[0] = 3.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = 1.0;
+
+    auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, 1.0);
+    std::size_t const M = 8u * 2u;
+    // Logical (ia,ib,ic) maps to (ia+M)%M etc.  The -1 support is at x=M-1.
+    std::size_t const idx = static_cast<std::size_t>(M - 1u)
+        + M * (static_cast<std::size_t>(3u) + M * static_cast<std::size_t>(3u));
+    // tscShape(-1) * tscShape(0) * tscShape(0) = 0.125 * 0.75 * 0.75.
+    EXPECT_NEAR(rho[idx], 0.0703125, 1.0e-14);
+}

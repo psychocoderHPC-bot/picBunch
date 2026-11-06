@@ -48,7 +48,15 @@ namespace picBunch
             return r;
         }
 
-        //! TSC assignment of weight*charge onto the n^3 sub-box of the M^3 padded grid.
+        //! Wrap a logical source index into the padded extent; the source halo lives there.
+        ALPAKA_FN_ACC inline long wrapPaddedIndex(long i, std::uint32_t m)
+        {
+            long const mm = static_cast<long>(m);
+            long r = i % mm;
+            return r < 0 ? r + mm : r;
+        }
+
+        //! TSC assignment of weight*charge onto the padded grid with a source halo.
         struct TscDepositKernel
         {
             template<typename TAcc>
@@ -65,9 +73,7 @@ namespace picBunch
                 std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
-                std::uint32_t nx,
-                std::uint32_t ny,
-                std::uint32_t nz,
+                std::uint32_t Mz,
                 double ox,
                 double oy,
                 double oz,
@@ -96,29 +102,30 @@ namespace picBunch
                     double const q = pq[p];
                     for(long ia = lo[0]; ia <= hi[0]; ++ia)
                     {
-                        if(ia < 0 || ia >= static_cast<long>(nx))
-                            continue;
                         double const wa = tscShape(static_cast<double>(ia) - t[0]);
                         if(wa == 0.0)
                             continue;
+                        long const ma = wrapPaddedIndex(ia, Mx);
                         for(long ib = lo[1]; ib <= hi[1]; ++ib)
                         {
-                            if(ib < 0 || ib >= static_cast<long>(ny))
-                                continue;
                             double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
                             if(wb == 0.0)
                                 continue;
+                            long const mb = wrapPaddedIndex(ib, My);
                             for(long ic = lo[2]; ic <= hi[2]; ++ic)
                             {
-                                if(ic < 0 || ic >= static_cast<long>(nz))
-                                    continue;
                                 double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
                                 if(wc == 0.0)
                                     continue;
-                                auto const idx = static_cast<std::size_t>(ia)
+                                long const mc = wrapPaddedIndex(ic, Mz);
+                                if(mc < static_cast<long>(zOffset)
+                                   || mc >= static_cast<long>(zOffset + zExtent))
+                                    continue;
+                                auto const idx = static_cast<std::size_t>(ma)
                                     + static_cast<std::size_t>(Mx)
-                                        * (static_cast<std::size_t>(ib)
-                                           + static_cast<std::size_t>(My) * static_cast<std::size_t>(ic));
+                                        * (static_cast<std::size_t>(mb)
+                                           + static_cast<std::size_t>(My)
+                                               * static_cast<std::size_t>(mc - zOffset));
                                 alpaka::onAcc::atomicAdd(acc, &rho[idx], wc * q);
                             }
                         }
@@ -850,33 +857,30 @@ namespace picBunch
                 double const q = bunch.weight[p] * bunch.charge[p];
                 for(long ia = lo[0]; ia <= hi[0]; ++ia)
                 {
-                    if(ia < 0 || ia >= static_cast<long>(grid.n[0]))
-                        continue;
                     double const wa = tscShape(static_cast<double>(ia) - t[0]);
                     if(wa == 0.0)
                         continue;
+                    long const ma = wrapPaddedIndex(ia, Mx);
                     for(long ib = lo[1]; ib <= hi[1]; ++ib)
                     {
-                        if(ib < 0 || ib >= static_cast<long>(grid.n[1]))
-                            continue;
                         double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
                         if(wb == 0.0)
                             continue;
+                        long const mb = wrapPaddedIndex(ib, My);
                         for(long ic = lo[2]; ic <= hi[2]; ++ic)
                         {
-                            if(ic < 0 || ic >= static_cast<long>(grid.n[2]))
-                                continue;
-                            if(ic < static_cast<long>(zOffset)
-                               || ic >= static_cast<long>(zOffset + zExtent))
-                                continue;
                             double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
                             if(wc == 0.0)
                                 continue;
-                            auto const idx = static_cast<std::size_t>(ia)
+                            long const mc = wrapPaddedIndex(ic, Mz);
+                            if(mc < static_cast<long>(zOffset)
+                               || mc >= static_cast<long>(zOffset + zExtent))
+                                continue;
+                            auto const idx = static_cast<std::size_t>(ma)
                                 + static_cast<std::size_t>(Mx)
-                                    * (static_cast<std::size_t>(ib)
+                                    * (static_cast<std::size_t>(mb)
                                        + static_cast<std::size_t>(My)
-                                           * static_cast<std::size_t>(ic - zOffset));
+                                           * static_cast<std::size_t>(mc - zOffset));
                             rho[idx * rhoStride] += wc * q;
                         }
                     }
@@ -919,9 +923,7 @@ namespace picBunch
                 zExtent,
                 Mx,
                 My,
-                static_cast<std::uint32_t>(grid.n[0]),
-                static_cast<std::uint32_t>(grid.n[1]),
-                static_cast<std::uint32_t>(grid.n[2]),
+                Mz,
                 grid.origin[0],
                 grid.origin[1],
                 grid.origin[2],
@@ -1315,21 +1317,29 @@ namespace picBunch
                 // ---------------------------------------------------------- read-out
                 auto const readoutStart = Clock::now();
                 double const factor = scale * (c < 3 ? eFactor : bFactor);
-                for(std::uint32_t k = 0; k < static_cast<std::uint32_t>(grid.n[2]); ++k)
-                    for(std::uint32_t j = 0; j < static_cast<std::uint32_t>(grid.n[1]); ++j)
-                        for(std::uint32_t i = 0; i < static_cast<std::uint32_t>(grid.n[0]); ++i)
+                // Every (k,j,i) owns one output node, so the parallel loop keeps
+                // exactly one deterministic write per node.  This is the host
+                // gather of the replicated path (the distributed path returns a
+                // z-slab through alltoallv instead).
+                std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
+                std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
+                std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
+#pragma omp parallel for collapse(2)
+                for(std::uint32_t k = 0; k < outNz; ++k)
+                    for(std::uint32_t j = 0; j < outNy; ++j)
+                        for(std::uint32_t i = 0; i < outNx; ++i)
                         {
                             auto const in = static_cast<std::size_t>(i)
                                 + static_cast<std::size_t>(Mx)
                                     * (static_cast<std::size_t>(j)
                                        + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
                             auto const out = static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(grid.n[0])
+                                + static_cast<std::size_t>(outNx)
                                     * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(grid.n[1]) * static_cast<std::size_t>(k));
+                                       + static_cast<std::size_t>(outNy) * static_cast<std::size_t>(k));
                             // Accumulate: the field of the mixed bunch is the sum
-                        // over the velocity classes.
-                        field.data[c][out] += outReal.data()[in] * factor;
+                            // over the velocity classes.
+                            field.data[c][out] += outReal.data()[in] * factor;
                         }
                 times.readoutMs += elapsedMs(readoutStart);
             }

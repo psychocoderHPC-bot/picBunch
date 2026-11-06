@@ -7,6 +7,7 @@
 // they land on disk.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
 
@@ -353,6 +354,32 @@ namespace
         EXPECT_EQ(rank, 3);
         std::vector<float> values(static_cast<std::size_t>(dimensions[0] * dimensions[1] * dimensions[2]));
         H5Dread(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
+        H5Sclose(space);
+        H5Dclose(dataset);
+        return values;
+    }
+
+    std::vector<std::int32_t> readInt32Vector(hid_t file, char const* path)
+    {
+        hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
+        EXPECT_GE(dataset, 0) << "missing dataset " << path;
+        hid_t space = H5Dget_space(dataset);
+        hssize_t const points = H5Sget_simple_extent_npoints(space);
+        std::vector<std::int32_t> values(static_cast<std::size_t>(points < 0 ? 0 : points));
+        H5Dread(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
+        H5Sclose(space);
+        H5Dclose(dataset);
+        return values;
+    }
+
+    std::vector<double> readDoubleVector(hid_t file, char const* path)
+    {
+        hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
+        EXPECT_GE(dataset, 0) << "missing dataset " << path;
+        hid_t space = H5Dget_space(dataset);
+        hssize_t const points = H5Sget_simple_extent_npoints(space);
+        std::vector<double> values(static_cast<std::size_t>(points < 0 ? 0 : points));
+        H5Dread(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
         H5Sclose(space);
         H5Dclose(dataset);
         return values;
@@ -927,5 +954,169 @@ TEST(Restart, WriterPinsFloat32ParticleDtypes)
     H5Tclose(weightingType);
     H5Dclose(weighting);
     H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, GeneratedMomentumUsesPIConGPUMacroWeighting)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_momentum";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input.h5";
+    writeParticleInput(input, true);
+
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 4;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    // Use float64 so the round-trip checks the convention, not float32
+    // quantization.
+    options.float64 = true;
+
+    double const mass = picBunch::kElectronMass;
+    double const charge = -picBunch::kElementaryCharge;
+    picBunch::GeneratedParticles generated;
+    generated.species = "electrons";
+    generated.bunch.x = {0.0, 1.0};
+    generated.bunch.y = {0.0, 0.0};
+    generated.bunch.z = {0.0, 1.0};
+    generated.bunch.ux = {0.3, -0.7};
+    generated.bunch.uy = {0.0, 1.1};
+    generated.bunch.uz = {2.0, -1.5};
+    generated.bunch.weight = {1.0, 100.0};
+    generated.bunch.charge = {charge, charge};
+    generated.bunch.restMass = {mass, mass};
+    generated.domainOrigin = {0.0, 0.0, 0.0};
+    generated.cellSize = {1.0, 1.0, 1.0};
+    generated.patchOffset = {0, 0, 0};
+    generated.patchExtent = {5, 5, 4};
+    generated.unitMassSpeed = mass * picBunch::kSpeedOfLight;
+    generated.unitCharge = picBunch::kElementaryCharge;
+    generated.unitMass = mass;
+    generated.fallbackMass = mass;
+    options.generatedParticles = generated;
+    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+
+    auto const path = directory / "checkpoint_000004.h5";
+    // The PIConGPU convention is macro momentum: raw = u*m*c*w/unitMassSpeed,
+    // macroWeighted = true, weightingPower = 1.  Check the raw data and
+    // metadata first.
+    {
+        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        ASSERT_GE(file, 0);
+        hid_t momentum = H5Gopen2(file, "data/4/particles/electrons/momentum", H5P_DEFAULT);
+        ASSERT_GE(momentum, 0);
+        EXPECT_EQ(readScalarAttribute<std::uint32_t>(momentum, "macroWeighted", H5T_NATIVE_UINT32), 1u);
+        EXPECT_DOUBLE_EQ(readScalarAttribute<double>(momentum, "weightingPower", H5T_NATIVE_DOUBLE), 1.0);
+        H5Gclose(momentum);
+        auto const stored = readDoubleVector(file, "data/4/particles/electrons/momentum/x");
+        ASSERT_EQ(stored.size(), 2u);
+        EXPECT_NEAR(stored[0], 0.3 * 1.0, 1.0e-12);
+        EXPECT_NEAR(stored[1], -0.7 * 100.0, 1.0e-12);
+        H5Fclose(file);
+    }
+
+    // picBunch's own reader applies macroWeighted/weightingPower, so the
+    // per-particle u must survive for both weights.
+    auto const roundTrip = picBunch::readBunch(path.string(), 0u);
+    ASSERT_EQ(roundTrip.bunch.size(), 2u);
+    EXPECT_NEAR(roundTrip.bunch.ux[0], 0.3, 1.0e-12);
+    EXPECT_NEAR(roundTrip.bunch.uy[0], 0.0, 1.0e-12);
+    EXPECT_NEAR(roundTrip.bunch.uz[0], 2.0, 1.0e-12);
+    EXPECT_NEAR(roundTrip.bunch.ux[1], -0.7, 1.0e-12);
+    EXPECT_NEAR(roundTrip.bunch.uy[1], 1.1, 1.0e-12);
+    EXPECT_NEAR(roundTrip.bunch.uz[1], -1.5, 1.0e-12);
+    EXPECT_DOUBLE_EQ(roundTrip.bunch.weight[0], 1.0);
+    EXPECT_DOUBLE_EQ(roundTrip.bunch.weight[1], 100.0);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_interleaved";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input.h5";
+    writeParticleInput(input, true);
+
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 5;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+
+    picBunch::GeneratedParticles generated;
+    generated.species = "electrons";
+    // Deliberately interleaved patch membership A,B,A,B.  y is unique per
+    // particle, so any lost or duplicated particle is visible in the dataset.
+    generated.bunch.x = {0.0, 0.0, 0.0, 0.0};
+    generated.bunch.y = {0.0, 1.0, 2.0, 3.0};
+    generated.bunch.z = {0.0, 2.0, 0.0, 2.0};
+    generated.bunch.ux = {0.0, 0.0, 0.0, 0.0};
+    generated.bunch.uy = {0.0, 0.0, 0.0, 0.0};
+    generated.bunch.uz = {0.0, 0.0, 0.0, 0.0};
+    generated.bunch.weight = {1.0, 1.0, 1.0, 1.0};
+    generated.bunch.charge = {-1.0, -1.0, -1.0, -1.0};
+    generated.domainOrigin = {0.0, 0.0, 0.0};
+    generated.cellSize = {1.0, 1.0, 1.0};
+    generated.patchOffset = {0, 0, 0};
+    generated.patchExtent = {5, 5, 4};
+    generated.unitMassSpeed = 1.0;
+    generated.unitCharge = 1.0;
+    generated.unitMass = 1.0;
+    generated.fallbackMass = 1.0;
+    generated.patches = {
+        {{0, 0, 0}, {5, 5, 2}},
+        {{0, 0, 2}, {5, 5, 2}}};
+    options.generatedParticles = generated;
+    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+
+    auto const path = directory / "checkpoint_000005.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    auto const counts = readUint64Vector(
+        file, "data/5/particles/electrons/particlePatches/numParticles");
+    auto const offsets = readUint64Vector(
+        file, "data/5/particles/electrons/particlePatches/numParticlesOffset");
+    auto const patchOffsetZ = readUint64Vector(
+        file, "data/5/particles/electrons/particlePatches/offset/z");
+    auto const patchExtentZ = readUint64Vector(
+        file, "data/5/particles/electrons/particlePatches/extent/z");
+    auto const cellZ = readInt32Vector(file, "data/5/particles/electrons/positionOffset/z");
+    auto const cellY = readInt32Vector(file, "data/5/particles/electrons/positionOffset/y");
+    H5Fclose(file);
+
+    ASSERT_EQ(counts.size(), 2u);
+    ASSERT_EQ(offsets.size(), 2u);
+    EXPECT_EQ(counts[0], 2u);
+    EXPECT_EQ(counts[1], 2u);
+    EXPECT_EQ(offsets[0], 0u);
+    EXPECT_EQ(offsets[1], counts[0]);
+    ASSERT_EQ(cellZ.size(), 4u);
+    ASSERT_EQ(cellY.size(), 4u);
+
+    // Every declared patch slice must lie in its spatial extent.
+    for(std::size_t q = 0; q < 2u; ++q)
+        for(std::uint64_t s = offsets[q]; s < offsets[q] + counts[q]; ++s)
+        {
+            EXPECT_GE(cellZ[static_cast<std::size_t>(s)],
+                      static_cast<std::int32_t>(patchOffsetZ[q]));
+            EXPECT_LT(cellZ[static_cast<std::size_t>(s)],
+                      static_cast<std::int32_t>(patchOffsetZ[q] + patchExtentZ[q]));
+        }
+
+    // Patch 0 owns z=0 (input 0, 2), patch 1 owns z=2 (input 1, 3); the y
+    // values prove that every input particle appears exactly once.
+    EXPECT_EQ(cellZ, (std::vector<std::int32_t>{0, 0, 2, 2}));
+    EXPECT_EQ(cellY, (std::vector<std::int32_t>{0, 2, 1, 3}));
     std::filesystem::remove_all(temporaryDirectory());
 }

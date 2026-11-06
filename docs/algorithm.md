@@ -80,7 +80,9 @@ field near the source; the difference there comes from the fixed TSC deposit at
 
 For a single-velocity bunch the target controls exactly one implementation
 choice: the FFT zero-padding factor. It does not change the interpolation order
-(fixed at TSC), the deposit scheme, the node spacing, or the refinement. The
+(fixed at TSC), the deposit scheme, the node spacing, or the refinement, and it
+is not an end-to-end accuracy guarantee. The README error-budget table lists the
+mesh, binning, near-quadrature, far-tail and output-precision terms separately. The
 mapping is a measured error-vs-padding model:
 
 | requested tolerance | padding | basis |
@@ -119,21 +121,33 @@ and only the outside-shell field carries the binning error.
 Error model.  Replacing a particle `u` by its box representative perturbs the
 field by a transverse tilt of the boosted pattern, of relative order
 `gamma * Delta_theta`, and an energy shift, of relative order
-`Delta_gamma / gamma`.  With `q_b` the charge in box `b`, `Q` the total
-absolute charge, `gamma_b` the largest `gamma` in the box, `Delta_theta_b`
-the largest member angle against the representative, and `Delta_gamma_b` the
-`gamma` range of the box, the estimated relative error is
+`Delta_gamma / gamma`.  With `|q_b|` the absolute charge in box `b`, `Q` the
+total absolute charge, `gamma_b` the largest `gamma` in the box,
+`Delta_theta_b` the largest member angle against the representative (taken as
+`pi` when the representative is zero and any member is moving, so a
+counterstreaming box cannot hide its error), `Delta_gamma_b` the `gamma` range
+of the box, and `delta_gamma_b` the largest member-vs-representative `gamma`
+deviation, the estimated relative error is
 
-    modelError = C * Sum_b (q_b / Q) * (gamma_b * Delta_theta_b
-                                         + Delta_gamma_b / gamma_b)
+    modelError = C * Sum_b (|q_b| / Q) * (gamma_b * Delta_theta_b
+                                         + Delta_gamma_b / gamma_b
+                                         + delta_gamma_b)
 
-`C` is calibrated against the TSC-convolved continuum reference by running a
-mixed bunch with 1, 2, 4, 8 and 16 boxes and fitting the measured worst-case
-relative error against the model sum; the shipped constant is the MV1
-calibration (run `pr24-20261102`, jureca-h100, CUDA 13.4).  `--velocity-bins`
-runs a fixed count (calibration/diagnostics), `--bin-model-constant` overrides
-`C`, and `--max-velocity-bins` (default 256) caps the auto policy; an
-infeasible requirement fails naming the needed count.
+Absolute charges keep opposite signs from cancelling a local error.
+
+`C` was fitted against the TSC-convolved continuum reference in the MV1 run
+(`pr24-20261102`, jureca-h100, CUDA 13.4) from a mixed bunch with 1, 2, 4, 8 and
+16 boxes.  That campaign's per-box rows and model sums were not archived in this
+repository, so the shipped value `C = 1` is an assumption, not a reproduced fit.
+The recorded 16- and 64-box points are in
+`docs/measurements/velocity_bin_calibration.csv`: the 5% energy-spread case
+measures `1.12e-3` at 16 boxes and `2.72e-4` at 64 (meeting `1e-3` at 64), while
+the 5 degree angular-spread case measures `0.421` at 16 and `0.295` at 64 and
+does not reach `1e-3`.  `tools/velocity-bins/calibrate_velocity_bins.py`
+reproduces the record from the CSV.  `--velocity-bins` runs a fixed count
+(calibration/diagnostics), `--bin-model-constant` overrides `C`, and
+`--max-velocity-bins` (default 256) caps the auto policy; an infeasible
+requirement fails naming the needed count.
 
 ## Padding
 

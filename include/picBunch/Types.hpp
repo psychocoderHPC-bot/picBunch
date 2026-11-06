@@ -161,16 +161,19 @@ namespace picBunch
         std::size_t* exactPairs = nullptr;
     };
 
-    /*! Fitted calibration constant of the velocity-bin error model.
+    /*! Assumed constant of the velocity-bin error model.
      *
      * The model (see ``VelocityBinning``) estimates the relative error of the
-     * binned mesh field as ``modelConstant * modelSum``.  The constant is
-     * calibrated against the TSC-convolved continuum reference by running the
-     * mixed bunch with 1, 2, 4, 8 and 16 boxes and fitting the measured
-     * worst-case relative error (``d >= 2`` cells, unfloored) against
-     * ``modelSum``; the MV1 calibration (run ``pr24-20261102``, host
-     * jureca-h100, CUDA 13.4) gives the shipped value.  The CLI exposes
-     * ``--bin-model-constant`` as a diagnostic override.
+     * binned mesh field as ``modelConstant * modelSum``.  The shipped value is
+     * an assumption, not a refitted calibration: the original 1, 2, 4, 8 and
+     * 16 box rows and their model sums from run ``pr24-20261102`` (host
+     * jureca-h100, CUDA 13.4) were not archived in the repository.  The
+     * recorded 16- and 64-box accuracy points are in
+     * ``docs/measurements/velocity_bin_calibration.csv``; the 5% energy-spread
+     * case measures 1.12e-3 at 16 boxes and 2.72e-4 at 64 (meeting 1e-3 only
+     * at 64), while the 5 degree angular-spread case does not reach 1e-3
+     * (0.421 at 16 boxes).  The CLI exposes ``--bin-model-constant`` as a
+     * diagnostic override.
      */
     inline constexpr double kDefaultVelocityModelConstant = 1.0;
 
@@ -346,9 +349,11 @@ namespace picBunch
          * The computation stays on the (small) output grid derived above; these
          * two values only describe the domain that is written.  The compute grid
          * is aligned to this domain so every computed node lands on a global
-         * node and no interpolation is needed.  Everything outside the compute
-         * box is written as exact zero.  When unset, the written domain is the
-         * compute grid itself (the v0.1 behaviour).
+         * node and no interpolation is needed.  Outside the compute box the
+         * monopole/dipole/quadrupole far tail is evaluated; zeros are written
+         * only on the diagnostic truncation path (``--allow-field-truncation``).
+         * When unset, the written domain is the compute grid itself (the v0.1
+         * behaviour).
          */
         std::optional<std::array<std::size_t, 3>> globalGridSize;
         std::optional<std::array<double, 3>> globalGridOrigin;

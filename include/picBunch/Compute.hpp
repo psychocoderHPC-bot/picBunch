@@ -143,11 +143,11 @@ namespace picBunch
      * every precision-critical stage in double precision, and returns the six
      * components in SI units (V/m and T) on ``makeGrid(bunch, options)``.
      *
-     * ``tolerance`` is the only accuracy knob exposed to users.  It selects the
-     * FFT zero padding, the only discretisation choice not fixed by the input
-     * geometry.  It does not change the TSC deposit order or ``kRefinement``, so
-     * near-source accuracy stays a stated limitation of v0.1.  The contract is
-     * written down in ``docs/algorithm.md``.
+     * ``tolerance`` sizes the FFT zero padding and the velocity-bin count.  It
+     * does not change the TSC deposit order or ``kRefinement``, so near-source
+     * accuracy stays a stated limitation, and it does not bound the far-tail or
+     * checkpoint-precision terms.  The full error budget is in ``README.md`` and
+     * ``docs/algorithm.md``.
      *
      * ``stageTimes``, when non-null, receives a wall-clock breakdown.  Every
      * boundary waits for the device, so the numbers are comparable across backends.
