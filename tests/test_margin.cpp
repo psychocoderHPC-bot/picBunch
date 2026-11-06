@@ -7,6 +7,7 @@
 #include "picBunch/Compute.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Kernel.hpp"
+#include "picBunch/Kernel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
@@ -438,4 +439,83 @@ TEST(Margin, NeutralCounterstreamingUsesAbsoluteChargeMeanVelocity)
     // the old running-partial-sum value was c*0.888; the correct one is c*0.414
     EXPECT_GT(std::abs(tail.meanVelocity[0] - c * 0.888290), 1.0e-2 * c)
         << "must use the absolute-charge weights, not the running partial sum";
+}
+
+TEST(Margin, MovingDipolarCloudBound)
+{
+    // A neutral, dipole-dominated bunch moving at gamma 10 exercises the
+    // higher-multipole transform, which the one-particle and symmetric-cube
+    // tests cannot see (both have zero dipole and quadrupole).  The leading
+    // moving multipole is exact in the principal alignment; away from it the
+    // documented bound is used, so this test pins both.
+    double const gamma = 10.0;
+    double const u = std::sqrt(gamma * gamma - 1.0);
+    picBunch::Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {-0.5, 0.5};
+    bunch.y = {0.0, 0.0};
+    bunch.z = {0.0, 0.0};
+    bunch.ux = {0.0, 0.0};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {u, u};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {picBunch::kElementaryCharge, -picBunch::kElementaryCharge};
+
+    auto const tail = picBunch::deriveFarTail(bunch);
+    ASSERT_NEAR(tail.meanVelocity[2], picBunch::kSpeedOfLight * u / gamma, 1.0);
+    ASSERT_NEAR(tail.charge, 0.0, 1.0e-30);
+
+    auto direct = [&](std::array<double, 3> const& point) {
+        std::array<double, 3> result{0.0, 0.0, 0.0};
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const R[3] = {
+                point[0] - bunch.x[p],
+                point[1] - bunch.y[p],
+                point[2] - bunch.z[p]};
+            double field[6];
+            picBunch::pointFieldNormalized(
+                R[0], R[1], R[2], bunch.ux[p], bunch.uy[p], bunch.uz[p], field);
+            double const scale = picBunch::kCoulombConstant * bunch.weight[p] * bunch.charge[p];
+            for(int a = 0; a < 3; ++a)
+                result[a] += scale * field[a];
+        }
+        return result;
+    };
+
+    // Principal alignment: dipole along x, observation along x, motion along z.
+    std::array<double, 3> const along{12.0, 0.0, 0.0};
+    auto const exact = direct(along);
+    auto const approx = picBunch::evaluateFarTailE(tail, along);
+    double num = 0.0;
+    double den = 0.0;
+    for(int a = 0; a < 3; ++a)
+    {
+        num += (approx[a] - exact[a]) * (approx[a] - exact[a]);
+        den += exact[a] * exact[a];
+    }
+    EXPECT_LT(std::sqrt(num / std::max(den, 1.0e-300)), 1.0e-2)
+        << "the principal moving-dipole alignment must be accurate";
+
+    // Off-alignment the leading multipole has a finite residual.  Bound it by
+    // the margin's conservative gamma-scaled static scale rather than claiming
+    // a point-value accuracy the expansion does not have.
+    double const scale = picBunch::kCoulombConstant * std::abs(bunch.charge[0]) / (12.0 * 12.0);
+    std::array<std::array<double, 3>, 3> const directions{{
+        {0.0, 12.0, 0.0},
+        {0.0, 0.0, 12.0},
+        {8.0, 8.0, 8.0},
+    }};
+    double worst = 0.0;
+    for(auto direction : directions)
+    {
+        auto const e = direct(direction);
+        auto const a = picBunch::evaluateFarTailE(tail, direction);
+        double d2 = 0.0;
+        for(int c = 0; c < 3; ++c)
+            d2 += (a[c] - e[c]) * (a[c] - e[c]);
+        worst = std::max(worst, std::sqrt(d2));
+    }
+    EXPECT_LT(worst / scale, 2.0)
+        << "off-alignment moving multipole must stay inside the conservative bound";
 }

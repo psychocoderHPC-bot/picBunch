@@ -47,13 +47,7 @@ namespace picBunch
                 bunch.z[p] - centre[2]};
             tail.charge += q;
             absoluteCharge += std::abs(q);
-            for(int a = 0; a < 3; ++a)
-                tail.dipole[a] += q * rel[a];
             double const r2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2];
-            for(int i = 0; i < 3; ++i)
-                for(int j = 0; j < 3; ++j)
-                    tail.quadrupole[i * 3 + j]
-                        += q * (3.0 * rel[i] * rel[j] - (i == j ? r2 : 0.0));
             tail.supportRadius = std::max(tail.supportRadius, std::sqrt(r2));
 
             double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
@@ -81,6 +75,43 @@ namespace picBunch
         if(velocityWeight != 0.0)
             for(int a = 0; a < 3; ++a)
                 tail.meanVelocity[a] = velocitySum[a] / velocityWeight;
+
+        // Dipole and quadrupole are accumulated in the bunch rest frame.  For a
+        // rigidly moving distribution the field is the Lorentz transform of the
+        // rest-frame static field, so the moments must be taken there: the
+        // longitudinal separation is stretched by gamma.  Keeping lab-frame
+        // moments and scaling the lab static field is not the same operation
+        // for the higher multipoles.
+        double const meanSpeed2 = tail.meanVelocity[0] * tail.meanVelocity[0]
+            + tail.meanVelocity[1] * tail.meanVelocity[1]
+            + tail.meanVelocity[2] * tail.meanVelocity[2];
+        double const meanGamma2
+            = 1.0 / std::max(1.0 - meanSpeed2 / (kSpeedOfLight * kSpeedOfLight), 1.0e-300);
+        double const meanGamma = std::sqrt(meanGamma2);
+        double const meanSpeed = std::sqrt(meanSpeed2);
+        std::array<double, 3> const nhat{
+            (meanSpeed > 0.0) ? tail.meanVelocity[0] / meanSpeed : 0.0,
+            (meanSpeed > 0.0) ? tail.meanVelocity[1] / meanSpeed : 0.0,
+            (meanSpeed > 0.0) ? tail.meanVelocity[2] / meanSpeed : 0.0};
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const q = bunch.weight[p] * bunch.charge[p];
+            std::array<double, 3> const rel{
+                bunch.x[p] - centre[0],
+                bunch.y[p] - centre[1],
+                bunch.z[p] - centre[2]};
+            double const rn = rel[0] * nhat[0] + rel[1] * nhat[1] + rel[2] * nhat[2];
+            std::array<double, 3> rest{};
+            for(int a = 0; a < 3; ++a)
+                rest[a] = rel[a] + (meanGamma - 1.0) * rn * nhat[a];
+            double const r2 = rest[0] * rest[0] + rest[1] * rest[1] + rest[2] * rest[2];
+            for(int a = 0; a < 3; ++a)
+                tail.dipole[a] += q * rest[a];
+            for(int i = 0; i < 3; ++i)
+                for(int j = 0; j < 3; ++j)
+                    tail.quadrupole[i * 3 + j]
+                        += q * (3.0 * rest[i] * rest[j] - (i == j ? r2 : 0.0));
+        }
         tail.switchDistance = switchFactor * tail.supportRadius;
         return tail;
     }
@@ -99,16 +130,6 @@ namespace picBunch
         double const d = std::sqrt(d2);
         std::array<double, 3> const n{r[0] / d, r[1] / d, r[2] / d};
 
-        double const pDotN
-            = tail.dipole[0] * n[0] + tail.dipole[1] * n[1] + tail.dipole[2] * n[2];
-        std::array<double, 3> dTimesN{};
-        for(int i = 0; i < 3; ++i)
-            dTimesN[i] = tail.quadrupole[i * 3 + 0] * n[0]
-                + tail.quadrupole[i * 3 + 1] * n[1]
-                + tail.quadrupole[i * 3 + 2] * n[2];
-        double const nDotDn
-            = n[0] * dTimesN[0] + n[1] * dTimesN[1] + n[2] * dTimesN[2];
-
         // Motion of the compact bunch: beta = meanVelocity / c, with
         // 1/gamma^2 = 1 - |beta|^2.  bhat is the unit direction of motion.
         double const c = kSpeedOfLight;
@@ -117,10 +138,8 @@ namespace picBunch
             tail.meanVelocity[1] / c,
             tail.meanVelocity[2] / c};
         double const betaSq = beta[0] * beta[0] + beta[1] * beta[1] + beta[2] * beta[2];
-        // A valid bunch has a subluminal mean velocity; a superluminal mean (a
-        // pathological mixed-sign, near-neutral bunch with a small net charge
-        // whose charge-weighted mean diverges) would make 1 - |beta|^2
-        // non-positive, so clamp it to keep the field finite.
+        // A valid bunch has a subluminal mean velocity; clamp the pathological
+        // superluminal mixed-sign case so the field stays finite.
         double const invG2 = std::max(1.0 - betaSq, 1.0e-15);
         double const gamma = 1.0 / std::sqrt(invG2);
         double const bnorm = std::sqrt(betaSq);
@@ -129,44 +148,62 @@ namespace picBunch
             (bnorm > 0.0) ? beta[1] / bnorm : 0.0,
             (bnorm > 0.0) ? beta[2] / bnorm : 0.0};
 
-        // Static dipole + quadrupole field (the monopole is handled separately,
-        // as the exact Lienard point field below).
-        double const dipoleScale = kCoulombConstant * 2.0 / (d2 * d);
-        double const quadrupoleScale = kCoulombConstant * 0.5 / (d2 * d2);
+        // Rest-frame observation vector: longitudinal separation is stretched
+        // by gamma.  The dipole and quadrupole in FarTail are rest-frame
+        // moments, so their static field must be evaluated at R', not at R.
+        double const rn = r[0] * bhat[0] + r[1] * bhat[1] + r[2] * bhat[2];
+        std::array<double, 3> const rRest{
+            r[0] + (gamma - 1.0) * rn * bhat[0],
+            r[1] + (gamma - 1.0) * rn * bhat[1],
+            r[2] + (gamma - 1.0) * rn * bhat[2]};
+        double const d2r = rRest[0] * rRest[0] + rRest[1] * rRest[1]
+            + rRest[2] * rRest[2];
+        double const dr = std::sqrt(d2r);
+        std::array<double, 3> const nr{
+            (dr > 0.0) ? rRest[0] / dr : 0.0,
+            (dr > 0.0) ? rRest[1] / dr : 0.0,
+            (dr > 0.0) ? rRest[2] / dr : 0.0};
+
+        double const pDotN
+            = tail.dipole[0] * nr[0] + tail.dipole[1] * nr[1] + tail.dipole[2] * nr[2];
+        std::array<double, 3> dTimesN{};
+        for(int i = 0; i < 3; ++i)
+            dTimesN[i] = tail.quadrupole[i * 3 + 0] * nr[0]
+                + tail.quadrupole[i * 3 + 1] * nr[1]
+                + tail.quadrupole[i * 3 + 2] * nr[2];
+        double const nDotDn
+            = nr[0] * dTimesN[0] + nr[1] * dTimesN[1] + nr[2] * dTimesN[2];
+
+        // Rest-frame static dipole + quadrupole field.  The monopole is the
+        // exact Lienard point field below and is not part of this expansion.
+        double const dipoleScale = kCoulombConstant * 2.0 / (d2r * dr);
+        double const quadrupoleScale = kCoulombConstant * 0.5 / (d2r * d2r);
         std::array<double, 3> high{};
         for(int a = 0; a < 3; ++a)
         {
-            double const dipoleTerm = 1.5 * pDotN * n[a] - 0.5 * tail.dipole[a];
-            double const quadrupoleTerm = 5.0 * nDotDn * n[a] - 2.0 * dTimesN[a];
+            double const dipoleTerm = 1.5 * pDotN * nr[a] - 0.5 * tail.dipole[a];
+            double const quadrupoleTerm = 5.0 * nDotDn * nr[a] - 2.0 * dTimesN[a];
             high[a] = dipoleScale * dipoleTerm + quadrupoleScale * quadrupoleTerm;
         }
 
-        // Asymptotic moving field of a uniformly moving compact bunch.
-        //
-        // Monopole: the exact Lienard point field of the total charge moving at
-        // the mean velocity.  This is exact for a point source in every
-        // direction; it is the on-axis 1/gamma^2 / transverse gamma form.
+        // Boost the rest-frame higher multipoles to the lab: parallel component
+        // unchanged, perpendicular component times gamma.
+        if(betaSq > 0.0)
+        {
+            double const ePar
+                = high[0] * bhat[0] + high[1] * bhat[1] + high[2] * bhat[2];
+            for(int a = 0; a < 3; ++a)
+                high[a] = high[a] + (gamma - 1.0) * (high[a] - ePar * bhat[a]);
+        }
+
+        // Monopole: exact Lienard point field of the total charge in the lab.
         double const rb = r[0] * beta[0] + r[1] * beta[1] + r[2] * beta[2];
-        double const denom = d2 * invG2 + rb * rb; // r^2 (1-beta^2) + (r.beta)^2
+        double const denom = d2 * invG2 + rb * rb;
         double const monopoleF
             = (denom > 0.0)
             ? kCoulombConstant * tail.charge * invG2 / (denom * std::sqrt(denom))
             : 0.0;
 
-        // Higher multipoles: keep their static shape but transform it by the
-        // motion, scaling the component parallel to beta by 1/gamma^2 and the
-        // perpendicular one by gamma.  This is an asymptotic moving multipole,
-        // not an exact Lienard multipole sum.  For beta = 0 the transform is the
-        // identity and the whole expression reduces exactly to the static
-        // multipole field (monopole + dipole + quadrupole, no gammaMax factor).
-        if(betaSq > 0.0)
-        {
-            double const ePar
-                = high[0] * bhat[0] + high[1] * bhat[1] + high[2] * bhat[2];
-            double const s = invG2 - gamma;
-            for(int a = 0; a < 3; ++a)
-                high[a] = gamma * high[a] + s * ePar * bhat[a];
-        }
         std::array<double, 3> field{};
         for(int a = 0; a < 3; ++a)
             field[a] = high[a] + monopoleF * r[a];

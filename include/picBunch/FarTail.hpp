@@ -10,14 +10,16 @@ namespace picBunch
 {
     /** Asymptotic moving-multipole far field of a compact bunch.
      *
-     * The moments (charge, dipole, traceless quadrupole ``D_ij = sum q (3 x_i
-     * x_j - |x|^2 delta_ij)``) are taken about the bounding-box centre in the
-     * lab frame.  The electric field is the asymptotic field of the bunch
-     * moving uniformly at ``meanVelocity``: the monopole is the exact Lienard
-     * point field of the total charge at the mean velocity, and the dipole and
-     * quadrupole keep their static shape with the component parallel to the
-     * mean velocity scaled by ``1/gamma^2`` and the perpendicular component by
-     * ``gamma``.  This is an asymptotic moving multipole, not an exact Lienard
+     * The charge and the bounding-box centre are lab-frame quantities.  The
+     * dipole and traceless quadrupole ``D_ij = sum q (3 x_i x_j - |x|^2
+     * delta_ij)`` are accumulated in the bunch rest frame (longitudinal
+     * separations stretched by ``gamma``), because for a rigidly moving
+     * distribution the field is the Lorentz transform of the rest-frame static
+     * field.  The monopole is the exact Lienard point field of the total charge
+     * at the mean velocity; the rest-frame dipole and quadrupole are evaluated
+     * at the Lorentz-stretched observation point and their field is boosted
+     * back (parallel component unchanged, perpendicular component times
+     * ``gamma``).  This is an asymptotic moving multipole, not an exact Lienard
      * multipole sum, so it is exact only in the limit of a point source (it
      * reproduces ``pointFieldNormalized`` for one particle in every direction).
      * For an extended bunch the error grows with the bunch size over the

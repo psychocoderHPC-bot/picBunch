@@ -305,7 +305,7 @@ meet the same number end to end:
 | mesh / TSC deposit | `--tolerance` (padding), fixed `kRefinement = 1`, TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order, deposit scheme or refinement. Near-source continuum error is not bounded by this term. |
 | velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed, not refitted. A 5% energy spread measures `1.12e-3` at 16 boxes and `2.72e-4` at 64; a 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. See `docs/measurements/velocity_bin_calibration.csv`. |
 | near quadrature | `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order` | `fast` gives `7.99e-4` stationary and `1.69e-4` moving axial gamma 10, but `8.15e-2` moving oblique in-support. `exact` uses Lorentz-contracted in-support quadrature: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. |
-| far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the static dipole/quadrupole transformed by `1/gamma^2` along and `gamma` across the motion. It is exact for a single point source; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
+| far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the rest-frame dipole/quadrupole evaluated at the Lorentz-stretched point and boosted back. It is exact for a single point source and in the principal dipole alignments; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
 | output precision | checkpoint `precision` | the field pipeline is float64; the default checkpoint stores float32 (`6e-8` fractional resolution) unless `precision = "float64"` is requested. |
 
 The mesh term is the only one `--tolerance` controls directly. Pick the near-shell mode
@@ -543,9 +543,9 @@ needs 350 cells from the new quadrupole bound and 360 cells from the old one, so
 box would exceed the `2^28` padded-node cap at tolerance `1e-3`. Therefore the writer does
 not zero-fill the global domain. Beyond a measured switch radius it evaluates an asymptotic
 moving multipole (`include/picBunch/FarTail.hpp`): the exact Liénard monopole of the total
-charge moving at the charge-weighted mean velocity, plus the static dipole and quadrupole
-with their component parallel to the motion scaled by `1/gamma^2` and their perpendicular
-component by `gamma`. For `beta = 0` this reduces exactly to the static multipole; for one
+charge moving at the charge-weighted mean velocity, plus the rest-frame dipole and
+quadrupole evaluated at the Lorentz-stretched observation point and boosted back to the
+lab frame. For `beta = 0` this reduces exactly to the static multipole; for one
 particle it reproduces `pointFieldNormalized` in every direction. For an extended bunch it
 is the leading moving multipole, not a full Liénard multipole sum. The switch is `6R`;
 the measured worst per-component deviation from an independent direct charge sum is
@@ -563,7 +563,8 @@ particle bunch the field on a box extended by exactly the derived margin differs
 2576.8 V/m`. `Margin.FarTailMatchesDirectSum` checks the stationary expansion against the
 direct sum; `Margin.MovingFarTailMatchesPointKernel` checks the gamma-10 axial, transverse
 and oblique directions against `pointFieldNormalized` to `1e-12`, and
-`Margin.NeutralBunchUsesTotalChargeForMeanVelocity` pins the neutral-bunch weighting.
+`Margin.NeutralBunchUsesTotalChargeForMeanVelocity` pins the neutral-bunch weighting, and
+`Margin.MovingDipolarCloudBound` pins the higher-multipole moving transform.
 
 PIConGPU restart on a domain larger than the written one must still treat the written file
 as a finite-domain field. The bound above applies inside the written domain; it says nothing
