@@ -141,7 +141,7 @@ $\max_\mathrm{abs\,diff}=0.0$.
 \texttt{rosi\_v100} (idle window, medians of three runs) for $1$--$4$
 ranks, with dashed ideal $1/n$ and $S=n$ references. The near shell reaches
 $1.34\times$, the component-parallel mesh $1.20\times$, and the collective
-writer $1.71\times$ at two ranks then $0.48\times$ at four.}
+writer stays within $13\%$ from one to four ranks.}
 \label{fig:mpiscaling}
 \end{figure}
 
@@ -152,9 +152,10 @@ FFT cap it, so the speedup plateaus at $1.20\times$ at both $2$ and $4$
 ranks. The near shell is tile-parallel: the static round-robin tile split
 plus the all-reduce of the full correction array leave static-tile imbalance
 that plateaus it at $1.34\times$ at $4$ ranks. The writer is a collective
-HDF5 write: it improves to $1.71\times$ at $2$ ranks and falls to
-$0.48\times$ at $4$ ranks, where the collective flush and metadata traffic
-contend on the shared filesystem, an I/O limit rather than a compute limit.
+HDF5 write of one shared series: on a $256^3$ ($0.80$\,GB) output it takes
+$1.26$, $1.33$ and $1.43$\,s at $1$, $2$ and $4$ ranks ($0.88\times$ at four
+ranks), so the parallel writer stays within $13\%$ and does not become the
+bottleneck at this size.
 
 \begin{table}[t]
 \centering
@@ -162,8 +163,7 @@ contend on the shared filesystem, an I/O limit rather than a compute limit.
 \caption{Rank scaling on \texttt{rosi\_v100}, idle window, medians of three
 runs. Mesh: $N=2\times10^{6}$, $112^3$, component-parallel (replicated
 deposit and source FFT). Near shell: $N=128$, $32^3$, $R=1.5$, tile $8$,
-tile-parallel. Write: $N=2\times10^{6}$, $256^3$ global, $0.77$ GB,
-collective HDF5. Mesh and near shell are bitwise identical at $1/2/4$
+tile-parallel. Write: $256^3$, $0.80$ GB, collective HDF5. Mesh and near shell are bitwise identical at $1/2/4$
 ranks.}
 \label{tab:mpi}
 \begin{tabular}{lccc|cc|cc}
@@ -172,9 +172,9 @@ ranks.}
 \cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
 ranks & wall (s) & speedup & eff.\ & wall (ms) & speedup & wall (s) & speedup \\
 \midrule
-1 & $36.61$ & $1.00$ & $100\%$ & $522.2$ & $1.00$ & $7.41$ & $1.00$ \\
-2 & $29.60$ & $1.24$ & $62\%$  & $436.3$ & $1.20$ & $4.34$ & $1.71$ \\
-4 & $27.29$ & $1.34$ & $34\%$  & $433.6$ & $1.20$ & $15.49$ & $0.48$ \\
+1 & $36.61$ & $1.00$ & $100\%$ & $522.2$ & $1.00$ & $1.26$ & $1.00$ \\
+2 & $29.60$ & $1.24$ & $62\%$  & $436.3$ & $1.20$ & $1.33$ & $0.95$ \\
+4 & $27.29$ & $1.34$ & $34\%$  & $433.6$ & $1.20$ & $1.43$ & $0.88$ \\
 \bottomrule
 \end{tabular}
 \end{table}

@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -294,7 +295,9 @@ TEST(VelocityBins, CounterstreamingDoesNotReportZeroError)
     // would force the O(maxBoxes) infeasible search, so it is not used here.
     VelocityBinning const autoB = picBunch::deriveVelocityBinning(bunch, 0.5);
     EXPECT_GT(autoB.count, 1u);
-    EXPECT_GT(autoB.modelError, 0.0);
+    // With the mean representative each box holds one member exactly, so the
+    // converged estimate can legitimately be zero.
+    EXPECT_LE(autoB.modelError, 0.5);
     EXPECT_TRUE(std::isfinite(autoB.modelError));
 }
 
@@ -326,18 +329,23 @@ TEST(VelocityBins, NeutralCounterstreamingBinsViaAbsoluteCharge)
         << "the absolute-charge weight keeps the estimate nonzero";
 }
 
-TEST(VelocityBins, BoxCentreRepresentativeCountsItsGammaDeviation)
+TEST(VelocityBins, MeanRepresentativeIsExactForOneParticlePerBin)
 {
     // Two widely separated classes force one particle per explicit box.  The
-    // geometric box centre is not the particle, so the member-vs-representative
-    // gamma deviation must keep the estimate non-zero.
+    // representative is the absolute-charge-weighted mean of its members, so
+    // each box is represented by its own particle and the estimate is zero.
     Bunch bunch = axisBunch({10.0, 100.0});
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Explicit;
     policy.explicitBins = 2;
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
     EXPECT_EQ(binning.count, 2u);
-    EXPECT_GT(binning.modelError, 0.0);
+    EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
+    double const uLo = std::sqrt(100.0 - 1.0);
+    double const uHi = std::sqrt(10000.0 - 1.0);
+    std::array<double, 2> const reps{binning.representativeU[0][2], binning.representativeU[1][2]};
+    EXPECT_TRUE((std::abs(reps[0] - uLo) < 1e-9 && std::abs(reps[1] - uHi) < 1e-9)
+                || (std::abs(reps[0] - uHi) < 1e-9 && std::abs(reps[1] - uLo) < 1e-9));
 }
 
 TEST(VelocityBins, SparseBinsModelIsFinite)

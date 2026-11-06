@@ -141,15 +141,12 @@ CUDA 13.4.92). The openPMD standard is version 5.0~\citep{openpmd}; the
 reference PIConGPU is the release whose \texttt{referenceOnly}
 field-initializer mode is used in
 Section~\ref{sec:validation}. The FFT library is cuFFT in the unnormalized
-form of the vendor documentation~\citep{cudacc2024}. The release passes
-$18/18$ ctest with zero compiler warnings on a V100 \texttt{sm\_70}, an
-H100 \texttt{sm\_90}, and a gfx1100 HIP build.
+form of the vendor documentation~\citep{cudacc2024}.
 
 \subsection{Data and code availability}
 \label{sec:availability}
 
-The source of \texttt{picBunch} \texttt{v0.9.1} (tag \texttt{v0.9.1},
-commit \texttt{c0bf82c2251448abfaad66aa03b18ab3a9ab9322}) is available at
+The source is available at
 \url{https://github.com/psychocoderHPC/picBunch}. The measurement data
 referenced by name in this paper are the files recorded in
 \texttt{docs/measurements/} of the repository: \texttt{matrix.csv} (the

@@ -1,0 +1,9 @@
+# Multi-velocity representative comparison, run 2026-11-06, rosi_v100 CPU.
+# Bunch: 200 electrons, gamma=10, 5 degree rms conical divergence, cell 1e-6 m,
+# 32^3 grid, explicit boxes.  Reference: 128 boxes with the same representative
+# rule.  Metric: global L2 relative error over all six field components.
+case,spread_deg,boxes,representative,global_rel_error,reference_boxes,date
+angular,5,16,box_centre,1.3220e-1,128,2026-11-06
+angular,5,16,mean_momentum,1.1232e-1,128,2026-11-06
+angular,5,64,box_centre,4.3148e-2,128,2026-11-06
+angular,5,64,mean_momentum,4.1252e-2,128,2026-11-06

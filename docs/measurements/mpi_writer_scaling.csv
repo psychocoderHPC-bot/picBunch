@@ -1,0 +1,6 @@
+# Collective openPMD/HDF5 writer scaling, run 2026-11-06, rosi_v100, 1 node.
+# Output: 256^3 nodes, six components, double, 0.80 GB.  rosi local filesystem.
+ranks,writer_seconds,speedup_vs_1,total_seconds
+1,1.2638,1.000,61.321
+2,1.3261,0.953,33.706
+4,1.4318,0.883,23.918

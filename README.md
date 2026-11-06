@@ -270,7 +270,7 @@ per-particle-velocity field and only the outside-shell field carries the binning
 The error model is
 `modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + Delta_gamma_b/gamma_b)`,
 where `q_b/Q` is the charge fraction of box `b`, `gamma_b` the largest gamma in the box,
-`Delta_theta_b` the largest angle to the box centre, and `Delta_gamma_b` the gamma range.
+`Delta_theta_b` the largest angle to the box representative (the absolute-charge-weighted mean momentum of the box), and `Delta_gamma_b` the gamma range.
 The shipped value `C = 1` is an assumption, not a refitted calibration; the archived
 accuracy points are in `docs/measurements/velocity_bin_calibration.csv` and the original
 model sums were not committed. `--bin-model-constant` overrides it for diagnostics.

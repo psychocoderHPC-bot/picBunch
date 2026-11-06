@@ -216,7 +216,9 @@ namespace picBunch
             out.representativeU.resize(boxes);
 
             // Representative: box centre in the beam frame, mapped to the lab
-            // frame.  One box: the charge-weighted mean u.
+            // frame.  For a multi-box split it is replaced below by the
+            // absolute-charge-weighted mean of the members.  One box: the
+            // charge-weighted mean u.
             if(boxes == 1u)
             {
                 Vec3 sum{0.0, 0.0, 0.0};
@@ -274,6 +276,30 @@ namespace picBunch
                 }
             }
             out.boxOf = boxOf;
+
+            // Replace the geometric box centre by the absolute-charge-weighted
+            // mean momentum of the box members.  The mean minimises the angular
+            // and gamma deviations the model charges for, so it is the correct
+            // kernel representative at zero extra kernel cost.  Empty boxes
+            // keep the centre (they contribute nothing to the field).
+            if(boxes > 1u)
+            {
+                std::vector<Vec3> sumU(boxes);
+                std::vector<double> sumW(boxes, 0.0);
+                for(std::size_t p = 0; p < count; ++p)
+                {
+                    std::size_t const b = boxOf[p];
+                    double const w = absCharge[p];
+                    sumU[b][0] += w * bunch.ux[p];
+                    sumU[b][1] += w * bunch.uy[p];
+                    sumU[b][2] += w * bunch.uz[p];
+                    sumW[b] += w;
+                }
+                for(std::size_t b = 0; b < boxes; ++b)
+                    if(sumW[b] > 0.0)
+                        for(int a = 0; a < 3; ++a)
+                            out.representativeU[b][a] = sumU[b][a] / sumW[b];
+            }
 
             // Content model: per box, absolute-charge fraction, gamma range, the
             // largest member angle against the representative, and the largest
