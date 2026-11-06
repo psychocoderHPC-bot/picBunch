@@ -18,7 +18,7 @@ run with
 \seqsplit{picBunchBench --sweep --repeat 3 --csv matrix.csv}. The input
 bunches are not checked into the repository; the sweep configuration is the
 generator. The fast GPU kernel
-\seqsplit{tools/closed-form/gpu\_extract.cu} is part of the shipped source.
+\seqsplit{tools/closed-form/gpu\_extract.cu} is part of the source.
 The H100 runs used CUDA $13.4$.
 
 \paragraph{Correctness anchor.}
@@ -94,7 +94,7 @@ not the global field.
 \small
 \caption{End-to-end pipeline time including the checkpoint writer and the
 openPMD reader, medians over 3 repeats, \texttt{rosi\_v100} GPU 0, 20-cell
-box, $\gamma=10$, shipped CLI \texttt{--tolerance} $10^{-3}$. A different
+box, $\gamma=10$, CLI \texttt{--tolerance} $10^{-3}$. A different
 measurement path from the compute-only Table~\ref{tab:matrix}: the totals
 include the writer (the dominant added term); the per-stage split is
 deposit/kernel/FFT/readout/writer.}

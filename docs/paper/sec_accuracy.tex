@@ -16,7 +16,7 @@ Gauss--Legendre quadrature with a TSC-knot split and a singularity-cancelling
 power map; its quadrature error is below the $3\times10^{-4}$ gate in every
 configuration measured here. Two more references constrain the method
 externally: an order-12 independent continuum (refine 3) against which the
-shipped CLI is measured, and the PIConGPU \texttt{referenceOnly} field used
+CLI is measured, and the PIConGPU \texttt{referenceOnly} field used
 in the cross-validation (Section~\ref{sec:validation}).
 
 Three metrics are reported and are not interchangeable; each claim in this
@@ -66,7 +66,7 @@ source & measured magnitude & statement \\
 mesh / deposit & $1.38\times10^{-7}$ ($M\!-\!T$, $\gamma=1$, aspect 1, $d=48$); $2.6\times10^{-4}$ ($\gamma=10$, aspect 1, $d=48$) & Table~\ref{tab:d48}; far-field sweeps of Section~\ref{sec:farfield} \\
 velocity binning & $4.3\times10^{-6}$ relative ($B=16$ vs $64$, 5\% energy spread); $0.004\%$ in $B_z$ for the 5\% energy case; $1.4\%$ worst against the arbiter for the 1\,mrad case & Appendix~\ref{app:multivel}, Table~\ref{tab:multivel} \\
 near-source quadrature & $7.99\times10^{-4}$ stationary interior; $1.69\times10^{-4}$ moving axial interior; $8.15\times10^{-2}$ moving oblique interior (measured limit) & Table~\ref{tab:fast} \\
-far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the shipped $512^3$ output & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
+far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the $512^3$ output & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
 output precision & float32 checkpoint: bitwise arrival under PIConGPU, $\max_\mathrm{abs\,diff}=0.0$ after one step; float64 opt-in records a warning attribute & Section~\ref{sec:validation} \\
 \bottomrule
 \end{tabular}
@@ -80,7 +80,7 @@ limit of the fast near backend in the oblique moving case
 (Section~\ref{sec:fastacc}); the stationary and axial modes reach
 $10^{-3}$. The far-tail term is bounded by the tolerance-level margin of
 Section~\ref{sec:margin} and is $1.9\times10^{-3}$ of that level at the
-shipped switch radius. Output precision is not a measured loss: the
+switch radius. Output precision is not a measured loss: the
 float32 checkpoint arrives bitwise in PIConGPU, and the float64 path is a
 uniform opt-in.
 
@@ -156,7 +156,7 @@ $3\times10^{-4}$ from $d=6$ for every $\gamma$.
 \centering
 \small
 \caption{Worst per-component relative error (over $x,y$,
-$|\mathrm{ref}|\ge10^{-3}$ of the local field) of the shipped CLI against
+$|\mathrm{ref}|\ge10^{-3}$ of the local field) of the CLI against
 the TSC-convolved continuum, at $d=16$ and $d=32$ cells;
 \texttt{rosi\_v100}, the order-12 independent continuum reference (refine
 3). ``s/c'' = single/cloud.}
@@ -387,7 +387,7 @@ memory feature rather than a speed feature.
 
 \subsection{Determinism}
 
-Repeated runs of the shipped CLI are bit-identical: two runs of the same
+Repeated runs of the CLI are bit-identical: two runs of the same
 input produce byte-identical E/B mesh payloads (md5
 \texttt{d3641d64\ldots}, $15\,092\,736$ bytes). The CLI also rejects a
 below-floor \texttt{--tolerance} ($10^{-15}$) with a nonzero exit. The
