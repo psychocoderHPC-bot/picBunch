@@ -143,6 +143,15 @@ namespace picBunch
         bool useFastGpu = false;
 #if defined(PICBUNCH_BACKEND_CUDA)
         useFastGpu = nearShell.mode == NearShellOptions::Mode::FastGpu;
+        // The fast evaluator is the same algebra on host and device.  When a
+        // CUDA device is compiled in and available, `fast` uses it; `fast-gpu`
+        // remains an explicit request and falls back to the host otherwise.
+        if(nearShell.mode == NearShellOptions::Mode::Fast
+           && pbfast::fastNearDeviceAvailable())
+        {
+            useFastGpu = true;
+            useFast = false;
+        }
         if(useFastGpu && !pbfast::fastNearDeviceAvailable())
         {
             std::fprintf(

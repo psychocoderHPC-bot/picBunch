@@ -202,26 +202,26 @@ reference (order 12, refine 3) it reaches worst-case `7.99e-4` stationary interi
 (order 8); moving oblique interior is `8.15e-2` at the default order and is not a `1e-3`
 path. The arbiter-validated in-support number is `1.6%`: at the hardest in-support node
 of a gamma 10 bunch (`Ey` at cells `(32, 31.5, 31)`, `0.53` cells from source #94),
-`fast` reads `2.043e9 V/m` against the order-12/refine-3 arbiter `2.077e9 V/m`, while
-the driver (and `--near-shell exact`, which shares its quadrature) read `2.153e10 V/m`,
-`10.4x` too high. Validate moving in-support points against the order-12 `indfield`
-arbiter, not the driver. The assembled field is unchanged outside the near tiles
-(bitwise) and the seam jump excess is `2.0e-10` stationary.
+`fast` reads `2.043e9 V/m` against the order-12/refine-3 arbiter `2.077e9 V/m`.
+`--near-shell exact` integrates the in-support points in Lorentz-contracted
+coordinates and agrees with the same arbiter to about `1e-4` off-axis and about `2%`
+at the closest axial node; it is the reference mode, not a blanket `1e-3` path.
+Validate production in-support points against the order-12 `indfield` arbiter. The
+assembled field is unchanged outside the near tiles (bitwise) and the seam jump
+excess is `2.0e-10` stationary.
 
-`--near-shell fast-gpu` (TOML `accuracy.near_shell = "fast-gpu"`) runs the same fast
-evaluator on the accelerator. The CUDA kernel is a line-by-line port of the host
-algebra: one output node per thread, a strided chunk of the tile's near sources, the
-eight-term `asinh` box, the subtracted-Gauss-Legendre remainder, the rest-frame octant
-box for oblique motion, and atomic partial sums for the six staggered components. The
-quadrature nodes and weights, the Yee offsets and the E/B units travel as kernel
-parameters, so no device-side global table is read. The host `--near-shell fast` path
-stays the explicit host selection. `fast-gpu` falls back to it with one stderr warning
-when the build has no CUDA backend or no device is present; it never changes the mesh
-path. On the integrated v0.9.0 tree (rosi_v100, 200 particles, `16^3` output, R = 2,
-tile 2), `fast-gpu` and `fast` agree to `5.7e-15` worst per-component relative
-(`1.37e-2` absolute on an `Ex` peak of `2.39e12 V/m`); the dedicated H100 comparison of
-the branch measured `5.4e-16` to `8.0e-16` relative for stationary, axial gamma 10 and
-oblique cases. The device path is CUDA-only; HIP and CPU builds use the host fallback.
+`--near-shell fast` runs the same evaluator on the CUDA accelerator when the build
+has a CUDA backend and a device is present, and otherwise on the host. The CUDA kernel
+is a line-by-line port of the host algebra: one output node per thread, a strided
+chunk of the tile's near sources, the eight-term `asinh` box, the
+subtracted-Gauss-Legendre remainder, the rest-frame octant box for oblique motion,
+and atomic partial sums for the six staggered components. The quadrature nodes and
+weights, the Yee offsets and the E/B units travel as kernel parameters, so no
+device-side global table is read. `fast-gpu` (TOML `accuracy.near_shell =
+"fast-gpu"`) remains an explicit alias. On rosi_v100 (64^3 output, R = 3, tile 4,
+2000 particles, 8.77e6 evaluations) the device path runs in `2.5 s` against `18.3 s`
+on the host, a `7.3x` speedup, and the two agree to `5.7e-15` worst per-component
+relative. HIP and CPU builds use the host fallback with one stderr warning.
 
 On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
 measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; the

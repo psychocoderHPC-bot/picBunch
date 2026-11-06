@@ -1,0 +1,6 @@
+# Near-shell fast evaluator, host vs CUDA device, run 2026-11-06, rosi_v100.
+# 2000 electrons, 64^3 output, R=3 cells, tile 4, 8.77e6 (source,node,component)
+# evaluations.  Same algebra; agreement 5.7e-15 worst relative.
+evaluator,wall_seconds,speedup,relative_difference_max,date
+host_cpu,18.36,1.00,0,2026-11-06
+cuda_device,2.55,7.20,5.7e-15,2026-11-06

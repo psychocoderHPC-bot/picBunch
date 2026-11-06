@@ -327,11 +327,15 @@ Appendix~\ref{app:slices} predate the Lorentz-contracted reference and are
 kept as an upper bound.
 
 The shell radius and order are the cost levers
-(Section~\ref{sec:cost}). A device backend,
-\texttt{--near-shell fast-gpu}, runs the same fast algebra on the CUDA
-device, one thread per (pair, component); against the host fast path it
-agrees to $5.4\times10^{-16}$ to $8.0\times10^{-16}$, and it falls back to
-the host path with a warning when no device is present.
+(Section~\ref{sec:cost}). The fast evaluator runs the same algebra on the
+CUDA device when the build has one and a device is present
+(\texttt{--near-shell fast}); \texttt{fast-gpu} is the explicit device
+request. The kernel uses one thread per (pair, component) and agrees with the
+host path to $5.4\times10^{-16}$ to $8.0\times10^{-16}$. On
+\texttt{rosi\_v100} ($64^3$ output, $R=3$, tile 4, 2000 particles,
+$8.77\times10^{6}$ evaluations) the device path runs in $2.5$\,s against
+$18.3$\,s on the host, a $7.3\times$ speedup; it falls back to the host
+with a warning when no device is present.
 
 \subsection{Cost at $2\times10^{6}$ particles, one H100}
 \label{sec:cost}
