@@ -15,6 +15,7 @@
 #include "picBunch/Kernel.hpp"
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
+#include "picBunch/VelocityMoments.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -30,9 +31,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 namespace picBunch
 {
@@ -232,6 +235,230 @@ namespace picBunch
                 }
             }
         };
+
+        //! TSC deposit of the velocity moment ``q_p (u_p - u0)^a`` onto the padded box.
+        //! Same stencil as the charge deposit, but the per-particle coefficient is the
+        //! signed charge times the velocity moment (power form, no ``1/a!``).
+        template<Shape S>
+        struct MomentDepositKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                double const* px,
+                double const* py,
+                double const* pz,
+                double const* pux,
+                double const* puy,
+                double const* puz,
+                double const* pq,
+                std::uint32_t numParticles,
+                double* rho,
+                std::uint32_t rhoStride,
+                std::uint32_t zOffset,
+                std::uint32_t zExtent,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz,
+                double ox,
+                double oy,
+                double oz,
+                double sx,
+                double sy,
+                double sz,
+                double u0x,
+                double u0y,
+                double u0z,
+                int a1,
+                int a2,
+                int a3) const
+            {
+                double const support = shapeSupport<S>();
+                auto const powSmall = [](double x, int e) {
+                    double r = 1.0;
+                    for(int i = 0; i < e; ++i)
+                        r *= x;
+                    return r;
+                };
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{numParticles}))
+                {
+                    double const pos[3] = {px[p], py[p], pz[p]};
+                    double const org[3] = {ox, oy, oz};
+                    double const sp[3] = {sx, sy, sz};
+                    double t[3];
+                    long lo[3];
+                    long hi[3];
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        t[a] = (pos[a] - org[a]) / sp[a];
+                        lo[a] = static_cast<long>(::ceil(t[a] - support));
+                        hi[a] = static_cast<long>(::floor(t[a] + support));
+                    }
+                    double const coeff
+                        = pq[p] * powSmall(pux[p] - u0x, a1) * powSmall(puy[p] - u0y, a2)
+                            * powSmall(puz[p] - u0z, a3);
+                    if(coeff == 0.0)
+                        continue;
+                    for(long ia = lo[0]; ia <= hi[0]; ++ia)
+                    {
+                        double const wa = shapeWeight<S>(static_cast<double>(ia) - t[0]);
+                        if(wa == 0.0)
+                            continue;
+                        long const ma = wrapPaddedIndex(ia, Mx);
+                        for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                        {
+                            double const wb = wa * shapeWeight<S>(static_cast<double>(ib) - t[1]);
+                            if(wb == 0.0)
+                                continue;
+                            long const mb = wrapPaddedIndex(ib, My);
+                            for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                            {
+                                double const wc = wb * shapeWeight<S>(static_cast<double>(ic) - t[2]);
+                                if(wc == 0.0)
+                                    continue;
+                                long const mc = wrapPaddedIndex(ic, Mz);
+                                if(mc < static_cast<long>(zOffset)
+                                   || mc >= static_cast<long>(zOffset + zExtent))
+                                    continue;
+                                auto const idx = static_cast<std::size_t>(ma)
+                                    + static_cast<std::size_t>(Mx)
+                                        * (static_cast<std::size_t>(mb)
+                                           + static_cast<std::size_t>(My)
+                                               * static_cast<std::size_t>(mc - zOffset));
+                                alpaka::onAcc::atomicAdd(acc, &rho[idx * rhoStride], wc * coeff);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        //! Velocity-moment kernel for one output component: writes the full
+        //! ``Order``-order Taylor of component ``component`` (all multi-indices,
+        //! compact order) at the node's Yee-offset displacement ``R``.  The buffer is
+        //! laid out ``[multiIndex][node]`` so each coefficient is a contiguous
+        //! padded field ready for one R2C transform.
+        template<std::size_t Order>
+        struct MomentKernelBuildKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                double* const* kernelPlanes,
+                std::uint32_t zOffset,
+                std::uint32_t zExtent,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz,
+                int component,
+                double dx,
+                double dy,
+                double dz,
+                double cellx,
+                double celly,
+                double cellz,
+                double refinement,
+                double u0x,
+                double u0y,
+                double u0z) const
+            {
+                using TP = detail::TaylorPoly<Order>;
+                constexpr std::size_t T = TP::T;
+                for(auto const& idx : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{Extents3{Mx, My, zExtent}}))
+                {
+                    auto const i = static_cast<std::uint32_t>(idx[0]);
+                    auto const j = static_cast<std::uint32_t>(idx[1]);
+                    auto const kLocal = static_cast<std::uint32_t>(idx[2]);
+                    auto const k = kLocal + zOffset;
+                    int const di = (i <= (Mx - 1u) / 2u) ? static_cast<int>(i)
+                                                         : static_cast<int>(i) - static_cast<int>(Mx);
+                    int const dj = (j <= (My - 1u) / 2u) ? static_cast<int>(j)
+                                                         : static_cast<int>(j) - static_cast<int>(My);
+                    int const dk = (k <= (Mz - 1u) / 2u) ? static_cast<int>(k)
+                                                         : static_cast<int>(k) - static_cast<int>(Mz);
+                    double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
+                    double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
+                    double const Rz = (static_cast<double>(dk) * refinement + dz) * cellz;
+                    double coeffs[6 * T];
+                    detail::pointFieldTaylor<Order>(Rx, Ry, Rz, u0x, u0y, u0z, coeffs);
+                    double const* comp = coeffs + static_cast<std::size_t>(component) * T;
+                    auto const flat = static_cast<std::size_t>(i)
+                        + static_cast<std::size_t>(Mx)
+                            * (static_cast<std::size_t>(j)
+                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(kLocal));
+                    for(std::size_t a = 0; a < T; ++a)
+                    {
+                        double const v = comp[a];
+                        kernelPlanes[a][flat] = std::isfinite(v) ? v : 0.0;
+                    }
+                }
+            }
+        };
+
+        //! Accumulate the complex product ``a * b`` into ``out``: ``out[i] += a[i] * b[i]``.
+        //! Complex is two adjacent doubles; the half-spectrum packing is untouched.
+        struct SpectrumAccumulateKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                double* out,
+                double const* a,
+                double const* b,
+                std::uint32_t count) const
+            {
+                for(auto [l] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    std::size_t const off = 2u * static_cast<std::size_t>(l);
+                    double const ar = a[off];
+                    double const ai = a[off + 1u];
+                    double const br = b[off];
+                    double const bi = b[off + 1u];
+                    double const orr = out[off];
+                    double const ori = out[off + 1u];
+                    out[off] = orr + ar * br - ai * bi;
+                    out[off + 1u] = ori + ar * bi + ai * br;
+                }
+            }
+        };
+
+        //! One multi-index ``(a1,a2,a3)`` with its compact order-3 packed index and total degree.
+        struct VelocityMomentMultiIndex
+        {
+            int a1;
+            int a2;
+            int a3;
+            std::size_t idx; //!< compactIndex into the order-3 coefficient layout
+            int tot;         //!< a1 + a2 + a3
+        };
+
+        //! Every multi-index with ``a1+a2+a3 <= order``, in order-3 packed order.
+        std::vector<VelocityMomentMultiIndex> velocityMomentMultiIndices(std::size_t order)
+        {
+            std::vector<VelocityMomentMultiIndex> out;
+            for(int a3 = 0; a3 <= static_cast<int>(order); ++a3)
+                for(int a2 = 0; a2 <= static_cast<int>(order) - a3; ++a2)
+                    for(int a1 = 0; a1 <= static_cast<int>(order) - a3 - a2; ++a1)
+                        out.push_back(
+                            {a1,
+                             a2,
+                             a3,
+                             detail::TaylorPoly<3>::compactIndex(
+                                 static_cast<std::size_t>(a1),
+                                 static_cast<std::size_t>(a2),
+                                 static_cast<std::size_t>(a3)),
+                             a1 + a2 + a3});
+            return out;
+        }
 
         using Clock = std::chrono::steady_clock;
 
@@ -728,8 +955,11 @@ namespace picBunch
         Bunch const& bunch,
         ComputeOptions const& options,
         StageTimes* stageTimes,
-        VelocityBinning* outBinning)
+        VelocityBinning* outBinning,
+        VelocityMomentsReport* outReport)
     {
+        if(outReport)
+            *outReport = VelocityMomentsReport{};
         if(options.nearShell.mode != NearShellOptions::Mode::None
            && options.shape != Shape::TSC)
             throw std::runtime_error(
@@ -1036,6 +1266,327 @@ namespace picBunch
                 && paddedNodes > options.distributedFftMinNodes);
         bool const useDistributed = distributedRequested && par != nullptr
             && (parSize > 1 || options.fftMode == FftMode::Distributed);
+
+        // ---------------------------------------------------------- velocity moments
+        // Opt-in (candidate C1): replace the per-velocity-box FFT chain with a
+        // one-inverse-transform moment sum.  The point kernel is expanded in a
+        // multivariate Taylor series about the absolute-charge-weighted mean u0,
+        // the moment densities M_a are deposited once, and each component is the
+        // inverse transform of sum_a (FFT M_a)(FFT K_a^c).  It always uses the
+        // replicated FFT (full transform per rank, component-parallel), independent
+        // of options.fftMode.  When the policy is disabled, infeasible, or (auto)
+        // not converged this block returns without a result and the binned path
+        // below runs unchanged, so the default stays bit-for-bit identical.
+        if(options.velocityMoments.mode != VelocityMomentsOptions::Mode::Off)
+        {
+            auto const& vm = options.velocityMoments;
+            VelocityMomentsReport localReport;
+            VelocityMomentsReport& rep = outReport ? *outReport : localReport;
+            rep.feasible = true;
+            std::optional<Field> vmField;
+            constexpr double kMomentAutoTol = 0.05;
+            std::size_t const nTerms3 = detail::velocityMomentTerms(3u);
+
+            if(bunch.size() > 0u && bunch.size() <= 0xffffffffu)
+            {
+                std::array<double, 3> u0{};
+                double maxSpread = 0.0;
+                try
+                {
+                    u0 = velocityMomentsCentre(bunch);
+                    maxSpread = velocityMomentsRadius(bunch, u0);
+                }
+                catch(std::exception const&)
+                {
+                    rep.feasible = false;
+                    if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                        rep.fellBack = true;
+                }
+                if(rep.feasible)
+                {
+                    rep.u0 = u0;
+                    rep.maxSpread = maxSpread;
+                    // Memory feasibility: keep the moment scratch (20 moment
+                    // spectra + 20 kernel planes + the auto probe) under a guard so
+                    // an oversized box falls back instead of exhausting the device.
+                    std::uint64_t const momentSpecBytes
+                        = nTerms3 * static_cast<std::uint64_t>(spectrumCount) * sizeof(Complex);
+                    std::uint64_t const kernelMomBytes
+                        = nTerms3 * paddedNodes * sizeof(double);
+                    std::uint64_t const probeBytes = (vm.mode == VelocityMomentsOptions::Mode::Auto)
+                        ? static_cast<std::uint64_t>(spectrumCount) * sizeof(Complex) : 0u;
+                    constexpr std::uint64_t kMomentMaxScratch
+                        = 8ull * 1024ull * 1024ull * 1024ull;
+                    if(momentSpecBytes + kernelMomBytes + probeBytes > kMomentMaxScratch)
+                    {
+                        rep.feasible = false;
+                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                            rep.fellBack = true;
+                    }
+                }
+                if(rep.feasible)
+                {
+                    std::size_t const orderUsed
+                        = (vm.mode == VelocityMomentsOptions::Mode::Explicit)
+                            ? (std::min<std::size_t>(vm.order, 3u))
+                            : 3u;
+                    bool converged = true;
+                    double probe = 0.0;
+                    std::uint32_t const N = static_cast<std::uint32_t>(bunch.size());
+
+                    // Whole-bunch particle arrays (the moment path deposits all
+                    // particles at once, not per velocity box).
+                    auto px = alpaka::onHost::allocUnified<double>(device, N);
+                    auto py = alpaka::onHost::allocUnified<double>(device, N);
+                    auto pz = alpaka::onHost::allocUnified<double>(device, N);
+                    auto pux = alpaka::onHost::allocUnified<double>(device, N);
+                    auto puy = alpaka::onHost::allocUnified<double>(device, N);
+                    auto puz = alpaka::onHost::allocUnified<double>(device, N);
+                    auto pq = alpaka::onHost::allocUnified<double>(device, N);
+                    for(std::uint32_t m = 0; m < N; ++m)
+                    {
+                        px.data()[m] = bunch.x[m];
+                        py.data()[m] = bunch.y[m];
+                        pz.data()[m] = bunch.z[m];
+                        pux.data()[m] = bunch.ux[m];
+                        puy.data()[m] = bunch.uy[m];
+                        puz.data()[m] = bunch.uz[m];
+                        pq.data()[m] = bunch.weight[m] * bunch.charge[m];
+                    }
+
+                    auto const moments = velocityMomentMultiIndices(3u);
+                    // One FFT I/O buffer per coefficient plane (``executeForward``
+                    // takes alpaka buffers, not sub-buffer pointers).  The 20 moment
+                    // spectra are reused across all six components; the 20 kernel
+                    // planes are rebuilt per component and reused.
+                    auto firstMom = alpaka::onHost::allocUnified<Complex>(
+                        device,
+                        static_cast<std::size_t>(spectrumCount));
+                    using MomBuf = decltype(firstMom);
+                    std::vector<MomBuf> momentBufs;
+                    momentBufs.reserve(nTerms3);
+                    momentBufs.push_back(std::move(firstMom));
+                    for(std::size_t a = 1u; a < nTerms3; ++a)
+                        momentBufs.push_back(
+                            alpaka::onHost::allocUnified<Complex>(
+                                device,
+                                static_cast<std::size_t>(spectrumCount)));
+                    auto firstKern = alpaka::onHost::allocUnified<double>(device, paddedNodes);
+                    using KernBuf = decltype(firstKern);
+                    std::vector<KernBuf> kernelBufs;
+                    kernelBufs.reserve(nTerms3);
+                    kernelBufs.push_back(std::move(firstKern));
+                    for(std::size_t a = 1u; a < nTerms3; ++a)
+                        kernelBufs.push_back(
+                            alpaka::onHost::allocUnified<double>(device, paddedNodes));
+                    // Device-side array of the 20 plane pointers for the build kernel.
+                    auto kernelPlanes = alpaka::onHost::allocUnified<double*>(device, nTerms3);
+                    for(std::size_t a = 0u; a < nTerms3; ++a)
+                        kernelPlanes.data()[a] = kernelBufs[a].data();
+                    alpaka::onHost::wait(queue);
+                    auto o3Spec = alpaka::onHost::allocUnified<Complex>(
+                        device,
+                        (vm.mode == VelocityMomentsOptions::Mode::Auto)
+                            ? static_cast<std::size_t>(spectrumCount)
+                            : 1u);
+
+                    auto launchMomentDeposit = [&](int a1, int a2, int a3) {
+                        auto launch = [&](auto tag) {
+                            constexpr Shape S = decltype(tag)::value;
+                            queue.enqueue(
+                                alpaka::onHost::FrameSpec{(N + 63u) / 64u, 64u},
+                                MomentDepositKernel<S>{},
+                                px.data(),
+                                py.data(),
+                                pz.data(),
+                                pux.data(),
+                                puy.data(),
+                                puz.data(),
+                                pq.data(),
+                                N,
+                                rhoReal.data(),
+                                1u,
+                                0u,
+                                Mz,
+                                Mx,
+                                My,
+                                Mz,
+                                grid.origin[0],
+                                grid.origin[1],
+                                grid.origin[2],
+                                grid.spacing[0],
+                                grid.spacing[1],
+                                grid.spacing[2],
+                                u0[0],
+                                u0[1],
+                                u0[2],
+                                a1,
+                                a2,
+                                a3);
+                        };
+                        if(grid.shape == Shape::CIC)
+                            launch(std::integral_constant<Shape, Shape::CIC>{});
+                        else if(grid.shape == Shape::PQS)
+                            launch(std::integral_constant<Shape, Shape::PQS>{});
+                        else
+                            launch(std::integral_constant<Shape, Shape::TSC>{});
+                    };
+
+                    // ---- deposit + FFT every moment density M_a (once)
+                    auto const depStart = Clock::now();
+                    for(auto const& mi : moments)
+                    {
+                        alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
+                        launchMomentDeposit(mi.a1, mi.a2, mi.a3);
+                        alpaka::fft::onHost::executeForward(
+                            queue, r2cPlan, rhoReal, momentBufs[static_cast<std::size_t>(mi.idx)]);
+                        alpaka::onHost::wait(queue);
+                    }
+                    times.depositMs += elapsedMs(depStart);
+
+                    // ---- field = sum_{|a|<=order} conv(M_a, K_a^c) per component
+                    Field vf;
+                    vf.grid = grid;
+                    for(auto& comp : vf.data)
+                        comp.assign(grid.size(), 0.0);
+                    double localFullNorm2 = 0.0;
+                    double localO3Norm2 = 0.0;
+                    auto const fldStart = Clock::now();
+                    for(int c = 0; c < 6; ++c)
+                    {
+                        if(parSize > 1 && (c % parSize) != parRank)
+                            continue; // another rank owns this component
+                        auto const kernelStart = Clock::now();
+                        queue.enqueue(
+                            alpaka::onHost::FrameSpec{
+                                ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
+                                Extents3::fill(4u)},
+                            MomentKernelBuildKernel<3u>{},
+                            kernelPlanes.data(),
+                            0u,
+                            Mz,
+                            Mx,
+                            My,
+                            Mz,
+                            c,
+                            kYeeOffset[c][0],
+                            kYeeOffset[c][1],
+                            kYeeOffset[c][2],
+                            cell[0],
+                            cell[1],
+                            cell[2],
+                            kRefinement,
+                            u0[0],
+                            u0[1],
+                            u0[2]);
+                        alpaka::onHost::wait(queue);
+                        times.kernelMs += elapsedMs(kernelStart);
+
+                        alpaka::onHost::memset(queue, rhoSpec, std::uint8_t{0});
+                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                            alpaka::onHost::memset(queue, o3Spec, std::uint8_t{0});
+                        auto const specStart = Clock::now();
+                        for(auto const& mi : moments)
+                        {
+                            if(static_cast<std::size_t>(mi.tot) > orderUsed)
+                                continue;
+                            alpaka::fft::onHost::executeForward(
+                                queue,
+                                r2cPlan,
+                                kernelBufs[static_cast<std::size_t>(mi.idx)],
+                                kernelSpec);
+                            queue.enqueue(
+                                alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                                SpectrumAccumulateKernel{},
+                                reinterpret_cast<double*>(rhoSpec.data()),
+                                reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
+                                reinterpret_cast<double const*>(kernelSpec.data()),
+                                spectrumCount);
+                            if(vm.mode == VelocityMomentsOptions::Mode::Auto && mi.tot == 3)
+                            {
+                                queue.enqueue(
+                                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                                     SpectrumAccumulateKernel{},
+                                     reinterpret_cast<double*>(o3Spec.data()),
+                                     reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
+                                     reinterpret_cast<double const*>(kernelSpec.data()),
+                                     spectrumCount);
+                            }
+                        }
+                        alpaka::onHost::wait(queue);
+                        // a-posteriori probe (k-space): order-3 part vs the full field
+                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                        {
+                            double const* const f
+                                = reinterpret_cast<double const*>(rhoSpec.data());
+                            double const* const o
+                                = reinterpret_cast<double const*>(o3Spec.data());
+                            for(std::uint32_t i = 0; i < spectrumCount; ++i)
+                            {
+                                double const fr = f[2u * i];
+                                double const fi = f[2u * i + 1u];
+                                double const orr = o[2u * i];
+                                double const oi = o[2u * i + 1u];
+                                localFullNorm2 += fr * fr + fi * fi;
+                                localO3Norm2 += orr * orr + oi * oi;
+                            }
+                        }
+                        alpaka::fft::onHost::executeBackward(queue, c2rPlan, rhoSpec, outReal);
+                        alpaka::onHost::wait(queue);
+                        times.fftMs += elapsedMs(specStart);
+
+                        auto const readoutStart = Clock::now();
+                        double const factor = scale * (c < 3 ? eFactor : bFactor);
+                        std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
+                        std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
+                        std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
+#pragma omp parallel for collapse(2)
+                        for(std::uint32_t k = 0; k < outNz; ++k)
+                            for(std::uint32_t j = 0; j < outNy; ++j)
+                                for(std::uint32_t i = 0; i < outNx; ++i)
+                                {
+                                    auto const in = static_cast<std::size_t>(i)
+                                        + static_cast<std::size_t>(Mx)
+                                            * (static_cast<std::size_t>(j)
+                                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
+                                    auto const out = static_cast<std::size_t>(i)
+                                        + static_cast<std::size_t>(outNx)
+                                            * (static_cast<std::size_t>(j)
+                                               + static_cast<std::size_t>(outNy) * static_cast<std::size_t>(k));
+                                    vf.data[c][out] += outReal.data()[in] * factor;
+                                }
+                        times.readoutMs += elapsedMs(readoutStart);
+                    }
+
+                    if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                    {
+                        double normSum[2] = {localFullNorm2, localO3Norm2};
+                        if(parSize > 1)
+                            par->allreduceSum(normSum, 2);
+                        double const fullN = std::sqrt(normSum[0]);
+                        double const o3N = std::sqrt(normSum[1]);
+                        probe = (fullN > 0.0) ? (o3N / fullN) : 0.0;
+                        rep.probe = probe;
+                        converged = (probe < kMomentAutoTol);
+                    }
+                    if(converged)
+                    {
+                        if(parSize > 1)
+                            for(int c = 0; c < 6; ++c)
+                                par->allreduceSum(vf.data[c].data(), vf.data[c].size());
+                        rep.used = true;
+                        rep.order = static_cast<int>(orderUsed);
+                        vmField = std::move(vf);
+                    }
+                    else
+                    {
+                        rep.fellBack = true;
+                    }
+                }
+            }
+            if(vmField)
+                return *vmField;
+        }
 
         if(useDistributed)
         {

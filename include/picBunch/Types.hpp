@@ -289,6 +289,29 @@ namespace picBunch
         std::size_t maxBins = kDefaultMaxVelocityBins;
     };
 
+    /*! Policy of the velocity-moment spectral decomposition (candidate C1).
+     *
+     * A multi-velocity bunch is normally evaluated by the binned path (one FFT
+     * chain per velocity box).  The moment path instead expands the point kernel
+     * in a multivariate Taylor series about the absolute-charge-weighted mean
+     * ``u0``, deposits the moment densities once, and takes one inverse
+     * transform per component -- independent of the number of velocity classes.
+     * See ``picBunch/VelocityMoments.hpp``.
+     */
+    struct VelocityMomentsOptions
+    {
+        enum class Mode
+        {
+            Off,       //!< binned path (default; unchanged behaviour)
+            Auto,      //!< smallest order (2, then 3) whose a-posteriori probe meets tolerance
+            Explicit   //!< fixed order (``order``, 2 or 3)
+        };
+
+        Mode mode = Mode::Off;
+        //! Moment order for ``Explicit`` (2 or 3).
+        std::size_t order = 2u;
+    };
+
     /** User-facing knobs of the field computation.
      *
      * The user sets an accuracy target, the physical cell size, and the empty
@@ -388,6 +411,11 @@ namespace picBunch
         //! ``VelocityBinning``).  ``Auto`` (default) sizes the boxes from the
         //! error model and ``tolerance``; ``Explicit`` runs a fixed count.
         VelocityBinningOptions velocityBinning;
+        //! Velocity-moment spectral decomposition policy (see
+        //! ``VelocityMomentsOptions``).  ``Off`` (default) keeps the binned path
+        //! bit-for-bit; ``Auto``/``Explicit`` replace the per-box FFT chain with a
+        //! one-inverse-transform moment sum for multi-velocity bunches.
+        VelocityMomentsOptions velocityMoments;
         //! Precomputed binning to use verbatim instead of deriving it from the
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.

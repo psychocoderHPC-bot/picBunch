@@ -32,7 +32,7 @@ namespace picBunch
         }
 
         //! Version of the compute-options wire layout and fingerprint.
-        constexpr std::uint64_t kComputeOptionsWireVersion = 3u;
+        constexpr std::uint64_t kComputeOptionsWireVersion = 4u;
 
         /*! Deterministic FNV-1a hasher over the logical option fields.
          *
@@ -232,6 +232,8 @@ namespace picBunch
         hasher.u64(static_cast<std::uint64_t>(options.fftMode));
         hasher.u64(static_cast<std::uint64_t>(options.distributedFftMinNodes));
         hasher.u64(static_cast<std::uint64_t>(options.shape));
+        hasher.u64(static_cast<std::uint64_t>(options.velocityMoments.mode));
+        hasher.u64(static_cast<std::uint64_t>(options.velocityMoments.order));
         for(auto const entry : options.cellSize)
             hasher.real(entry);
         // Optional grid overrides: presence plus values.
@@ -255,7 +257,7 @@ namespace picBunch
             options.marginCells,
             options.nearShell.radiusCells,
             options.velocityBinning.modelConstant};
-        std::uint64_t integers[12] = {
+        std::uint64_t integers[14] = {
             static_cast<std::uint64_t>(options.fftPadding),
             options.deterministicDeposit ? 1u : 0u,
             static_cast<std::uint64_t>(options.nearShell.mode),
@@ -267,14 +269,16 @@ namespace picBunch
             static_cast<std::uint64_t>(options.velocityBinning.maxBins),
             static_cast<std::uint64_t>(options.fftMode),
             static_cast<std::uint64_t>(options.distributedFftMinNodes),
-            static_cast<std::uint64_t>(options.shape)};
+            static_cast<std::uint64_t>(options.shape),
+            static_cast<std::uint64_t>(options.velocityMoments.mode),
+            static_cast<std::uint64_t>(options.velocityMoments.order)};
         double cell[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::uint64_t version = kComputeOptionsWireVersion;
         MPI_Bcast(&version, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
         if(version != kComputeOptionsWireVersion)
             throw std::runtime_error("MPI compute-options wire version mismatch");
         MPI_Bcast(scalars, 4, MPI_DOUBLE, root, MPI_COMM_WORLD);
-        MPI_Bcast(integers, 12, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(integers, 14, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         // Optional arrays: one presence flag, then three values each.
         auto broadcastOptional = [&](std::optional<std::array<std::size_t, 3>>& value) {
@@ -335,6 +339,9 @@ namespace picBunch
             options.fftMode = static_cast<FftMode>(integers[9]);
             options.distributedFftMinNodes = static_cast<std::size_t>(integers[10]);
             options.shape = static_cast<Shape>(integers[11]);
+            options.velocityMoments.mode
+                = static_cast<VelocityMomentsOptions::Mode>(integers[12]);
+            options.velocityMoments.order = static_cast<std::size_t>(integers[13]);
             options.cellSize = {cell[0], cell[1], cell[2]};
         }
         // Verify that every rank ended up with root's effective options.

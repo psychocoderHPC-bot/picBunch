@@ -139,6 +139,7 @@ int main(int argc, char** argv)
         double tolerance = 1.0e-3;
         double modelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
+        std::size_t momentOrder = 0; //!< 0 = off; else run the moment path at this order
         unsigned fftPadding = 2u;
         bool deterministicDeposit = false;
         std::string nearShell = "none";
@@ -190,6 +191,13 @@ int main(int argc, char** argv)
                 modelConstant = std::stod(next());
             else if(a == "--max-bins")
                 maxBins = static_cast<std::size_t>(std::stoul(next()));
+            else if(a == "--moments")
+            {
+                std::size_t const v = static_cast<std::size_t>(std::stoul(next()));
+                if(v > 3u)
+                    throw std::runtime_error("--moments must be 0, 2 or 3");
+                momentOrder = v;
+            }
             else if(a == "--fft-padding")
                 fftPadding = static_cast<unsigned>(std::stoul(next()));
             else if(a == "--deterministic-deposit")
@@ -303,6 +311,8 @@ int main(int argc, char** argv)
 
         std::ofstream report(prefix + "_report.txt");
         report.precision(17);
+        picBunch::Field refField;
+        std::size_t refB = 0u;
         for(std::size_t const requested : binList)
         {
             options.velocityBinning.mode
@@ -319,6 +329,11 @@ int main(int argc, char** argv)
             double const wallS = std::chrono::duration<double>(t1 - t0).count();
 
             std::size_t const B = binning.count;
+            if(B > refB)
+            {
+                refField = field;
+                refB = B;
+            }
             writeField(prefix + "_field_B" + std::to_string(B) + ".bin", field);
 
             std::vector<std::size_t> const boxOf = binning.boxOf;
@@ -400,6 +415,47 @@ int main(int argc, char** argv)
                 times.kernelMs,
                 times.fftMs,
                 times.readoutMs);
+        }
+
+        if(momentOrder > 0u && refB > 0u)
+        {
+            options.velocityMoments.mode = picBunch::VelocityMomentsOptions::Mode::Explicit;
+            options.velocityMoments.order = momentOrder;
+            picBunch::StageTimes mtimes;
+            picBunch::VelocityMomentsReport mrep{};
+            auto const m0 = std::chrono::steady_clock::now();
+            picBunch::Field const mfield
+                = picBunch::computeField(bunch, options, &mtimes, nullptr, &mrep);
+            auto const m1 = std::chrono::steady_clock::now();
+            double const mwall = std::chrono::duration<double>(m1 - m0).count();
+            double num = 0.0;
+            double den = 0.0;
+            for(int c = 0; c < 6; ++c)
+                for(std::size_t i = 0; i < mfield.data[c].size(); ++i)
+                {
+                    double const d = mfield.data[c][i] - refField.data[c][i];
+                    num += d * d;
+                    den += refField.data[c][i] * refField.data[c][i];
+                }
+            double const relL2 = std::sqrt(num) / std::sqrt(den);
+            report << "moment_order=" << momentOrder << " used=" << (mrep.used ? 1 : 0)
+                   << " fell_back=" << (mrep.fellBack ? 1 : 0) << " probe=" << mrep.probe
+                   << " rel_l2_vs_B" << refB << "=" << relL2 << " wall_s=" << mwall
+                   << " deposit_ms=" << mtimes.depositMs << " kernel_ms=" << mtimes.kernelMs
+                   << " fft_ms=" << mtimes.fftMs << " readout_ms=" << mtimes.readoutMs << "\n";
+            std::printf(
+                "moment order %zu: used=%d fell_back=%d rel_l2_vs_B%zu=%.4e wall=%.4f s "
+                "(deposit %.3f ms, kernel %.3f ms, fft %.3f ms, readout %.3f ms)\n",
+                momentOrder,
+                mrep.used ? 1 : 0,
+                mrep.fellBack ? 1 : 0,
+                refB,
+                relL2,
+                mwall,
+                mtimes.depositMs,
+                mtimes.kernelMs,
+                mtimes.fftMs,
+                mtimes.readoutMs);
         }
         return 0;
     }
