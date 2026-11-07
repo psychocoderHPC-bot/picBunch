@@ -6,8 +6,9 @@
 // The per-(source, node) algebra is identical to the host evaluator: the
 // eight-term asinh singular box on the TSC support box, the plain
 // Gauss-Legendre remainder on the subtracted integrand (S - W*)K over the
-// knot/s* panels, and the rest-frame octant quadrature for an oblique
-// velocity.  One thread owns one output node and a strided chunk of the near
+// knot/s* panels.  Oblique in-support pairs use the d-space ray integral
+// (exact radial Gauss per knot interval, beta-aligned angular rule) in the
+// device kernel.  One thread owns one output node and a strided chunk of the near
 // sources, accumulates the six components, and atomically adds its partial
 // sum.  Only alpaka/CUDA builds compile the kernel; other backends keep the
 // host evaluator.

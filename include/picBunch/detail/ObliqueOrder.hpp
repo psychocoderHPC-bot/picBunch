@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
 //
-// Allowed orders of the Duffy-mapped oblique singular box and the shared
-// host/device `auto` selection rule.
+// Compatibility ordering knob and the shared host/device `auto` rule.
 //
-// The oblique box is evaluated in Lorentz-contracted coordinates.  At high
-// gamma the beamed peak narrows by 1/gamma, so an order-4 quadrature
-// under-resolves it.  The rule below is intentionally cheap: it depends only
-// on the pair's gamma.  The caller applies it per tile to the largest gamma of
-// the *oblique, support-overlapping* sources, which keeps one coherent order
-// for the whole kernel launch.  Axial pairs never enter this path (they use
-// the exact gamma-stretched box), so raising the tile order cannot change
-// them.
+// The oblique in-support path is now an exact radial / polar-aligned angular
+// integral in Lorentz-contracted coordinates and does not depend on this
+// order.  The values are retained so existing CLI, TOML, restart, MPI and
+// device-table plumbing keeps working.  The caller still resolves one order
+// per tile from the largest oblique-overlapping gamma, which keeps the
+// kernel launch coherent.  Axial pairs never enter the oblique path.
 #pragma once
 
 namespace picBunch::pbfast
