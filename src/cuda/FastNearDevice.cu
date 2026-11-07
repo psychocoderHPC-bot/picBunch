@@ -128,7 +128,13 @@ namespace picBunch::pbfast
                 }
                 else
                 {
-                    double const mm = gam - 1.0;
+                    // Oblique: Lorentz-contracted tetrahedral Duffy quadrature.
+                    // In d-space the kernel is |M R|^{-3} R; with d' = M R the
+                    // (1-beta^2) prefactor cancels the Jacobian and the
+                    // integrand becomes the plain Coulomb field M^{-1} d'/|d'|^3.
+                    // Each corner box is split into the six tetrahedra of a
+                    // cube and mapped with the collapsed tetrahedral map, which
+                    // turns the vertex singularity into a smooth integrand.
                     double const Lp[3] = {
                         1.5 * cells[0] - R0[0],
                         1.5 * cells[1] - R0[1],
@@ -139,6 +145,21 @@ namespace picBunch::pbfast
                         1.5 * cells[2] + R0[2]};
                     int const n = prm.obliqueOrder;
                     double acc[3] = {0.0, 0.0, 0.0};
+                    auto applyMmin = [&](double const v[3], double out[3]) {
+                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
+                        double const f = 1.0 / gam - 1.0;
+                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
+                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
+                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
+                    };
+                    auto applyMplus = [&](double const v[3], double out[3]) {
+                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
+                        double const f = gam - 1.0;
+                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
+                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
+                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
+                    };
+                    int const perm[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
                     for(int sx = -1; sx <= 1; sx += 2)
                         for(int sy = -1; sy <= 1; sy += 2)
                             for(int sz = -1; sz <= 1; sz += 2)
@@ -149,40 +170,67 @@ namespace picBunch::pbfast
                                     sz > 0 ? Lp[2] : Ln[2]};
                                 if(L[0] <= 1e-14 || L[1] <= 1e-14 || L[2] <= 1e-14)
                                     continue;
-                                for(int ix = 0; ix < n; ++ix)
-                                    for(int iy = 0; iy < n; ++iy)
-                                        for(int iz = 0; iz < n; ++iz)
+                                double ev[3][3] = {{sx * L[0], 0.0, 0.0}, {0.0, sy * L[1], 0.0},
+                                                   {0.0, 0.0, sz * L[2]}};
+                                double e[3][3];
+                                for(int a = 0; a < 3; ++a)
+                                    applyMmin(ev[a], e[a]);
+                                for(int pi = 0; pi < 6; ++pi)
+                                {
+                                    int const i0 = perm[pi][0];
+                                    int const i1 = perm[pi][1];
+                                    int const i2 = perm[pi][2];
+                                    double const A[3] = {e[i0][0], e[i0][1], e[i0][2]};
+                                    double const Bv[3]
+                                        = {A[0] + e[i1][0], A[1] + e[i1][1], A[2] + e[i1][2]};
+                                    double const C[3]
+                                        = {Bv[0] + e[i2][0], Bv[1] + e[i2][1], Bv[2] + e[i2][2]};
+                                    double const BA[3] = {Bv[0] - A[0], Bv[1] - A[1], Bv[2] - A[2]};
+                                    for(int iu = 0; iu < n; ++iu)
+                                    {
+                                        double const tu = 0.5 * prm.oxi[iu] + 0.5;
+                                        double const wu = 0.5 * prm.owi[iu];
+                                        for(int iv = 0; iv < n; ++iv)
                                         {
-                                            double const tx = 0.5 * prm.oxi[ix] + 0.5;
-                                            double const ty = 0.5 * prm.oxi[iy] + 0.5;
-                                            double const tz = 0.5 * prm.oxi[iz] + 0.5;
-                                            double const tx2 = tx * tx;
-                                            double const ty2 = ty * ty;
-                                            double const tz2 = tz * tz;
-                                            double const px = L[0] * tx2 * tx2 * tx;
-                                            double const py = L[1] * ty2 * ty2 * ty;
-                                            double const pz = L[2] * tz2 * tz2 * tz;
-                                            double const jx
-                                                = 0.5 * L[0] * 5.0 * tx2 * tx2 * prm.owi[ix];
-                                            double const jy
-                                                = 0.5 * L[1] * 5.0 * ty2 * ty2 * prm.owi[iy];
-                                            double const jz
-                                                = 0.5 * L[2] * 5.0 * tz2 * tz2 * prm.owi[iz];
-                                            double const d[3] = {sx * px, sy * py, sz * pz};
-                                            double const dn
-                                                = d[0] * betaH[0] + d[1] * betaH[1] + d[2] * betaH[2];
-                                            double const md[3] = {
-                                                d[0] + mm * dn * betaH[0],
-                                                d[1] + mm * dn * betaH[1],
-                                                d[2] + mm * dn * betaH[2]};
-                                            double const rho2
-                                                = md[0] * md[0] + md[1] * md[1] + md[2] * md[2];
-                                            double const rho = std::sqrt(rho2);
-                                            double const f = -gam / (rho2 * rho) * jx * jy * jz;
-                                            acc[0] += f * d[0];
-                                            acc[1] += f * d[1];
-                                            acc[2] += f * d[2];
+                                            double const tv = 0.5 * prm.oxi[iv] + 0.5;
+                                            double const wv = 0.5 * prm.owi[iv];
+                                            for(int iw = 0; iw < n; ++iw)
+                                            {
+                                                double const tw = 0.5 * prm.oxi[iw] + 0.5;
+                                                double const ww = 0.5 * prm.owi[iw];
+                                                double const a0 = (1.0 - tv) * (1.0 - tw);
+                                                double const a1 = tv * (1.0 - tw);
+                                                double const Q[3] = {
+                                                    a0 * A[0] + a1 * Bv[0] + tw * C[0],
+                                                    a0 * A[1] + a1 * Bv[1] + tw * C[1],
+                                                    a0 * A[2] + a1 * Bv[2] + tw * C[2]};
+                                                double const Qv[3]
+                                                    = {(1.0 - tw) * BA[0], (1.0 - tw) * BA[1],
+                                                       (1.0 - tw) * BA[2]};
+                                                double const Qw[3] = {
+                                                    -(1.0 - tv) * A[0] - tv * Bv[0] + C[0],
+                                                    -(1.0 - tv) * A[1] - tv * Bv[1] + C[1],
+                                                    -(1.0 - tv) * A[2] - tv * Bv[2] + C[2]};
+                                                double const det = Q[0] * (Qv[1] * Qw[2] - Qv[2] * Qw[1])
+                                                    - Q[1] * (Qv[0] * Qw[2] - Qv[2] * Qw[0])
+                                                    + Q[2] * (Qv[0] * Qw[1] - Qv[1] * Qw[0]);
+                                                double const dp[3] = {tu * Q[0], tu * Q[1], tu * Q[2]};
+                                                double const rho2
+                                                    = dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2];
+                                                if(rho2 < 1e-300)
+                                                    continue;
+                                                double const rho = std::sqrt(rho2);
+                                                double Rv[3];
+                                                applyMplus(dp, Rv);
+                                                double const jac = tu * tu * std::abs(det) * wu * wv * ww;
+                                                double const f = -jac / (rho2 * rho);
+                                                acc[0] += f * Rv[0];
+                                                acc[1] += f * Rv[1];
+                                                acc[2] += f * Rv[2];
+                                            }
                                         }
+                                    }
+                                }
                             }
                     Ebox[0] = acc[0];
                     Ebox[1] = acc[1];

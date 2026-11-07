@@ -175,7 +175,8 @@ namespace picBunch
         std::uint64_t pairs = 0;
         std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
-        pbfast::Settings const fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        pbfast::Settings fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        fastSettings.tolerance = options.tolerance;
         bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
         bool useFastGpu = false;
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -211,7 +212,12 @@ namespace picBunch
 #if defined(PICBUNCH_BACKEND_CUDA)
         pbfast::DeviceParams deviceParams;
         deviceParams.order = fastSettings.order;
-        deviceParams.obliqueOrder = fastSettings.obliqueOrder;
+        // The device oblique box uses the six-tetrahedron Duffy map, i.e. 6x
+        // the nodes of the octant box per order^3.  Cap its order so the near
+        // shell stays inside the 1.5x wall budget of the 2e3-particle case;
+        // the host path keeps the requested order and adds the controlled
+        // residual fallback.
+        deviceParams.obliqueOrder = std::min(fastSettings.obliqueOrder, 6);
         {
             auto const& xi = pbfast::detail::rule(fastSettings.order).x;
             auto const& wi = pbfast::detail::rule(fastSettings.order).w;
