@@ -363,8 +363,11 @@ source on every rank. Two stages are rank-parallel.
   `c % size == rank`, then one `MPI_Allreduce` sums the six arrays. This is component
   parallelism. It is a global transform on every rank, not a per-rank transform of a
   truncated subdomain.
-* **Distributed FFT (optional).** `--fft-mode distributed`, or `auto` when the padded box
-  exceeds the per-rank limit, decomposes the padded grid into contiguous z-slabs. Each rank
+* **Distributed FFT (experimental, not production).** `--fft-mode distributed`
+  decomposes the padded grid into contiguous z-slabs. `auto` currently stays on the
+  replicated path: the slab transform passes its self-test, but the end-to-end
+  production field has not yet been validated against the replicated field. The
+  explicit mode prints a warning and is kept for debugging only. Each rank
   performs the local x and y 1-D transforms, transposes with `MPI_Alltoallv` so that z
   becomes local, transforms z, multiplies the kernel spectrum, and inverts in reverse
   order. This is the exact global transform, with one copy of each work array per rank.
@@ -446,25 +449,27 @@ published single-velocity number changes. The power-of-two rounding of near-shel
 boxes used on an earlier diagnostic branch is not needed and is not merged: the flat
 allocation alone makes every tested local size exact.
 
-#### Distributed FFT measurements (v0.9.0)
+#### Distributed FFT measurements (v0.9.0, transform self-test only)
+
+> **Status:** the generic transform and transpose pass their self-test, but the
+> production `--fft-mode distributed` field currently disagrees with the replicated
+> field (verified on HIP+MPI on hal, including a one-rank run). Do not use it for
+> production until that mismatch is fixed and covered by a distributed-vs-replicated
+> field test. `auto` no longer selects it.
+
+
 
 Measured on `jureca-h100` (one H100 PCIe per rank, CUDA 13.4). The distributed path was
 forced with `--fft-mode distributed`; all other settings were identical to the replicated
 run.
 
-Agreement with the replicated path on a 128-particle, `32^3` box (`64^3` padded): worst
-per-component relative difference `2.2e-16` (E; B is zero for this stationary bunch) at
-2 and 4 ranks. A moving one-particle case with all six components present gives
-`8.5e-17` relative. The generic distributed 3-D transform matches a replicated c2c plan to
-`1.6e-16`. These are FFT roundoff, not a physics difference. The written `32^3` file of a
-2- and a 4-rank distributed run is bitwise equal (0 ULP, all six components) to the
-single-rank distributed output. The same checks were repeated on the integrated
-v0.9.0 tree on `rosi_v100` (200 particles, `32^3` output, deterministic deposit):
-the one-particle convolution matches the replicated path to `8.5e-17` relative, the
-generic transform to `1.6e-16`, and the written 1-, 2- and 4-rank distributed files are
-bitwise equal (0 ULP, all six components). A replicated 1-rank run of the same case
-differs from the distributed file by `5.4e-16` relative (worst component), i.e. FFT
-roundoff only.
+The transform self-test (`picBunchDfftCheck`) matches the generic distributed
+transform against a replicated c2c plan to `1.6e-16`, and the roundtrip is at
+FFT roundoff.  The end-to-end production field is a separate matter: on the
+current tree it does not match the replicated field (verified on HIP+MPI on
+hal, including a one-rank run), so the earlier end-to-end agreement claims are
+not reproduced and the mode is experimental.  `auto` stays on the replicated
+path; see the status note above.
 
 Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer),
 `rosi_v100` with idle GPUs (medians of 3 runs at 2 ranks and 2 runs at 4 ranks):

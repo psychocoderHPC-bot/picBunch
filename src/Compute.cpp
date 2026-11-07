@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -974,9 +975,18 @@ namespace picBunch
         int const parSize = (par && par->distributed()) ? par->size : 1;
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
-        bool const distributedRequested = options.fftMode == FftMode::Distributed
-            || (options.fftMode == FftMode::Auto
-                && paddedNodes > options.distributedFftMinNodes);
+        // Auto currently stays on the replicated path: the slab algorithm
+        // passes its transform self-test but the end-to-end production field
+        // does not yet match the replicated field, so it must not be selected
+        // silently for large boxes.  The explicit mode is kept for debugging.
+        bool const distributedRequested = options.fftMode == FftMode::Distributed;
+        int const warnRank = (options.parallel != nullptr) ? options.parallel->rank : 0;
+        if(options.fftMode == FftMode::Distributed && warnRank == 0)
+            std::fprintf(
+                stderr,
+                "picBunch: warning: --fft-mode distributed is experimental; the "
+                "end-to-end slab field is not yet validated against the replicated "
+                "path.  Use the default replicated mode for production.\n");
         // An explicit --fft-mode distributed also runs the slab algorithm on a
         // single rank so its written field can be compared bitwise with a
         // multi-rank run; Auto keeps the replicated fallback for one rank.
