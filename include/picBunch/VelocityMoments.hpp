@@ -323,10 +323,19 @@ namespace picBunch
     struct VelocityMomentsReport
     {
         bool used = false;   //!< true when the moment path produced the delivered field
-        bool fellBack = false; //!< true when the auto policy fell back to the binned path
+        bool fellBack = false; //!< true when the moment policy fell back to the binned path
         int order = 0;       //!< moment order used (2 or 3), 0 when the path was not used
         bool feasible = true; //!< false when the moment path was infeasible (size/memory)
-        double probe = 0.0; //!< ||F_{n+1} - F_n|| / ||F_{n+1}|| (auto probe, k-space)
+        /*! The probe exceeded the convergence budget but the explicit order was
+         * forced through by VelocityMomentsOptions::allowUnconverged.  The
+         * delivered field is then known to be unconverged.
+         */
+        bool allowUnconverged = false;
+        /*! The moment field (or its k-space probe) contained a NaN or Inf and
+         * the binned path was used instead.  This fallback is never overridden.
+         */
+        bool nonFinite = false;
+        double probe = 0.0; //!< relative k-space remainder probe (order 2/3, auto)
         std::array<double, 3> u0{}; //!< absolute-charge-weighted expansion centre
         double maxSpread = 0.0; //!< largest |u_p - u0| (velocity-space radius)
     };

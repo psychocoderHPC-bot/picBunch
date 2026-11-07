@@ -1331,29 +1331,29 @@ namespace picBunch
                 catch(std::exception const&)
                 {
                     rep.feasible = false;
-                    if(vm.mode == VelocityMomentsOptions::Mode::Auto)
-                        rep.fellBack = true;
+                    rep.fellBack = true;
                 }
                 if(rep.feasible)
                 {
                     rep.u0 = u0;
                     rep.maxSpread = maxSpread;
                     // Memory feasibility: keep the moment scratch (20 moment
-                    // spectra + 20 kernel planes + the auto probe) under a guard so
-                    // an oversized box falls back instead of exhausting the device.
+                    // spectra + 20 kernel planes + the convergence probe) under a
+                    // guard so an oversized box falls back instead of exhausting
+                    // the device.  The probe is computed for explicit orders too
+                    // (see below), so it is always budgeted.
                     std::uint64_t const momentSpecBytes
                         = nTerms3 * static_cast<std::uint64_t>(spectrumCount) * sizeof(Complex);
                     std::uint64_t const kernelMomBytes
                         = nTerms3 * paddedNodes * sizeof(double);
-                    std::uint64_t const probeBytes = (vm.mode == VelocityMomentsOptions::Mode::Auto)
-                        ? static_cast<std::uint64_t>(spectrumCount) * sizeof(Complex) : 0u;
+                    std::uint64_t const probeBytes
+                        = static_cast<std::uint64_t>(spectrumCount) * sizeof(Complex);
                     constexpr std::uint64_t kMomentMaxScratch
                         = 8ull * 1024ull * 1024ull * 1024ull;
                     if(momentSpecBytes + kernelMomBytes + probeBytes > kMomentMaxScratch)
                     {
                         rep.feasible = false;
-                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
-                            rep.fellBack = true;
+                        rep.fellBack = true;
                     }
                 }
                 if(rep.feasible)
@@ -1362,8 +1362,6 @@ namespace picBunch
                         = (vm.mode == VelocityMomentsOptions::Mode::Explicit)
                             ? (std::min<std::size_t>(vm.order, 3u))
                             : 3u;
-                    bool converged = true;
-                    double probe = 0.0;
                     std::uint32_t const N = static_cast<std::uint32_t>(bunch.size());
 
                     // Whole-bunch particle arrays (the moment path deposits all
@@ -1416,11 +1414,11 @@ namespace picBunch
                     for(std::size_t a = 0u; a < nTerms3; ++a)
                         kernelPlanes.data()[a] = kernelBufs[a].data();
                     alpaka::onHost::wait(queue);
+                    // The order-3 remainder is needed for the convergence probe
+                    // in explicit mode as well; both orders validate against it.
                     auto o3Spec = alpaka::onHost::allocUnified<Complex>(
                         device,
-                        (vm.mode == VelocityMomentsOptions::Mode::Auto)
-                            ? static_cast<std::size_t>(spectrumCount)
-                            : 1u);
+                        static_cast<std::size_t>(spectrumCount));
 
                     auto launchMomentDeposit = [&](int a1, int a2, int a3) {
                         auto launch = [&](auto tag) {
@@ -1515,26 +1513,31 @@ namespace picBunch
                         times.kernelMs += elapsedMs(kernelStart);
 
                         alpaka::onHost::memset(queue, rhoSpec, std::uint8_t{0});
-                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
-                            alpaka::onHost::memset(queue, o3Spec, std::uint8_t{0});
+                        alpaka::onHost::memset(queue, o3Spec, std::uint8_t{0});
                         auto const specStart = Clock::now();
                         for(auto const& mi : moments)
                         {
-                            if(static_cast<std::size_t>(mi.tot) > orderUsed)
+                            bool const inFull
+                                = static_cast<std::size_t>(mi.tot) <= orderUsed;
+                            bool const inOrder3 = mi.tot == 3;
+                            if(!inFull && !inOrder3)
                                 continue;
                             alpaka::fft::onHost::executeForward(
                                 queue,
                                 r2cPlan,
                                 kernelBufs[static_cast<std::size_t>(mi.idx)],
                                 kernelSpec);
-                            queue.enqueue(
-                                alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
-                                SpectrumAccumulateKernel{},
-                                reinterpret_cast<double*>(rhoSpec.data()),
-                                reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
-                                reinterpret_cast<double const*>(kernelSpec.data()),
-                                spectrumCount);
-                            if(vm.mode == VelocityMomentsOptions::Mode::Auto && mi.tot == 3)
+                            if(inFull)
+                                queue.enqueue(
+                                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                                    SpectrumAccumulateKernel{},
+                                    reinterpret_cast<double*>(rhoSpec.data()),
+                                    reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
+                                    reinterpret_cast<double const*>(kernelSpec.data()),
+                                    spectrumCount);
+                            // The order-3 remainder is needed for the probe even
+                            // when the delivered order is 2.
+                            if(inOrder3)
                             {
                                 queue.enqueue(
                                     alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
@@ -1546,8 +1549,10 @@ namespace picBunch
                             }
                         }
                         alpaka::onHost::wait(queue);
-                        // a-posteriori probe (k-space): order-3 part vs the full field
-                        if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                        // a-posteriori probe (k-space): order-3 remainder against
+                        // the order-`orderUsed` field.  Explicit orders use the
+                        // same probe so they cannot silently return an
+                        // unconverged series.
                         {
                             double const* const f
                                 = reinterpret_cast<double const*>(rhoSpec.data());
@@ -1590,7 +1595,11 @@ namespace picBunch
                         times.readoutMs += elapsedMs(readoutStart);
                     }
 
-                    if(vm.mode == VelocityMomentsOptions::Mode::Auto)
+                    // Convergence probe: ||F_3|| / ||F_0..F_orderUsed||.  For
+                    // order 2 it estimates the next term; for order 3 it is the
+                    // existing order-2-vs-3 k-space probe.  Auto and explicit
+                    // share it.
+                    double probe = 0.0;
                     {
                         double normSum[2] = {localFullNorm2, localO3Norm2};
                         if(parSize > 1)
@@ -1599,20 +1608,66 @@ namespace picBunch
                         double const o3N = std::sqrt(normSum[1]);
                         probe = (fullN > 0.0) ? (o3N / fullN) : 0.0;
                         rep.probe = probe;
-                        converged = (probe < kMomentAutoTol);
                     }
-                    if(converged)
+                    // Every rank owns the same field after the reduction, so the
+                    // finiteness verdict and the fallback decision agree.
+                    if(parSize > 1)
+                        for(int c = 0; c < 6; ++c)
+                            par->allreduceSum(vf.data[c].data(), vf.data[c].size());
+                    bool nonFinite = false;
+                    for(int c = 0; c < 6 && !nonFinite; ++c)
+                        for(double const value : vf.data[c])
+                            if(!std::isfinite(value))
+                            {
+                                nonFinite = true;
+                                break;
+                            }
+                    bool const probeConverged = (probe < kMomentAutoTol);
+                    bool const forced = vm.mode == VelocityMomentsOptions::Mode::Explicit
+                        && vm.allowUnconverged;
+                    if(nonFinite)
                     {
-                        if(parSize > 1)
-                            for(int c = 0; c < 6; ++c)
-                                par->allreduceSum(vf.data[c].data(), vf.data[c].size());
+                        // A non-finite result is never delivered, not even with
+                        // the diagnostic escape hatch.
+                        rep.nonFinite = true;
+                        rep.fellBack = true;
+                        std::fprintf(
+                            stderr,
+                            "picBunch: warning: velocity-moment field contains non-finite "
+                            "values (probe %.3e); falling back to the binned path\n",
+                            probe);
+                    }
+                    else if(probeConverged || forced)
+                    {
                         rep.used = true;
                         rep.order = static_cast<int>(orderUsed);
+                        if(!probeConverged)
+                        {
+                            rep.allowUnconverged = true;
+                            std::fprintf(
+                                stderr,
+                                "picBunch: warning: velocity-moment order %zu forced with "
+                                "probe %.3e above the %.3f budget "
+                                "(--velocity-moments-allow-unconverged); the delivered "
+                                "field is not converged\n",
+                                orderUsed,
+                                probe,
+                                kMomentAutoTol);
+                        }
                         vmField = std::move(vf);
                     }
                     else
                     {
                         rep.fellBack = true;
+                        std::fprintf(
+                            stderr,
+                            "picBunch: velocity-moment order %zu probe %.3e exceeds the "
+                            "%.3f budget; falling back to the binned path (raise "
+                            "--tolerance or --max-velocity-bins, or pass "
+                            "--velocity-moments-allow-unconverged for a diagnostic field)\n",
+                            orderUsed,
+                            probe,
+                            kMomentAutoTol);
                     }
                 }
             }
