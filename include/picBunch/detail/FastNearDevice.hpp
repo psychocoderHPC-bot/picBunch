@@ -50,8 +50,15 @@ namespace picBunch::pbfast
      * subtracts the tile-local mesh field.  ``ox/oy/oz`` is the tile's node
      * zero position, ``spacing`` the node spacing, ``cells`` the PIC cell size.
      */
+    /*! @param mesh  per-source representative velocity (binned) used for the
+     *               mesh-near stencil; ignored when ``stencilMesh`` is false.
+     *  @param stencilMesh  subtract the 27-point TSC mesh-near term inside the
+     *               kernel instead of the caller's per-tile local FFT.
+     */
     std::vector<double> evalFastNearDevice(
         Bunch const& near,
+        Bunch const& mesh,
+        bool stencilMesh,
         std::size_t nx,
         std::size_t ny,
         std::size_t nz,
