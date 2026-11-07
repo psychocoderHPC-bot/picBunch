@@ -282,6 +282,23 @@ names the count the model needs, for example
 The single-velocity case is detected within `1e-12` relative and returns one box, so its
 field is bitwise the unbinned field.
 
+### Velocity moments
+
+`--velocity-moments off|auto|2|3` (default `off`) replaces the per-box FFT chain with a
+single inverse transform. The six-component point kernel is expanded in a multivariate
+Taylor series about the absolute-charge-weighted mean momentum `u0`; the moment densities
+are deposited once and each field component is the inverse transform of the moment/kernel
+spectra. See `include/picBunch/VelocityMoments.hpp` for the algebra.
+
+With `--near-shell`, the expansion centre is pinned to the full-bunch `u0` for every
+per-tile local mesh. The subtraction is then the same truncated kernel operator applied to
+the near subset, so it cancels exactly the contribution the global mesh added. Recomputing
+the centre on a tile would cancel a different expansion and leave a residual inside the
+shell, which is why the near-shell code passes the fixed centre down. `auto` probes the
+order-3-only contribution in k-space (`< 0.05` keeps order 3) and otherwise falls back to
+the binned path; the near shell follows the resolved decision and uses the same fixed
+order, or the binned path when the base mesh fell back.
+
 Measured on the multi-velocity campaign (`pr24-20261102`, branch `experimental/multivel`,
 H100, `02891fe6`): a 5% energy spread gives `1.12e-3` binning error at 16 boxes and
 `2.72e-4` at 64, so it meets `1e-3` at 64 boxes. A 5 degree angular spread does not

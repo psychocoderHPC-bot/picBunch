@@ -416,6 +416,15 @@ namespace picBunch
         //! bit-for-bit; ``Auto``/``Explicit`` replace the per-box FFT chain with a
         //! one-inverse-transform moment sum for multi-velocity bunches.
         VelocityMomentsOptions velocityMoments;
+        /*! Fixed Taylor expansion centre for the moment path.
+         *
+         * Set by the near shell so the global mesh and every per-tile
+         * subtraction use the *same* truncated kernel operator.  Recomputing
+         * the centre on a near subset would make the subtraction cancel a
+         * different approximation and leave a residual inside the shell.
+         * Unset means "derive from the bunch" (the ordinary moment path).
+         */
+        std::optional<std::array<double, 3>> velocityMomentsCentre;
         //! Precomputed binning to use verbatim instead of deriving it from the
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.

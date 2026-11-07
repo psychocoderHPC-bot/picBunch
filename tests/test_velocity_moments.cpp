@@ -13,6 +13,7 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Kernel.hpp"
+#include "picBunch/NearShell.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
 #include <gtest/gtest.h>
@@ -252,4 +253,85 @@ TEST(VelocityMoments, OffKeepsTheBinnedPath)
     for(auto const& component : field.data)
         for(double v : component)
             EXPECT_TRUE(std::isfinite(v));
+}
+
+// ------------------------------------------------------- near-shell composition
+
+TEST(VelocityMoments, NearShellComposesWithMomentField)
+{
+    // Two velocity classes that are spatially separated by more than the shell
+    // radius.  The full-bunch centre is far from either class, so a per-tile
+    // centre recomputed from the near subset would make the subtraction cancel
+    // a different Taylor approximation than the global mesh added.  The
+    // composition is correct only if the near band still matches the binned
+    // near-shell reference (both replace the near sources with the exact pair
+    // field).
+    using picBunch::NearShellOptions;
+
+    Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {12.0, 12.0};
+    bunch.y = {12.0, 12.0};
+    bunch.z = {12.0, 2.0};
+    bunch.ux = {0.0, 0.0};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {std::sqrt(100.0 - 1.0), 0.0}; // gamma 10 and a resting source
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {kElectronCharge, kElectronCharge};
+
+    ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.gridSize = {24, 24, 24};
+    options.gridOrigin = {0.0, 0.0, 0.0};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+
+    NearShellOptions shell;
+    shell.mode = NearShellOptions::Mode::Exact;
+    shell.radiusCells = 3.0;
+    shell.tileNodes = 4;
+
+    auto refOptions = options;
+    refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+    refOptions.velocityBinning.explicitBins = 16u;
+    picBunch::Field const reference
+        = picBunch::computeFieldNearExact(bunch, refOptions, shell);
+
+    auto momentOptions = options;
+    momentOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+    momentOptions.velocityMoments.order = 3u;
+    VelocityMomentsReport rep{};
+    picBunch::Field const candidate = picBunch::computeFieldNearExact(
+        bunch, momentOptions, shell, nullptr, nullptr, &rep);
+    ASSERT_TRUE(rep.used) << "the moment path must be composed with the near shell";
+    EXPECT_EQ(rep.order, 3);
+
+    // Chebyshev distance <= 2 from the gamma-10 source (inside the shell).
+    double num = 0.0;
+    double den = 0.0;
+    std::size_t const n = 24u;
+    for(std::size_t k = 0; k < n; ++k)
+        for(std::size_t j = 0; j < n; ++j)
+            for(std::size_t i = 0; i < n; ++i)
+            {
+                double const cheb = std::max(
+                    {std::abs(static_cast<double>(i) - 12.0),
+                     std::abs(static_cast<double>(j) - 12.0),
+                     std::abs(static_cast<double>(k) - 12.0)});
+                if(cheb > 2.0)
+                    continue;
+                std::size_t const idx = i + n * (j + n * k);
+                for(int c = 0; c < 6; ++c)
+                {
+                    double const d = candidate.data[c][idx] - reference.data[c][idx];
+                    num += d * d;
+                    den += reference.data[c][idx] * reference.data[c][idx];
+                }
+            }
+    double const nearRelL2 = std::sqrt(num) / std::sqrt(den);
+    std::printf(
+        "[velocity-moments] near-shell+moment near-band relL2 vs binned near shell = %.3e\n",
+        nearRelL2);
+    EXPECT_LT(nearRelL2, 5.0e-2)
+        << "near-shell subtraction did not cancel the same moment operator as the global mesh";
 }

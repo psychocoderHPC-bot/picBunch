@@ -15,6 +15,7 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/FastNear.hpp"
 #if defined(PICBUNCH_BACKEND_CUDA)
 #    include "picBunch/detail/FastNearDevice.hpp"
@@ -88,7 +89,8 @@ namespace picBunch
         ComputeOptions const& options,
         NearShellOptions const& nearShell,
         StageTimes* stageTimes,
-        VelocityBinning* outBinning)
+        VelocityBinning* outBinning,
+        VelocityMomentsReport* outReport)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("computeFieldNearExact: empty bunch");
@@ -116,7 +118,42 @@ namespace picBunch
         // each rank touches only its own output nodes.
         if(!options.fixedBinning)
             plain.fixedBinning = binning;
-        Field field = computeField(bunch, plain, stageTimes);
+        // Pin the Taylor centre of the velocity-moment path to the full-bunch
+        // one.  The per-tile subtraction is the same linear operator applied to
+        // the near subset; a centre recomputed per tile would cancel a
+        // different approximation and leave a residual inside the shell.
+        bool const momentsRequested
+            = options.velocityMoments.mode != VelocityMomentsOptions::Mode::Off;
+        if(momentsRequested)
+            plain.velocityMomentsCentre = velocityMomentsCentre(bunch);
+        VelocityMomentsReport baseReport;
+        Field field = computeField(
+            bunch,
+            plain,
+            stageTimes,
+            nullptr,
+            momentsRequested ? &baseReport : nullptr);
+        if(outReport)
+            *outReport = baseReport;
+
+        // The tiled subtraction must use exactly the velocity model the base
+        // mesh used.  When the moment path engaged, run the local mesh at the
+        // resolved fixed order; when it fell back (auto probe, size or memory),
+        // run the local mesh on the binned path as well.
+        ComputeOptions tileOptions = plain;
+        if(momentsRequested)
+        {
+            if(baseReport.used)
+            {
+                tileOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+                tileOptions.velocityMoments.order
+                    = static_cast<std::size_t>(baseReport.order);
+            }
+            else
+            {
+                tileOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Off;
+            }
+        }
 
         // Each rank owns a disjoint set of output tiles and writes only the
         // correction there.  A zero correction buffer plus one all-reduce keeps
@@ -289,7 +326,7 @@ namespace picBunch
                     for(int a = 0; a < 3; ++a)
                         localOrigin[a] = origin[a] + static_cast<double>(localLo[a]) * spacing[a];
 
-                    ComputeOptions localOptions = plain;
+                    ComputeOptions localOptions = tileOptions;
                     // The local subtraction is computed by this rank alone for
                     // its own tile; never split it across ranks.
                     localOptions.parallel = nullptr;
@@ -300,7 +337,16 @@ namespace picBunch
                     localOptions.globalGridSize = std::nullopt;
                     localOptions.globalGridOrigin = std::nullopt;
                     localOptions.fftPadding = 2u;
-                    Field const local = computeField(near, localOptions);
+                    VelocityMomentsReport localReport;
+                    Field const local = computeField(
+                        near, localOptions, nullptr, nullptr, &localReport);
+                    if(localOptions.velocityMoments.mode
+                           != VelocityMomentsOptions::Mode::Off
+                       && !localReport.used)
+                        throw std::runtime_error(
+                            "near shell: the velocity-moment subtraction did not engage on a "
+                            "tile; refusing to deliver a field whose near shell cancels a "
+                            "different velocity model than the global mesh");
 
                     // Subtract F_mesh(near) and add F_exact(near) inside the tile.
                     std::size_t const nx = i1 - i0;

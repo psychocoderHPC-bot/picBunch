@@ -970,7 +970,8 @@ namespace picBunch
         // F = F_mesh(all) - F_mesh(near) + F_exact(near); only the per-pair
         // evaluator differs (adaptive reference vs closed form).
         if(options.nearShell.mode != NearShellOptions::Mode::None)
-            return computeFieldNearExact(bunch, options, options.nearShell, stageTimes, outBinning);
+            return computeFieldNearExact(
+                bunch, options, options.nearShell, stageTimes, outBinning, outReport);
 
         // A multi-velocity bunch is the sum over velocity classes: the kernel
         // is linear in charge, so each velocity box contributes its own
@@ -1293,7 +1294,12 @@ namespace picBunch
                 double maxSpread = 0.0;
                 try
                 {
-                    u0 = velocityMomentsCentre(bunch);
+                    // The near shell pins the centre so its per-tile
+                    // subtraction uses the same expansion as the global mesh.
+                    if(options.velocityMomentsCentre)
+                        u0 = *options.velocityMomentsCentre;
+                    else
+                        u0 = picBunch::velocityMomentsCentre(bunch);
                     maxSpread = velocityMomentsRadius(bunch, u0);
                 }
                 catch(std::exception const&)
