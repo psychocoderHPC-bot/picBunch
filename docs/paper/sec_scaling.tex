@@ -156,6 +156,18 @@ ranks & wall (ms) & speedup & eff.\ & wall (ms) & speedup & wall (ms) & speedup 
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling_h100.pdf}
+\caption{Strong scaling of the three rank-parallel pieces on
+\texttt{jureca-h100} for $1$--$4$ ranks, medians of three serialized runs:
+near shell ($32^3$, $R=1.5$, tile 8), mesh ($2\times10^{6}$ particles,
+$256^3$), and the collective writer ($256^3$).  The writer is flat; the
+mesh reaches $1.79\times$; the small near-shell case has all-reduce
+overhead and does not scale.}
+\label{fig:h100mpiscaling}
+\end{figure}
+
 \subsection{H100 remeasurement}
 \label{sec:h100}
 
