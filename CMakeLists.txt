@@ -90,12 +90,12 @@ endif()
 # ---------------------------------------------------------------------------
 # Pinned dependencies
 #
-# alpaka           7b92361468d3280c260200198081ae7e98f0bc56  (reports 3.0.0)
-# alpakaVendor     af24cc7b2bd125056e9889e270d3af7bdf972c6f  (FFT: cuFFT/rocFFT/FFTW)
+# alpaka3          e91f6f4d8d1da321a6423a8ad5b4954562c57a9a  (alpaka-group/alpaka3)
+# alpakaVendor     33a4a4f401de2b157de195bb68e8ec61d7460cee  (alpaka-group/alpakaVendor; FFT: cuFFT/rocFFT/FFTW)
 # toml++           30172438cee64926dc41fdd9c11fb3ba5b2ba9de  (v3.4.0, header-only)
 # ---------------------------------------------------------------------------
-set(ALPAKA_PIN "7b92361468d3280c260200198081ae7e98f0bc56")
-set(ALPAKAVENDOR_PIN "af24cc7b2bd125056e9889e270d3af7bdf972c6f")
+set(ALPAKA_PIN "e91f6f4d8d1da321a6423a8ad5b4954562c57a9a")
+set(ALPAKAVENDOR_PIN "33a4a4f401de2b157de195bb68e8ec61d7460cee")
 set(TOMLPLUSPLUS_PIN "30172438cee64926dc41fdd9c11fb3ba5b2ba9de")
 
 set(alpaka_TESTS OFF CACHE BOOL "alpaka tests" FORCE)
@@ -115,16 +115,15 @@ if(PICBUNCH_ENABLE_HIP AND NOT DEFINED alpaka_DEP_OMP)
 endif()
 
 FetchContent_Declare(
-    alpaka
-    GIT_REPOSITORY https://github.com/alpaka-group/alpaka.git
+    alpaka3
+    GIT_REPOSITORY https://github.com/alpaka-group/alpaka3.git
     GIT_TAG ${ALPAKA_PIN}
     GIT_SHALLOW FALSE
 )
-FetchContent_MakeAvailable(alpaka)
+FetchContent_MakeAvailable(alpaka3)
 
 set(alpakaV_TESTS OFF CACHE BOOL "alpakaVendor tests" FORCE)
 set(alpakaV_DOCS OFF CACHE BOOL "alpakaVendor docs" FORCE)
-set(alpakaV_ALPAKA_PROVIDER "extern" CACHE STRING "reuse the pinned alpaka::alpaka target" FORCE)
 set(alpakaV_DEP_FFTW ON CACHE BOOL "alpakaVendor FFTW host backend" FORCE)
 set(alpakaV_DEP_OPENBLAS OFF CACHE BOOL "alpakaVendor OpenBLAS host backend" FORCE)
 set(alpakaV_DEP_CUFFT ${PICBUNCH_ENABLE_CUDA} CACHE BOOL "alpakaVendor cuFFT backend" FORCE)
@@ -135,7 +134,7 @@ set(alpakaV_DEP_ONEMKL OFF CACHE BOOL "alpakaVendor oneMKL backend" FORCE)
 
 FetchContent_Declare(
     alpakaVendor
-    GIT_REPOSITORY https://github.com/psychocoderHPC-bot/alpakaVendor.git
+    GIT_REPOSITORY https://github.com/alpaka-group/alpakaVendor.git
     GIT_TAG ${ALPAKAVENDOR_PIN}
     GIT_SHALLOW FALSE
 )

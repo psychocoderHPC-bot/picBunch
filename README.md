@@ -36,8 +36,8 @@ docs/               algorithm and validation notes
 
 | Dependency | Pin | Notes |
 | --- | --- | --- |
-| alpaka | `7b92361468d3280c260200198081ae7e98f0bc56` (reports 3.0.0) | fetched by CMake `FetchContent` |
-| alpakaVendor | `af24cc7b2bd125056e9889e270d3af7bdf972c6f` | fetched by CMake `FetchContent`; FFT via cuFFT/rocFFT/FFTW |
+| alpaka3 | `e91f6f4d8d1da321a6423a8ad5b4954562c57a9a` | fetched by CMake `FetchContent` from `alpaka-group/alpaka3` |
+| alpakaVendor | `33a4a4f401de2b157de195bb68e8ec61d7460cee` | fetched by CMake `FetchContent` from `alpaka-group/alpakaVendor`; FFT via cuFFT/rocFFT/FFTW, including strided FFTW plans |
 | toml++ | `30172438cee64926dc41fdd9c11fb3ba5b2ba9de` (v3.4.0) | fetched by CMake `FetchContent`; configuration parser |
 | openPMD-api | system install | HDF5 backend required; configure fails without it |
 | HDF5 C API | system install | checkpoint writer; the parallel build matching openPMD is preferred |
@@ -456,7 +456,9 @@ one rank with a single source matches the replicated field to `3.2e-16`, and a
 200-particle `64^3` run at 4 ranks matches to `5.4e-16` in the written file.
 The same 4-rank case on jureca-h100 (CUDA 13.4, sm_90, four H100s) gives
 `2.48e-16` global relative and `2.9e-11` worst absolute difference on a
-`8.65e4` V/m peak.  The regression test `Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit`
+`8.65e4` V/m peak.  The host FFTW backend, with the strided-plan support in
+the current alpakaVendor, matches the replicated field to `1.94e-16` at two
+MPI ranks.  The regression test `Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit`
 covers both the explicit and the auto-selected path with the device deposit.
 The previous mismatch was a device TSC deposit that ignored `rhoStride`, so the
 distributed complex buffer received the source at half its index; the host

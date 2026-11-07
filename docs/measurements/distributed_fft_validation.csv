@@ -5,3 +5,4 @@ backend,ranks,case,global_rel,worst_abs,date
 HIP ROCm 7.2 (hal),1,one particle 32^3,3.2e-16,,2026-11-07
 HIP ROCm 7.2 (hal),4,200 particles 64^3,5.4e-16,,2026-11-07
 CUDA 13.4 sm_90 (jureca-h100),4,200 particles 64^3,2.48e-16,2.91e-11,2026-11-07
+CPU FFTW 3.3.10 (jureca-h100),2,200 particles 32^3,1.94e-16,,2026-11-07
