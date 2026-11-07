@@ -630,6 +630,11 @@ namespace
         restart.unitLength = config.picongpu.unitLength;
         restart.unitEField = config.picongpu.unitEField;
         restart.unitBField = config.picongpu.unitBField;
+        restart.unitTime = config.picongpu.unitTime;
+        restart.unitSpeed = config.picongpu.unitSpeed;
+        restart.unitEnergy = config.picongpu.unitEnergy;
+        restart.unitMass = config.picongpu.unitMass;
+        restart.unitCharge = config.picongpu.unitCharge;
         restart.float64 = config.picongpu.float64;
 
         picBunch::GeneratedParticles generated;

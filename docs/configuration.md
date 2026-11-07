@@ -19,18 +19,46 @@ convolution target and the optional exact near shell.
 
 ### `[picongpu]`
 
+The table carries the independent PIConGPU deck inputs. Copy the values from
+the deck that will restart the checkpoint (`simulation.param`,
+`speciesConstants.param`, `physicalConstants.param`). picBunch derives every SI
+unit factor exactly as `include/picongpu/unitless/simulation.unitless`:
+
+```text
+n_mpp       = base_density * dx*dy*dz / typical_particles_per_cell
+unit_time   = delta_t
+unit_speed  = speed_of_light
+unit_length = unit_time * unit_speed
+unit_mass   = base_mass * n_mpp
+unit_charge = -base_charge * n_mpp
+unit_energy = unit_mass * unit_length^2 / unit_time^2
+unit_efield = 1 / (unit_time^2 / unit_mass / unit_length * unit_charge)
+unit_bfield = unit_mass / (unit_time * unit_charge)
+```
+
 | key | required | meaning |
 | --- | --- | --- |
-| `unit_length` | yes | PIConGPU length unit in metres (`sim.unit.length()`). |
-| `unit_e` | yes | PIConGPU electric-field unit in V/m (`sim.unit.eField()`). |
-| `unit_b` | yes | PIConGPU magnetic-field unit in T (`sim.unit.bField()`). |
-| `dt` | yes | Time step in seconds, stored in the checkpoint. |
+| `delta_t` | yes | `SI::DELTA_T_SI`, the time step in seconds. |
+| `cell_size` | yes | `SI::CELL_WIDTH/HEIGHT/DEPTH_SI`, three positive metres `[dx, dy, dz]`. May instead be given once as `domain.cell_size` (deprecated); if both are present they must be equal. |
+| `base_mass` | no | `SI::BASE_MASS_SI` in kg. Default `9.1093837139e-31` (2022 CODATA electron mass). |
+| `base_charge` | no | `SI::BASE_CHARGE_SI` in C, **signed**. Default `-1.602176634e-19`. |
+| `base_density` | yes | `SI::BASE_DENSITY_SI` in m^-3. It sets the macro-particle weight and therefore the mass and charge units. |
+| `typical_particles_per_cell` | no | `TYPICAL_PARTICLES_PER_CELL`. Default `2`. |
+| `speed_of_light` | no | `SI::SPEED_OF_LIGHT_SI` in m/s. Default `2.99792458e8`. Override only if the deck does. |
 | `step` | yes | Checkpoint step in `[0, 999999]`; also the file suffix. |
 | `precision` | no | `"float32"` (default) or `"float64"`, applied uniformly to every field component and every particle property record. `positionOffset` stays int32 and `id` stays uint64. |
 | `species` | yes | Species to read from `--input` and write to the checkpoint. |
-| `unit_charge` | no | Charge unit in C. Default `1.602176634e-19`. |
-| `unit_mass` | yes | PIConGPU mass unit in kg, i.e. `sim.unit.mass()`. It must match the deck; do not assume the electron mass. PIConGPU restart ignores the particle `unitSI` and interprets momentum in `sim.unit.mass()*unit_speed`, so a mismatch scales every momentum. |
-| `unit_speed` | no | Speed unit in m/s. Default `299792458.0`. |
+
+The values must match the restart deck, not the deck that produced the input
+bunch. PIConGPU restart ignores the particle `unitSI` and interprets momentum in
+`unit_mass * unit_speed` and mass/charge in `unit_mass`/`unit_charge`, so a
+mismatch scales every record.
+
+The old manual `unit_length`, `unit_e`, `unit_b`, `unit_charge`, `unit_mass` and
+`unit_speed` keys are no longer part of the schema. They are still accepted as
+explicit overrides for backward compatibility: an override wins for that one
+factor, always prints a deprecation warning, and is then validated. The default
+path is pure derivation. `dt` is accepted as a deprecated alias for `delta_t`.
 
 Particle momenta are written in PIConGPU internal units, i.e. the SI momentum
 divided by `unit_mass * unit_speed`. The reader returns `u = p/(m c)` for the
@@ -115,14 +143,15 @@ Records are in PIConGPU internal units:
 - `weighting`: statistical weight with `macroWeighted = 1` and
   `weightingPower = 1`, stored at the configured precision.
 - `charge`: `q / unit_charge` with `unitSI = unit_charge`, read from the input
-  bunch and converted with `unit_charge`.
+  bunch and converted with the derived `unit_charge`.
 - `mass`: `m / unit_mass` with `unitSI = unit_mass`, read from the input bunch
-  and converted with `unit_mass`. When the input has no positive rest mass the
-  configured `unit_mass` is used.
+  and converted with the derived `unit_mass`. When the input has no positive
+  rest mass the derived `unit_mass` is used.
 - `id`: uint64 global index.
 
-A missing or non-positive `unit_charge`/`unit_mass` factor is an error when the
-corresponding record is written, so the writer never invents a conversion.
+A non-positive derived `unit_charge`/`unit_mass` is rejected at configuration
+parse time and again when the corresponding record is written, so the writer
+never invents a conversion.
 
 The checkpoint also contains `fields/picongpu_idProvider`, every other species
 present in the input iteration, and `checkpoints.txt`.

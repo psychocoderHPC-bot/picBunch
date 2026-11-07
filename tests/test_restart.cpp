@@ -7,6 +7,7 @@
 // they land on disk.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Config.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
@@ -609,6 +610,70 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     H5Gclose(particles);
 
     H5Gclose(fields);
+    H5Gclose(iteration);
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, IterationUnitAttributesMatchDerivedUnits)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_units";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input.h5";
+    writeParticleInput(input, true);
+
+    picBunch::Config::PicOnGPU deck;
+    deck.deltaT = 0.8e-16;
+    deck.cellSize = {0.1772e-6, 0.1772e-6, 0.1772e-6};
+    deck.baseDensity = 1.0e25;
+    deck.typicalParticlesPerCell = 2.0;
+    picBunch::derivePicOnGPUUnits(deck);
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.species = "electrons";
+    options.time = 2.5e-13;
+    options.timeUnitSI = 1.0;
+    options.dt = deck.dt;
+    options.unitLength = deck.unitLength;
+    options.unitEField = deck.unitEField;
+    options.unitBField = deck.unitBField;
+    options.unitTime = deck.unitTime;
+    options.unitSpeed = deck.unitSpeed;
+    options.unitEnergy = deck.unitEnergy;
+    options.unitMass = deck.unitMass;
+    options.unitCharge = deck.unitCharge;
+    picBunch::writePicOnGPUCheckpoint(field, options);
+
+    hid_t file = H5Fopen(
+        (directory / "checkpoint_000002.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    hid_t iteration = H5Gopen2(file, "data/2", H5P_DEFAULT);
+    ASSERT_GE(iteration, 0);
+    struct Attribute
+    {
+        char const* name;
+        double value;
+    };
+    Attribute const expected[] = {
+        {"unit_time", deck.unitTime},
+        {"unit_speed", deck.unitSpeed},
+        {"unit_length", deck.unitLength},
+        {"unit_mass", deck.unitMass},
+        {"unit_charge", deck.unitCharge},
+        {"unit_energy", deck.unitEnergy},
+        {"unit_efield", deck.unitEField},
+        {"unit_bfield", deck.unitBField}};
+    for(auto const& attribute : expected)
+        EXPECT_DOUBLE_EQ(
+            readScalarAttribute<double>(iteration, attribute.name, H5T_NATIVE_DOUBLE),
+            attribute.value)
+            << attribute.name;
     H5Gclose(iteration);
     H5Fclose(file);
     std::filesystem::remove_all(temporaryDirectory());

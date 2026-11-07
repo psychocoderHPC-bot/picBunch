@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -117,6 +118,26 @@ namespace picBunch
         }
     } // namespace
 
+    void derivePicOnGPUUnits(Config::PicOnGPU& picongpu)
+    {
+        // Exactly include/picongpu/unitless/simulation.unitless (struct Units).
+        double const numParticlesPerMacroParticle
+            = picongpu.baseDensity * picongpu.cellSize[0] * picongpu.cellSize[1]
+              * picongpu.cellSize[2] / picongpu.typicalParticlesPerCell;
+        picongpu.unitTime = picongpu.deltaT;
+        picongpu.unitSpeed = picongpu.speedOfLight;
+        picongpu.unitLength = picongpu.unitTime * picongpu.unitSpeed;
+        picongpu.unitMass = picongpu.baseMass * numParticlesPerMacroParticle;
+        picongpu.unitCharge = -1.0 * picongpu.baseCharge * numParticlesPerMacroParticle;
+        picongpu.unitEnergy = picongpu.unitMass * picongpu.unitLength * picongpu.unitLength
+                              / (picongpu.unitTime * picongpu.unitTime);
+        picongpu.unitEField = 1.0
+                              / (picongpu.unitTime * picongpu.unitTime / picongpu.unitMass
+                                 / picongpu.unitLength * picongpu.unitCharge);
+        picongpu.unitBField = picongpu.unitMass / (picongpu.unitTime * picongpu.unitCharge);
+        picongpu.dt = picongpu.deltaT;
+    }
+
     Config loadConfig(std::string const& path)
     {
         toml::table document;
@@ -140,10 +161,34 @@ namespace picBunch
         auto const& placement = requireTable(document, "placement");
         auto const& accuracy = requireTable(document, "accuracy");
 
-        config.picongpu.unitLength = asDouble(require(picongpu, "unit_length"), "picongpu.unit_length");
-        config.picongpu.unitEField = asDouble(require(picongpu, "unit_e"), "picongpu.unit_e");
-        config.picongpu.unitBField = asDouble(require(picongpu, "unit_b"), "picongpu.unit_b");
-        config.picongpu.dt = asDouble(require(picongpu, "dt"), "picongpu.dt");
+        // Independent deck inputs; the SI unit factors are derived below.
+        if(auto const* node = picongpu.get("delta_t"))
+            config.picongpu.deltaT = asDouble(*node, "picongpu.delta_t");
+        else if(auto const* node = picongpu.get("dt"))
+        {
+            config.picongpu.deltaT = asDouble(*node, "picongpu.dt");
+            config.warnings.push_back(
+                "configuration key 'picongpu.dt' is deprecated; use 'picongpu.delta_t'");
+        }
+        else
+            fail("picongpu.delta_t", "required key is missing");
+
+        if(auto const* node = picongpu.get("cell_size"))
+            config.picongpu.cellSize = asTriple(*node, "picongpu.cell_size");
+        if(auto const* node = picongpu.get("base_mass"))
+            config.picongpu.baseMass = asDouble(*node, "picongpu.base_mass");
+        if(auto const* node = picongpu.get("base_charge"))
+            config.picongpu.baseCharge = asDouble(*node, "picongpu.base_charge");
+        config.picongpu.baseDensity
+            = asDouble(require(picongpu, "base_density"), "picongpu.base_density");
+        if(auto const* node = picongpu.get("typical_particles_per_cell"))
+        {
+            config.picongpu.typicalParticlesPerCell
+                = asDouble(*node, "picongpu.typical_particles_per_cell");
+        }
+        if(auto const* node = picongpu.get("speed_of_light"))
+            config.picongpu.speedOfLight = asDouble(*node, "picongpu.speed_of_light");
+
         auto const step = asInteger(require(picongpu, "step"), "picongpu.step");
         config.picongpu.species = asString(require(picongpu, "species"), "picongpu.species");
 
@@ -157,14 +202,41 @@ namespace picBunch
             else
                 fail("picongpu.precision", "expected \"float32\" or \"float64\"");
         }
-        if(auto const* node = picongpu.get("unit_charge"))
-            config.picongpu.unitCharge = asDouble(*node, "picongpu.unit_charge");
-        config.picongpu.unitMass = asDouble(require(picongpu, "unit_mass"), "picongpu.unit_mass");
-        if(auto const* node = picongpu.get("unit_speed"))
-            config.picongpu.unitSpeed = asDouble(*node, "picongpu.unit_speed");
 
         config.domain.cells = asCells(require(domain, "cells"), "domain.cells");
-        config.domain.cellSize = asTriple(require(domain, "cell_size"), "domain.cell_size");
+        // The physical cell size may live in [picongpu] (new schema) or in
+        // [domain] (legacy).  Both are the same deck value; if both are given
+        // they must agree, otherwise the unit derivation and the geometry
+        // would silently describe different decks.
+        bool const picCellGiven = picongpu.get("cell_size") != nullptr;
+        std::optional<std::array<double, 3>> domainCellSize;
+        if(auto const* node = domain.get("cell_size"))
+            domainCellSize = asTriple(*node, "domain.cell_size");
+        if(!picCellGiven)
+        {
+            if(!domainCellSize)
+                fail(
+                    "picongpu.cell_size",
+                    "required key is missing (also absent as domain.cell_size)");
+            config.picongpu.cellSize = *domainCellSize;
+            config.warnings.push_back(
+                "configuration key 'domain.cell_size' is deprecated; use 'picongpu.cell_size'");
+        }
+        config.domain.cellSize = domainCellSize ? *domainCellSize : config.picongpu.cellSize;
+        if(domainCellSize)
+        {
+            for(std::size_t a = 0; a < 3; ++a)
+            {
+                double const reference = config.picongpu.cellSize[a];
+                double const other = (*domainCellSize)[a];
+                double const scale = std::max(std::abs(reference), std::abs(other));
+                if(scale > 0.0 && std::abs(reference - other) > 1e-12 * scale)
+                    fail(
+                        "picongpu.cell_size",
+                        "must equal domain.cell_size; the unit derivation and the grid geometry "
+                        "describe different decks");
+            }
+        }
         if(auto const* node = domain.get("origin"))
             config.domain.origin = asTriple(*node, "domain.origin");
 
@@ -237,14 +309,49 @@ namespace picBunch
             if(!(value > 0.0) || !std::isfinite(value))
                 fail(key, "must be finite and positive");
         };
+        // Validate the independent deck inputs, then derive the unit system.
+        positive(config.picongpu.deltaT, "picongpu.delta_t");
+        for(std::size_t a = 0; a < 3; ++a)
+            positive(config.picongpu.cellSize[a], "picongpu.cell_size");
+        positive(config.picongpu.baseMass, "picongpu.base_mass");
+        if(!std::isfinite(config.picongpu.baseCharge) || config.picongpu.baseCharge == 0.0)
+            fail("picongpu.base_charge", "must be finite and non-zero");
+        positive(config.picongpu.baseDensity, "picongpu.base_density");
+        positive(config.picongpu.typicalParticlesPerCell, "picongpu.typical_particles_per_cell");
+        positive(config.picongpu.speedOfLight, "picongpu.speed_of_light");
+        derivePicOnGPUUnits(config.picongpu);
+
+        // Deprecated manual unit keys are explicit overrides: they win over the
+        // derived value for that factor only and always warn.  The default path
+        // is derivation, so a config without them is fully determined by the
+        // deck inputs above.
+        auto overrideUnit = [&](char const* key, double& target) {
+            if(auto const* node = picongpu.get(key))
+            {
+                target = asDouble(*node, std::string("picongpu.") + key);
+                config.warnings.push_back(
+                    std::string("configuration key 'picongpu.") + key
+                    + "' is deprecated and overrides the derived unit; remove it so the "
+                      "value is derived from the deck inputs");
+            }
+        };
+        overrideUnit("unit_length", config.picongpu.unitLength);
+        overrideUnit("unit_e", config.picongpu.unitEField);
+        overrideUnit("unit_b", config.picongpu.unitBField);
+        overrideUnit("unit_charge", config.picongpu.unitCharge);
+        overrideUnit("unit_mass", config.picongpu.unitMass);
+        overrideUnit("unit_speed", config.picongpu.unitSpeed);
+
         positive(config.picongpu.unitLength, "picongpu.unit_length");
         positive(config.picongpu.unitEField, "picongpu.unit_e");
         positive(config.picongpu.unitBField, "picongpu.unit_b");
         positive(config.picongpu.unitCharge, "picongpu.unit_charge");
         positive(config.picongpu.unitMass, "picongpu.unit_mass");
         positive(config.picongpu.unitSpeed, "picongpu.unit_speed");
-        if(config.picongpu.dt < 0.0)
-            fail("picongpu.dt", "must be non-negative");
+        positive(config.picongpu.unitTime, "picongpu.delta_t");
+        if(!(config.picongpu.unitEnergy > 0.0) || !std::isfinite(config.picongpu.unitEnergy))
+            fail("picongpu.unit_energy", "derived energy unit must be finite and positive");
+        config.picongpu.dt = config.picongpu.deltaT;
         if(step < 0 || step > 999999)
             fail("picongpu.step", "must be in [0, 999999]");
         config.picongpu.step = static_cast<std::uint64_t>(step);
@@ -274,13 +381,20 @@ namespace picBunch
         warnUnknown(
             picongpu,
             "picongpu",
-            {"picongpu.unit_length",
+            {"picongpu.delta_t",
+             "picongpu.cell_size",
+             "picongpu.base_mass",
+             "picongpu.base_charge",
+             "picongpu.base_density",
+             "picongpu.typical_particles_per_cell",
+             "picongpu.speed_of_light",
+             "picongpu.dt",
+             "picongpu.unit_length",
              "picongpu.unit_e",
              "picongpu.unit_b",
              "picongpu.unit_charge",
              "picongpu.unit_mass",
              "picongpu.unit_speed",
-             "picongpu.dt",
              "picongpu.step",
              "picongpu.precision",
              "picongpu.species"},

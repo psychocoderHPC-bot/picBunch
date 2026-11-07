@@ -835,12 +835,17 @@ consume:
 picBunch --input bunch.h5 --destination checkpoints --config params.toml
 ```
 
-`[picongpu]` supplies `unit_length`, `unit_e`, `unit_b`, `unit_mass`, `dt`, `step` and
-`precision`; no unit or conversion value is accepted on the command line. `unit_mass`
-**must** equal the deck's `sim.unit.mass()`, not an assumed electron mass: PIConGPU
-restart ignores the particle `unitSI` and interprets momentum in
-`sim.unit.mass()*unit_speed`, so a wrong value scales every momentum. `[domain]` and
-`[placement]` supply the geometry. See [docs/configuration.md](docs/configuration.md).
+`[picongpu]` supplies the independent PIConGPU deck inputs `delta_t`, `cell_size`,
+`base_mass`, `base_charge`, `base_density` and `typical_particles_per_cell` (plus
+optional `speed_of_light`), together with `step` and `precision`. picBunch derives
+every SI factor (`unit_time`, `unit_speed`, `unit_length`, `unit_mass`, `unit_charge`,
+`unit_energy`, `unit_efield`, `unit_bfield`) exactly as
+`include/picongpu/unitless/simulation.unitless`, so the operator repeats only the deck
+setup and never transcribes a unit. The inputs must match the restart deck, not the deck
+that produced the input bunch: PIConGPU restart ignores the particle `unitSI` and
+interprets momentum in `sim.unit.mass()*unit_speed`, so a mismatch scales every
+momentum. `[domain]` and `[placement]` supply the geometry. See
+[docs/configuration.md](docs/configuration.md).
 
 Placement was validated end to end on `rosi_v100`: a 12-marker bunch placed at xz middle
 and y first quarter of a 32x64x32 domain has centroid fractions

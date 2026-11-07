@@ -490,7 +490,7 @@ namespace picBunch
     //! elementary charge in C (magnitude).
     inline constexpr double kElementaryCharge = 1.602176634e-19;
     //! electron rest mass in kg.
-    inline constexpr double kElectronMass = 9.1093837015e-31;
+    inline constexpr double kElectronMass = 9.1093837139e-31;
 
     /** Geometry and time metadata of an openPMD mesh iteration.
      *
