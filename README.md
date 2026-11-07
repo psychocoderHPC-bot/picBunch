@@ -312,6 +312,27 @@ The mesh term is the only one `--tolerance` controls directly. Pick the near-she
 from the near-shell regime limits above, check the binning term for a momentum spread,
 and account for the checkpoint dtype when a downstream consumer is single precision.
 
+### Precision and accuracy safeguards
+
+The compute path is double precision end to end: deposit, TSC convolution,
+FFT, kernel, near-shell quadrature and Yee read-out all run in FP64.  The
+default PIConGPU checkpoint is FP32 for loader compatibility; the separate
+quantization budget is in the error-budget table above.  The following
+accuracy fixes are in the current tree and are covered by tests:
+
+| area | change | measured effect | test |
+| --- | --- | --- | --- |
+| far tail | exact Liénard monopole plus rest-frame dipole/quadrupole, evaluated at the Lorentz-stretched point and boosted back | one moving gamma-10 source reproduces the point kernel to `<1e-12`; the old isotropic `gamma_max` scaling was `~1000x` high on axis | `Margin.MovingFarTailMatchesPointKernel`, `Margin.MovingDipolarCloudBound` |
+| near shell, moving in-support | Lorentz-contracted reference quadrature; the original static path is preserved bit-for-bit | axial off-axis `~1e-4`, closest axial node `~2%`, oblique `~1e-3`; the old axial path was `~9%` to `~10x` | `NearShellAccuracy.*` |
+| velocity binning | box representative is the absolute-charge-weighted mean momentum | 5 degree, gamma-10 bunch: global L2 error `13.2% -> 11.2%` at 16 boxes, `4.31% -> 4.13%` at 64 boxes against 128 boxes | `VelocityBins.MeanRepresentativeIsExactForOneParticlePerBin` |
+| output boundary | source halo wraps the full TSC support into the padded FFT box | a particle at node 0 deposits `0.669921875 -> 1.0` of its charge | `Deposit.PaddedSourceHaloConservesChargeAtBoundaries`, `Physics.BoundarySourceMatchesLargerComputeBox` |
+| checkpoint | PIConGPU macro-momentum weighting and patch-contiguous ordering | weight 100 round-trips `u` exactly; A,B,A,B patches stay inside their extents | `Restart.GeneratedMomentumUsesPIConGPUMacroWeighting`, `Restart.GeneratedPatchesAreContiguousForInterleavedInput` |
+
+The measured tables behind these statements are
+`docs/measurements/velocity_bin_representative.csv`,
+`docs/measurements/near_shell_device_speedup.csv` and the test assertions
+above.  The model behind the binning term is in `docs/algorithm.md`.
+
 ## Global output domains and MPI
 
 By default the computation grid and the written grid are the same. When the bunch is much

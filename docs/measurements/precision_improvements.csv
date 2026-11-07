@@ -1,0 +1,10 @@
+# Accuracy fixes in the current tree, with the measured effect and evidence.
+# Values are per-unit-charge or deposited-charge quantities; see the tests named
+# in the evidence column and README "Precision and accuracy safeguards".
+area,quantity,old_value,new_value,reference,evidence,date
+far_tail_moving,gamma10 axial single-source field ratio to point kernel,1000,<1e-12,pointFieldNormalized,Margin.MovingFarTailMatchesPointKernel,2026-11-06
+near_shell_exact,gamma10 axial closest in-support relative error,9.4e-2,1.9e-2,indfield order12 refine3,NearShellAccuracy.AdaptiveReferenceIsAccurateForAxialGamma10,2026-11-06
+near_shell_exact,gamma10 axial off-axis relative error,1.8e-2,4.0e-4,indfield order12 refine3,NearShellAccuracy.AdaptiveReferenceIsAccurateForAxialGamma10,2026-11-06
+near_shell_exact,gamma10 oblique hard-point relative error,2.1e-2,1.5e-3,indfield order12 refine3,NearShellAccuracy.AdaptiveReferenceIsAccurateForObliqueGamma10,2026-11-06
+boundary_deposit,charge deposited by a particle at node 0 (charge 1),0.669921875,1.0,charge conservation,Deposit.PaddedSourceHaloConservesChargeAtBoundaries,2026-11-06
+velocity_binning,5deg gamma10 global L2 at 16 boxes,1.3220e-1,1.1232e-1,128 boxes,velocity_bin_representative.csv,2026-11-06

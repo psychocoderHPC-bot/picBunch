@@ -10,6 +10,15 @@ convolution per class; the near shell needs no binning, because each pair
 carries its own velocity. The measurements below are on a $64^3$ grid with
 $200$ sources on \texttt{hal} (NVIDIA A30, \texttt{sm\_80}, CUDA 13.4.92).
 
+\paragraph{Box representative.}
+Each box is represented by its absolute-charge-weighted mean momentum, not by
+the geometric box centre.  The mean minimises the angular and energy
+deviations for which the error model charges the split, at no extra kernel
+cost.  On a $200$-particle, $\gamma=10$, $5^\circ$ bunch the global L2 field
+error against the $128$-box field falls from $13.2\%$ to $11.2\%$ at
+$16$ boxes and from $4.31\%$ to $4.13\%$ at $64$ boxes.  The raw rows are in
+\texttt{docs/measurements/velocity\_bin\_representative.csv}.
+
 \paragraph{Single-velocity sanity.}
 With zero spread the binned path is bitwise equal to the unbinned path:
 $B=1$ and $B=16$ give bit-identical fields in all six components
