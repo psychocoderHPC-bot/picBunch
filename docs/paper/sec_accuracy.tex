@@ -376,11 +376,13 @@ on the integrated path is $1.55\times10^{6}$, $1.61\times10^{6}$ and
 $1.76\times10^{6}$ pairs/s for the three radii, about $2\times$ slower per
 component than the standalone kernel, the overhead of the per-tile local FFT
 and launch in the integrated path. A distributed FFT decomposes the output
-field in $z$ slabs, one slab per rank. The generic transform and transpose
-agree with the replicated transform to $2.2\times10^{-16}$, but the
-end-to-end production field is not yet validated against the replicated path
-and the mode is experimental; the automatic policy therefore stays on the
-replicated path. At a $640^{3}$ output the per-rank host memory is
+field in $z$ slabs, one slab per rank. The transform and transpose agree with the
+replicated transform to $2.2\times10^{-16}$. The end-to-end field, including
+the device TSC deposit into the interleaved complex slab, matches the
+replicated field to $3.2\times10^{-16}$ at one rank and $5.4\times10^{-16}$
+at four ranks in the written file (HIP+MPI, hal); the automatic policy selects
+the slab path above its padded-node threshold. At a $640^{3}$ output the
+per-rank host memory is
 $41.1$\,GB at $2$ ranks and $20.6$\,GB at $4$, the quantity the
 decomposition buys: the output field is slab-local, while the bunch remains
 replicated on every rank. The \texttt{MPI\_Alltoallv} transposes are

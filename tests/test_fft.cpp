@@ -9,6 +9,9 @@
 
 #include "TestDevice.hpp"
 
+#include "picBunch/Compute.hpp"
+#include "picBunch/Parallel.hpp"
+
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
 #include <alpaka/math/Complex.hpp>
@@ -261,4 +264,91 @@ TEST(Fft, R2cMatchesC2cAndPackedPlanesMustBePreserved)
             EXPECT_GT(maxZeroed, 1.0e-2 * (scale + 1.0e-30))
                 << "zeroing the DC/Nyquist imaginary planes must change the result";
         });
+}
+
+namespace
+{
+    //! Single-rank parallel context: copies the one block so the distributed
+    //! path can be exercised in-process without MPI.
+    struct SelfContext : picBunch::ParallelContext
+    {
+        void alltoallv(
+            double* send,
+            int const* sendCounts,
+            int const* sendDispls,
+            double* recv,
+            int const* recvCounts,
+            int const* recvDispls) const override
+        {
+            if(sendCounts != nullptr && recvCounts != nullptr && sendCounts[0] > 0)
+                std::copy_n(send + sendDispls[0], sendCounts[0], recv + recvDispls[0]);
+        }
+    };
+} // namespace
+
+TEST(Fft, DistributedProductionMatchesReplicatedWithDeviceDeposit)
+{
+    // Regression: the device TSC deposit ignored rhoStride, so the distributed
+    // path (stride 2, interleaved complex) deposited at half the index.  The
+    // deterministic host deposit was correct, so this test must use the device
+    // deposit (deterministicDeposit = false).
+    picBunch::Bunch bunch;
+    bunch.resize(4);
+    bunch.x = {-2.0e-6, 0.5e-6, 1.5e-6, 3.0e-6};
+    bunch.y = {0.5e-6, -1.5e-6, 2.0e-6, 0.0};
+    bunch.z = {1.0e-6, -0.5e-6, 0.0, 2.5e-6};
+    bunch.ux = {0.0, 0.3, -0.2, 0.5};
+    bunch.uy = {0.0, -0.1, 0.4, 0.0};
+    bunch.uz = {0.0, 0.2, 0.0, -0.3};
+    bunch.weight = {1.0, 2.0, 0.5, 1.5};
+    bunch.charge = {
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge};
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
+    options.gridSize = {16, 16, 16};
+    options.gridOrigin = {-8.0e-6, -8.0e-6, -8.0e-6};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = false;
+
+    options.fftMode = picBunch::FftMode::Replicated;
+    auto const replicated = picBunch::computeField(bunch, options);
+
+    SelfContext context;
+    options.fftMode = picBunch::FftMode::Distributed;
+    options.parallel = &context;
+    auto const distributed = picBunch::computeField(bunch, options);
+
+    double peak = 0.0;
+    double worst = 0.0;
+    for(int c = 0; c < 6; ++c)
+    {
+        ASSERT_EQ(replicated.data[c].size(), distributed.data[c].size());
+        for(std::size_t l = 0; l < replicated.data[c].size(); ++l)
+        {
+            peak = std::max(peak, std::abs(replicated.data[c][l]));
+            worst = std::max(
+                worst, std::abs(replicated.data[c][l] - distributed.data[c][l]));
+        }
+    }
+    ASSERT_GT(peak, 0.0);
+    EXPECT_LT(worst / peak, 1.0e-12)
+        << "distributed production field must match the replicated field";
+
+    // The automatic policy must select the same validated path above its
+    // padded-node threshold.
+    options.fftMode = picBunch::FftMode::Auto;
+    options.distributedFftMinNodes = 1u;
+    auto const automatic = picBunch::computeField(bunch, options);
+    double autoWorst = 0.0;
+    for(int c = 0; c < 6; ++c)
+        for(std::size_t l = 0; l < replicated.data[c].size(); ++l)
+            autoWorst = std::max(
+                autoWorst,
+                std::abs(replicated.data[c][l] - automatic.data[c][l]));
+    EXPECT_LT(autoWorst / peak, 1.0e-12)
+        << "auto-selected distributed path must match the replicated field";
 }

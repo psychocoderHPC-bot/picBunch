@@ -127,7 +127,7 @@ namespace picBunch
                                         * (static_cast<std::size_t>(mb)
                                            + static_cast<std::size_t>(My)
                                                * static_cast<std::size_t>(mc - zOffset));
-                                alpaka::onAcc::atomicAdd(acc, &rho[idx], wc * q);
+                                alpaka::onAcc::atomicAdd(acc, &rho[idx * rhoStride], wc * q);
                             }
                         }
                     }
@@ -975,21 +975,13 @@ namespace picBunch
         int const parSize = (par && par->distributed()) ? par->size : 1;
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
-        // Auto currently stays on the replicated path: the slab algorithm
-        // passes its transform self-test but the end-to-end production field
-        // does not yet match the replicated field, so it must not be selected
-        // silently for large boxes.  The explicit mode is kept for debugging.
-        bool const distributedRequested = options.fftMode == FftMode::Distributed;
-        int const warnRank = (options.parallel != nullptr) ? options.parallel->rank : 0;
-        if(options.fftMode == FftMode::Distributed && warnRank == 0)
-            std::fprintf(
-                stderr,
-                "picBunch: warning: --fft-mode distributed is experimental; the "
-                "end-to-end slab field is not yet validated against the replicated "
-                "path.  Use the default replicated mode for production.\n");
-        // An explicit --fft-mode distributed also runs the slab algorithm on a
-        // single rank so its written field can be compared bitwise with a
-        // multi-rank run; Auto keeps the replicated fallback for one rank.
+        // Auto uses the slab algorithm only above the configured padded-node
+        // threshold; the explicit mode also runs it on one rank so its written
+        // field can be compared with a multi-rank run.  The end-to-end field is
+        // covered by Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit.
+        bool const distributedRequested = options.fftMode == FftMode::Distributed
+            || (options.fftMode == FftMode::Auto
+                && paddedNodes > options.distributedFftMinNodes);
         bool const useDistributed = distributedRequested && par != nullptr
             && (parSize > 1 || options.fftMode == FftMode::Distributed);
 
