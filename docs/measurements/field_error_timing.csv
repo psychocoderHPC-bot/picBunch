@@ -1,0 +1,13 @@
+case,variant,runs,median_cli_wall_s,median_compute_wall_ms,median_near_shell_wall_ms,median_peak_rss_kb,gpu_before,status,notes
+single200k,main,3,0.77,411.771,,286132,0 percent 0 MiB,ok,single-velocity auto returns 1 box; quiet A30
+single200k,branch,3,0.77,414.936,,289720,0 percent 0 MiB,ok,branch/main wall 1.00x and compute 1.008x; gate <=1.02x
+es200k,main B=8,3,1.75,1383.113,,282904,0 percent 0 MiB,ok,64^3; TSC; near-shell none
+es200k,main B=64,3,11.20,10852.772,,282476,not 0 percent but 0 MiB,ok,residual utilization from the preceding run; no foreign process
+es200k,main B=256,3,35.46,35086.942,,282148,not 0 percent but 0 MiB,ok,residual utilization from the preceding run; no foreign process
+es200k,branch moment 2,3,1.82,1455.848,,284664,not 0 percent but 0 MiB,ok,velocity-bins 8 + --velocity-moments 2
+es200k,branch moment 3,3,1.85,1477.728,,284664,not 0 percent but 0 MiB,ok,velocity-bins 8 + --velocity-moments 3
+es200k,branch moment auto,3,2.10,1733.741,,317756,not 0 percent but 0 MiB,ok,auto probe overhead; resolved order 3
+es200k,branch N3 auto-bin tol 1e-3,0,,,,,0 percent 0 MiB,hard-error,no field; model requires 8388608 boxes (cap 256 estimate 1.867e-01)
+s6-near,device fast-gpu,3,5.46,5082.038,4799.835,250912,0 percent 0 MiB,ok,2e3 particles; 16^3; R=3 tile=4
+s6-near,device fast-gpu local FFT,1,8.24,7844.384,7481.286,251432,0 percent 0 MiB,ok,PICBUNCH_NEAR_SHELL_LOCAL_FFT=1 equivalence run
+es200k,production near-shell fast-gpu,3,232.80,232363.828,231013.541,337128,0 percent 0 MiB,ok,near-shell wall median 231.01 s; N5 baseline 231 s; pre-N5 baseline 282 s

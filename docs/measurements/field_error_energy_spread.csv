@@ -1,0 +1,50 @@
+case,variant,quantity,value,unit,status,reference,notes
+es200k,main B=8,band [0 1.5) relL2,5.878e-01,,ok,eval.json.ref.npz,40 stratified nodes; TSC; near-shell none
+es200k,main B=8,band [1.5 3) relL2,1.198e-02,,ok,eval.json.ref.npz,
+es200k,main B=8,band [3 6) relL2,1.008e-02,,ok,eval.json.ref.npz,
+es200k,main B=8,band [6 12) relL2,2.494e-03,,ok,eval.json.ref.npz,
+es200k,main B=8,band >12 relL2,9.677e-03,,ok,eval.json.ref.npz,
+es200k,main B=8,overall relL2,5.147e-01,,ok,eval.json.ref.npz,
+es200k,main B=64,band [0 1.5) relL2,5.837e-01,,ok,eval.json.ref.npz,
+es200k,main B=64,band [1.5 3) relL2,1.172e-02,,ok,eval.json.ref.npz,
+es200k,main B=64,band [3 6) relL2,9.521e-03,,ok,eval.json.ref.npz,
+es200k,main B=64,band [6 12) relL2,1.460e-03,,ok,eval.json.ref.npz,
+es200k,main B=64,band >12 relL2,4.780e-03,,ok,eval.json.ref.npz,
+es200k,main B=64,overall relL2,5.111e-01,,ok,eval.json.ref.npz,
+es200k,main B=256,band [0 1.5) relL2,5.779e-01,,ok,eval.json.ref.npz,
+es200k,main B=256,band [1.5 3) relL2,1.110e-02,,ok,eval.json.ref.npz,
+es200k,main B=256,band [3 6) relL2,8.378e-03,,ok,eval.json.ref.npz,
+es200k,main B=256,band [6 12) relL2,8.104e-04,,ok,eval.json.ref.npz,
+es200k,main B=256,band >12 relL2,2.505e-03,,ok,eval.json.ref.npz,
+es200k,main B=256,overall relL2,5.060e-01,,ok,eval.json.ref.npz,
+es200k,branch moment 2,band [0 1.5) relL2,5.684e-01,,ok,eval.json.ref.npz,velocity-bins 8 + --velocity-moments 2
+es200k,branch moment 2,band [1.5 3) relL2,9.281e-03,,ok,eval.json.ref.npz,
+es200k,branch moment 2,band [3 6) relL2,6.469e-03,,ok,eval.json.ref.npz,
+es200k,branch moment 2,band [6 12) relL2,9.834e-05,,ok,eval.json.ref.npz,
+es200k,branch moment 2,band >12 relL2,2.191e-04,,ok,eval.json.ref.npz,
+es200k,branch moment 2,overall relL2,4.977e-01,,ok,eval.json.ref.npz,
+es200k,branch moment 3,band [0 1.5) relL2,5.681e-01,,ok,eval.json.ref.npz,velocity-bins 8 + --velocity-moments 3
+es200k,branch moment 3,band [1.5 3) relL2,9.164e-03,,ok,eval.json.ref.npz,
+es200k,branch moment 3,band [3 6) relL2,6.380e-03,,ok,eval.json.ref.npz,
+es200k,branch moment 3,band [6 12) relL2,7.851e-05,,ok,eval.json.ref.npz,
+es200k,branch moment 3,band >12 relL2,4.131e-04,,ok,eval.json.ref.npz,
+es200k,branch moment 3,overall relL2,4.974e-01,,ok,eval.json.ref.npz,
+es200k,branch moment auto,band [0 1.5) relL2,5.681e-01,,ok,eval.json.ref.npz,auto resolved order 3
+es200k,branch moment auto,band [1.5 3) relL2,9.164e-03,,ok,eval.json.ref.npz,
+es200k,branch moment auto,band [3 6) relL2,6.380e-03,,ok,eval.json.ref.npz,
+es200k,branch moment auto,band [6 12) relL2,7.851e-05,,ok,eval.json.ref.npz,
+es200k,branch moment auto,band >12 relL2,4.131e-04,,ok,eval.json.ref.npz,
+es200k,branch moment auto,overall relL2,4.974e-01,,ok,eval.json.ref.npz,
+es200k,branch N3 auto-bin tol 1e-3,required boxes,8388608,,hard-error,,1-degree divergence makes the angular term dominant; cap estimate 1.867e-01 at 256 boxes; exits non-zero by design
+single200k,branch vs main,worst point rel to peak,6.864e-15,,ok,main field,3 run pairs; not bitwise; gate <1e-14
+single200k,branch vs main,overall relL2,1.843e-15,,ok,main field,
+cap1024,velocity-moments 3 1-rank vs 2-rank,overall relL2,2.047e-16,,ok,1-rank field,gate <1e-12; max point rel 4.820e-16
+cap1024,velocity-moments 3 1-rank vs 2-rank,max point rel,4.820e-16,,ok,1-rank field,
+cap1024,velocity-moments off max-bins 32,required boxes,64,,hard-error,,auto binned path exits non-zero (2.004e-03 at the 32-box cap)
+cap1024,velocity-moments auto max-bins 32,moment order used,3,,ok,velocity-moments path,warn-and-run at cap; probe 5.064e-06; no hard error
+cap1024,binned auto max-bins 256,selected boxes,64,,ok,N3 calibrated model,model estimate 9.679e-04 at 1e-3 tolerance
+s6-near,host fast vs NearReference,gamma10 oblique in-support rel err,0,,ok,nbref,gated pairs fall back to the contracted NearReference quadrature; non-gated residual <0.25*tolerance
+s6-near,device in-kernel vs NearReference,gamma10 oblique in-support rel err,5.342e-02,,ok,nbref,"point (0,0.5,0); other gamma10 points 1.501e-01 and 1.540e-01"
+s6-near,device in-kernel vs NearReference,gamma10 oblique in-support rel err,5.342e-02,,ok,nbref,"point (0,0.5,0); other gamma10 points 1.501e-01 and 1.540e-01"
+s6-near,device in-kernel vs NearReference,S6 beta=0.5 oblique in-support rel err,9.324e-04,,ok,nbref,range 9.32e-04 to 1.22e-03 over three points
+s6-near,device stencil vs local FFT,max point rel,2.528e-15,,ok,FFT local subtraction,2e3 case; PICBUNCH_NEAR_SHELL_LOCAL_FFT=1; overall relL2 4.900e-16
