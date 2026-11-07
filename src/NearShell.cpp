@@ -102,8 +102,44 @@ namespace picBunch
         // representatives, so the binning is derived once from the full bunch
         // and fixed for every per-tile local mesh.
         VelocityBinning binning;
+        bool const momentsRequestedForBinning
+            = options.velocityMoments.mode != VelocityMomentsOptions::Mode::Off;
         if(!options.fixedBinning)
-            binning = deriveVelocityBinning(bunch, options.tolerance, options.velocityBinning);
+        {
+            try
+            {
+                binning = deriveVelocityBinning(
+                    bunch, options.tolerance, options.velocityBinning);
+            }
+            catch(std::runtime_error const& error)
+            {
+                // Only the model's bin-cap failure may be downgraded.  Any other
+                // setup error (invalid input, empty bunch, bad geometry) must
+                // still propagate, also when the moment path is enabled.
+                if(!momentsRequestedForBinning
+                   || std::string(error.what()).find("velocity-bin model requires")
+                          == std::string::npos)
+                    throw;
+                // The moment path does not consume the velocity boxes, but the
+                // near-shell mesh subtraction (and the fallback if its probe
+                // declines) still needs the same fixed geometry as the global
+                // mesh.  Use the largest count the policy allows instead of
+                // aborting at the model cap; the moment centre stays pinned to
+                // the full-bunch u0, so the subtraction operator is unchanged.
+                std::fprintf(
+                    stderr,
+                    "picBunch: near shell: velocity-bin auto policy exceeded the %zu-box "
+                    "cap (%s); using a %zu-box fallback binning for the mesh and trying "
+                    "the velocity-moment path\n",
+                    options.velocityBinning.maxBins,
+                    error.what(),
+                    options.velocityBinning.maxBins);
+                VelocityBinningOptions capped = options.velocityBinning;
+                capped.mode = VelocityBinningOptions::Mode::Explicit;
+                capped.explicitBins = capped.maxBins;
+                binning = deriveVelocityBinning(bunch, options.tolerance, capped);
+            }
+        }
         if(outBinning)
             *outBinning = options.fixedBinning ? *options.fixedBinning : binning;
 

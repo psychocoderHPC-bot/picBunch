@@ -325,6 +325,12 @@ namespace picBunch
         Mode mode = Mode::Off;
         //! Moment order for ``Explicit`` (2 or 3).
         std::size_t order = 2u;
+        /*! Keep an explicit order even when its a-posteriori probe exceeds the
+         * convergence budget.  Diagnostic escape hatch: the delivered field is
+         * then known to be unconverged (the CLI warns and the report marks it).
+         * It never overrides the non-finite guard.
+         */
+        bool allowUnconverged = false;
     };
 
     /** User-facing knobs of the field computation.
