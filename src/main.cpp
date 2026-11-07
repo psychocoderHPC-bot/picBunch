@@ -120,6 +120,8 @@ namespace
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
             "                        when the padded box exceeds the per-rank limit\n"
+            "  --shape <shape>       cic|tsc|pqs particle shape for the charge deposit\n"
+            "                        (default: tsc); must match the PIConGPU species shape\n"
             "  --multipole-group-cells <N>\n"
             "                        spatial supercell size for the far-tail multipoles,\n"
             "                        in PIC cells (default: 16; 0 = one global multipole)\n"
@@ -160,6 +162,7 @@ namespace
         std::optional<std::array<double, 3>> cellSize;
         std::optional<std::array<std::size_t, 3>> grid;
         std::optional<std::array<double, 3>> origin;
+        std::string shape = "tsc";
         int multipoleGroupCells = 16;
         double maxParticleChunkGb = 0.0;
         std::optional<std::array<std::size_t, 3>> globalGrid;
@@ -353,6 +356,8 @@ namespace
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
                 args.allowFieldTruncation = true;
+            else if(option == "--shape")
+                args.shape = value("--shape");
             else if(option == "--multipole-group-cells")
             {
                 args.multipoleGroupCells
@@ -418,6 +423,8 @@ namespace
         if(args.nearShell != "none" && args.nearShell != "exact" && args.nearShell != "fast"
            && args.nearShell != "fast-gpu")
             throw std::invalid_argument("--near-shell must be 'none', 'exact', 'fast' or 'fast-gpu'");
+        if(args.shape != "cic" && args.shape != "tsc" && args.shape != "pqs")
+            throw std::invalid_argument("--shape must be 'cic', 'tsc' or 'pqs'");
         if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
@@ -658,6 +665,9 @@ namespace
         picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
         options.deterministicDeposit = args.deterministicDeposit;
+        options.shape = (args.shape == "cic") ? picBunch::Shape::CIC
+            : (args.shape == "pqs") ? picBunch::Shape::PQS
+                                    : picBunch::Shape::TSC;
         options.cellSize = *args.cellSize;
         options.gridSize = *args.grid;
         options.gridOrigin = *args.origin;
@@ -906,6 +916,9 @@ int main(int argc, char** argv)
         // When neither is available the run fails; nothing is assumed.
         options.tolerance = args.tolerance;
         options.deterministicDeposit = args.deterministicDeposit;
+        options.shape = (args.shape == "cic") ? picBunch::Shape::CIC
+            : (args.shape == "pqs") ? picBunch::Shape::PQS
+                                    : picBunch::Shape::TSC;
         options.nearShell.mode = (args.nearShell == "exact")
             ? picBunch::NearShellOptions::Mode::Exact
             : (args.nearShell == "fast")

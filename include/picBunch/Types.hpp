@@ -13,6 +13,14 @@
 
 namespace picBunch
 {
+    //! Particle shape used for the TSC-style charge deposit.
+    enum class Shape
+    {
+        CIC, //!< first-order B-spline, support radius 1 cell
+        TSC, //!< second-order B-spline, support radius 1.5 cells
+        PQS  //!< third-order B-spline, support radius 2 cells
+    };
+
     //! Number of nodes per physical PIC cell along one axis (``h`` in the algorithm spec).
     //!
     //! v0.1 keeps the mesh at cell resolution.  The tolerance-driven refinement policy is a
@@ -36,6 +44,8 @@ namespace picBunch
         std::array<double, 3> spacing{1.0, 1.0, 1.0}; //!< physical node spacing
         std::array<double, 3> origin{0.0, 0.0, 0.0}; //!< physical position of node (0,0,0)
         unsigned fftPadding{2};
+        //! Deposit shape; the near shell currently supports TSC only.
+        Shape shape = Shape::TSC;
 
         //! Total number of output nodes.
         [[nodiscard]] std::size_t size() const
@@ -382,6 +392,8 @@ namespace picBunch
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.
         std::optional<VelocityBinning> fixedBinning;
+        //! Particle shape for the charge deposit (default TSC).
+        Shape shape = Shape::TSC;
         //! FFT decomposition policy.  The replicated path stays the default for small boxes.
         FftMode fftMode = FftMode::Auto;
         /*! Padded-node count per rank above which ``Auto`` selects the distributed FFT.

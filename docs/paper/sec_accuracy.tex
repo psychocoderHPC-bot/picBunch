@@ -84,6 +84,15 @@ switch radius. Output precision is not a measured loss: the
 float32 checkpoint arrives bitwise in PIConGPU, and the float64 path is a
 uniform opt-in.
 
+\paragraph{Shape bias.}
+The deposited shape is a deliberate smoothing of the point field, not a mesh
+error.  For a stationary point charge the relative bias at 2, 4 and 8 cells is
+$-8.31\times10^{-3}$, $-5.62\times10^{-4}$, $-3.55\times10^{-5}$ for CIC;
+$-1.20\times10^{-2}$, $-8.41\times10^{-4}$, $-5.33\times10^{-5}$ for TSC; and
+$-1.55\times10^{-2}$, $-1.12\times10^{-3}$, $-7.10\times10^{-5}$ for PQS.
+TSC is the closest of the three to the point field at these distances.  The
+shape option exists to match the PIConGPU species, not to reduce this bias.
+
 \subsection{Reference-separated error at 48 cells}
 
 \begin{table}[t]

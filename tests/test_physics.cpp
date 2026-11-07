@@ -42,6 +42,7 @@
 // the v0.1 deposit kernel, not an FFT error; it is asserted at 2e-2.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Kernel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
@@ -431,4 +432,41 @@ TEST(Physics, BoundarySourceMatchesLargerComputeBox)
                     << small.data[c][si] << " large " << large.data[c][li];
         }
     }
+}
+
+TEST(Physics, PqsChangesTheMeshField)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x = {5.0};
+    bunch.y = {5.0};
+    bunch.z = {5.0};
+    bunch.ux = {0.0};
+    bunch.uy = {0.0};
+    bunch.uz = {10.0};
+    bunch.weight = {1.0};
+    bunch.charge = {-picBunch::kElementaryCharge};
+
+    picBunch::ComputeOptions options;
+    options.tolerance = 1e-3;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.gridSize = {10, 10, 10};
+    options.gridOrigin = {1.0, 1.0, 1.0};
+    options.shape = picBunch::Shape::TSC;
+    auto const tsc = picBunch::computeField(bunch, options);
+    options.shape = picBunch::Shape::PQS;
+    auto const pqs = picBunch::computeField(bunch, options);
+    double peak = 0.0;
+    double diff = 0.0;
+    for(int c = 0; c < 6; ++c)
+    {
+        ASSERT_EQ(tsc.data[c].size(), pqs.data[c].size());
+        for(std::size_t l = 0; l < tsc.data[c].size(); ++l)
+        {
+            peak = std::max(peak, std::abs(tsc.data[c][l]));
+            diff = std::max(diff, std::abs(tsc.data[c][l] - pqs.data[c][l]));
+        }
+    }
+    ASSERT_GT(peak, 0.0);
+    EXPECT_GT(diff, 1.0e-6 * peak) << "PQS must change the deposited field";
 }

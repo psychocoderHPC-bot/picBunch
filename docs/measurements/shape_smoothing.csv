@@ -1,0 +1,7 @@
+# Field-smoothing error of the shape-convolved stationary point-charge field
+# against the point field, 3D tensor quadrature; negative means below the point
+# field.  Cell units.  This is a shape bias, not the mesh or FFT error.
+shape,support_radius_cells,d2_relative,d4_relative,d8_relative
+CIC,1,-8.31e-3,-5.62e-4,-3.55e-5
+TSC,1.5,-1.20e-2,-8.41e-4,-5.33e-5
+PQS,2,-1.55e-2,-1.12e-3,-7.10e-5

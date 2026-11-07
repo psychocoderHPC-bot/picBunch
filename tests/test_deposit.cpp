@@ -4,11 +4,13 @@
 // Group 1: TSC deposit.  Partition of unity, compact support (+-1.5 cells),
 // and a single particle of weight 1 depositing exactly its charge.
 
+#include "picBunch/Compute.hpp"
 #include "picBunch/Deposit.hpp"
 #include "picBunch/Kernel.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numeric>
@@ -210,4 +212,99 @@ TEST(Deposit, PaddedSourceHaloWrapsNegativeSupport)
         + M * (static_cast<std::size_t>(3u) + M * static_cast<std::size_t>(3u));
     // tscShape(-1) * tscShape(0) * tscShape(0) = 0.125 * 0.75 * 0.75.
     EXPECT_NEAR(rho[idx], 0.0703125, 1.0e-14);
+}
+
+TEST(Deposit, ShapeChargeConservationAndSupport)
+{
+    for(picBunch::Shape shape : {picBunch::Shape::CIC, picBunch::Shape::TSC, picBunch::Shape::PQS})
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x = {0.0};
+        bunch.y = {0.0};
+        bunch.z = {0.0};
+        bunch.ux = {0.0};
+        bunch.uy = {0.0};
+        bunch.uz = {0.0};
+        bunch.weight = {1.0};
+        bunch.charge = {1.0};
+
+        picBunch::Grid grid;
+        grid.n = {16, 16, 16};
+        grid.spacing = {1.0, 1.0, 1.0};
+        grid.origin = {-8.0, -8.0, -8.0};
+        grid.fftPadding = 2u;
+        grid.shape = shape;
+
+        auto const rho = picBunch::depositTSC(bunch, grid);
+        double sum = 0.0;
+        double maxRadius = 0.0;
+        for(std::size_t k = 0; k < 16u; ++k)
+            for(std::size_t j = 0; j < 16u; ++j)
+                for(std::size_t i = 0; i < 16u; ++i)
+                {
+                    double const value = rho[i + 16u * (j + 16u * k)];
+                    sum += value;
+                    if(value != 0.0)
+                    {
+                        double const dx = static_cast<double>(i) - 8.0;
+                        double const dy = static_cast<double>(j) - 8.0;
+                        double const dz = static_cast<double>(k) - 8.0;
+                        maxRadius = std::max(
+                            maxRadius, std::sqrt(dx * dx + dy * dy + dz * dz));
+                    }
+                }
+        EXPECT_NEAR(sum, 1.0, 1.0e-12) << "shape " << static_cast<int>(shape);
+        EXPECT_LE(maxRadius, picBunch::shapeSupport(shape) * std::sqrt(3.0) + 1.0e-12)
+            << "shape " << static_cast<int>(shape);
+    }
+}
+
+TEST(Deposit, NearShellRejectsNonTscShape)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x = {0.0};
+    bunch.y = {0.0};
+    bunch.z = {0.0};
+    bunch.ux = {0.0};
+    bunch.uy = {0.0};
+    bunch.uz = {0.0};
+    bunch.weight = {1.0};
+    bunch.charge = {-picBunch::kElementaryCharge};
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.gridSize = {8, 8, 8};
+    options.gridOrigin = {-4.0, -4.0, -4.0};
+    options.shape = picBunch::Shape::PQS;
+    options.nearShell.mode = picBunch::NearShellOptions::Mode::Fast;
+    options.nearShell.radiusCells = 2.0;
+    EXPECT_THROW(picBunch::computeField(bunch, options), std::runtime_error);
+}
+
+TEST(Deposit, ShapesProduceDifferentStencils)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x = {0.3};
+    bunch.y = {0.4};
+    bunch.z = {0.5};
+    bunch.ux = {0.0};
+    bunch.uy = {0.0};
+    bunch.uz = {0.0};
+    bunch.weight = {1.0};
+    bunch.charge = {1.0};
+    picBunch::Grid grid;
+    grid.n = {16, 16, 16};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {-8.0, -8.0, -8.0};
+    grid.shape = picBunch::Shape::TSC;
+    auto const tsc = picBunch::depositTSC(bunch, grid);
+    grid.shape = picBunch::Shape::PQS;
+    auto const pqs = picBunch::depositTSC(bunch, grid);
+    double maxDiff = 0.0;
+    for(std::size_t l = 0; l < tsc.size(); ++l)
+        maxDiff = std::max(maxDiff, std::abs(tsc[l] - pqs[l]));
+    EXPECT_GT(maxDiff, 1.0e-9) << "the deposit must use the selected shape";
 }

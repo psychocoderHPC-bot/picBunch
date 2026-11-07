@@ -355,6 +355,27 @@ sum at `6R`/`8R`/`12R` falls from `1.72e-3` (global) to `1.81e-4` (grouped,
 per tail node, so choose the group size from the bunch extent: large groups are
 cheaper, small groups are more accurate near the transition.
 
+## Particle shapes
+
+`--shape cic|tsc|pqs` selects the charge-assignment shape for the deposit
+(default `tsc`).  The support radii are 1, 1.5 and 2 PIC cells, matching
+PIConGPU's `CIC`, `TSC` and `PQS` species shapes.  The shape is not stored in
+the openPMD particle records, so the value must mirror the simulation's
+`shape.param`; use the same shape in the PIC run.
+
+The shape changes the deposited field: the FFT kernel remains the sampled point
+kernel and the source shape sets the smoothing.  The shape term is a deliberate
+bias against the point field, not a mesh error: at 2, 4 and 8 cells the
+stationary point-charge smoothing error is `-8.31e-3`, `-5.62e-4`, `-3.55e-5`
+for CIC, `-1.20e-2`, `-8.41e-4`, `-5.33e-5` for TSC and `-1.55e-2`,
+`-1.12e-3`, `-7.10e-5` for PQS (`docs/measurements/shape_smoothing.csv`).
+TSC is the closest of the three to the point field at these distances; PQS has
+the widest support and the largest bias here.  Choose the shape for PIConGPU
+consistency, not for a smaller point-field error.
+
+The near shell currently supports `tsc` only and exits with a clear error for
+CIC/PQS; the mesh path supports all three.
+
 ## Global output domains and MPI
 
 By default the computation grid and the written grid are the same. When the bunch is much

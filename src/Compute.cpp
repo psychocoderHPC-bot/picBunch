@@ -32,6 +32,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace picBunch
 {
@@ -58,6 +59,7 @@ namespace picBunch
         }
 
         //! TSC assignment of weight*charge onto the padded grid with a source halo.
+        template<Shape S>
         struct TscDepositKernel
         {
             template<typename TAcc>
@@ -82,7 +84,7 @@ namespace picBunch
                 double sy,
                 double sz) const
             {
-                double const support = 1.5;
+                double const support = shapeSupport<S>();
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
@@ -103,19 +105,19 @@ namespace picBunch
                     double const q = pq[p];
                     for(long ia = lo[0]; ia <= hi[0]; ++ia)
                     {
-                        double const wa = tscShape(static_cast<double>(ia) - t[0]);
+                        double const wa = shapeWeight<S>( static_cast<double>(ia) - t[0]);
                         if(wa == 0.0)
                             continue;
                         long const ma = wrapPaddedIndex(ia, Mx);
                         for(long ib = lo[1]; ib <= hi[1]; ++ib)
                         {
-                            double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
+                            double const wb = wa * shapeWeight<S>( static_cast<double>(ib) - t[1]);
                             if(wb == 0.0)
                                 continue;
                             long const mb = wrapPaddedIndex(ib, My);
                             for(long ic = lo[2]; ic <= hi[2]; ++ic)
                             {
-                                double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
+                                double const wc = wb * shapeWeight<S>( static_cast<double>(ic) - t[2]);
                                 if(wc == 0.0)
                                     continue;
                                 long const mc = wrapPaddedIndex(ic, Mz);
@@ -531,6 +533,7 @@ namespace picBunch
         if(padding == 0u)
             throw std::invalid_argument("makeGrid: fftPadding must be >= 1");
         grid.fftPadding = padding;
+        grid.shape = options.shape;
 
         for(int a = 0; a < 3; ++a)
         {
@@ -727,6 +730,12 @@ namespace picBunch
         StageTimes* stageTimes,
         VelocityBinning* outBinning)
     {
+        if(options.nearShell.mode != NearShellOptions::Mode::None
+           && options.shape != Shape::TSC)
+            throw std::runtime_error(
+                "the near shell currently supports the TSC shape only; use "
+                "--near-shell none or --shape tsc");
+
         // Both near-shell backends share the tiled assembly
         // F = F_mesh(all) - F_mesh(near) + F_exact(near); only the per-pair
         // evaluator differs (adaptive reference vs closed form).
@@ -834,13 +843,15 @@ namespace picBunch
 
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
-        auto depositHost = [&](
+        auto depositHostImpl = [&](
+                               auto tag,
                                std::vector<std::size_t> const& list,
                                double* rho,
                                std::uint32_t rhoStride,
                                std::uint32_t zOffset,
                                std::uint32_t zExtent) {
-            double const support = 1.5;
+            constexpr Shape S = decltype(tag)::value;
+            double const support = shapeSupport<S>();
             double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
             double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
             for(std::size_t const p : list)
@@ -858,19 +869,19 @@ namespace picBunch
                 double const q = bunch.weight[p] * bunch.charge[p];
                 for(long ia = lo[0]; ia <= hi[0]; ++ia)
                 {
-                    double const wa = tscShape(static_cast<double>(ia) - t[0]);
+                    double const wa = shapeWeight<S>(static_cast<double>(ia) - t[0]);
                     if(wa == 0.0)
                         continue;
                     long const ma = wrapPaddedIndex(ia, Mx);
                     for(long ib = lo[1]; ib <= hi[1]; ++ib)
                     {
-                        double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
+                        double const wb = wa * shapeWeight<S>(static_cast<double>(ib) - t[1]);
                         if(wb == 0.0)
                             continue;
                         long const mb = wrapPaddedIndex(ib, My);
                         for(long ic = lo[2]; ic <= hi[2]; ++ic)
                         {
-                            double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
+                            double const wc = wb * shapeWeight<S>(static_cast<double>(ic) - t[2]);
                             if(wc == 0.0)
                                 continue;
                             long const mc = wrapPaddedIndex(ic, Mz);
@@ -887,6 +898,38 @@ namespace picBunch
                     }
                 }
             }
+        };
+
+        auto depositHost = [&](
+                               std::vector<std::size_t> const& list,
+                               double* rho,
+                               std::uint32_t rhoStride,
+                               std::uint32_t zOffset,
+                               std::uint32_t zExtent) {
+            if(grid.shape == Shape::CIC)
+                depositHostImpl(
+                    std::integral_constant<Shape, Shape::CIC>{},
+                    list,
+                    rho,
+                    rhoStride,
+                    zOffset,
+                    zExtent);
+            else if(grid.shape == Shape::PQS)
+                depositHostImpl(
+                    std::integral_constant<Shape, Shape::PQS>{},
+                    list,
+                    rho,
+                    rhoStride,
+                    zOffset,
+                    zExtent);
+            else
+                depositHostImpl(
+                    std::integral_constant<Shape, Shape::TSC>{},
+                    list,
+                    rho,
+                    rhoStride,
+                    zOffset,
+                    zExtent);
         };
 
         // Device TSC deposit of a particle list into the (already zeroed) rho.
@@ -910,27 +953,36 @@ namespace picBunch
                 charge.data()[m] = bunch.weight[p] * bunch.charge[p];
             }
             std::uint32_t const frame = 64u;
-            queue.enqueue(
-                alpaka::onHost::FrameSpec{(numParticles + frame - 1u) / frame, frame},
-                TscDepositKernel{},
-                posX.data(),
-                posY.data(),
-                posZ.data(),
-                charge.data(),
-                numParticles,
-                rho,
-                rhoStride,
-                zOffset,
-                zExtent,
-                Mx,
-                My,
-                Mz,
-                grid.origin[0],
-                grid.origin[1],
-                grid.origin[2],
-                grid.spacing[0],
-                grid.spacing[1],
-                grid.spacing[2]);
+            auto launch = [&](auto tag) {
+                constexpr Shape S = decltype(tag)::value;
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{(numParticles + frame - 1u) / frame, frame},
+                    TscDepositKernel<S>{},
+                    posX.data(),
+                    posY.data(),
+                    posZ.data(),
+                    charge.data(),
+                    numParticles,
+                    rho,
+                    rhoStride,
+                    zOffset,
+                    zExtent,
+                    Mx,
+                    My,
+                    Mz,
+                    grid.origin[0],
+                    grid.origin[1],
+                    grid.origin[2],
+                    grid.spacing[0],
+                    grid.spacing[1],
+                    grid.spacing[2]);
+            };
+            if(grid.shape == Shape::CIC)
+                launch(std::integral_constant<Shape, Shape::CIC>{});
+            else if(grid.shape == Shape::PQS)
+                launch(std::integral_constant<Shape, Shape::PQS>{});
+            else
+                launch(std::integral_constant<Shape, Shape::TSC>{});
             // The host queue is non-blocking (a CallbackThread worker runs the
             // kernel), so the particle buffers must stay alive until the wait.
             // Keep this wait inside the block that owns posX/posY/posZ/charge.

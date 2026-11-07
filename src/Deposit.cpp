@@ -43,7 +43,8 @@ namespace picBunch
         return b;
     }
 
-    std::vector<double> depositTSC(Bunch const& bunch, Grid const& grid)
+    template<Shape S>
+    std::vector<double> depositShape(Bunch const& bunch, Grid const& grid)
     {
         std::vector<double> rho(grid.size(), 0.0);
         std::size_t const nx = grid.n[0];
@@ -51,6 +52,7 @@ namespace picBunch
         std::size_t const nz = grid.n[2];
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+        int const reach = static_cast<int>(std::ceil(shapeSupport<S>()));
 
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
@@ -64,28 +66,28 @@ namespace picBunch
                 base[a] = static_cast<int>(std::floor(t));
                 frac[a] = t - base[a];
             }
-            for(int da = -1; da <= 2; ++da)
+            for(int da = -reach; da <= reach; ++da)
             {
                 long const ia = static_cast<long>(base[0]) + da;
                 if(ia < 0 || ia >= static_cast<long>(nx))
                     continue;
-                double const wa = tscShape(da - frac[0]);
+                double const wa = shapeWeight<S>( da - frac[0]);
                 if(wa == 0.0)
                     continue;
-                for(int db = -1; db <= 2; ++db)
+                for(int db = -reach; db <= reach; ++db)
                 {
                     long const ib = static_cast<long>(base[1]) + db;
                     if(ib < 0 || ib >= static_cast<long>(ny))
                         continue;
-                    double const wb = wa * tscShape(db - frac[1]);
+                    double const wb = wa * shapeWeight<S>( db - frac[1]);
                     if(wb == 0.0)
                         continue;
-                    for(int dc = -1; dc <= 2; ++dc)
+                    for(int dc = -reach; dc <= reach; ++dc)
                     {
                         long const ic = static_cast<long>(base[2]) + dc;
                         if(ic < 0 || ic >= static_cast<long>(nz))
                             continue;
-                        double const wc = wb * tscShape(dc - frac[2]);
+                        double const wc = wb * shapeWeight<S>( dc - frac[2]);
                         if(wc == 0.0)
                             continue;
                         rho[static_cast<std::size_t>(ia)
@@ -98,7 +100,8 @@ namespace picBunch
         return rho;
     }
 
-    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement)
+    template<Shape S>
+    std::vector<double> depositPaddedShape(Bunch const& bunch, Grid const& grid, double refinement)
     {
         if(refinement <= 0.0)
             throw std::invalid_argument("depositTSCPaddedHost: refinement must be positive");
@@ -118,7 +121,7 @@ namespace picBunch
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
         // The TSC shape is sampled in node units: grid.spacing already carries the
         // refinement, so no extra refinement factor belongs in the argument.
-        double const support = 1.5;
+        double const support = shapeSupport<S>();
         std::vector<double> rho(Mx * My * Mz, 0.0);
         auto const wrap = [](long i, std::size_t m) {
             long const mm = static_cast<long>(m);
@@ -141,19 +144,19 @@ namespace picBunch
             }
             for(long ia = lo[0]; ia <= hi[0]; ++ia)
             {
-                double const wa = tscShape(static_cast<double>(ia) - t[0]);
+                double const wa = shapeWeight<S>( static_cast<double>(ia) - t[0]);
                 if(wa == 0.0)
                     continue;
                 long const ma = wrap(ia, Mx);
                 for(long ib = lo[1]; ib <= hi[1]; ++ib)
                 {
-                    double const wb = wa * tscShape(static_cast<double>(ib) - t[1]);
+                    double const wb = wa * shapeWeight<S>( static_cast<double>(ib) - t[1]);
                     if(wb == 0.0)
                         continue;
                     long const mb = wrap(ib, My);
                     for(long ic = lo[2]; ic <= hi[2]; ++ic)
                     {
-                        double const wc = wb * tscShape(static_cast<double>(ic) - t[2]);
+                        double const wc = wb * shapeWeight<S>( static_cast<double>(ic) - t[2]);
                         if(wc == 0.0)
                             continue;
                         long const mc = wrap(ic, Mz);
@@ -167,6 +170,34 @@ namespace picBunch
             }
         }
         return rho;
+    }
+
+    std::vector<double> depositTSC(Bunch const& bunch, Grid const& grid)
+    {
+        switch(grid.shape)
+        {
+        case Shape::CIC:
+            return depositShape<Shape::CIC>(bunch, grid);
+        case Shape::PQS:
+            return depositShape<Shape::PQS>(bunch, grid);
+        case Shape::TSC:
+        default:
+            return depositShape<Shape::TSC>(bunch, grid);
+        }
+    }
+
+    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement)
+    {
+        switch(grid.shape)
+        {
+        case Shape::CIC:
+            return depositPaddedShape<Shape::CIC>(bunch, grid, refinement);
+        case Shape::PQS:
+            return depositPaddedShape<Shape::PQS>(bunch, grid, refinement);
+        case Shape::TSC:
+        default:
+            return depositPaddedShape<Shape::TSC>(bunch, grid, refinement);
+        }
     }
 
     bool allParticlesInside(Bunch const& bunch, Grid const& grid)

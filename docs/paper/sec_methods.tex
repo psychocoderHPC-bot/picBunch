@@ -143,6 +143,15 @@ field-initializer mode is used in
 Section~\ref{sec:validation}. The FFT library is cuFFT in the unnormalized
 form of the vendor documentation~\citep{cudacc2024}.
 
+\paragraph{Particle shape.}
+The charge deposit uses the PIConGPU species shape selected with
+\texttt{--shape} (\texttt{cic}, \texttt{tsc} or \texttt{pqs}; default
+\texttt{tsc}).  The support radii are 1, 1.5 and 2 PIC cells.  The shape is not
+recorded in the openPMD particle data, so it must mirror the simulation's
+\texttt{shape.param}.  The shape sets the source smoothing; the FFT kernel
+remains the sampled point kernel.  The near shell currently supports TSC only
+and rejects CIC/PQS, while the mesh path supports all three.
+
 \paragraph{Chunked particle input.}
 \texttt{--max-particle-chunk-gb} (a float, for example $1.5$) streams the
 selected species in chunks of at most that many gigabytes instead of loading

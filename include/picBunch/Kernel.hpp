@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/Types.hpp"
+
 #include <cmath>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -12,6 +14,61 @@
 
 namespace picBunch
 {
+    //! Support radius of a shape in cells, compile-time per shape.
+    template<Shape S>
+    PICBUNCH_HD constexpr double shapeSupport()
+    {
+        if constexpr(S == Shape::CIC)
+            return 1.0;
+        else if constexpr(S == Shape::TSC)
+            return 1.5;
+        else
+            return 2.0;
+    }
+
+    //! Assignment weight of a shape, argument in cell units.  Compile-time shape.
+    template<Shape S>
+    PICBUNCH_HD double shapeWeight(double x)
+    {
+        double const ax = std::abs(x);
+        if constexpr(S == Shape::CIC)
+        {
+            return ax < 1.0 ? 1.0 - ax : 0.0;
+        }
+        else if constexpr(S == Shape::TSC)
+        {
+            if(ax < 0.5)
+                return 0.75 - ax * ax;
+            if(ax < 1.5)
+                return 0.5 * (1.5 - ax) * (1.5 - ax);
+            return 0.0;
+        }
+        else
+        {
+            if(ax < 1.0)
+                return (4.0 - 6.0 * ax * ax + 3.0 * ax * ax * ax) / 6.0;
+            if(ax < 2.0)
+                return (2.0 - ax) * (2.0 - ax) * (2.0 - ax) / 6.0;
+            return 0.0;
+        }
+    }
+
+    //! Runtime wrapper for non-hot paths and tests.
+    PICBUNCH_HD double shapeWeight(Shape shape, double x)
+    {
+        if(shape == Shape::CIC)
+            return shapeWeight<Shape::CIC>(x);
+        if(shape == Shape::TSC)
+            return shapeWeight<Shape::TSC>(x);
+        return shapeWeight<Shape::PQS>(x);
+    }
+
+    PICBUNCH_HD constexpr double shapeSupport(Shape shape)
+    {
+        return shape == Shape::CIC ? shapeSupport<Shape::CIC>()
+            : (shape == Shape::TSC ? shapeSupport<Shape::TSC>() : shapeSupport<Shape::PQS>());
+    }
+
     /** TSC assignment function, argument in cell units. */
     PICBUNCH_HD double tscShape(double x)
     {
