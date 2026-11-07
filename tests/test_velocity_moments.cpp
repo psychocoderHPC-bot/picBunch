@@ -300,6 +300,10 @@ TEST(VelocityMoments, NearShellComposesWithMomentField)
     auto momentOptions = options;
     momentOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
     momentOptions.velocityMoments.order = 3u;
+    // This two-class bunch (one source at rest) has a large Taylor remainder.
+    // The composition test exercises the pinned-centre subtraction operator, so
+    // force the explicit order through the diagnostic override.
+    momentOptions.velocityMoments.allowUnconverged = true;
     VelocityMomentsReport rep{};
     picBunch::Field const candidate = picBunch::computeFieldNearExact(
         bunch, momentOptions, shell, nullptr, nullptr, &rep);
@@ -353,4 +357,219 @@ TEST(VelocityMoments, AutoDoesNotFailAtTheVelocityBinCap)
     for(auto const& component : field.data)
         for(double v : component)
             EXPECT_TRUE(std::isfinite(v));
+}
+
+// ------------------------------------------------- gamma-100 validity guard
+
+namespace
+{
+    //! Gamma-mean bunch with a Gaussian relative energy spread and a
+    //! transverse divergence (uniform direction, up to ``divergenceDeg``).
+    Bunch divergentBunch(
+        std::size_t n,
+        double gammaMean,
+        double relSpread,
+        double divergenceDeg)
+    {
+        Bunch bunch;
+        bunch.resize(n);
+        std::mt19937 gen(0x0badf00du);
+        std::normal_distribution<double> gauss(0.0, 1.0);
+        std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+        std::size_t const side = static_cast<std::size_t>(std::cbrt(static_cast<double>(n))) + 1u;
+        double const tanDiv = std::tan(divergenceDeg * std::acos(-1.0) / 180.0);
+        for(std::size_t p = 0; p < n; ++p)
+        {
+            double const gamma = gammaMean * (1.0 + relSpread * gauss(gen));
+            double const uz = std::sqrt(std::max(1.0e-12, gamma * gamma - 1.0));
+            bunch.x[p] = 4.0 + 0.5 * static_cast<double>(p % side);
+            bunch.y[p] = 4.0 + 0.5 * static_cast<double>((p / side) % side);
+            bunch.z[p] = 4.0 + 0.5 * static_cast<double>((p / (side * side)) % side);
+            double const perp = uz * tanDiv;
+            bunch.ux[p] = perp * uniform(gen);
+            bunch.uy[p] = perp * uniform(gen);
+            bunch.uz[p] = uz;
+            bunch.weight[p] = 1.0;
+            bunch.charge[p] = kElectronCharge;
+        }
+        return bunch;
+    }
+
+    ComputeOptions gamma100Options()
+    {
+        ComputeOptions options = momentOptions();
+        options.gridSize = {32, 32, 32};
+        return options;
+    }
+
+    void expectAllFinite(picBunch::Field const& field)
+    {
+        for(auto const& component : field.data)
+            for(double const value : component)
+                ASSERT_TRUE(std::isfinite(value));
+    }
+} // namespace
+
+TEST(VelocityMoments, Gamma100ExplicitOrdersConvergeOrFallBack)
+{
+    // gamma 100 with a 5% energy spread is outside the Taylor regime: the
+    // order-2-vs-3 probe must either reject the series (fallback to the binned
+    // path) or, when it accepts it, the field must be close to the 256-box
+    // reference.  A non-finite field is never acceptable.
+    for(double const divergence : {1.0, 5.0})
+    {
+        Bunch const bunch = divergentBunch(96, 100.0, 0.05, divergence);
+
+        auto refOptions = gamma100Options();
+        refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+        refOptions.velocityBinning.explicitBins = 256u;
+        picBunch::Field const reference = picBunch::computeField(bunch, refOptions);
+
+        for(std::size_t const order : {2u, 3u})
+        {
+            auto options = gamma100Options();
+            options.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+            options.velocityMoments.order = order;
+            VelocityMomentsReport rep{};
+            picBunch::Field const field
+                = picBunch::computeField(bunch, options, nullptr, nullptr, &rep);
+
+            expectAllFinite(field);
+            ASSERT_TRUE(rep.used || rep.fellBack)
+                << "order " << order << " divergence " << divergence;
+            if(rep.used)
+            {
+                // Documented acceptance bound for a used explicit order: the
+                // moment field must stay within 50% Frobenius relative L2 of the
+                // 256-box reference.  At gamma 100 this branch is not expected to
+                // run; the probe normally rejects it.
+                double const rel = relativeL2(field, reference);
+                std::printf(
+                    "[velocity-moments] gamma-100 order %zu div %.0f deg USED: probe %.3e, "
+                    "relL2 vs 256 boxes %.3e\n",
+                    order,
+                    divergence,
+                    rep.probe,
+                    rel);
+                EXPECT_LT(rel, 0.5) << "used moment field is not close to the reference";
+            }
+            else
+            {
+                // The fallback must deliver the binned result, which with the
+                // 256-box cap is the reference here.
+                std::printf(
+                    "[velocity-moments] gamma-100 order %zu div %.0f deg fell back: "
+                    "probe %.3e\n",
+                    order,
+                    divergence,
+                    rep.probe);
+                EXPECT_LT(relativeL2(field, reference), 1e-12)
+                    << "fallback did not return the binned field";
+            }
+        }
+    }
+}
+
+TEST(VelocityMoments, Gamma100AutoMatchesOrBeatsBinned)
+{
+    Bunch const bunch = divergentBunch(96, 100.0, 0.05, 1.0);
+
+    auto refOptions = gamma100Options();
+    refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+    refOptions.velocityBinning.explicitBins = 256u;
+    picBunch::Field const binned = picBunch::computeField(bunch, refOptions);
+
+    auto options = gamma100Options();
+    options.velocityMoments.mode = VelocityMomentsOptions::Mode::Auto;
+    VelocityMomentsReport rep{};
+    picBunch::Field const field
+        = picBunch::computeField(bunch, options, nullptr, nullptr, &rep);
+    expectAllFinite(field);
+    ASSERT_TRUE(rep.used || rep.fellBack);
+
+    double const rel = relativeL2(field, binned);
+    std::printf(
+        "[velocity-moments] gamma-100 auto: used=%d fellBack=%d probe %.3e, "
+        "relL2 vs 256 boxes %.3e\n",
+        rep.used ? 1 : 0,
+        rep.fellBack ? 1 : 0,
+        rep.probe,
+        rel);
+    if(rep.fellBack)
+        EXPECT_LT(rel, 1e-12) << "auto fallback must reproduce the binned capped result";
+    else
+    {
+        EXPECT_LT(rep.probe, 0.05);
+        EXPECT_LT(rel, 0.5) << "auto moment field is not close to the binned reference";
+    }
+}
+
+TEST(VelocityMoments, Gamma100AllowUnconvergedForcesFiniteExplicitOrder)
+{
+    // The explicit order must be kept only when the diagnostic override is on,
+    // and the report must say so.  Finiteness still holds.
+    Bunch const bunch = divergentBunch(64, 100.0, 0.05, 5.0);
+    auto options = gamma100Options();
+    options.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+    options.velocityMoments.order = 3u;
+    options.velocityMoments.allowUnconverged = true;
+    VelocityMomentsReport rep{};
+    picBunch::Field const field
+        = picBunch::computeField(bunch, options, nullptr, nullptr, &rep);
+    ASSERT_TRUE(rep.used) << "the override must keep the explicit order";
+    EXPECT_TRUE(rep.allowUnconverged);
+    EXPECT_EQ(rep.order, 3);
+    expectAllFinite(field);
+}
+
+TEST(VelocityMoments, Gamma100NearShellFastWithMomentsDoesNotThrowAtBinCap)
+{
+    // Reproduces the abort on the gate: near shell derives a binned mesh at the
+    // cap before the moment path can run.  With moments enabled it must use the
+    // bounded fallback binning and deliver a finite field.
+    using picBunch::NearShellOptions;
+    Bunch const bunch = divergentBunch(48, 100.0, 0.05, 1.0);
+
+    ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.gridSize = {16, 16, 16};
+    options.gridOrigin = {0.0, 0.0, 0.0};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+    options.velocityBinning.maxBins = 2u;
+    options.tolerance = 1e-3;
+    options.velocityMoments.mode = VelocityMomentsOptions::Mode::Auto;
+
+    NearShellOptions shell;
+    shell.mode = NearShellOptions::Mode::Fast;
+    shell.radiusCells = 3.0;
+    shell.tileNodes = 4;
+
+    VelocityMomentsReport rep{};
+    picBunch::Field field;
+    EXPECT_NO_THROW(
+        field = picBunch::computeFieldNearExact(
+            bunch, options, shell, nullptr, nullptr, &rep));
+    expectAllFinite(field);
+    EXPECT_TRUE(rep.used || rep.fellBack);
+}
+
+TEST(VelocityMoments, Gamma10ExplicitOrdersStillConverge)
+{
+    // Regression guard: the new explicit-order probe must not reject the
+    // validated gamma-10 regime.
+    Bunch const bunch = spreadBunch(216, 10.0, 0.05);
+    for(std::size_t const order : {2u, 3u})
+    {
+        auto options = momentOptions();
+        options.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+        options.velocityMoments.order = order;
+        VelocityMomentsReport rep{};
+        picBunch::Field const field
+            = picBunch::computeField(bunch, options, nullptr, nullptr, &rep);
+        ASSERT_TRUE(rep.used) << "gamma-10 order " << order << " regressed: probe "
+                              << rep.probe;
+        EXPECT_LT(rep.probe, 0.05);
+        expectAllFinite(field);
+    }
 }

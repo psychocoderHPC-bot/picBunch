@@ -345,12 +345,25 @@ band error by `10.3x` at `[6,12)` cells and `6.1x` beyond 12 cells against B=256
 order 3 at `[6,12)` and better beyond 12 cells; order 3 is the better default. The full
 per-band table is in [Error budget](#error-budget).
 
-The auto policy always computes order 3, then probes the order-3-only contribution
-`||F3 - F2|| / ||F3||` in k-space, allreduced across ranks. A probe below `0.05` keeps
-order 3; otherwise the run falls back to the binned path. On the 200k case the probe was
-`1.762e-4` and auto selected order 3 (`2.10 s` CLI). When an explicit
-`--velocity-moments auto|2|3` is set and the auto binning policy fails, the run warns and
-runs the moment path instead of aborting at the bin cap.
+Every order is validated, not only `auto`. The code probes the order-3 remainder
+`||F3|| / ||F0..Fn||` in k-space, allreduced across ranks: for `auto`/order 3 this is the
+existing order-2-vs-3 probe, and for order 2 it estimates the next term of the same
+series. A probe below `0.05` keeps the selected order; otherwise the run prints an
+actionable one-line warning and falls back to the binned path. `auto` selects order 3
+and follows the same rule. The report then carries `used=false`, `fellBack=true` and the
+measured `probe`, so a caller can tell a rejected moment run from an infeasible one.
+On the 200k gamma-10 case the probe was `1.762e-4` and auto selected order 3
+(`2.10 s` CLI). An explicit order can be forced through for diagnostics with
+`--velocity-moments-allow-unconverged`; the CLI warns, and the report sets
+`allowUnconverged=true`, so the delivered field is clearly marked as unconverged. A
+non-finite moment field (any of the six components, or the probe) is never delivered:
+the run warns and falls back even when the override is set.
+
+When `--velocity-moments auto|2|3` is set and the auto binning policy fails, the run
+warns and runs the moment path instead of aborting at the bin cap. This also applies to
+the near-shell mesh setup: the near shell needs a fixed box geometry for the subtraction,
+so it uses a bounded fallback binning at `--max-velocity-bins` and keeps the pinned
+`velocityMomentsCentre`, rather than aborting before the moment path can run.
 
 Two limitations remain. The moment path always uses the replicated full FFT, independent
 of `options.fftMode`; the one-rank and two-rank fields agree to `2.05e-16` relative L2
@@ -394,7 +407,12 @@ representation error. Every mesh-only path here measures between `0.568` and `0.
 relative L2, including both moment orders and auto; the moment expansion does not bring
 it below this floor. Use the near shell for that region.
 
-Supported regime for this evidence: gamma 10 with 5% energy spread. Outside the TSC
+Supported regime for this evidence: gamma 10 with 5% energy spread. gamma 100 is outside
+the validated regime: even a 5% energy spread makes the Taylor remainder too large, so
+the order probe normally rejects orders 2 and 3 and the run falls back to the binned
+path. Before the validity guard existed, explicit orders returned nonphysical fields at
+gamma 100 (measured peak `2.36e7` for order 3 against `5.11e5` for the binned path on the
+C3 gate) while `auto` correctly fell back. Outside the TSC
 support the binned path improves with box count, and both moment orders beat B=256 in
 every band outside `[0,1.5)`. Order 3 is best up to 12 cells; order 2 is slightly better
 beyond 12 cells (`2.19e-4` against `4.13e-4`). Against B=256 order 3 is `1.21x` lower at

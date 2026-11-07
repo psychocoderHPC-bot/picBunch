@@ -125,8 +125,16 @@ namespace
             "  --velocity-moments <m>  off|auto|2|3 (default: off).  Replaces the\n"
             "                        per-velocity-box FFT chain with the velocity-moment\n"
             "                        spectral decomposition: '2'/'3' fix the Taylor order,\n"
-            "                        'auto' probes order 3 in k-space and falls back to the\n"
-            "                        binned path when the remainder is too large\n"
+            "                        'auto' probes order 3 in k-space.  Every order is\n"
+            "                        validated by the same order-2-vs-3 probe; when it\n"
+            "                        exceeds 0.05 the run warns and falls back to the\n"
+            "                        binned path.  A non-finite moment field always falls\n"
+            "                        back.  gamma-100 bunches are outside the validated\n"
+            "                        regime (order 3 does not converge there)\n"
+            "  --velocity-moments-allow-unconverged\n"
+            "                        diagnostic: keep an explicit --velocity-moments 2|3\n"
+            "                        even when its probe exceeds 0.05; the run warns and\n"
+            "                        the report marks the field as unconverged\n"
             "  --multipole-group-cells <N>\n"
             "                        spatial supercell size for the far-tail multipoles,\n"
             "                        in PIC cells (default: 16; 0 = one global multipole)\n"
@@ -162,6 +170,7 @@ namespace
         std::string backend = "auto";
         std::string fftMode = "auto";
         std::string velocityMoments = "off"; //!< off|auto|2|3
+        bool velocityMomentsAllowUnconverged = false; //!< diagnostic override
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
@@ -366,6 +375,8 @@ namespace
                 args.shape = value("--shape");
             else if(option == "--velocity-moments")
                 args.velocityMoments = value("--velocity-moments");
+            else if(option == "--velocity-moments-allow-unconverged")
+                args.velocityMomentsAllowUnconverged = true;
             else if(option == "--multipole-group-cells")
             {
                 args.multipoleGroupCells
@@ -953,6 +964,7 @@ int main(int argc, char** argv)
                 : picBunch::VelocityMomentsOptions::Mode::Off;
         if(args.velocityMoments == "2" || args.velocityMoments == "3")
             options.velocityMoments.order = std::stoul(args.velocityMoments);
+        options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
@@ -1175,7 +1187,7 @@ int main(int argc, char** argv)
             if(velocityMomentsReport.used)
                 std::printf(
                     "velocity moments: used order %d, u0=(%.6g, %.6g, %.6g) m/c, spread %.3g%s, "
-                    "probe %.3e\n",
+                    "probe %.3e%s\n",
                     velocityMomentsReport.order,
                     velocityMomentsReport.u0[0],
                     velocityMomentsReport.u0[1],
@@ -1184,13 +1196,16 @@ int main(int argc, char** argv)
                     options.velocityMoments.mode == picBunch::VelocityMomentsOptions::Mode::Auto
                         ? " (auto)"
                         : "",
-                    velocityMomentsReport.probe);
+                    velocityMomentsReport.probe,
+                    velocityMomentsReport.allowUnconverged ? " [UNCONVERGED: forced]" : "");
             else
                 std::printf(
                     "velocity moments: fell back to the binned path (%s)\n",
-                    velocityMomentsReport.feasible
-                        ? "auto k-space probe above tolerance"
-                        : "infeasible (memory or size)");
+                    velocityMomentsReport.nonFinite
+                        ? "non-finite moment field"
+                        : velocityMomentsReport.feasible
+                            ? "order probe above the 0.05 budget"
+                            : "infeasible (memory or size)");
         }
         if(binning.derived)
             std::printf(
