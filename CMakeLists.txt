@@ -224,6 +224,7 @@ set(PICBUNCH_SOURCES
     src/FarTail.cpp
     src/NearShell.cpp
     src/VelocityBinning.cpp
+    src/VelocityMoments.cpp
 )
 
 if(PICBUNCH_ENABLE_CUDA)

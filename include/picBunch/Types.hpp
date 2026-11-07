@@ -182,8 +182,12 @@ namespace picBunch
      * ``docs/measurements/velocity_bin_calibration.csv``; the 5% energy-spread
      * case measures 1.12e-3 at 16 boxes and 2.72e-4 at 64 (meeting 1e-3 only
      * at 64), while the 5 degree angular-spread case does not reach 1e-3
-     * (0.421 at 16 boxes).  The CLI exposes ``--bin-model-constant`` as a
-     * diagnostic override.
+     * (0.421 at 16 boxes).  Re-running the 1024-source 5% energy-spread case,
+     * the node-bounded energy term gives 3.9e-3 at 16 boxes and 9.2e-4 at 64
+     * (3.4x conservative against the archived points, down from 27x/26x) and
+     * selects 64 boxes at a 1e-3 tolerance instead of failing above the cap;
+     * the pure angular case is unchanged.  The CLI exposes
+     * ``--bin-model-constant`` as a diagnostic override.
      */
     inline constexpr double kDefaultVelocityModelConstant = 1.0;
 
@@ -219,14 +223,25 @@ namespace picBunch
      * Error model.  Replacing a particle ``u`` by its box representative
      * perturbs the field by two mechanisms: a transverse tilt of the boosted
      * pattern, of order ``gamma * Delta_theta`` in relative terms, and an
-     * energy shift, of order ``Delta_gamma / gamma``.  With ``q_b`` the charge
-     * in box ``b``, ``Q`` the total absolute charge, ``gamma_b`` the largest
-     * ``gamma`` in the box, ``Delta_theta_b`` the largest angle between a
-     * member and the box representative, and ``Delta_gamma_b`` the ``gamma``
-     * range of the box, the estimated relative error is
+     * energy shift, of order ``(2/gamma) * Delta_gamma / gamma`` at a node.
+     * With ``q_b`` the charge in box ``b``, ``Q`` the total absolute charge,
+     * ``gamma_b`` the largest ``gamma`` in the box, ``Delta_theta_b`` the
+     * largest angle between a member and the box representative, and
+     * ``Delta_gamma_b`` the ``gamma`` range of the box, the estimated relative
+     * error is
      *
-     *   modelError = modelConstant * Sum_b (q_b / Q) * (gamma_b*Delta_theta_b
-     *                                                        + Delta_gamma_b/gamma_b)
+     *   modelError = modelConstant * Sum_b (q_b / Q)
+     *                 * (gamma_b*Delta_theta_b
+     *                    + (2/gamma_b) * Delta_gamma_b/gamma_b)
+     *
+     * The angular term uses the measured worst-case angular-spread error
+     * (``modelConstant = 1`` reproduces the archived 5 degree point); the
+     * energy term is the node-bounded single term that replaces the former
+     * ``Delta_gamma/gamma + maxGammaDev`` pair, which double-counted the same
+     * effect and over-predicted the archived 5% energy-spread points by
+     * ~26x.  This is a calibrated/conservative estimate, not a guarantee: the
+     * energy term still over-predicts the two archived points by ~3.4x, and its
+     * behaviour beyond gamma 10 and the measured box range is not validated.
      *
      * ``modelSum`` is the uncalibrated sum; ``modelError`` is the calibrated
      * estimate.  The auto policy chooses the smallest power-of-two box count
@@ -287,6 +302,29 @@ namespace picBunch
         //! Box-count cap of the auto policy; exceeded requirements fail with
         //! the needed count instead of running.
         std::size_t maxBins = kDefaultMaxVelocityBins;
+    };
+
+    /*! Policy of the velocity-moment spectral decomposition (candidate C1).
+     *
+     * A multi-velocity bunch is normally evaluated by the binned path (one FFT
+     * chain per velocity box).  The moment path instead expands the point kernel
+     * in a multivariate Taylor series about the absolute-charge-weighted mean
+     * ``u0``, deposits the moment densities once, and takes one inverse
+     * transform per component -- independent of the number of velocity classes.
+     * See ``picBunch/VelocityMoments.hpp``.
+     */
+    struct VelocityMomentsOptions
+    {
+        enum class Mode
+        {
+            Off,       //!< binned path (default; unchanged behaviour)
+            Auto,      //!< smallest order (2, then 3) whose a-posteriori probe meets tolerance
+            Explicit   //!< fixed order (``order``, 2 or 3)
+        };
+
+        Mode mode = Mode::Off;
+        //! Moment order for ``Explicit`` (2 or 3).
+        std::size_t order = 2u;
     };
 
     /** User-facing knobs of the field computation.
@@ -388,6 +426,20 @@ namespace picBunch
         //! ``VelocityBinning``).  ``Auto`` (default) sizes the boxes from the
         //! error model and ``tolerance``; ``Explicit`` runs a fixed count.
         VelocityBinningOptions velocityBinning;
+        //! Velocity-moment spectral decomposition policy (see
+        //! ``VelocityMomentsOptions``).  ``Off`` (default) keeps the binned path
+        //! bit-for-bit; ``Auto``/``Explicit`` replace the per-box FFT chain with a
+        //! one-inverse-transform moment sum for multi-velocity bunches.
+        VelocityMomentsOptions velocityMoments;
+        /*! Fixed Taylor expansion centre for the moment path.
+         *
+         * Set by the near shell so the global mesh and every per-tile
+         * subtraction use the *same* truncated kernel operator.  Recomputing
+         * the centre on a near subset would make the subtraction cancel a
+         * different approximation and leave a residual inside the shell.
+         * Unset means "derive from the bunch" (the ordinary moment path).
+         */
+        std::optional<std::array<double, 3>> velocityMomentsCentre;
         //! Precomputed binning to use verbatim instead of deriving it from the
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.

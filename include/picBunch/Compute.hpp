@@ -5,6 +5,7 @@
 #include "picBunch/Parallel.hpp"
 #include "picBunch/Types.hpp"
 #include "picBunch/VelocityBinning.hpp"
+#include "picBunch/VelocityMoments.hpp"
 
 #include <array>
 #include <optional>
@@ -159,10 +160,11 @@ namespace picBunch
      * used (a copy; the near shell passes the full-bunch binning down, so the
      * caller sees the same one).
      */
-    Field computeField(
-        Bunch const& bunch,
-        ComputeOptions const& options = {},
-        StageTimes* stageTimes = nullptr,
-        VelocityBinning* outBinning = nullptr);
+     Field computeField(
+         Bunch const& bunch,
+         ComputeOptions const& options = {},
+         StageTimes* stageTimes = nullptr,
+         VelocityBinning* outBinning = nullptr,
+         VelocityMomentsReport* outReport = nullptr);
 
 } // namespace picBunch

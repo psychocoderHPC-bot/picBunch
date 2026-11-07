@@ -373,3 +373,96 @@ TEST(VelocityBins, SparseBinsModelIsFinite)
     EXPECT_GE(binning.modelSum, 0.0);
     EXPECT_GE(binning.modelError, 0.0);
 }
+
+TEST(VelocityBins, EnergyTermIsNodeBoundedSingleTerm)
+{
+    // Two collinear energy classes.  The old model charged the gamma range plus
+    // a max member deviation (~0.79); the node-bounded single term is
+    // (2/gamma_max) * (gamma_max - gamma_min)/gamma_max = 0.05.
+    Bunch const bunch = axisBunch({10.0, 20.0});
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 1;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    // The representative is moving along the same axis, so the angular term is 0.
+    EXPECT_NEAR(binning.modelSum, 2.0 * (10.0 / 20.0) / 20.0, 1e-12);
+}
+
+TEST(VelocityBins, PureAngularSpreadKeepsTheUnitAngularConstant)
+{
+    // Constant gamma, two symmetric 5 degree tilts: the one-box representative
+    // is the beam axis, every member is 5 degrees away, and the gamma range is
+    // zero.  The model must stay gamma*Delta_theta (C_angular = 1), which is the
+    // archived angular calibration point.
+    Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {4.0, 4.0};
+    bunch.y = {4.0, 4.0};
+    bunch.z = {4.0, 4.0};
+    double const u = std::sqrt(100.0 - 1.0);
+    double const theta = 5.0 * M_PI / 180.0;
+    bunch.ux = {u * std::sin(theta), -u * std::sin(theta)};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {u * std::cos(theta), u * std::cos(theta)};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {kElectronCharge, kElectronCharge};
+
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 1;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_NEAR(binning.modelSum, 10.0 * theta, 1e-12);
+}
+
+TEST(VelocityBins, PureEnergySpreadAutoCountIsTractable)
+{
+    // A 5% energy spread at gamma 10 (4-sigma range) previously needed more
+    // than the 256-box cap.  The node-bounded energy term must keep the auto
+    // count inside the cap and still meet the requested tolerance.
+    Bunch const bunch = axisBunch(gammaLinspace(8.0, 12.0, 64));
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_TRUE(binning.multiVelocity);
+    EXPECT_GT(binning.count, 1u);
+    EXPECT_LE(binning.count, 128u);
+    EXPECT_LE(binning.modelError, 1e-3);
+    // The spread is collinear along the beam axis, so all boxes sit there.
+    EXPECT_EQ(binning.perAxis[0], 1u);
+    EXPECT_EQ(binning.perAxis[1], 1u);
+    EXPECT_EQ(binning.perAxis[2], binning.count);
+}
+
+TEST(VelocityBins, InfeasibleRequirementPrintsTheCapError)
+{
+    // The reported "cap" number must be the model error at maxBins, not at the
+    // required count (the historical bug printed the latter under the cap label).
+    Bunch const bunch = axisBunch(gammaLinspace(8.0, 12.0, 64));
+    VelocityBinningOptions explicitTwo;
+    explicitTwo.mode = VelocityBinningOptions::Mode::Explicit;
+    explicitTwo.explicitBins = 2;
+    double const capError
+        = picBunch::deriveVelocityBinning(bunch, 1e-12, explicitTwo).modelError;
+
+    VelocityBinningOptions policy;
+    policy.maxBins = 2;
+    try
+    {
+        picBunch::deriveVelocityBinning(bunch, 1e-12, policy);
+        FAIL() << "expected the infeasible auto policy to throw";
+    }
+    catch(std::runtime_error const& e)
+    {
+        std::string const message = e.what();
+        std::string const label = "at the 2-box cap: ";
+        auto const at = message.find(label);
+        ASSERT_NE(at, std::string::npos) << message;
+        double const parsed = std::stod(message.substr(at + label.size()));
+        EXPECT_NEAR(parsed, capError, 1e-5) << message;
+        // The required-count error, printed earlier, is a different and smaller
+        // number than the cap error (the model decreases with the box count).
+        std::string const reqLabel = " boxes: ";
+        auto const reqAt = message.find(reqLabel);
+        ASSERT_NE(reqAt, std::string::npos) << message;
+        double const requiredError = std::stod(message.substr(reqAt + reqLabel.size()));
+        EXPECT_LT(requiredError, parsed) << message;
+    }
+}

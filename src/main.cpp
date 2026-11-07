@@ -122,6 +122,11 @@ namespace
             "                        when the padded box exceeds the per-rank limit\n"
             "  --shape <shape>       cic|tsc|pqs particle shape for the charge deposit\n"
             "                        (default: tsc); must match the PIConGPU species shape\n"
+            "  --velocity-moments <m>  off|auto|2|3 (default: off).  Replaces the\n"
+            "                        per-velocity-box FFT chain with the velocity-moment\n"
+            "                        spectral decomposition: '2'/'3' fix the Taylor order,\n"
+            "                        'auto' probes order 3 in k-space and falls back to the\n"
+            "                        binned path when the remainder is too large\n"
             "  --multipole-group-cells <N>\n"
             "                        spatial supercell size for the far-tail multipoles,\n"
             "                        in PIC cells (default: 16; 0 = one global multipole)\n"
@@ -156,6 +161,7 @@ namespace
         bool allowFieldTruncation = false;
         std::string backend = "auto";
         std::string fftMode = "auto";
+        std::string velocityMoments = "off"; //!< off|auto|2|3
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
@@ -358,6 +364,8 @@ namespace
                 args.allowFieldTruncation = true;
             else if(option == "--shape")
                 args.shape = value("--shape");
+            else if(option == "--velocity-moments")
+                args.velocityMoments = value("--velocity-moments");
             else if(option == "--multipole-group-cells")
             {
                 args.multipoleGroupCells
@@ -425,6 +433,9 @@ namespace
             throw std::invalid_argument("--near-shell must be 'none', 'exact', 'fast' or 'fast-gpu'");
         if(args.shape != "cic" && args.shape != "tsc" && args.shape != "pqs")
             throw std::invalid_argument("--shape must be 'cic', 'tsc' or 'pqs'");
+        if(args.velocityMoments != "off" && args.velocityMoments != "auto"
+           && args.velocityMoments != "2" && args.velocityMoments != "3")
+            throw std::invalid_argument("--velocity-moments must be 'off', 'auto', '2' or '3'");
         if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
@@ -935,6 +946,13 @@ int main(int argc, char** argv)
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        options.velocityMoments.mode
+            = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
+            : (args.velocityMoments == "2" || args.velocityMoments == "3")
+                ? picBunch::VelocityMomentsOptions::Mode::Explicit
+                : picBunch::VelocityMomentsOptions::Mode::Off;
+        if(args.velocityMoments == "2" || args.velocityMoments == "3")
+            options.velocityMoments.order = std::stoul(args.velocityMoments);
         std::optional<std::array<double, 3>> meshCellSize;
         std::optional<std::array<double, 3>> meshGridOrigin;
         std::optional<std::array<std::size_t, 3>> meshGridExtent;
@@ -1137,18 +1155,43 @@ int main(int argc, char** argv)
                     options.tolerance);
         }
         picBunch::VelocityBinning binning;
+        picBunch::VelocityMomentsReport velocityMomentsReport;
         if(options.nearShell.mode != picBunch::NearShellOptions::Mode::None)
         {
             std::size_t exactPairs = 0;
             options.nearShell.exactPairs = &exactPairs;
-            field = picBunch::computeField(bunchData.bunch, options, &times, &binning);
+            field = picBunch::computeField(
+                bunchData.bunch, options, &times, &binning, &velocityMomentsReport);
             if(root)
                 std::printf(
                     "near shell: %zu exact (source,node,component) evaluations\n",
                     exactPairs);
         }
         else
-            field = picBunch::computeField(bunchData.bunch, options, &times, &binning);
+            field = picBunch::computeField(
+                bunchData.bunch, options, &times, &binning, &velocityMomentsReport);
+        if(root && options.velocityMoments.mode != picBunch::VelocityMomentsOptions::Mode::Off)
+        {
+            if(velocityMomentsReport.used)
+                std::printf(
+                    "velocity moments: used order %d, u0=(%.6g, %.6g, %.6g) m/c, spread %.3g%s, "
+                    "probe %.3e\n",
+                    velocityMomentsReport.order,
+                    velocityMomentsReport.u0[0],
+                    velocityMomentsReport.u0[1],
+                    velocityMomentsReport.u0[2],
+                    velocityMomentsReport.maxSpread,
+                    options.velocityMoments.mode == picBunch::VelocityMomentsOptions::Mode::Auto
+                        ? " (auto)"
+                        : "",
+                    velocityMomentsReport.probe);
+            else
+                std::printf(
+                    "velocity moments: fell back to the binned path (%s)\n",
+                    velocityMomentsReport.feasible
+                        ? "auto k-space probe above tolerance"
+                        : "infeasible (memory or size)");
+        }
         if(binning.derived)
             std::printf(
                 "velocity bins: %zu box(es) (%zux%zux%zu), model estimate %.3e "

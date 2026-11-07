@@ -50,6 +50,12 @@ namespace picBunch::pbfast
         int obliqueOrder = 8;
         //! Power-transform exponent of the oblique singular box.
         int obliquePower = 5;
+        //! Per-pair error budget source.  The oblique in-support path picks the
+        //! controlled quadrature when the octant/Duffy order-pair residual
+        //! exceeds a fraction of this value.
+        double tolerance = 1e-3;
+        //! Force the legacy plain octant box (diagnostics / equivalence tests).
+        bool legacyOblique = false;
     };
 
     namespace detail
@@ -159,6 +165,135 @@ namespace picBunch::pbfast
             static std::map<int, Rule> cache;
             std::lock_guard<std::mutex> lock(mutex);
             return cache.emplace(n, makeRule(n)).first->second;
+        }
+
+        //! M = n n^T + (1/gamma)(I - n n^T): the Lorentz contraction of the
+        //! Liénard kernel, |M R|^2 = R^2(1-beta^2) + (R.beta)^2.
+        inline Vec3 applyMmin(Vec3 const& v, Vec3 const& n, double gam)
+        {
+            double const vn = nbref::dot(v, n);
+            return v + (1.0 / gam - 1.0) * (v - vn * n);
+        }
+
+        //! M^{-1} = n n^T + gamma (I - n n^T).
+        inline Vec3 applyMplus(Vec3 const& v, Vec3 const& n, double gam)
+        {
+            double const vn = nbref::dot(v, n);
+            return v + (gam - 1.0) * (v - vn * n);
+        }
+
+        //! True when beta is aligned with one coordinate axis (the exact
+        //! gamma-stretched box branch).
+        inline bool isAxialBeta(Vec3 const& u, Vec3 const& betaH)
+        {
+            if(nbref::dot(u, u) == 0.0)
+                return false;
+            for(int a = 0; a < 3; ++a)
+                if(std::abs(std::abs(betaH[a]) - 1.0) < 1e-12)
+                    return true;
+            return false;
+        }
+
+        /*! Singular support-box field in Lorentz-contracted coordinates.
+         *
+         * In d-space the Liénard kernel is |M R|^{-3} R.  With d = M R the
+         * Jacobian cancels the (1-beta^2) prefactor and the integrand becomes
+         * M^{-1} d / |d|^3, a plain Coulomb field.  The support box of the
+         * observer is split into the eight corner boxes around R = 0; each is
+         * in turn split into the six tetrahedra of a cube and integrated with
+         * the collapsed (Duffy) tetrahedral map
+         *
+         *     d(u,v,w) = u [ (1-v)(1-w) A + v(1-w) B + w C ],
+         *     jac     = u^2 |det(Q, dQ/dv, dQ/dw)|,
+         *
+         * which turns the 1/|d|^2 vertex singularity into a smooth integrand.
+         * This is the controlled variant used only when the octant residual
+         * exceeds the per-pair budget.
+         */
+        inline void boxTermDuffy(
+            Vec3 const& R0,
+            Vec3 const& cells,
+            Vec3 const& u,
+            int order,
+            Vec3& E,
+            Vec3& B)
+        {
+            double const uu2 = nbref::dot(u, u);
+            if(uu2 == 0.0)
+            {
+                E = Vec3{};
+                B = Vec3{};
+                return;
+            }
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const betaH = u / std::sqrt(uu2);
+            double const Lp[3] = {
+                1.5 * cells.x - R0.x,
+                1.5 * cells.y - R0.y,
+                1.5 * cells.z - R0.z};
+            double const Ln[3] = {
+                1.5 * cells.x + R0.x,
+                1.5 * cells.y + R0.y,
+                1.5 * cells.z + R0.z};
+            Rule const& gl = rule(order);
+            Vec3 acc{};
+            int const perm[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
+            for(int sx = -1; sx <= 1; sx += 2)
+                for(int sy = -1; sy <= 1; sy += 2)
+                    for(int sz = -1; sz <= 1; sz += 2)
+                    {
+                        double const L[3] = {
+                            sx > 0 ? Lp[0] : Ln[0],
+                            sy > 0 ? Lp[1] : Ln[1],
+                            sz > 0 ? Lp[2] : Ln[2]};
+                        if(L[0] <= 1e-14 || L[1] <= 1e-14 || L[2] <= 1e-14)
+                            continue;
+                        Vec3 const e[3] = {
+                            applyMmin(Vec3{sx * L[0], 0.0, 0.0}, betaH, gam),
+                            applyMmin(Vec3{0.0, sy * L[1], 0.0}, betaH, gam),
+                            applyMmin(Vec3{0.0, 0.0, sz * L[2]}, betaH, gam)};
+                        for(int pi = 0; pi < 6; ++pi)
+                        {
+                            Vec3 const A = e[perm[pi][0]];
+                            Vec3 const Bv = A + e[perm[pi][1]];
+                            Vec3 const C = A + e[perm[pi][1]] + e[perm[pi][2]];
+                            for(int iu = 0; iu < order; ++iu)
+                            {
+                                double const tu = 0.5 * gl.x[static_cast<std::size_t>(iu)] + 0.5;
+                                double const wu = 0.5 * gl.w[static_cast<std::size_t>(iu)];
+                                for(int iv = 0; iv < order; ++iv)
+                                {
+                                    double const tv = 0.5 * gl.x[static_cast<std::size_t>(iv)] + 0.5;
+                                    double const wv = 0.5 * gl.w[static_cast<std::size_t>(iv)];
+                                    for(int iw = 0; iw < order; ++iw)
+                                    {
+                                        double const tw = 0.5 * gl.x[static_cast<std::size_t>(iw)] + 0.5;
+                                        double const ww = 0.5 * gl.w[static_cast<std::size_t>(iw)];
+                                        Vec3 const Q = (1.0 - tv) * (1.0 - tw) * A
+                                            + tv * (1.0 - tw) * Bv + tw * C;
+                                        Vec3 const Qv = (1.0 - tw) * (Bv - A);
+                                        Vec3 const Qw = -(1.0 - tv) * A - tv * Bv + C;
+                                        double const det = nbref::dot(Q, nbref::cross(Qv, Qw));
+                                        Vec3 const dp = tu * Q;
+                                        double const rho = std::sqrt(nbref::dot(dp, dp));
+                                        if(rho < 1e-300)
+                                            continue;
+                                        Vec3 const R = applyMplus(dp, betaH, gam);
+                                        double const jac = tu * tu * std::abs(det) * wu * wv * ww;
+                                        acc = acc - (jac / (rho * rho * rho)) * R;
+                                    }
+                                }
+                            }
+                        }
+                    }
+            double const invVolume = 1.0 / (cells.x * cells.y * cells.z);
+            E = invVolume * acc;
+            B = nbref::cross(u / gam, E);
+        }
+
+        inline double norm3(Vec3 const& v)
+        {
+            return std::sqrt(nbref::dot(v, v));
         }
 
         struct Panels
@@ -412,6 +547,37 @@ namespace picBunch::pbfast
 
         E = Wstar * Ebox + Erem;
         B = Wstar * Bbox + nbref::cross(beta, Erem);
+
+        // Oblique in-support: the octant box is only a bounded approximation in
+        // the beamed peak.  Estimate its residual against the singularity-aware
+        // Duffy box and keep the expensive controlled variant only when the
+        // estimate exceeds the per-pair budget.
+        if(singular && uu2 > 0.0 && !settings.legacyOblique)
+        {
+            Vec3 const betaH = u / std::sqrt(uu2);
+            if(!detail::isAxialBeta(u, betaH))
+            {
+                Vec3 EboxD{}, BboxD{};
+                detail::boxTermDuffy(R0, cells, u, settings.obliqueOrder, EboxD, BboxD);
+                Vec3 const Eref = E + Wstar * (EboxD - Ebox);
+                double const scale = std::max(detail::norm3(Eref), 1e-300);
+                double const residual = Wstar * detail::norm3(EboxD - Ebox) / scale;
+                double const budget = std::max(1e-6, 0.25 * settings.tolerance);
+                if(residual > budget)
+                {
+                    // Controlled fallback: the validated Lorentz-contracted
+                    // quadrature (same evaluator as --near-shell exact).  Its
+                    // in-support path resolves the beamed peak; this branch is
+                    // reached only for pairs the cheap octant cannot certify.
+                    nbref::Settings ref;
+                    nbref::shape_field(
+                        x_obs, x_src, u, dx, dy, dz, ref, E, B);
+                    return;
+                }
+                E = Eref;
+                B = B + Wstar * (BboxD - Bbox);
+            }
+        }
     }
 
 } // namespace picBunch::pbfast

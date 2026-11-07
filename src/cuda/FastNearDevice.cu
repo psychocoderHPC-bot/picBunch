@@ -128,7 +128,13 @@ namespace picBunch::pbfast
                 }
                 else
                 {
-                    double const mm = gam - 1.0;
+                    // Oblique: Lorentz-contracted tetrahedral Duffy quadrature.
+                    // In d-space the kernel is |M R|^{-3} R; with d' = M R the
+                    // (1-beta^2) prefactor cancels the Jacobian and the
+                    // integrand becomes the plain Coulomb field M^{-1} d'/|d'|^3.
+                    // Each corner box is split into the six tetrahedra of a
+                    // cube and mapped with the collapsed tetrahedral map, which
+                    // turns the vertex singularity into a smooth integrand.
                     double const Lp[3] = {
                         1.5 * cells[0] - R0[0],
                         1.5 * cells[1] - R0[1],
@@ -139,6 +145,21 @@ namespace picBunch::pbfast
                         1.5 * cells[2] + R0[2]};
                     int const n = prm.obliqueOrder;
                     double acc[3] = {0.0, 0.0, 0.0};
+                    auto applyMmin = [&](double const v[3], double out[3]) {
+                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
+                        double const f = 1.0 / gam - 1.0;
+                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
+                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
+                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
+                    };
+                    auto applyMplus = [&](double const v[3], double out[3]) {
+                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
+                        double const f = gam - 1.0;
+                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
+                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
+                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
+                    };
+                    int const perm[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
                     for(int sx = -1; sx <= 1; sx += 2)
                         for(int sy = -1; sy <= 1; sy += 2)
                             for(int sz = -1; sz <= 1; sz += 2)
@@ -149,40 +170,67 @@ namespace picBunch::pbfast
                                     sz > 0 ? Lp[2] : Ln[2]};
                                 if(L[0] <= 1e-14 || L[1] <= 1e-14 || L[2] <= 1e-14)
                                     continue;
-                                for(int ix = 0; ix < n; ++ix)
-                                    for(int iy = 0; iy < n; ++iy)
-                                        for(int iz = 0; iz < n; ++iz)
+                                double ev[3][3] = {{sx * L[0], 0.0, 0.0}, {0.0, sy * L[1], 0.0},
+                                                   {0.0, 0.0, sz * L[2]}};
+                                double e[3][3];
+                                for(int a = 0; a < 3; ++a)
+                                    applyMmin(ev[a], e[a]);
+                                for(int pi = 0; pi < 6; ++pi)
+                                {
+                                    int const i0 = perm[pi][0];
+                                    int const i1 = perm[pi][1];
+                                    int const i2 = perm[pi][2];
+                                    double const A[3] = {e[i0][0], e[i0][1], e[i0][2]};
+                                    double const Bv[3]
+                                        = {A[0] + e[i1][0], A[1] + e[i1][1], A[2] + e[i1][2]};
+                                    double const C[3]
+                                        = {Bv[0] + e[i2][0], Bv[1] + e[i2][1], Bv[2] + e[i2][2]};
+                                    double const BA[3] = {Bv[0] - A[0], Bv[1] - A[1], Bv[2] - A[2]};
+                                    for(int iu = 0; iu < n; ++iu)
+                                    {
+                                        double const tu = 0.5 * prm.oxi[iu] + 0.5;
+                                        double const wu = 0.5 * prm.owi[iu];
+                                        for(int iv = 0; iv < n; ++iv)
                                         {
-                                            double const tx = 0.5 * prm.oxi[ix] + 0.5;
-                                            double const ty = 0.5 * prm.oxi[iy] + 0.5;
-                                            double const tz = 0.5 * prm.oxi[iz] + 0.5;
-                                            double const tx2 = tx * tx;
-                                            double const ty2 = ty * ty;
-                                            double const tz2 = tz * tz;
-                                            double const px = L[0] * tx2 * tx2 * tx;
-                                            double const py = L[1] * ty2 * ty2 * ty;
-                                            double const pz = L[2] * tz2 * tz2 * tz;
-                                            double const jx
-                                                = 0.5 * L[0] * 5.0 * tx2 * tx2 * prm.owi[ix];
-                                            double const jy
-                                                = 0.5 * L[1] * 5.0 * ty2 * ty2 * prm.owi[iy];
-                                            double const jz
-                                                = 0.5 * L[2] * 5.0 * tz2 * tz2 * prm.owi[iz];
-                                            double const d[3] = {sx * px, sy * py, sz * pz};
-                                            double const dn
-                                                = d[0] * betaH[0] + d[1] * betaH[1] + d[2] * betaH[2];
-                                            double const md[3] = {
-                                                d[0] + mm * dn * betaH[0],
-                                                d[1] + mm * dn * betaH[1],
-                                                d[2] + mm * dn * betaH[2]};
-                                            double const rho2
-                                                = md[0] * md[0] + md[1] * md[1] + md[2] * md[2];
-                                            double const rho = std::sqrt(rho2);
-                                            double const f = -gam / (rho2 * rho) * jx * jy * jz;
-                                            acc[0] += f * d[0];
-                                            acc[1] += f * d[1];
-                                            acc[2] += f * d[2];
+                                            double const tv = 0.5 * prm.oxi[iv] + 0.5;
+                                            double const wv = 0.5 * prm.owi[iv];
+                                            for(int iw = 0; iw < n; ++iw)
+                                            {
+                                                double const tw = 0.5 * prm.oxi[iw] + 0.5;
+                                                double const ww = 0.5 * prm.owi[iw];
+                                                double const a0 = (1.0 - tv) * (1.0 - tw);
+                                                double const a1 = tv * (1.0 - tw);
+                                                double const Q[3] = {
+                                                    a0 * A[0] + a1 * Bv[0] + tw * C[0],
+                                                    a0 * A[1] + a1 * Bv[1] + tw * C[1],
+                                                    a0 * A[2] + a1 * Bv[2] + tw * C[2]};
+                                                double const Qv[3]
+                                                    = {(1.0 - tw) * BA[0], (1.0 - tw) * BA[1],
+                                                       (1.0 - tw) * BA[2]};
+                                                double const Qw[3] = {
+                                                    -(1.0 - tv) * A[0] - tv * Bv[0] + C[0],
+                                                    -(1.0 - tv) * A[1] - tv * Bv[1] + C[1],
+                                                    -(1.0 - tv) * A[2] - tv * Bv[2] + C[2]};
+                                                double const det = Q[0] * (Qv[1] * Qw[2] - Qv[2] * Qw[1])
+                                                    - Q[1] * (Qv[0] * Qw[2] - Qv[2] * Qw[0])
+                                                    + Q[2] * (Qv[0] * Qw[1] - Qv[1] * Qw[0]);
+                                                double const dp[3] = {tu * Q[0], tu * Q[1], tu * Q[2]};
+                                                double const rho2
+                                                    = dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2];
+                                                if(rho2 < 1e-300)
+                                                    continue;
+                                                double const rho = std::sqrt(rho2);
+                                                double Rv[3];
+                                                applyMplus(dp, Rv);
+                                                double const jac = tu * tu * std::abs(det) * wu * wv * ww;
+                                                double const f = -jac / (rho2 * rho);
+                                                acc[0] += f * Rv[0];
+                                                acc[1] += f * Rv[1];
+                                                acc[2] += f * Rv[2];
+                                            }
                                         }
+                                    }
+                                }
                             }
                     Ebox[0] = acc[0];
                     Ebox[1] = acc[1];
@@ -326,6 +374,104 @@ namespace picBunch::pbfast
             B[2] = Wstar * Bbox[2] + (beta[0] * Erem[1] - beta[1] * Erem[0]);
         }
 
+        //! One component of the normalized point field (Kernel.hpp).
+        ALPAKA_FN_ACC inline double dpointComp(
+            double Rx,
+            double Ry,
+            double Rz,
+            double const u[3],
+            int c)
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const invG2 = 1.0 / (1.0 + uu2);
+            double Ex, Ey, Ez;
+            if(uu2 == 0.0)
+            {
+                double const r2 = Rx * Rx + Ry * Ry + Rz * Rz;
+                double const r3 = r2 * std::sqrt(r2);
+                double const f = r3 > 0.0 ? 1.0 / r3 : 0.0;
+                Ex = f * Rx;
+                Ey = f * Ry;
+                Ez = f * Rz;
+            }
+            else
+            {
+                double const r2 = Rx * Rx + Ry * Ry + Rz * Rz;
+                double const gamma = std::sqrt(1.0 + uu2);
+                double const rb = (Rx * u[0] + Ry * u[1] + Rz * u[2]) / gamma;
+                double const D = r2 * invG2 + rb * rb;
+                double const f = D > 0.0 ? invG2 / (D * std::sqrt(D)) : 0.0;
+                Ex = f * Rx;
+                Ey = f * Ry;
+                Ez = f * Rz;
+            }
+            if(c == 0)
+                return Ex;
+            if(c == 1)
+                return Ey;
+            if(c == 2)
+                return Ez;
+            double const gamma = std::sqrt(1.0 + uu2);
+            double const bx = u[0] / gamma;
+            double const by = u[1] / gamma;
+            double const bz = u[2] / gamma;
+            if(c == 3)
+                return by * Ez - bz * Ey;
+            if(c == 4)
+                return bz * Ex - bx * Ez;
+            return bx * Ey - by * Ex;
+        }
+
+        //! 27-point TSC mesh-near stencil contribution (one component) of one
+        //! source.  R = (yee - delta) * cells with the integer support offset
+        //! delta, so no grid origin is needed.
+        ALPAKA_FN_ACC inline double dmeshComp(
+            double const xs[3],
+            double const urep[3],
+            double const cells[3],
+            double const nodeBase[3],
+            double const sp[3],
+            double const yee[3],
+            int c)
+        {
+            double tau[3];
+            long lo[3];
+            long hi[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                tau[a] = (xs[a] - nodeBase[a]) / sp[a];
+                lo[a] = static_cast<long>(::ceil(tau[a] - 1.5));
+                hi[a] = static_cast<long>(::floor(tau[a] + 1.5));
+            }
+            double sum = 0.0;
+            for(long ia = lo[0]; ia <= hi[0]; ++ia)
+            {
+                double const sa = static_cast<double>(ia) - tau[0];
+                double const wa = dtsc(sa);
+                if(wa == 0.0)
+                    continue;
+                for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                {
+                    double const sb = static_cast<double>(ib) - tau[1];
+                    double const wb = wa * dtsc(sb);
+                    if(wb == 0.0)
+                        continue;
+                    for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                    {
+                        double const sc = static_cast<double>(ic) - tau[2];
+                        double const wc = wb * dtsc(sc);
+                        if(wc == 0.0)
+                            continue;
+                        double const Rx = (yee[0] - static_cast<double>(ia)) * cells[0];
+                        double const Ry = (yee[1] - static_cast<double>(ib)) * cells[1];
+                        double const Rz = (yee[2] - static_cast<double>(ic)) * cells[2];
+                        sum += wc * dpointComp(Rx, Ry, Rz, urep, c);
+                    }
+                }
+            }
+            return sum;
+        }
+
         // ---- kernel --------------------------------------------------------
 
         struct FastNearKernel
@@ -341,6 +487,10 @@ namespace picBunch::pbfast
                 double const* puy,
                 double const* puz,
                 double const* pq,
+                double const* prux,
+                double const* pruy,
+                double const* pruz,
+                bool stencilMesh,
                 std::uint32_t nsrc,
                 std::uint32_t nx,
                 std::uint32_t ny,
@@ -358,42 +508,52 @@ namespace picBunch::pbfast
                 DeviceParams prm,
                 std::uint32_t total) const
             {
+                // One thread per (component, node, source chunk): the six
+                // staggered components are independent observations, so this
+                // keeps per-thread state to one accumulator and multiplies the
+                // number of resident blocks six-fold (the per-node work was
+                // block-starved on small tiles).
+                std::uint32_t const perComp = static_cast<std::uint32_t>(nx * ny * nz) * chunks;
                 for(auto [idx] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{alpaka::Vec<std::uint32_t, 1u>{total}}))
                 {
-                    std::uint32_t const node = idx / chunks;
-                    std::uint32_t const chunk = idx - node * chunks;
+                    int const c = static_cast<int>(idx / perComp);
+                    std::uint32_t const rem = idx - static_cast<std::uint32_t>(c) * perComp;
+                    std::uint32_t const node = rem / chunks;
+                    std::uint32_t const chunk = rem - node * chunks;
                     std::uint32_t const ii = node % nx;
                     std::uint32_t const jj = (node / nx) % ny;
                     std::uint32_t const kk = node / (nx * ny);
 
-                    double acc6[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+                    double const nodeBase[3] = {
+                        ox + static_cast<double>(ii) * spx,
+                        oy + static_cast<double>(jj) * spy,
+                        oz + static_cast<double>(kk) * spz};
+                    double const sp[3] = {spx, spy, spz};
+                    double const cells[3] = {cx, cy, cz};
+                    double sum = 0.0;
                     for(std::uint32_t q = chunk; q < nsrc; q += chunks)
                     {
                         double const x_src[3] = {px[q], py[q], pz[q]};
                         double const u[3] = {pux[q], puy[q], puz[q]};
+                        double const urep[3] = {prux[q], pruy[q], pruz[q]};
                         double const qw = pq[q];
-                        for(int c = 0; c < 6; ++c)
-                        {
-                            double const x_obs[3] = {
-                                ox + static_cast<double>(ii) * spx + prm.delta[c][0] * cx,
-                                oy + static_cast<double>(jj) * spy + prm.delta[c][1] * cy,
-                                oz + static_cast<double>(kk) * spz + prm.delta[c][2] * cz};
-                            double const cells[3] = {cx, cy, cz};
-                            double E[3], B[3];
-                            dshapeField(x_obs, x_src, u, cells, prm, E, B);
-                            double const comp = c < 3 ? E[c] : B[c - 3];
-                            double const unit = c < 3 ? prm.unitE : prm.unitB;
-                            acc6[c] += unit * qw * comp;
-                        }
+                        double const x_obs[3] = {
+                            nodeBase[0] + prm.delta[c][0] * cx,
+                            nodeBase[1] + prm.delta[c][1] * cy,
+                            nodeBase[2] + prm.delta[c][2] * cz};
+                        double E[3], B[3];
+                        dshapeField(x_obs, x_src, u, cells, prm, E, B);
+                        double comp = c < 3 ? E[c] : B[c - 3];
+                        if(stencilMesh)
+                            comp -= dmeshComp(x_src, urep, cells, nodeBase, sp, prm.delta[c], c);
+                        double const unit = c < 3 ? prm.unitE : prm.unitB;
+                        sum += unit * qw * comp;
                     }
-                    for(int c = 0; c < 6; ++c)
-                    {
-                        std::uint32_t const o = static_cast<std::uint32_t>(c) * nx * ny * nz + node;
-                        alpaka::onAcc::atomicAdd(acc, &out6[o], acc6[c]);
-                    }
+                    std::uint32_t const o = static_cast<std::uint32_t>(c) * nx * ny * nz + node;
+                    alpaka::onAcc::atomicAdd(acc, &out6[o], sum);
                 }
             }
         };
@@ -447,6 +607,8 @@ namespace picBunch::pbfast
 
     std::vector<double> evalFastNearDevice(
         Bunch const& near,
+        Bunch const& mesh,
+        bool stencilMesh,
         std::size_t nx,
         std::size_t ny,
         std::size_t nz,
@@ -476,6 +638,9 @@ namespace picBunch::pbfast
         auto puy = alloc1<double>(ctx, n);
         auto puz = alloc1<double>(ctx, n);
         auto pq = alloc1<double>(ctx, n);
+        auto prux = alloc1<double>(ctx, n);
+        auto pruy = alloc1<double>(ctx, n);
+        auto pruz = alloc1<double>(ctx, n);
         auto dout = alloc1<double>(ctx, static_cast<std::uint32_t>(6 * nodes));
         for(std::uint32_t i = 0; i < n; ++i)
         {
@@ -486,6 +651,9 @@ namespace picBunch::pbfast
             puy.data()[i] = near.uy[i];
             puz.data()[i] = near.uz[i];
             pq.data()[i] = near.weight[i] * near.charge[i];
+            prux.data()[i] = mesh.ux.empty() ? near.ux[i] : mesh.ux[i];
+            pruy.data()[i] = mesh.uy.empty() ? near.uy[i] : mesh.uy[i];
+            pruz.data()[i] = mesh.uz.empty() ? near.uz[i] : mesh.uz[i];
         }
         for(std::size_t i = 0; i < 6 * nodes; ++i)
             dout.data()[i] = 0.0;
@@ -498,7 +666,7 @@ namespace picBunch::pbfast
         if(chunks > n)
             chunks = n;
         std::uint32_t const total
-            = static_cast<std::uint32_t>(nodes) * chunks;
+            = 6u * static_cast<std::uint32_t>(nodes) * chunks;
 
         std::uint32_t const frame = 256u;
         ctx.queue.enqueue(
@@ -512,6 +680,10 @@ namespace picBunch::pbfast
             puy.data(),
             puz.data(),
             pq.data(),
+            prux.data(),
+            pruy.data(),
+            pruz.data(),
+            stencilMesh,
             n,
             static_cast<std::uint32_t>(nx),
             static_cast<std::uint32_t>(ny),

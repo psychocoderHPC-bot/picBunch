@@ -15,6 +15,7 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/FastNear.hpp"
 #if defined(PICBUNCH_BACKEND_CUDA)
 #    include "picBunch/detail/FastNearDevice.hpp"
@@ -27,6 +28,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -88,7 +90,8 @@ namespace picBunch
         ComputeOptions const& options,
         NearShellOptions const& nearShell,
         StageTimes* stageTimes,
-        VelocityBinning* outBinning)
+        VelocityBinning* outBinning,
+        VelocityMomentsReport* outReport)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("computeFieldNearExact: empty bunch");
@@ -116,7 +119,42 @@ namespace picBunch
         // each rank touches only its own output nodes.
         if(!options.fixedBinning)
             plain.fixedBinning = binning;
-        Field field = computeField(bunch, plain, stageTimes);
+        // Pin the Taylor centre of the velocity-moment path to the full-bunch
+        // one.  The per-tile subtraction is the same linear operator applied to
+        // the near subset; a centre recomputed per tile would cancel a
+        // different approximation and leave a residual inside the shell.
+        bool const momentsRequested
+            = options.velocityMoments.mode != VelocityMomentsOptions::Mode::Off;
+        if(momentsRequested)
+            plain.velocityMomentsCentre = velocityMomentsCentre(bunch);
+        VelocityMomentsReport baseReport;
+        Field field = computeField(
+            bunch,
+            plain,
+            stageTimes,
+            nullptr,
+            momentsRequested ? &baseReport : nullptr);
+        if(outReport)
+            *outReport = baseReport;
+
+        // The tiled subtraction must use exactly the velocity model the base
+        // mesh used.  When the moment path engaged, run the local mesh at the
+        // resolved fixed order; when it fell back (auto probe, size or memory),
+        // run the local mesh on the binned path as well.
+        ComputeOptions tileOptions = plain;
+        if(momentsRequested)
+        {
+            if(baseReport.used)
+            {
+                tileOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Explicit;
+                tileOptions.velocityMoments.order
+                    = static_cast<std::size_t>(baseReport.order);
+            }
+            else
+            {
+                tileOptions.velocityMoments.mode = VelocityMomentsOptions::Mode::Off;
+            }
+        }
 
         // Each rank owns a disjoint set of output tiles and writes only the
         // correction there.  A zero correction buffer plus one all-reduce keeps
@@ -138,7 +176,8 @@ namespace picBunch
         std::uint64_t pairs = 0;
         std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
-        pbfast::Settings const fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        pbfast::Settings fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        fastSettings.tolerance = options.tolerance;
         bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
         bool useFastGpu = false;
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -174,7 +213,12 @@ namespace picBunch
 #if defined(PICBUNCH_BACKEND_CUDA)
         pbfast::DeviceParams deviceParams;
         deviceParams.order = fastSettings.order;
-        deviceParams.obliqueOrder = fastSettings.obliqueOrder;
+        // The device oblique box uses the six-tetrahedron Duffy map, i.e. 6x
+        // the nodes of the octant box per order^3.  Cap its order so the near
+        // shell stays inside the 1.5x wall budget of the 2e3-particle case;
+        // the host path keeps the requested order and adds the controlled
+        // residual fallback.
+        deviceParams.obliqueOrder = std::min(fastSettings.obliqueOrder, 4);
         {
             auto const& xi = pbfast::detail::rule(fastSettings.order).x;
             auto const& wi = pbfast::detail::rule(fastSettings.order).w;
@@ -201,6 +245,42 @@ namespace picBunch
         auto const n = grid.n;
         auto const& origin = grid.origin;
         auto const& spacing = grid.spacing;
+
+        // Uniform cell list over the sources.  One cell is `radius` PIC cells
+        // wide per axis, so a tile only visits the (up to) 3x3x3 neighbouring
+        // buckets instead of scanning all sources for every tile.  Sources are
+        // pushed in index order and the per-tile list is sorted afterwards, so
+        // the near set is identical to the former O(tiles x N) scan.
+        double cl[3];
+        double smin[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
+        double smax[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
+        for(int a = 0; a < 3; ++a)
+            cl[a] = std::max(radius * cells[a], 1e-300);
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+            for(int a = 0; a < 3; ++a)
+            {
+                smin[a] = std::min(smin[a], pos[a]);
+                smax[a] = std::max(smax[a], pos[a]);
+            }
+        }
+        long cn[3];
+        for(int a = 0; a < 3; ++a)
+            cn[a] = std::max<long>(1, static_cast<long>(std::ceil((smax[a] - smin[a]) / cl[a])) + 1);
+        std::vector<std::vector<std::size_t>> buckets(
+            static_cast<std::size_t>(cn[0] * cn[1] * cn[2]));
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+            long ci[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                ci[a] = static_cast<long>(std::floor((pos[a] - smin[a]) / cl[a]));
+                ci[a] = std::clamp(ci[a], 0L, cn[a] - 1L);
+            }
+            buckets[static_cast<std::size_t>(ci[0] + cn[0] * (ci[1] + cn[1] * ci[2]))].push_back(p);
+        }
 
         // Stable in-support reference expects cells (dx,dy,dz); picBunch's
         // node spacing is kRefinement * cellSize with kRefinement == 1.
@@ -233,63 +313,90 @@ namespace picBunch
                     // All of them are then evaluated exactly, so the tile's
                     // effective radius is `radius` plus at most half a tile.
                     std::vector<std::size_t> nearIndex;
-                    for(std::size_t p = 0; p < bunch.size(); ++p)
+                    long cLo[3];
+                    long cHi[3];
+                    for(int a = 0; a < 3; ++a)
                     {
-                        double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
-                        bool inside = true;
-                        for(int a = 0; a < 3; ++a)
-                        {
-                            double const reach = radius * cells[a];
-                            if(pos[a] < low[a] - reach || pos[a] > high[a] + reach)
-                            {
-                                inside = false;
-                                break;
-                            }
-                        }
-                        if(inside)
-                            nearIndex.push_back(p);
+                        double const reach = radius * cells[a];
+                        cLo[a] = static_cast<long>(std::floor((low[a] - reach - smin[a]) / cl[a]));
+                        cHi[a] = static_cast<long>(std::floor((high[a] + reach - smin[a]) / cl[a]));
+                        cLo[a] = std::clamp(cLo[a], 0L, cn[a] - 1L);
+                        cHi[a] = std::clamp(cHi[a], 0L, cn[a] - 1L);
                     }
+                    for(long ck = cLo[2]; ck <= cHi[2]; ++ck)
+                        for(long cj = cLo[1]; cj <= cHi[1]; ++cj)
+                            for(long ci = cLo[0]; ci <= cHi[0]; ++ci)
+                            {
+                                auto const& bucket = buckets[static_cast<std::size_t>(
+                                    ci + cn[0] * (cj + cn[1] * ck))];
+                                for(std::size_t const p : bucket)
+                                {
+                                    double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                                    bool inside = true;
+                                    for(int a = 0; a < 3; ++a)
+                                    {
+                                        double const reach = radius * cells[a];
+                                        if(pos[a] < low[a] - reach || pos[a] > high[a] + reach)
+                                        {
+                                            inside = false;
+                                            break;
+                                        }
+                                    }
+                                    if(inside)
+                                        nearIndex.push_back(p);
+                                }
+                            }
+                    std::sort(nearIndex.begin(), nearIndex.end());
                     if(nearIndex.empty())
                         continue;
 
                     Bunch const near = selectSources(bunch, nearIndex);
 
-                    // Local node box: the tile plus the full TSC support of
-                    // every near source.  It must contain every source used in
-                    // the subtraction and every observer in the tile.
-                    long localLo[3] = {
-                        static_cast<long>(i0),
-                        static_cast<long>(j0),
-                        static_cast<long>(k0)};
-                    long localHi[3] = {
-                        static_cast<long>(i1 - 1u),
-                        static_cast<long>(j1 - 1u),
-                        static_cast<long>(k1 - 1u)};
-                    for(std::size_t q = 0; q < near.size(); ++q)
+                    // The local FFT subtraction is only needed on the legacy
+                    // path.  The direct 27-point TSC stencil performs the same
+                    // discrete convolution per (source, node) pair on the
+                    // device, so the per-tile FFT (and its plan setup) is
+                    // skipped by default.
+                    bool const deviceStencil = useFastGpu
+                        && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
+                    Field local;
+                    long localLo[3] = {0, 0, 0};
+                    std::size_t nLocalX = 0;
+                    std::size_t nLocalY = 0;
+                    if(!deviceStencil)
                     {
-                        double const pos[3] = {near.x[q], near.y[q], near.z[q]};
+                        // Local node box: the tile plus the full TSC support of
+                        // every near source.  It must contain every source used
+                        // in the subtraction and every observer in the tile.
+                        long localHi[3] = {
+                            static_cast<long>(i1 - 1u),
+                            static_cast<long>(j1 - 1u),
+                            static_cast<long>(k1 - 1u)};
+                        for(std::size_t q = 0; q < near.size(); ++q)
+                        {
+                            double const pos[3] = {near.x[q], near.y[q], near.z[q]};
+                            for(int a = 0; a < 3; ++a)
+                            {
+                                double const t = (pos[a] - origin[a]) / spacing[a];
+                                long const lo = static_cast<long>(std::floor(t - 1.5)) - 1;
+                                long const hi = static_cast<long>(std::ceil(t + 1.5)) + 1;
+                                localLo[a] = std::min(localLo[a], lo);
+                                localHi[a] = std::max(localHi[a], hi);
+                            }
+                        }
+                        std::array<std::size_t, 3> localN{};
                         for(int a = 0; a < 3; ++a)
                         {
-                            double const t = (pos[a] - origin[a]) / spacing[a];
-                            long const lo = static_cast<long>(std::floor(t - 1.5)) - 1;
-                            long const hi = static_cast<long>(std::ceil(t + 1.5)) + 1;
-                            localLo[a] = std::min(localLo[a], lo);
-                            localHi[a] = std::max(localHi[a], hi);
+                            std::size_t len = static_cast<std::size_t>(localHi[a] - localLo[a] + 1);
+                            if(len % 2u)
+                                ++len;
+                            localN[a] = len;
                         }
-                    }
-                    std::array<std::size_t, 3> localN{};
-                    for(int a = 0; a < 3; ++a)
-                    {
-                        std::size_t len = static_cast<std::size_t>(localHi[a] - localLo[a] + 1);
-                        if(len % 2u)
-                            ++len;
-                        localN[a] = len;
-                    }
-                    std::array<double, 3> localOrigin{};
-                    for(int a = 0; a < 3; ++a)
-                        localOrigin[a] = origin[a] + static_cast<double>(localLo[a]) * spacing[a];
+                        std::array<double, 3> localOrigin{};
+                        for(int a = 0; a < 3; ++a)
+                            localOrigin[a] = origin[a] + static_cast<double>(localLo[a]) * spacing[a];
 
-                    ComputeOptions localOptions = plain;
+                    ComputeOptions localOptions = tileOptions;
                     // The local subtraction is computed by this rank alone for
                     // its own tile; never split it across ranks.
                     localOptions.parallel = nullptr;
@@ -300,21 +407,53 @@ namespace picBunch
                     localOptions.globalGridSize = std::nullopt;
                     localOptions.globalGridOrigin = std::nullopt;
                     localOptions.fftPadding = 2u;
-                    Field const local = computeField(near, localOptions);
+                    VelocityMomentsReport localReport;
+                    local = computeField(near, localOptions, nullptr, nullptr, &localReport);
+                    if(localOptions.velocityMoments.mode
+                           != VelocityMomentsOptions::Mode::Off
+                       && !localReport.used)
+                        throw std::runtime_error(
+                            "near shell: the velocity-moment subtraction did not engage on a "
+                            "tile; refusing to deliver a field whose near shell cancels a "
+                            "different velocity model than the global mesh");
+                    nLocalX = local.grid.n[0];
+                    nLocalY = local.grid.n[1];
+                    }
 
                     // Subtract F_mesh(near) and add F_exact(near) inside the tile.
                     std::size_t const nx = i1 - i0;
                     std::size_t const ny = j1 - j0;
                     std::size_t const nz = k1 - k0;
-                    std::size_t const nLocalX = local.grid.n[0];
-                    std::size_t const nLocalY = local.grid.n[1];
-                    std::size_t const nLocalZ = local.grid.n[2];
-                    (void)nLocalZ;
                     if(useFastGpu)
                     {
 #if defined(PICBUNCH_BACKEND_CUDA)
+                        Bunch meshB = near;
+                        if(deviceStencil)
+                        {
+                            VelocityBinning const& meshBin
+                                = options.fixedBinning ? *options.fixedBinning : binning;
+                            for(std::size_t q = 0; q < meshB.size(); ++q)
+                            {
+                                double const coords[3] = {
+                                    meshB.ux[q] * meshBin.basis[0][0]
+                                        + meshB.uy[q] * meshBin.basis[0][1]
+                                        + meshB.uz[q] * meshBin.basis[0][2],
+                                    meshB.ux[q] * meshBin.basis[1][0]
+                                        + meshB.uy[q] * meshBin.basis[1][1]
+                                        + meshB.uz[q] * meshBin.basis[1][2],
+                                    meshB.ux[q] * meshBin.basis[2][0]
+                                        + meshB.uy[q] * meshBin.basis[2][1]
+                                        + meshB.uz[q] * meshBin.basis[2][2]};
+                                std::size_t const b = meshBin.boxIndex(coords[0], coords[1], coords[2]);
+                                meshB.ux[q] = meshBin.representativeU[b][0];
+                                meshB.uy[q] = meshBin.representativeU[b][1];
+                                meshB.uz[q] = meshBin.representativeU[b][2];
+                            }
+                        }
                         std::vector<double> const dev = pbfast::evalFastNearDevice(
                             near,
+                            meshB,
+                            deviceStencil,
                             nx,
                             ny,
                             nz,
@@ -345,8 +484,10 @@ namespace picBunch
                                         std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
                                         std::size_t const didx = ii + nx * (jj + ny * kk);
                                         correction.data[c][gidx]
-                                            = -local.data[c][lidx]
-                                            + dev[static_cast<std::size_t>(c) * nx * ny * nz + didx];
+                                            = deviceStencil
+                                            ? dev[static_cast<std::size_t>(c) * nx * ny * nz + didx]
+                                            : -local.data[c][lidx]
+                                                + dev[static_cast<std::size_t>(c) * nx * ny * nz + didx];
                                     }
                         }
 #endif

@@ -336,9 +336,7 @@ namespace picBunch
                     continue;
                 Vec3 const& uRep = out.representativeU[b];
                 double const repNorm = norm(uRep);
-                double const gammaRep = std::sqrt(1.0 + repNorm * repNorm);
                 double maxAngle = 0.0;
-                double maxGammaDev = 0.0;
                 bool anyMoving = false;
                 for(std::size_t p = 0; p < count; ++p)
                 {
@@ -364,17 +362,22 @@ namespace picBunch
                             maxAngle = std::max(maxAngle, std::acos(cosA));
                         }
                     }
-                    maxGammaDev = std::max(
-                        maxGammaDev, std::abs(particleGamma[p] - gammaRep) / gammaRep);
                 }
                 // A stationary representative for a moving member is a full
                 // angular mismatch: the representative kernel is a static one.
                 if(repNorm == 0.0 && anyMoving)
                     maxAngle = std::acos(-1.0);
                 double const gamma = boxGammaMax[b];
+                // Energy term: a relative gamma shift changes the boosted
+                // pattern by at most 2*Delta_gamma/gamma at a node.  The former
+                // (Delta_gamma/gamma + maxGammaDev) pair charged ~1.5
+                // Delta_gamma/gamma for the same effect and double-counted it;
+                // the archived calibration points show that pair over-predicting
+                // the measured energy-spread error by ~26x, so a single
+                // node-bounded term is used instead.
+                double const deltaGamma = (boxGammaMax[b] - boxGammaMin[b]) / gamma;
                 modelSum += (boxAbsCharge[b] / totalAbsoluteCharge)
-                    * (gamma * maxAngle + (boxGammaMax[b] - boxGammaMin[b]) / gamma
-                       + maxGammaDev);
+                    * (gamma * maxAngle + 2.0 * deltaGamma / gamma);
             }
             out.modelSum = modelSum;
             out.modelConstant = modelConstant;
@@ -511,7 +514,12 @@ namespace picBunch
             }
             if(targetBins == 0u)
             {
-                // Report the count the model would need, beyond the cap.
+                // Report the count the model would need beyond the cap, and the
+                // model error at the cap itself (a different number: the loop
+                // above already failed at the cap before continuing).
+                VelocityBinning capProbe;
+                double const capError
+                    = policy.modelConstant * modelSumFor(policy.maxBins, capProbe);
                 std::size_t required = policy.maxBins;
                 double lastError = 0.0;
                 for(std::size_t B = policy.maxBins * 2u; B <= (1u << 30); B *= 2u)
@@ -527,8 +535,10 @@ namespace picBunch
                     "deriveVelocityBinning: the velocity-bin model requires at least "
                     + std::to_string(required)
                     + " boxes for tolerance " + std::to_string(tolerance)
-                    + " (estimated error at the " + std::to_string(policy.maxBins)
-                    + "-box cap: " + std::to_string(lastError)
+                    + " (estimated error at " + std::to_string(required)
+                    + " boxes: " + std::to_string(lastError)
+                    + "; at the " + std::to_string(policy.maxBins)
+                    + "-box cap: " + std::to_string(capError)
                     + "); reduce the momentum spread, raise --tolerance, or raise --max-velocity-bins");
             }
         }
