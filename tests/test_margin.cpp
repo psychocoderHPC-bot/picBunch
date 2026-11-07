@@ -519,3 +519,77 @@ TEST(Margin, MovingDipolarCloudBound)
     EXPECT_LT(worst / scale, 2.0)
         << "off-alignment moving multipole must stay inside the conservative bound";
 }
+
+TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
+{
+    // Two separated clusters create strong higher multipoles.  A single global
+    // expansion is limited by its quadrupole truncation; spatial supercell
+    // groups reduce the tail error.
+    picBunch::Bunch bunch;
+    int const n = 400;
+    bunch.resize(n);
+    std::mt19937 rng(5u);
+    std::uniform_real_distribution<double> uniform(-0.5, 0.5);
+    for(int i = 0; i < n; ++i)
+    {
+        double const side = (i < n / 2) ? -1.0 : 1.0;
+        bunch.x[i] = side * 6.0 + uniform(rng);
+        bunch.y[i] = uniform(rng);
+        bunch.z[i] = uniform(rng);
+        bunch.ux[i] = 0.0;
+        bunch.uy[i] = 0.0;
+        bunch.uz[i] = std::sqrt(99.0);
+        bunch.weight[i] = 1.0;
+        bunch.charge[i] = -picBunch::kElementaryCharge;
+    }
+    auto direct = [&](std::array<double, 3> const& point) {
+        std::array<double, 3> result{0.0, 0.0, 0.0};
+        for(std::size_t p = 0; p < bunch.size(); ++p)
+        {
+            double const R[3] = {
+                point[0] - bunch.x[p],
+                point[1] - bunch.y[p],
+                point[2] - bunch.z[p]};
+            double field[6];
+            picBunch::pointFieldNormalized(
+                R[0], R[1], R[2], bunch.ux[p], bunch.uy[p], bunch.uz[p], field);
+            double const scale = picBunch::kCoulombConstant * bunch.weight[p] * bunch.charge[p];
+            for(int a = 0; a < 3; ++a)
+                result[a] += scale * field[a];
+        }
+        return result;
+    };
+    auto relative = [](std::array<double, 3> const& value, std::array<double, 3> const& ref) {
+        double num = 0.0;
+        double den = 0.0;
+        for(int a = 0; a < 3; ++a)
+        {
+            num += (value[a] - ref[a]) * (value[a] - ref[a]);
+            den += ref[a] * ref[a];
+        }
+        return std::sqrt(num / std::max(den, 1.0e-300));
+    };
+    auto worstFor = [&](picBunch::FarTail const& tail) {
+        double worst = 0.0;
+        for(int factor : {6, 8, 12})
+            for(int dir = 0; dir < 3; ++dir)
+                for(int sign : {-1, 1})
+                {
+                    std::array<double, 3> point = tail.centre;
+                    point[static_cast<std::size_t>(dir)]
+                        += sign * factor * tail.supportRadius;
+                    worst = std::max(
+                        worst, relative(picBunch::evaluateFarTailE(tail, point), direct(point)));
+                }
+        return worst;
+    };
+
+    auto const global = picBunch::deriveFarTail(bunch);
+    auto const grouped
+        = picBunch::deriveFarTail(bunch, 6.0, {1.0, 1.0, 1.0}, 4);
+    ASSERT_FALSE(grouped.groups.empty());
+    double const globalWorst = worstFor(global);
+    double const groupedWorst = worstFor(grouped);
+    EXPECT_LT(groupedWorst, globalWorst) << "grouped multipoles must improve the tail";
+    EXPECT_LT(groupedWorst, 5.0e-4);
+}

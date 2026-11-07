@@ -333,6 +333,28 @@ The measured tables behind these statements are
 `docs/measurements/near_shell_device_speedup.csv` and the test assertions
 above.  The model behind the binning term is in `docs/algorithm.md`.
 
+## Chunked particles and grouped far-tail multipoles
+
+**Chunked reading.** `--max-particle-chunk-gb <GB>` (float, e.g. `1.5`) streams
+the selected species in chunks of at most that many gigabytes.  The chunk is
+read on rank 0 and broadcast, then the field of each chunk is computed on the
+same fixed grid and added to the output field; the FFT of each chunk is repeated,
+so the option trades memory for FFT time.  It requires explicit
+`--grid`, `--origin` and `--cell-size`, and a single velocity class
+(`--velocity-bins 1`).  `--global-grid` is not combined with chunking yet.
+Measured: 200 particles in 1-particle chunks reproduce the unchunked field to
+`4.8e-16` (`docs/measurements/chunking_and_grouping.csv`).
+
+**Grouped multipoles.** `--multipole-group-cells <N>` (default `16`, `0` = one
+global multipole) splits the bunch into spatial supercells of `N` PIC cells and
+computes one far-tail multipole per occupied supercell.  The tail outside the
+exact box sums the group multipoles instead of one global expansion.  For a
+two-cluster gamma-10 bunch the worst far-tail error against the direct Liénard
+sum at `6R`/`8R`/`12R` falls from `1.72e-3` (global) to `1.81e-4` (grouped,
+4-cell groups).  The evaluation cost grows with the number of occupied groups
+per tail node, so choose the group size from the bunch extent: large groups are
+cheaper, small groups are more accurate near the transition.
+
 ## Global output domains and MPI
 
 By default the computation grid and the written grid are the same. When the bunch is much

@@ -105,6 +105,7 @@ namespace picBunch
         std::vector<double> loadValues(
             Series& series,
             RecordComponent& component,
+            std::size_t offset,
             std::size_t count,
             std::string const& path);
 
@@ -112,6 +113,7 @@ namespace picBunch
         std::vector<double> loadScalarValues(
             Series& series,
             Record& record,
+            std::size_t offset,
             std::size_t count,
             std::string const& path)
         {
@@ -119,7 +121,7 @@ namespace picBunch
             // a dataset.  Prefer a real ``value`` child when both exist.
             if(!record.contains("value") && record.containsAttribute("value"))
                 return std::vector<double>(count, record.getAttribute("value").get<double>());
-            return loadValues(series, scalarComponent(record, path), count, path);
+            return loadValues(series, scalarComponent(record, path), offset, count, path);
         }
 
         double scalarUnitSI(Record& record, std::string const& path)
@@ -166,6 +168,7 @@ namespace picBunch
         std::vector<double> loadValues(
             Series& series,
             RecordComponent& component,
+            std::size_t offset,
             std::size_t count,
             std::string const& path)
         {
@@ -183,11 +186,11 @@ namespace picBunch
                 fail(path + ": dataset holds fewer values than the position extent");
             // openPMD defers non-constant reads; flush() executes the queued task.
             auto const datatype = component.getDatatype();
-            openPMD::Offset const offset{0};
+            openPMD::Offset const chunkOffset{static_cast<openPMD::Offset::value_type>(offset)};
             openPMD::Extent const requested{count};
 #define PICBUNCH_LOAD(type)                                                                                      \
     {                                                                                                            \
-        auto raw = component.loadChunk<type>(offset, requested);                                                 \
+        auto raw = component.loadChunk<type>(chunkOffset, requested);                                                 \
         series.flush();                                                                                          \
         return copyValues(raw, count);                                                                           \
     }
@@ -232,6 +235,7 @@ namespace picBunch
         std::array<std::vector<double>, 3> readVectorSeries(
             Series& series,
             Record& record,
+            std::size_t offset,
             std::size_t count,
             std::string const& prefix)
         {
@@ -241,7 +245,7 @@ namespace picBunch
                 std::string const componentName = std::string(1, static_cast<char>('x' + a));
                 std::string const path = prefix + "/" + componentName;
                 requireRecord(record, componentName, prefix);
-                result[a] = loadValues(series, record[componentName], count, path);
+                result[a] = loadValues(series, record[componentName], offset, count, path);
             }
             return result;
         }
@@ -291,7 +295,7 @@ namespace picBunch
 
     namespace
     {
-        BunchData readBunchImpl(std::string const& fileName, BunchSelection const& selection)
+        BunchData readBunchImpl(std::string const& fileName, BunchSelection const& selection, std::size_t offset, std::size_t count)
         {
         BunchData result;
         Series series(fileName, openPMD::Access::READ_ONLY);
@@ -349,30 +353,33 @@ namespace picBunch
         auto const referenceExtent = position["x"].getExtent();
         if(referenceExtent.empty() || referenceExtent[0] == 0u)
             fail("position/x has no particle extent");
-        std::size_t const count = static_cast<std::size_t>(referenceExtent[0]);
+        std::size_t const totalCount = static_cast<std::size_t>(referenceExtent[0]);
+        std::size_t const chunkCount = (count == 0u) ? (totalCount - offset) : count;
+        if(offset > totalCount || chunkCount > totalCount - offset)
+            fail("requested particle range is outside the species extent");
 
-        auto const positionValues = readVectorSeries(series, position, count, "position");
+        auto const positionValues = readVectorSeries(series, position, offset, chunkCount, "position");
         auto const positionUnits = readComponentUnits(position, "position");
 
         std::array<std::vector<double>, 3> offsetValues;
         std::array<double, 3> offsetUnits{0.0, 0.0, 0.0};
         if(species.contains("positionOffset"))
         {
-            Record& offset = species["positionOffset"];
-            offsetValues = readVectorSeries(series, offset, count, "positionOffset");
-            offsetUnits = readComponentUnits(offset, "positionOffset");
+            Record& offsetRecord = species["positionOffset"];
+            offsetValues = readVectorSeries(series, offsetRecord, offset, chunkCount, "positionOffset");
+            offsetUnits = readComponentUnits(offsetRecord, "positionOffset");
         }
         else
         {
             for(auto& component : offsetValues)
-                component.assign(count, 0.0);
+                component.assign(chunkCount, 0.0);
         }
 
         if(!species.contains("momentum"))
             fail("species '" + speciesName + "' has no 'momentum' record");
         Record& momentum = species["momentum"];
         checkUnitDimension(momentum, "momentum", {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0});
-        auto const momentumValues = readVectorSeries(series, momentum, count, "momentum");
+        auto const momentumValues = readVectorSeries(series, momentum, offset, chunkCount, "momentum");
         auto const momentumUnits = readComponentUnits(momentum, "momentum");
         // openPMD standard default for macroWeighted is false; the momentum is
         // then a per-particle value and the weightingPower must not be applied.
@@ -388,7 +395,7 @@ namespace picBunch
         Record& weightingRecord = species["weighting"];
         checkUnitDimension(weightingRecord, "weighting", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
         double const weightUnitSI = scalarUnitSI(weightingRecord, "weighting");
-        auto const rawWeight = loadScalarValues(series, weightingRecord, count, "weighting");
+        auto const rawWeight = loadScalarValues(series, weightingRecord, offset, chunkCount, "weighting");
 
         std::vector<double> chargePerParticle;
         bool const chargeDefaulted = !species.contains("charge");
@@ -401,9 +408,9 @@ namespace picBunch
             Record& chargeRecord = species["charge"];
             checkUnitDimension(chargeRecord, "charge", {0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0});
             double const chargeUnitSI = scalarUnitSI(chargeRecord, "charge");
-            auto const rawCharge = loadScalarValues(series, chargeRecord, count, "charge");
-            chargePerParticle.resize(count);
-            for(std::size_t p = 0; p < count; ++p)
+            auto const rawCharge = loadScalarValues(series, chargeRecord, offset, chunkCount, "charge");
+            chargePerParticle.resize(chunkCount);
+            for(std::size_t p = 0; p < chunkCount; ++p)
                 chargePerParticle[p] = rawCharge[p] * chargeUnitSI;
         }
 
@@ -413,15 +420,15 @@ namespace picBunch
             Record& massRecord = species["mass"];
             checkUnitDimension(massRecord, "mass", {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
             double const massUnitSI = scalarUnitSI(massRecord, "mass");
-            auto const rawMass = loadScalarValues(series, massRecord, count, "mass");
-            restMass.resize(count);
-            for(std::size_t p = 0; p < count; ++p)
+            auto const rawMass = loadScalarValues(series, massRecord, offset, chunkCount, "mass");
+            restMass.resize(chunkCount);
+            for(std::size_t p = 0; p < chunkCount; ++p)
                 restMass[p] = rawMass[p] * massUnitSI;
         }
 
         Bunch& bunch = result.bunch;
-        bunch.resize(count);
-        for(std::size_t p = 0; p < count; ++p)
+        bunch.resize(chunkCount);
+        for(std::size_t p = 0; p < chunkCount; ++p)
         {
             double const weight = rawWeight[p] * weightUnitSI;
             double const mass = (restMass.empty() || !(restMass[p] > 0.0)) ? kElectronMass : restMass[p];
@@ -446,12 +453,56 @@ namespace picBunch
     {
         BunchSelection selection;
         selection.speciesIndex = speciesIndex;
-        return readBunchImpl(fileName, selection);
+        return readBunchImpl(fileName, selection, 0u, 0u);
     }
 
     BunchData readBunch(std::string const& fileName, BunchSelection const& selection)
     {
-        return readBunchImpl(fileName, selection);
+        return readBunchImpl(fileName, selection, 0u, 0u);
+    }
+
+    std::size_t readParticleCount(std::string const& fileName, BunchSelection const& selection)
+    {
+        Series series(fileName, openPMD::Access::READ_ONLY);
+        auto [iteration, iterationIndex] = selectIteration(series, selection.iteration);
+        (void)iterationIndex;
+        auto& particles = iteration.particles;
+        if(particles.empty())
+            fail("the selected iteration contains no particle species");
+        ParticleSpecies* speciesPtr = nullptr;
+        if(selection.speciesName)
+        {
+            auto it = particles.find(*selection.speciesName);
+            if(it == particles.end())
+                fail("particle species '" + *selection.speciesName + "' is absent");
+            speciesPtr = &it->second;
+        }
+        else
+        {
+            std::size_t const speciesIndex = selection.speciesIndex.value_or(0);
+            auto speciesIt = particles.begin();
+            for(std::size_t i = 0; i < speciesIndex && speciesIt != particles.end(); ++i)
+                ++speciesIt;
+            if(speciesIt == particles.end())
+                fail("particle species index " + std::to_string(speciesIndex) + " is out of range");
+            speciesPtr = &speciesIt->second;
+        }
+        ParticleSpecies& species = *speciesPtr;
+        if(!species.contains("position") || !species["position"].contains("x"))
+            fail("species has no position/x record");
+        auto const extent = species["position"]["x"].getExtent();
+        if(extent.empty() || extent[0] == 0u)
+            fail("position/x has no particle extent");
+        return static_cast<std::size_t>(extent[0]);
+    }
+
+    BunchData readBunchRange(
+        std::string const& fileName,
+        BunchSelection const& selection,
+        std::size_t offset,
+        std::size_t count)
+    {
+        return readBunchImpl(fileName, selection, offset, count);
     }
 
     MeshGeometry readMeshGeometry(

@@ -74,6 +74,21 @@ namespace picBunch
     /** Read one particle species of a selected iteration by name or index. */
     BunchData readBunch(std::string const& fileName, BunchSelection const& selection);
 
+    /** Total number of particles in the selected species. */
+    std::size_t readParticleCount(std::string const& fileName, BunchSelection const& selection);
+
+    /** Read a contiguous particle range of the selected species.
+     *
+     * ``offset + count`` must lie inside the species extent.  This is the
+     * chunked-reader entry point; the units and record conventions are the
+     * same as :func:`readBunch`.
+     */
+    BunchData readBunchRange(
+        std::string const& fileName,
+        BunchSelection const& selection,
+        std::size_t offset,
+        std::size_t count);
+
     /** Read the geometry metadata of a mesh record of the first iteration.
      *
      * Reads grid spacing, ``gridUnitSI``, ``gridGlobalOffset``, axis labels,

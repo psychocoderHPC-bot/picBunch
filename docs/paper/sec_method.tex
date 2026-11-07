@@ -189,6 +189,19 @@ the switch error against an independent direct charge sum is in
 Appendix~\ref{app:far-tail}, and the moving point-kernel check is
 \texttt{Margin.MovingFarTailMatchesPointKernel}.
 
+\paragraph{Spatial far-tail multipoles.}
+The tail can use one multipole per spatial supercell instead of a single
+global expansion.  The bunch is split into boxes of $N$ PIC cells
+(\texttt{--multipole-group-cells}, default $16$; $0$ keeps one global
+multipole), one set of moments is accumulated per occupied box about its own
+centre, and the tail sums the group expansions.  For a two-cluster
+$\gamma=10$ bunch the worst far-tail error against the direct Li\'enard sum at
+$6R$, $8R$ and $12R$ falls from $1.72\times10^{-3}$ (global) to
+$1.81\times10^{-4}$ (4-cell groups).  The evaluation cost grows with the number
+of occupied groups per tail node, so the group size controls the accuracy-cost
+trade-off; large groups are cheaper, small groups are more accurate near the
+exact-box transition.
+
 \subsection{MPI parallelism}
 \label{sec:mpi}
 

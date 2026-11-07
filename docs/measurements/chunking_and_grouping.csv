@@ -1,0 +1,10 @@
+# Chunked particle loading and spatial multipole grouping, 2026-11-07.
+# Chunked: 200 electrons, 32^3 grid, cell 1e-6 m, one velocity bin, 1-particle
+# chunks; metric is the written field against the unchunked run.
+# Grouped tail: 400 electrons in two separated clusters, gamma 10, 1 m cells,
+# group extent 4 cells; worst relative E error against the direct Liénard sum
+# at 6R, 8R and 12R along the three axes.
+mode,particles,groups_or_chunks,metric,value
+chunked_vs_full,200,200,global_rel_field,4.8e-16
+global_far_tail,400,1,worst_rel_E_6_12R,1.72e-3
+grouped_far_tail,400,3,worst_rel_E_6_12R,1.81e-4

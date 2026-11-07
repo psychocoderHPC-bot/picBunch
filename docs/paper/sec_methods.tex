@@ -143,6 +143,16 @@ field-initializer mode is used in
 Section~\ref{sec:validation}. The FFT library is cuFFT in the unnormalized
 form of the vendor documentation~\citep{cudacc2024}.
 
+\paragraph{Chunked particle input.}
+\texttt{--max-particle-chunk-gb} (a float, for example $1.5$) streams the
+selected species in chunks of at most that many gigabytes instead of loading
+it once.  Each chunk is read on rank 0, broadcast, computed on the same fixed
+grid, and added to the output field.  The mode requires explicit
+\texttt{--grid}, \texttt{--origin} and \texttt{--cell-size} and a single
+velocity class; the global-domain writer is not combined with it yet.  On a
+200-electron test, 1-particle chunks reproduce the unchunked field to
+$4.8\times10^{-16}$.
+
 \subsection{Data and code availability}
 \label{sec:availability}
 

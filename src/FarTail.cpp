@@ -15,7 +15,11 @@
 namespace picBunch
 {
 
-    FarTail deriveFarTail(Bunch const& bunch, double switchFactor)
+    FarTail deriveFarTail(
+        Bunch const& bunch,
+        double switchFactor,
+        std::array<double, 3> const& cellSize,
+        int groupCells)
     {
         if(bunch.size() == 0u)
             throw std::runtime_error("deriveFarTail: empty bunch");
@@ -113,6 +117,63 @@ namespace picBunch
                         += q * (3.0 * rest[i] * rest[j] - (i == j ? r2 : 0.0));
         }
         tail.switchDistance = switchFactor * tail.supportRadius;
+
+        if(groupCells > 0 && cellSize[0] > 0.0 && cellSize[1] > 0.0 && cellSize[2] > 0.0)
+        {
+            std::array<double, 3> extent{};
+            for(int a = 0; a < 3; ++a)
+                extent[a] = static_cast<double>(groupCells) * cellSize[a];
+            std::array<long, 3> dims{};
+            for(int a = 0; a < 3; ++a)
+            {
+                dims[a] = static_cast<long>(
+                    std::floor((bounds[1][a] - bounds[0][a]) / extent[a])) + 1;
+                dims[a] = std::max(1L, dims[a]);
+            }
+            long long const cellCount = static_cast<long long>(dims[0])
+                * static_cast<long long>(dims[1]) * static_cast<long long>(dims[2]);
+            if(cellCount > 0 && cellCount <= 1'000'000ll)
+            {
+                std::vector<std::vector<std::size_t>> members(
+                    static_cast<std::size_t>(cellCount));
+                for(std::size_t p = 0; p < bunch.size(); ++p)
+                {
+                    long idx[3];
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        double const value = (a == 0) ? bunch.x[p] : (a == 1) ? bunch.y[p] : bunch.z[p];
+                        long t = static_cast<long>(
+                            std::floor((value - bounds[0][a]) / extent[a]));
+                        idx[a] = std::max(0L, std::min(t, dims[a] - 1));
+                    }
+                    std::size_t const flat = static_cast<std::size_t>(
+                        idx[0] + dims[0] * (idx[1] + dims[1] * idx[2]));
+                    members[flat].push_back(p);
+                }
+                for(auto const& groupMembers : members)
+                {
+                    if(groupMembers.empty())
+                        continue;
+                    Bunch sub;
+                    sub.resize(groupMembers.size());
+                    for(std::size_t k = 0; k < groupMembers.size(); ++k)
+                    {
+                        std::size_t const p = groupMembers[k];
+                        sub.x[k] = bunch.x[p];
+                        sub.y[k] = bunch.y[p];
+                        sub.z[k] = bunch.z[p];
+                        sub.ux[k] = bunch.ux[p];
+                        sub.uy[k] = bunch.uy[p];
+                        sub.uz[k] = bunch.uz[p];
+                        sub.weight[k] = bunch.weight[p];
+                        sub.charge[k] = bunch.charge[p];
+                        sub.restMass[k] = bunch.restMass.empty() ? 0.0 : bunch.restMass[p];
+                    }
+                    tail.groups.push_back(
+                        deriveFarTail(sub, switchFactor, std::array<double, 3>{0.0, 0.0, 0.0}, 0));
+                }
+            }
+        }
         return tail;
     }
 
@@ -127,6 +188,17 @@ namespace picBunch
         double const d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
         if(d2 == 0.0)
             return {0.0, 0.0, 0.0};
+        if(!tail.groups.empty())
+        {
+            std::array<double, 3> sum{0.0, 0.0, 0.0};
+            for(auto const& group : tail.groups)
+            {
+                auto const value = evaluateFarTailE(group, position);
+                for(int a = 0; a < 3; ++a)
+                    sum[a] += value[a];
+            }
+            return sum;
+        }
         double const d = std::sqrt(d2);
         std::array<double, 3> const n{r[0] / d, r[1] / d, r[2] / d};
 

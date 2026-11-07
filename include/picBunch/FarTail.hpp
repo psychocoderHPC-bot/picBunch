@@ -5,6 +5,7 @@
 #include "picBunch/Types.hpp"
 
 #include <array>
+#include <vector>
 
 namespace picBunch
 {
@@ -47,6 +48,10 @@ namespace picBunch
         double supportRadius = 0.0;
         double switchDistance = 0.0;
         double gammaMax = 1.0;
+        //! Optional spatial groups.  When non-empty, evaluation sums the group
+        //! multipoles instead of the single global expansion.  Each group is a
+        //! FarTail about its own centre and has no nested groups.
+        std::vector<FarTail> groups;
     };
 
     /** Moments and expansion switch radius of a bunch.
@@ -55,7 +60,11 @@ namespace picBunch
      * from the bounding-box centre).  The default 6 is the measured safe switch
      * for the 20-cell, 4096-particle recipe.
      */
-    FarTail deriveFarTail(Bunch const& bunch, double switchFactor = 6.0);
+    FarTail deriveFarTail(
+        Bunch const& bunch,
+        double switchFactor = 6.0,
+        std::array<double, 3> const& cellSize = {0.0, 0.0, 0.0},
+        int groupCells = 0);
 
     //! Static multipole electric field of the tail at a physical position.
     std::array<double, 3> evaluateFarTailE(

@@ -120,6 +120,15 @@ namespace
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
             "                        when the padded box exceeds the per-rank limit\n"
+            "  --multipole-group-cells <N>\n"
+            "                        spatial supercell size for the far-tail multipoles,\n"
+            "                        in PIC cells (default: 16; 0 = one global multipole)\n"
+            "  --max-particle-chunk-gb <GB>\n"
+            "                        stream the particle species in chunks of at most\n"
+            "                        this many gigabytes (float; 0 = load all).  Requires\n"
+            "                        explicit --grid, --origin, --cell-size and a fixed\n"
+            "                        --velocity-bins N; --global-grid is not combined with\n"
+            "                        chunking yet\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
             "  --help                print this help\n"
             "\n"
@@ -151,6 +160,8 @@ namespace
         std::optional<std::array<double, 3>> cellSize;
         std::optional<std::array<std::size_t, 3>> grid;
         std::optional<std::array<double, 3>> origin;
+        int multipoleGroupCells = 16;
+        double maxParticleChunkGb = 0.0;
         std::optional<std::array<std::size_t, 3>> globalGrid;
         std::optional<std::array<double, 3>> globalOrigin;
         std::string restartFormat = "standard";
@@ -342,6 +353,19 @@ namespace
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
                 args.allowFieldTruncation = true;
+            else if(option == "--multipole-group-cells")
+            {
+                args.multipoleGroupCells
+                    = static_cast<int>(parseIteration(value("--multipole-group-cells"), "--multipole-group-cells"));
+                if(args.multipoleGroupCells < 0)
+                    throw std::invalid_argument("--multipole-group-cells must be >= 0");
+            }
+            else if(option == "--max-particle-chunk-gb")
+            {
+                args.maxParticleChunkGb = std::stod(value("--max-particle-chunk-gb"));
+                if(!std::isfinite(args.maxParticleChunkGb) || args.maxParticleChunkGb < 0.0)
+                    throw std::invalid_argument("--max-particle-chunk-gb must be finite and >= 0");
+            }
             else if(option == "--backend")
                 args.backend = value("--backend");
             else if(option == "--fft-mode")
@@ -571,6 +595,235 @@ namespace
             config.picongpu.float64 ? "float64" : "float32");
         return 0;
     }
+
+    int runChunked(Arguments const& args)
+    {
+        if(!args.output)
+            throw std::runtime_error("chunked mode requires --output");
+        if(args.globalGrid)
+            throw std::runtime_error(
+                "--global-grid is not combined with --max-particle-chunk-gb yet");
+        if(!args.grid || !args.origin || !args.cellSize)
+            throw std::runtime_error(
+                "chunked mode requires explicit --grid, --origin and --cell-size so "
+                "every chunk uses the same field grid");
+        if(args.velocityBins != 1u)
+            throw std::runtime_error(
+                "chunked mode currently requires --velocity-bins 1; a multi-velocity "
+                "chunked run needs a global binning pass, which is not implemented yet");
+
+        bool const root = picBunch::mpiRank() == 0;
+        picBunch::BunchSelection selection;
+        selection.iteration = args.inputIteration;
+        if(args.species)
+        {
+            if(isInteger(*args.species))
+                selection.speciesIndex = static_cast<std::size_t>(
+                    parseIteration(*args.species, "--species index"));
+            else
+                selection.speciesName = *args.species;
+        }
+
+        picBunch::StageTimes times;
+        std::uint64_t totalCount = 0;
+        if(root)
+            totalCount = picBunch::readParticleCount(args.input, selection);
+        double totalMeta = static_cast<double>(totalCount);
+        picBunch::mpiBroadcast(&totalMeta, 1, 0);
+        totalCount = static_cast<std::uint64_t>(totalMeta);
+        if(totalCount == 0)
+            throw std::runtime_error("chunked mode: the selected species is empty");
+
+        constexpr std::size_t bytesPerParticle = 9u * sizeof(double);
+        std::size_t chunkSize = static_cast<std::size_t>(totalCount);
+        if(args.maxParticleChunkGb > 0.0)
+        {
+            double const budget = args.maxParticleChunkGb * 1.0e9;
+            std::size_t const byBudget
+                = static_cast<std::size_t>(budget / static_cast<double>(bytesPerParticle));
+            chunkSize = std::max<std::size_t>(1u, std::min<std::size_t>(chunkSize, byBudget));
+        }
+        std::size_t const chunks
+            = (chunkSize == 0u) ? 0u : (static_cast<std::size_t>(totalCount) + chunkSize - 1u) / chunkSize;
+        if(root)
+            std::printf(
+                "chunked reader: %llu particles, %zu chunk(s), at most %zu particles "
+                "(%.3f GB) per chunk\n",
+                static_cast<unsigned long long>(totalCount),
+                chunks,
+                chunkSize,
+                static_cast<double>(chunkSize * bytesPerParticle) / 1.0e9);
+
+        picBunch::MpiParallelContext parallel;
+        picBunch::ComputeOptions options;
+        options.tolerance = args.tolerance;
+        options.deterministicDeposit = args.deterministicDeposit;
+        options.cellSize = *args.cellSize;
+        options.gridSize = *args.grid;
+        options.gridOrigin = *args.origin;
+        options.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+        options.velocityBinning.explicitBins = 1u;
+        options.velocityBinning.modelConstant = args.binModelConstant;
+        options.velocityBinning.maxBins = args.maxVelocityBins;
+        options.nearShell.mode = (args.nearShell == "exact")
+            ? picBunch::NearShellOptions::Mode::Exact
+            : (args.nearShell == "fast")
+                ? picBunch::NearShellOptions::Mode::Fast
+                : (args.nearShell == "fast-gpu")
+                    ? picBunch::NearShellOptions::Mode::FastGpu
+                    : picBunch::NearShellOptions::Mode::None;
+        options.nearShell.fastOrder = args.nearShellFastOrder;
+        options.nearShell.radiusCells = args.nearShellRadius;
+        options.nearShell.tileNodes = args.nearShellTile;
+        options.fftMode = (args.fftMode == "replicated")
+            ? picBunch::FftMode::Replicated
+            : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
+                                              : picBunch::FftMode::Auto;
+        options.parallel = &parallel;
+
+        // Global representative for the single velocity class.  The chunk
+        // fields are linear only if every chunk uses the same kernel, so the
+        // representative must be derived from the whole species, not per chunk.
+        std::array<double, 3> velocitySum{0.0, 0.0, 0.0};
+        double velocityWeight = 0.0;
+        for(std::size_t offset = 0; offset < static_cast<std::size_t>(totalCount);
+            offset += chunkSize)
+        {
+            std::size_t const count
+                = std::min<std::size_t>(chunkSize, static_cast<std::size_t>(totalCount) - offset);
+            picBunch::BunchData chunk;
+            if(root)
+                chunk = picBunch::readBunchRange(args.input, selection, offset, count);
+            picBunch::mpiBroadcastBunch(chunk.bunch, 0);
+            for(std::size_t p = 0; p < chunk.bunch.size(); ++p)
+            {
+                double const w = std::abs(chunk.bunch.weight[p] * chunk.bunch.charge[p]);
+                velocitySum[0] += w * chunk.bunch.ux[p];
+                velocitySum[1] += w * chunk.bunch.uy[p];
+                velocitySum[2] += w * chunk.bunch.uz[p];
+                velocityWeight += w;
+            }
+        }
+        if(velocityWeight > 0.0)
+            for(int a = 0; a < 3; ++a)
+                velocitySum[a] /= velocityWeight;
+        picBunch::VelocityBinning fixedBinning;
+        fixedBinning.derived = true;
+        fixedBinning.count = 1u;
+        fixedBinning.perAxis = {1u, 1u, 1u};
+        fixedBinning.representativeU.resize(1u);
+        fixedBinning.representativeU[0] = velocitySum;
+        options.fixedBinning = fixedBinning;
+
+        picBunch::Field totalField;
+        double metaTime = 0.0;
+        double metaTimeUnitSI = 1.0;
+        std::uint64_t metaIteration = 0;
+        bool haveMeta = false;
+        for(std::size_t offset = 0; offset < static_cast<std::size_t>(totalCount);
+            offset += chunkSize)
+        {
+            std::size_t const count
+                = std::min<std::size_t>(chunkSize, static_cast<std::size_t>(totalCount) - offset);
+            picBunch::BunchData chunk;
+            if(root)
+            {
+                auto const t0 = Clock::now();
+                chunk = picBunch::readBunchRange(args.input, selection, offset, count);
+                times.readerMs += elapsedMs(t0);
+            }
+            picBunch::mpiBroadcastBunch(chunk.bunch, 0);
+            double chunkMeta[3] = {
+                chunk.time,
+                chunk.timeUnitSI,
+                static_cast<double>(chunk.iteration)};
+            if(root)
+            {
+                chunkMeta[0] = chunk.time;
+                chunkMeta[1] = chunk.timeUnitSI;
+                chunkMeta[2] = static_cast<double>(chunk.iteration);
+            }
+            picBunch::mpiBroadcast(chunkMeta, 3, 0);
+            if(!root)
+            {
+                chunk.time = chunkMeta[0];
+                chunk.timeUnitSI = chunkMeta[1];
+                chunk.iteration = static_cast<std::uint64_t>(chunkMeta[2]);
+            }
+            if(!haveMeta)
+            {
+                metaTime = chunk.time;
+                metaTimeUnitSI = chunk.timeUnitSI;
+                metaIteration = chunk.iteration;
+                haveMeta = true;
+            }
+
+            picBunch::StageTimes chunkTimes;
+            picBunch::Field const part
+                = picBunch::computeField(chunk.bunch, options, &chunkTimes);
+            times.depositMs += chunkTimes.depositMs;
+            times.kernelMs += chunkTimes.kernelMs;
+            times.fftMs += chunkTimes.fftMs;
+            times.readoutMs += chunkTimes.readoutMs;
+            times.transposeMs += chunkTimes.transposeMs;
+            if(totalField.data[0].empty())
+            {
+                totalField = part;
+            }
+            else
+            {
+                for(int c = 0; c < 6; ++c)
+                {
+                    if(totalField.data[c].size() != part.data[c].size())
+                        throw std::runtime_error(
+                            "chunked mode: field sizes differ between chunks");
+                    for(std::size_t l = 0; l < part.data[c].size(); ++l)
+                        totalField.data[c][l] += part.data[c][l];
+                }
+            }
+            if(root)
+                std::printf(
+                    "chunk %zu: %zu particles\n",
+                    offset / chunkSize + 1u,
+                    chunk.bunch.size());
+        }
+        if(totalField.data[0].empty())
+            throw std::runtime_error("chunked mode: no particle chunk produced a field");
+
+        std::array<double, 2> peaks{0.0, 0.0};
+        for(int c = 0; c < 6; ++c)
+            for(double value : totalField.data[c])
+                peaks[c < 3 ? 0 : 1] = std::max(peaks[c < 3 ? 0 : 1], std::abs(value));
+        if(options.parallel && options.parallel->distributed())
+            options.parallel->allreduceMax(peaks.data(), peaks.size());
+        if(root)
+        {
+            std::printf(
+                "field: max|E|=%g V/m  max|B|=%g T\n", peaks[0], peaks[1]);
+        }
+
+        picBunch::FieldWriteOptions writeOptions;
+        writeOptions.iteration = args.outputIteration;
+        writeOptions.time = metaTime;
+        writeOptions.timeUnitSI = metaTimeUnitSI;
+        auto const writerStart = Clock::now();
+        if(totalField.zSlab)
+            picBunch::writeFieldToDomain(
+                totalField, *args.output, writeOptions, totalField.grid.n, totalField.grid.origin);
+        else if(root)
+            picBunch::writeField(totalField, *args.output, writeOptions);
+        times.writerMs = elapsedMs(writerStart);
+        if(root)
+        {
+            std::printf(
+                "wrote %s (iteration %llu)\n",
+                args.output->c_str(),
+                static_cast<unsigned long long>(args.outputIteration));
+            printTimings(times);
+        }
+        return 0;
+    }
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -601,6 +854,18 @@ int main(int argc, char** argv)
     }
 
     picBunch::MpiGuard mpiRuntime(argc, argv);
+    if(args.maxParticleChunkGb > 0.0)
+    {
+        try
+        {
+            return runChunked(args);
+        }
+        catch(std::exception const& error)
+        {
+            std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+            return 1;
+        }
+    }
     picBunch::StageTimes times;
     try
     {
@@ -926,7 +1191,11 @@ int main(int argc, char** argv)
             // exact compute box.  Its measured validity radius is a multiple
             // of the bunch support radius; the exact box must reach it (plus
             // two cells for the global-node snap) before the tail is used.
-            picBunch::FarTail const tail = picBunch::deriveFarTail(bunchData.bunch);
+            picBunch::FarTail const tail = picBunch::deriveFarTail(
+                bunchData.bunch,
+                6.0,
+                options.cellSize,
+                args.multipoleGroupCells);
             auto const bounds = bunchData.bunch.bounds();
             std::array<double, 3> tailMargin{};
             for(int a = 0; a < 3; ++a)
@@ -1039,39 +1308,60 @@ int main(int argc, char** argv)
         // Every rank fills its own global chunk, so the far-tail moments must be
         // identical everywhere.  Broadcast the small fixed-size description.
         {
+            auto packTail = [](picBunch::FarTail const& tail, double* data) {
+                data[0] = 1.0;
+                for(int a = 0; a < 3; ++a)
+                {
+                    data[1 + a] = tail.centre[a];
+                    data[5 + a] = tail.dipole[a];
+                    data[17 + a] = tail.meanVelocity[a];
+                }
+                data[4] = tail.charge;
+                for(int i = 0; i < 9; ++i)
+                    data[8 + i] = tail.quadrupole[i];
+                data[20] = tail.supportRadius;
+                data[21] = tail.switchDistance;
+                data[22] = tail.gammaMax;
+            };
+            auto unpackTail = [](double const* data, picBunch::FarTail& tail) {
+                for(int a = 0; a < 3; ++a)
+                {
+                    tail.centre[a] = data[1 + a];
+                    tail.dipole[a] = data[5 + a];
+                    tail.meanVelocity[a] = data[17 + a];
+                }
+                tail.charge = data[4];
+                for(int i = 0; i < 9; ++i)
+                    tail.quadrupole[i] = data[8 + i];
+                tail.supportRadius = data[20];
+                tail.switchDistance = data[21];
+                tail.gammaMax = data[22];
+            };
             double tailData[23] = {};
             tailData[0] = farTail ? 1.0 : 0.0;
             if(farTail)
-            {
-                for(int a = 0; a < 3; ++a)
-                {
-                    tailData[1 + a] = farTail->centre[a];
-                    tailData[5 + a] = farTail->dipole[a];
-                    tailData[17 + a] = farTail->meanVelocity[a];
-                }
-                tailData[4] = farTail->charge;
-                for(int i = 0; i < 9; ++i)
-                    tailData[8 + i] = farTail->quadrupole[i];
-                tailData[20] = farTail->supportRadius;
-                tailData[21] = farTail->switchDistance;
-                tailData[22] = farTail->gammaMax;
-            }
+                packTail(*farTail, tailData);
             picBunch::mpiBroadcast(tailData, 23, 0);
             if(!root && tailData[0] != 0.0)
             {
                 farTail.emplace();
-                for(int a = 0; a < 3; ++a)
-                {
-                    farTail->centre[a] = tailData[1 + a];
-                    farTail->dipole[a] = tailData[5 + a];
-                    farTail->meanVelocity[a] = tailData[17 + a];
-                }
-                farTail->charge = tailData[4];
-                for(int i = 0; i < 9; ++i)
-                    farTail->quadrupole[i] = tailData[8 + i];
-                farTail->supportRadius = tailData[20];
-                farTail->switchDistance = tailData[21];
-                farTail->gammaMax = tailData[22];
+                unpackTail(tailData, *farTail);
+            }
+            // Spatial group multipoles must be identical on every rank.
+            double groupCount = farTail ? static_cast<double>(farTail->groups.size()) : 0.0;
+            picBunch::mpiBroadcast(&groupCount, 1, 0);
+            std::size_t const groups = static_cast<std::size_t>(groupCount);
+            std::vector<double> groupData(groups * 23u);
+            if(root && farTail)
+                for(std::size_t g = 0; g < groups; ++g)
+                    packTail(farTail->groups[g], groupData.data() + g * 23u);
+            if(!groupData.empty())
+                picBunch::mpiBroadcast(groupData.data(), groupData.size(), 0);
+            if(!root && farTail)
+            {
+                farTail->groups.resize(groups);
+                for(std::size_t g = 0; g < groups; ++g)
+                    unpackTail(groupData.data() + g * 23u, farTail->groups[g]);
             }
         }
 
