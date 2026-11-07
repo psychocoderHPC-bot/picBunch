@@ -197,7 +197,10 @@ HDF5 writer dominates: at $256^3$ the total is $3899$, $3737$ and
 $3664$\,ms and the writer $3319$, $3327$ and $3323$\,ms at $1$, $2$ and $4$
 ranks, while the read-out falls from $204$ to $44$\,ms.  The writer is the
 remaining multi-rank bottleneck at this size; the compute stages scale only
-modestly because the deposit and source spectrum are replicated.
+modestly because the deposit and source spectrum are replicated.  The
+fast-GPU near shell at $32^3$, $R=1.5$, tile 8 takes $519$, $653$ and
+$1112$\,ms at $1$, $2$ and $4$ ranks: at this small size the tile split and
+the correction all-reduce dominate, so more ranks do not help.
 
 \begin{table}[t]
 \centering

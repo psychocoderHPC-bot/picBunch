@@ -1,0 +1,7 @@
+# Near-shell rank scaling on jureca-h100, 2026-11-07.
+# 200 particles, 32^3 output, R=1.5 cells, tile 8, fast-gpu, one bin,
+# tolerance 1e-3, serialized runs.
+ranks,near_shell_wall_ms,total_ms,maxE_V_m,maxB_T
+1,519.383,18.114,28281,5.48627e-05
+2,652.934,7.959,28281,5.48627e-05
+4,1112.207,49.109,28281,5.48627e-05
