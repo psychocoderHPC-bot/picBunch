@@ -163,8 +163,16 @@ silently.
 **Near-shell regime limits.** The default `--near-shell none` is the safest choice: it
 keeps the plain mesh field and makes no regime-specific accuracy claim. `fast` is the
 accurate backend for stationary and near-axial motion. At the default order it gives
-`1.69e-4` for moving axial gamma 10 but `8.15e-2` for moving oblique in-support (per
-component `2.43e-2` to `8.15e-2`), so the oblique case is not a `1e-3` path. `exact`
+`1.69e-4` for moving axial gamma 10. On the host, each oblique in-support pair is gated
+by the estimated octant residual; when the residual exceeds
+`max(1e-6, 0.25*tolerance)` the pair falls back to the validated Lorentz-contracted
+reference. The host gate reaches `<=1e-3` for moving oblique in-support: gated pairs
+return the reference quadrature and the non-gated residual stays below
+`0.25*tolerance` (`docs/measurements/field_error_energy_spread.csv`). The CUDA
+in-kernel path has no contracted fallback: gamma-10 oblique in-support measures
+`5.34e-2` at `(0,0.5,0)` and `1.50e-1`/`1.54e-1` at two other points, and beta 0.5
+oblique measures `9.3e-4` to `1.2e-3`. The in-kernel oblique case is not a `1e-3` path
+until the contracted reference runs in the kernel. `exact`
 integrates moving in-support points in Lorentz-contracted coordinates, where the
 beaming anisotropy moves out of the kernel into a smooth density; against the order-12
 `indfield` arbiter it reaches about `1e-4` at cells (1,0,0) and (0,0.5,0) and about
@@ -199,8 +207,9 @@ nodes in-support). Moving axial velocities use the exact gamma-stretched box. Th
 backend is the accurate one for near-source points. Against the independent `indfield`
 reference (order 12, refine 3) it reaches worst-case `7.99e-4` stationary interior
 (order 5), `1.96e-5` face, `1.57e-7` outside, and `1.69e-4` axial gamma 10 interior
-(order 8); moving oblique interior is `8.15e-2` at the default order and is not a `1e-3`
-path. The arbiter-validated in-support number is `1.6%`: at the hardest in-support node
+(order 8). Moving oblique interior goes through the host residual gate and reaches
+`<=1e-3`; the ungated octant alone is `8.15e-2` at the default order and is not a
+`1e-3` path. The arbiter-validated in-support number is `1.6%`: at the hardest in-support node
 of a gamma 10 bunch (`Ey` at cells `(32, 31.5, 31)`, `0.53` cells from source #94),
 `fast` reads `2.043e9 V/m` against the order-12/refine-3 arbiter `2.077e9 V/m`.
 `--near-shell exact` integrates the in-support points in Lorentz-contracted
@@ -212,16 +221,29 @@ excess is `2.0e-10` stationary.
 
 `--near-shell fast` runs the same evaluator on the CUDA accelerator when the build
 has a CUDA backend and a device is present, and otherwise on the host. The CUDA kernel
-is a line-by-line port of the host algebra: one output node per thread, a strided
-chunk of the tile's near sources, the eight-term `asinh` box, the
-subtracted-Gauss-Legendre remainder, the rest-frame octant box for oblique motion,
-and atomic partial sums for the six staggered components. The quadrature nodes and
-weights, the Yee offsets and the E/B units travel as kernel parameters, so no
-device-side global table is read. `fast-gpu` (TOML `accuracy.near_shell =
-"fast-gpu"`) remains an explicit alias. On rosi_v100 (64^3 output, R = 3, tile 4,
-2000 particles, 8.77e6 evaluations) the device path runs in `2.5 s` against `18.3 s`
-on the host, a `7.3x` speedup, and the two agree to `5.7e-15` worst per-component
-relative. HIP and CPU builds use the host fallback with one stderr warning.
+evaluates one (component, node, source chunk) per thread with a single accumulator,
+using the eight-term `asinh` box, the subtracted-Gauss-Legendre remainder, the
+singularity-aware Duffy tetrahedral box for oblique motion (device order capped at 4),
+the direct 27-point TSC mesh-near stencil and a uniform source cell list. The
+quadrature nodes and weights, the Yee offsets and the E/B units travel as kernel
+parameters, so no device-side global table is read. `fast-gpu` (TOML
+`accuracy.near_shell = "fast-gpu"`) remains an explicit alias. On rosi_v100 (64^3
+output, R = 3, tile 4, 2000 particles, 8.77e6 evaluations) the device path runs in
+`2.5 s` against `18.3 s` on the host, a `7.3x` speedup, and the two agree to
+`5.7e-15` worst per-component relative. HIP and CPU builds use the host fallback with
+one stderr warning.
+
+On `hal` (A30, sm_80) the device mesh-near term evaluates the 27-point TSC stencil
+`sum_s w(s) K((node-j)h + yee*h)` per (source, node) pair with the binned
+representative velocity, so the per-tile local FFT and its plan setup are gone from
+this path. The direct stencil matches the local-FFT subtraction to `2.528e-15` maximum
+point relative (2e3 case, `PICBUNCH_NEAR_SHELL_LOCAL_FFT=1`). A uniform cell list with
+one cell of `radius` PIC cells replaces the per-tile source scan. On the 200k
+production case the near-shell wall falls from `282.0 s` to `231.0 s`, a `1.22x`
+speedup (`docs/measurements/field_error_timing.csv`). The kernel is compute-bound near
+the FP64 roofline, so this is far below a 10x target. The device in-kernel oblique
+accuracy limitation is in the regime limits above; a device `1e-3` path needs the
+contracted reference in the kernel and is future work.
 
 On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
 measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; the
@@ -245,8 +267,9 @@ projected `42.6 s` support-only; its 3- and 4-cell shells exceed a projected `30
 These near wall times are the measured standalone H100 kernel rate times the pair
 count: the shipped `--near-shell fast` path evaluates the same algebra on the host, so
 they are an algorithm cost floor, not the CPU wall time of the CLI. Moving oblique
-in-support stays at `8.15e-2` (per component Ex 2.43e-2, Ey 7.42e-2, Ez 6.32e-2, Bx
-8.15e-2, By 2.96e-2, Bz 3.89e-2) and is not a `1e-3` path.
+in-support goes through the host residual gate and reaches `<=1e-3`; the ungated octant
+is `8.15e-2` (per component Ex 2.43e-2, Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2,
+By 2.96e-2, Bz 3.89e-2).
 `--near-shell exact` evaluates in-support points in Lorentz-contracted coordinates:
 the Li'enard kernel becomes a Coulomb kernel and the beaming structure moves into a
 smooth TSC density, so the pyramid singularity cancellation is exact for any velocity.
@@ -268,66 +291,137 @@ subtraction cancels bin for bin. Nodes inside the shell therefore keep the exact
 per-particle-velocity field and only the outside-shell field carries the binning error.
 
 The error model is
-`modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + Delta_gamma_b/gamma_b)`,
+`modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + (2/gamma_b) * Delta_gamma_b/gamma_b)`,
 where `q_b/Q` is the charge fraction of box `b`, `gamma_b` the largest gamma in the box,
-`Delta_theta_b` the largest angle to the box representative (the absolute-charge-weighted mean momentum of the box), and `Delta_gamma_b` the gamma range.
-The shipped value `C = 1` is an assumption, not a refitted calibration; the archived
-accuracy points are in `docs/measurements/velocity_bin_calibration.csv` and the original
-model sums were not committed. `--bin-model-constant` overrides it for diagnostics.
+`Delta_theta_b` the largest angle to the box representative (the absolute-charge-weighted mean momentum of the box), and `Delta_gamma_b` the gamma range. The angular term
+`gamma_b * Delta_theta_b` and `C = 1` are unchanged. The single node-bounded energy term
+`(2/gamma_b) * Delta_gamma_b/gamma_b` replaces the former `Delta_gamma_b/gamma_b +
+delta_gamma_b` pair, which charged one node effect twice.
+
+The energy term is calibrated on the archived 5% energy-spread points only (gamma 10,
+16 and 64 boxes). At those points it gives `3.9e-3` and `9.2e-4` against measured
+`1.12e-3` and `2.72e-4`, a `3.4x` conservative over-prediction (down from `26.7x` and
+`25.9x`). `C = 1` remains an assumption for the angular term, not a reproduced fit. The
+model makes no accuracy claim beyond gamma 10, 5% energy spread and the measured 16-64
+box range, and it is not a tolerance guarantee. `--bin-model-constant` overrides it for
+diagnostics.
+
 `--velocity-bins N` requests a fixed count and `--velocity-bins 0` (the default) takes the
 smallest power of two whose estimate is at or below `--tolerance`, capped by
 `--max-velocity-bins` (default 256). When the cap is too small the run exits non-zero and
-names the count the model needs, for example
-`the velocity-bin model requires at least 32 boxes for tolerance 0.001000`.
+prints the required count and the error at the cap as separate numbers, for example
+`the velocity-bin model requires at least 8388608 boxes for tolerance 0.001000
+(estimated error at 8388608 boxes: ...; at the 256-box cap: 1.867e-01)`.
 The single-velocity case is detected within `1e-12` relative and returns one box, so its
 field is bitwise the unbinned field.
 
+The archived regime points are in `docs/measurements/velocity_bin_calibration.csv`:
+a 5% energy spread measures `1.12e-3` at 16 boxes and `2.72e-4` at 64 (reaches `1e-3`
+at 64); a 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does
+not reach `1e-3`, because it scales only as `1/sqrt(N_transverse)`. For the 1 mrad
+x-divergence bunch used for the paper (`N = 200`, `64^3` cells, cell `1e-7` m,
+`--near-shell fast`), the auto policy chooses 32 boxes (`32x1x1`, estimate `8.35e-4`);
+the resulting `B_y` peak is `8.57e2 T` against `B_z = 2.34e4 T` (ratio `3.7e-2`), while
+the exact per-particle reference is `B_y = 8.24 T`, ratio `3.5e-4`. The angular case is
+accepted and runs, but binning does not reproduce the small `B_y` residual; the
+reference needs per-particle velocities.
+
 ### Velocity moments
 
-`--velocity-moments off|auto|2|3` (default `off`) replaces the per-box FFT chain with a
-single inverse transform. The six-component point kernel is expanded in a multivariate
-Taylor series about the absolute-charge-weighted mean momentum `u0`; the moment densities
-are deposited once and each field component is the inverse transform of the moment/kernel
-spectra. See `include/picBunch/VelocityMoments.hpp` for the algebra.
+`--velocity-moments off|auto|2|3` (default `off`) targets bunches with a velocity or
+energy spread. The six-component point Liénard kernel is expanded in a multivariate
+Taylor series about the absolute-charge-weighted mean velocity `u0`. The moment densities
+(`20` multi-indices for order 3, `10` for order 2) are deposited once, and each field
+component comes from one inverse transform of the moment/kernel spectral sum. The
+per-velocity-box deposit/FFT chain is replaced; the binned path remains the fallback.
+
+Measured on 200 000 particles with a 5% energy spread, gamma 10, `64^3` cells and
+`--near-shell none` (40 stratified nodes, reference: TSC order-5 far / order-8 refine-1
+near, A30 on `hal`; `docs/measurements/field_error_timing.csv` and
+`docs/measurements/field_error_energy_spread.csv`): order 3 runs in `1.85 s` against
+`35.46 s` for 256 boxes, a `19x` reduction in CLI wall. It lowers the mesh-limited
+band error by `10.3x` at `[6,12)` cells and `6.1x` beyond 12 cells against B=256; it is
+`1.21x` lower at `[1.5,3)` and `1.31x` lower at `[3,6)`. Order 2 is slightly worse than
+order 3 at `[6,12)` and better beyond 12 cells; order 3 is the better default. The full
+per-band table is in [Error budget](#error-budget).
+
+The auto policy always computes order 3, then probes the order-3-only contribution
+`||F3 - F2|| / ||F3||` in k-space, allreduced across ranks. A probe below `0.05` keeps
+order 3; otherwise the run falls back to the binned path. On the 200k case the probe was
+`1.762e-4` and auto selected order 3 (`2.10 s` CLI). When an explicit
+`--velocity-moments auto|2|3` is set and the auto binning policy fails, the run warns and
+runs the moment path instead of aborting at the bin cap.
+
+Two limitations remain. The moment path always uses the replicated full FFT, independent
+of `options.fftMode`; the one-rank and two-rank fields agree to `2.05e-16` relative L2
+(`docs/measurements/field_error_energy_spread.csv`), and more ranks do not reduce the
+replicated transform cost. The path does not change the in-support `[0,1.5)` error,
+which stays at about `0.57` relative L2 because the shared TSC/mesh representation
+dominates there; use the near shell for that region.
 
 With `--near-shell`, the expansion centre is pinned to the full-bunch `u0` for every
-per-tile local mesh. The subtraction is then the same truncated kernel operator applied to
-the near subset, so it cancels exactly the contribution the global mesh added. Recomputing
-the centre on a tile would cancel a different expansion and leave a residual inside the
-shell, which is why the near-shell code passes the fixed centre down. `auto` probes the
-order-3-only contribution in k-space (`< 0.05` keeps order 3) and otherwise falls back to
-the binned path; the near shell follows the resolved decision and uses the same fixed
-order, or the binned path when the base mesh fell back.
-
-Measured on the multi-velocity campaign (`pr24-20261102`, branch `experimental/multivel`,
-H100, `02891fe6`): a 5% energy spread gives `1.12e-3` binning error at 16 boxes and
-`2.72e-4` at 64, so it meets `1e-3` at 64 boxes. A 5 degree angular spread does not
-reach `1e-3`; the measured binning error is `0.421` at 16 boxes and `0.295` at 64,
-because it scales only
-as `1/sqrt(N_transverse)`. For the 1 mrad x-divergence bunch used for the paper
-(`N = 200`, `64^3` cells, cell `1e-7` m, `--near-shell fast`), the auto policy chooses
-32 boxes (`32x1x1`, estimate `8.35e-4`); the resulting `B_y` peak is `8.57e2 T` against
-`B_z = 2.34e4 T` (ratio `3.7e-2`), while the exact per-particle reference is
-`B_y = 8.24 T`, ratio `3.5e-4`. The angular case is accepted and runs, but binning does
-not reproduce the small `B_y` residual; the reference needs per-particle velocities.
+per-tile local mesh. The subtraction is then the same truncated kernel operator applied
+to the near subset, so it cancels exactly the contribution the global mesh added.
+Recomputing the centre on a tile would cancel a different expansion and leave a residual
+inside the shell, which is why the near-shell code passes the fixed centre down. The
+near shell follows the resolved decision: the fixed order when the moment path engaged,
+the binned path when auto, size or the scratch guard made the base mesh fall back.
 
 ### Error budget
 
-`--tolerance` bounds only the padded-FFT free-space convolution. The delivered error is
-the sum of independent terms, and a run that meets `--tolerance` does not automatically
-meet the same number end to end:
+`--tolerance` sizes only the padded-FFT free-space convolution. It is not an end-to-end
+accuracy target: the delivered error is the sum of independent terms, and a run that
+meets `--tolerance` does not automatically meet the same number end to end. For a bunch
+with an energy spread the measured per-band errors are:
+
+| path | CLI wall | [0,1.5) | [1.5,3) | [3,6) | [6,12) | >12 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| binned B=8 | 1.75 s | 5.878e-1 | 1.198e-2 | 1.008e-2 | 2.494e-3 | 9.677e-3 |
+| binned B=64 | 11.20 s | 5.837e-1 | 1.172e-2 | 9.521e-3 | 1.460e-3 | 4.780e-3 |
+| binned B=256 | 35.46 s | 5.779e-1 | 1.110e-2 | 8.378e-3 | 8.104e-4 | 2.505e-3 |
+| moment order 2 | 1.82 s | 5.684e-1 | 9.281e-3 | 6.469e-3 | 9.834e-5 | 2.191e-4 |
+| moment order 3 | 1.85 s | 5.681e-1 | 9.164e-3 | 6.380e-3 | 7.851e-5 | 4.131e-4 |
+| moment auto | 2.10 s | 5.681e-1 | 9.164e-3 | 6.380e-3 | 7.851e-5 | 4.131e-4 |
+
+Relative L2 per Chebyshev distance-to-nearest-source band (cells). Measurement: 200 000 particles, gamma 10,
+5% energy spread, `64^3` cells of `1e-6` m, TSC, `--near-shell none`, A30 on `hal`, 40
+stratified nodes; reference is the TSC-convolved field (order-5 far, order-8 refine-1
+near). Raw rows: `docs/measurements/field_error_energy_spread.csv`; walls:
+`docs/measurements/field_error_timing.csv`.
+
+The in-support `[0,1.5)` band is dominated by the shared TSC deposit and mesh
+representation error. Every mesh-only path here measures between `0.568` and `0.588`
+relative L2, including both moment orders and auto; the moment expansion does not bring
+it below this floor. Use the near shell for that region.
+
+Supported regime for this evidence: gamma 10 with 5% energy spread. Outside the TSC
+support the binned path improves with box count, and both moment orders beat B=256 in
+every band outside `[0,1.5)`. Order 3 is best up to 12 cells; order 2 is slightly better
+beyond 12 cells (`2.19e-4` against `4.13e-4`). Against B=256 order 3 is `1.21x` lower at
+`[1.5,3)`, `1.31x` at `[3,6)`, `10.3x` at `[6,12)`, `6.1x` beyond 12 cells, and is `19x`
+faster in CLI wall (`1.85 s` against `35.46 s`).
+
+The angular regime is not supported at `1e-3`. A 5 degree per-axis angular spread
+measures `0.421` at 16 boxes and `0.295` at 64 against the TSC-convolved continuum
+reference (`docs/measurements/velocity_bin_calibration.csv`) and does not reach the
+target. On the gate's 1-degree-divergence bunch the auto binning policy requires
+`8388608` boxes for `--tolerance 1e-3` (model estimate at the 256-box cap:
+`1.867e-1`) and exits non-zero by design.
+
+The per-term controls are:
 
 | term | controlled by | scope and recorded behaviour |
 | --- | --- | --- |
 | mesh / TSC deposit | `--tolerance` (padding), fixed `kRefinement = 1`, TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order, deposit scheme or refinement. Near-source continuum error is not bounded by this term. |
-| velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed, not refitted. A 5% energy spread measures `1.12e-3` at 16 boxes and `2.72e-4` at 64; a 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. See `docs/measurements/velocity_bin_calibration.csv`. |
-| near quadrature | `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order` | `fast` gives `7.99e-4` stationary and `1.69e-4` moving axial gamma 10, but `8.15e-2` moving oblique in-support. `exact` uses Lorentz-contracted in-support quadrature: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. |
+| velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed for the angular term. The energy term is `(2/gamma_b) * Delta_gamma_b/gamma_b`, calibrated on the archived 5% energy-spread points (gamma 10, 16-64 boxes); it is `3.4x` conservative there and claims nothing beyond that range. A 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. This is not a tolerance guarantee. See `docs/measurements/velocity_bin_calibration.csv`. |
+| near quadrature | `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order` | On the host, `fast` gates each oblique in-support pair on the octant residual and falls back to the Lorentz-contracted reference when it exceeds `max(1e-6, 0.25*tolerance)`; gated oblique in-support points reach `<=1e-3`. The CUDA in-kernel path has no contracted fallback: gamma-10 oblique in-support measures `5.34e-2` at `(0,0.5,0)` and `1.50e-1`/`1.54e-1` at two other points, and beta 0.5 oblique measures `9.3e-4` to `1.2e-3`. `exact` uses Lorentz-contracted in-support quadrature: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. See `docs/measurements/field_error_energy_spread.csv`. |
 | far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the rest-frame dipole/quadrupole evaluated at the Lorentz-stretched point and boosted back. It is exact for a single point source and in the principal dipole alignments; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
 | output precision | checkpoint `precision` | the field pipeline is float64; the default checkpoint stores float32 (`6e-8` fractional resolution) unless `precision = "float64"` is requested. |
 
 The mesh term is the only one `--tolerance` controls directly. Pick the near-shell mode
-from the near-shell regime limits above, check the binning term for a momentum spread,
-and account for the checkpoint dtype when a downstream consumer is single precision.
+from the near-shell regime limits above, check the binning term or `--velocity-moments`
+for a momentum spread, and account for the checkpoint dtype when a downstream consumer
+is single precision.
 
 ### Precision and accuracy safeguards
 
@@ -347,8 +441,10 @@ accuracy fixes are in the current tree and are covered by tests:
 
 The measured tables behind these statements are
 `docs/measurements/velocity_bin_representative.csv`,
-`docs/measurements/near_shell_device_speedup.csv` and the test assertions
-above.  The model behind the binning term is in `docs/algorithm.md`.
+`docs/measurements/near_shell_device_speedup.csv`,
+`docs/measurements/field_error_energy_spread.csv`,
+`docs/measurements/field_error_timing.csv` and the test assertions above.  The model
+behind the binning term is in `docs/algorithm.md`.
 
 ## Chunked particles and grouped far-tail multipoles
 

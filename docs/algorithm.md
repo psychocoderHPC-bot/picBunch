@@ -72,11 +72,12 @@ and build conditions are stated with them.
 
 ## Tolerance contract
 
-`--tolerance` is the only user-facing accuracy knob. It is a relative target for
-the delivered *discrete free-space TSC convolution*, i.e. the discrete sum the
-pipeline is designed to evaluate. It is not a target for the continuum Coulomb
-field near the source; the difference there comes from the fixed TSC deposit at
-`kRefinement = 1` and no tolerance value can reduce it.
+`--tolerance` sizes only the FFT zero padding. It is a relative target for the
+delivered *discrete free-space TSC convolution*, i.e. the discrete sum the
+pipeline is designed to evaluate. It is not an end-to-end accuracy target, and
+it is not a target for the continuum Coulomb field near the source; the
+difference there comes from the fixed TSC deposit at `kRefinement = 1` and no
+tolerance value can reduce it.
 
 For a single-velocity bunch the target controls exactly one implementation
 choice: the FFT zero-padding factor. It does not change the interpolation order
@@ -95,9 +96,11 @@ Padding 1 is never selected by the policy. It is a diagnostic override used by
 the padding test only.
 
 For a multi-velocity bunch the same target additionally sizes the velocity
-boxes (see "Velocity binning"): the box count is the smallest power of two
-whose calibrated error model stays below the target, and an infeasible
-requirement fails with the needed count instead of running.
+boxes (see "Velocity binning"), or `--velocity-moments` replaces the boxes with
+a moment expansion: the box count is the smallest power of two whose calibrated
+error model stays below the target, and an infeasible requirement fails with
+the needed count and the error at the cap instead of running. The model is an
+estimate, not a tolerance guarantee.
 
 ## Velocity binning
 
@@ -120,34 +123,42 @@ and only the outside-shell field carries the binning error.
 
 Error model.  Replacing a particle `u` by its box representative perturbs the
 field by a transverse tilt of the boosted pattern, of relative order
-`gamma * Delta_theta`, and an energy shift, of relative order
-`Delta_gamma / gamma`.  With `|q_b|` the absolute charge in box `b`, `Q` the
-total absolute charge, `gamma_b` the largest `gamma` in the box,
-`Delta_theta_b` the largest member angle against the representative (taken as
-`pi` when the representative is zero and any member is moving, so a
-counterstreaming box cannot hide its error), `Delta_gamma_b` the `gamma` range
-of the box, and `delta_gamma_b` the largest member-vs-representative `gamma`
-deviation, the estimated relative error is
+`gamma * Delta_theta`, and an energy shift.  With `|q_b|` the absolute charge in
+box `b`, `Q` the total absolute charge, `gamma_b` the largest `gamma` in the
+box, `Delta_theta_b` the largest member angle against the representative (taken
+as `pi` when the representative is zero and any member is moving, so a
+counterstreaming box cannot hide its error), and `Delta_gamma_b` the `gamma`
+range of the box, the estimated relative error is
 
     modelError = C * Sum_b (|q_b| / Q) * (gamma_b * Delta_theta_b
-                                         + Delta_gamma_b / gamma_b
-                                         + delta_gamma_b)
+                                         + (2 / gamma_b) * Delta_gamma_b / gamma_b)
 
-Absolute charges keep opposite signs from cancelling a local error.
+Absolute charges keep opposite signs from cancelling a local error. The angular
+term and `C = 1` are unchanged from the original calibration. The single
+node-bounded energy term `(2/gamma_b) * Delta_gamma_b/gamma_b` replaces the
+former `Delta_gamma_b/gamma_b + delta_gamma_b` pair, which charged the same
+node effect twice and over-predicted the archived 5% energy-spread points by
+`26.7x` and `25.9x`.
 
-`C` was fitted against the TSC-convolved continuum reference in the MV1 run
-(`pr24-20261102`, jureca-h100, CUDA 13.4) from a mixed bunch with 1, 2, 4, 8 and
-16 boxes.  That campaign's per-box rows and model sums were not archived in this
-repository, so the shipped value `C = 1` is an assumption, not a reproduced fit.
-The recorded 16- and 64-box points are in
-`docs/measurements/velocity_bin_calibration.csv`: the 5% energy-spread case
-measures `1.12e-3` at 16 boxes and `2.72e-4` at 64 (meeting `1e-3` at 64), while
-the 5 degree angular-spread case measures `0.421` at 16 and `0.295` at 64 and
-does not reach `1e-3`.  `tools/velocity-bins/calibrate_velocity_bins.py`
-reproduces the record from the CSV.  `--velocity-bins` runs a fixed count
-(calibration/diagnostics), `--bin-model-constant` overrides `C`, and
-`--max-velocity-bins` (default 256) caps the auto policy; an infeasible
-requirement fails naming the needed count.
+The energy term is calibrated on the archived energy-spread points only: gamma
+10, 5% energy spread, 16 and 64 boxes. It gives `3.9e-3` at 16 boxes and `9.2e-4`
+at 64 against measured `1.12e-3` and `2.72e-4`, a `3.4x` conservative
+over-prediction. It selected 64 boxes at `--tolerance 1e-3` instead of failing
+above the 256-box cap. The angular term is not refitted: `C = 1` reproduces the
+archived 5 degree point, and the 5 degree angular-spread case measures `0.421`
+at 16 and `0.295` at 64 and does not reach `1e-3`. No guarantee is made beyond
+gamma 10, 5% energy spread and the measured 16-64 box range. The stored points
+are in `docs/measurements/velocity_bin_calibration.csv`;
+`tools/velocity-bins/calibrate_velocity_bins.py` reproduces the record from the
+CSV.
+
+`--velocity-bins` runs a fixed count (calibration/diagnostics),
+`--bin-model-constant` overrides `C`, and `--max-velocity-bins` (default 256)
+caps the auto policy. When the cap is too small the run exits non-zero and
+prints the required count and the error at the cap as separate numbers, for
+example
+`the velocity-bin model requires at least 8388608 boxes for tolerance 0.001000
+(estimated error at 8388608 boxes: ...; at the 256-box cap: 1.867e-01)`.
 
 ## Padding
 
@@ -251,10 +262,12 @@ performance claim about `hal`.
   (vendored FP64 reference quadrature), using a per-tile local zero-padded FFT
   for the `F_mesh(near)` subtraction. It is not lookup-class and its measured
   accuracy/cost envelope is reported with the change that added it. `--near-shell
-  fast` is the accurate backend for near-source points (README Accuracy): it
-  validates against the order-12 `indfield` arbiter to `1.6%` at the closest
-  moving in-support node. `exact` is kept for comparison only; it shares a
-  quadrature with the driver reference and overestimates moving oblique
+  fast` is the accurate backend for near-source points (README Accuracy): the
+  host path gates oblique in-support pairs on the octant residual and falls back
+  to the Lorentz-contracted reference, reaching `<=1e-3`; the CUDA in-kernel
+  path reaches about `5.3e-2` for gamma-10 oblique in-support and needs the
+  contracted reference in the kernel. `exact` is kept for comparison only; it
+  shares a quadrature with the driver reference and overestimates moving oblique
   in-support points by about `10x` at the closest node.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
