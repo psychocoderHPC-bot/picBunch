@@ -14,6 +14,7 @@
 #pragma once
 
 #include "picBunch/Types.hpp"
+#include "picBunch/detail/ObliqueOrder.hpp"
 
 #include <cstddef>
 #include <vector>
@@ -29,11 +30,13 @@ namespace picBunch::pbfast
     {
         static constexpr int kMaxOrder = 32;
         int order = 5;
-        int obliqueOrder = 8;
+        //! Selected order for this launch; must be one of kObliqueOrders.
+        int obliqueOrder = 4;
         double xi[kMaxOrder]{};
         double wi[kMaxOrder]{};
-        double oxi[kMaxOrder]{};
-        double owi[kMaxOrder]{};
+        //! Rules for every allowed oblique order, filled once on the host.
+        double oxi[kObliqueOrderCount][kMaxOrder]{};
+        double owi[kObliqueOrderCount][kMaxOrder]{};
         double delta[6][3]{};
         double unitE = 0.0;
         double unitB = 0.0;

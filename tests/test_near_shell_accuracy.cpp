@@ -177,3 +177,134 @@ TEST(NearShellAccuracy, FastObliqueInSupportMeets1e3Gamma100)
         EXPECT_LT(relativeErrorV(got, referenceField(obs, u)), 1.0e-3) << obs.x << "," << obs.y << "," << obs.z;
     }
 }
+
+// ---- adaptive oblique order ------------------------------------------------
+#include "picBunch/detail/ObliqueOrder.hpp"
+#if defined(PICBUNCH_BACKEND_CUDA)
+#    include "picBunch/detail/FastNearDevice.hpp"
+#endif
+
+TEST(NearShellAccuracy, AutoObliqueOrderRule)
+{
+    using namespace picBunch::pbfast;
+    EXPECT_EQ(autoObliqueOrder(1.0), 4);
+    EXPECT_EQ(autoObliqueOrder(10.0), 4);
+    EXPECT_EQ(autoObliqueOrder(11.2), 4);
+    EXPECT_EQ(autoObliqueOrder(20.0), 6);
+    EXPECT_EQ(autoObliqueOrder(41.0), 8);
+    EXPECT_EQ(autoObliqueOrder(100.0), 8);
+    EXPECT_EQ(normalizeObliqueOrder(1), 4);
+    EXPECT_EQ(normalizeObliqueOrder(5), 6);
+    EXPECT_EQ(normalizeObliqueOrder(7), 8);
+    EXPECT_EQ(normalizeObliqueOrder(99), 12);
+}
+
+TEST(NearShellAccuracy, AutoGamma100ObliqueMeets1e2)
+{
+    // The auto rule selects order 8 at gamma 100.  Order 4 is the fast path
+    // and stays bounded; the auto order must be at least as accurate.
+    Vec3 const u = oblique45(kGamma100Beta);
+    for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.2, -0.3, 0.4}, Vec3{0.0, 0.5, 0.0}})
+    {
+        Vec3 const truth = referenceField(obs, u);
+        Vec3 const fast = fastField(obs, u, picBunch::pbfast::autoObliqueOrder(100.0));
+        EXPECT_LT(relativeErrorV(fast, truth), 1.0e-2) << obs.x << "," << obs.y << "," << obs.z;
+    }
+}
+
+TEST(NearShellAccuracy, AutoGamma10KeepsOrder4)
+{
+    // gamma <= 10 maps to order 4, and order 4 already meets the gamma-10
+    // accuracy budget at these points.
+    EXPECT_EQ(picBunch::pbfast::autoObliqueOrder(10.0), 4);
+    Vec3 const u = oblique45(kGamma10Beta);
+    for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.2, -0.3, 0.4}, Vec3{0.0, 0.5, 0.0}})
+        EXPECT_LT(relativeErrorV(fastField(obs, u, 4), referenceField(obs, u)), 1.0e-2)
+            << obs.x << "," << obs.y << "," << obs.z;
+}
+
+#if defined(PICBUNCH_BACKEND_CUDA)
+namespace
+{
+    Vec3 deviceField(Vec3 const& obs, Vec3 const& u, int obliqueOrder)
+    {
+        picBunch::Bunch source;
+        source.resize(1);
+        source.x[0] = source.y[0] = source.z[0] = 0.0;
+        source.ux[0] = u.x;
+        source.uy[0] = u.y;
+        source.uz[0] = u.z;
+        source.weight[0] = 1.0;
+        source.charge[0] = 1.0;
+        picBunch::pbfast::DeviceParams params;
+        params.order = 5;
+        params.obliqueOrder = obliqueOrder;
+        for(int i = 0; i < params.order; ++i)
+        {
+            auto const& r = picBunch::pbfast::detail::rule(params.order);
+            params.xi[i] = r.x[static_cast<std::size_t>(i)];
+            params.wi[i] = r.w[static_cast<std::size_t>(i)];
+        }
+        for(int slot = 0; slot < picBunch::pbfast::kObliqueOrderCount; ++slot)
+        {
+            int const n = picBunch::pbfast::kObliqueOrders[slot];
+            auto const& r = picBunch::pbfast::detail::rule(n);
+            for(int i = 0; i < n; ++i)
+            {
+                params.oxi[slot][i] = r.x[static_cast<std::size_t>(i)];
+                params.owi[slot][i] = r.w[static_cast<std::size_t>(i)];
+            }
+        }
+        for(int c = 0; c < 6; ++c)
+            for(int a = 0; a < 3; ++a)
+                params.delta[c][a] = 0.0;
+        params.unitE = 1.0;
+        params.unitB = 1.0;
+        auto const out = picBunch::pbfast::evalFastNearDevice(
+            source, source, false, 1, 1, 1, obs.x, obs.y, obs.z, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            params);
+        return {out[0], out[1], out[2]};
+    }
+} // namespace
+
+TEST(NearShellAccuracy, DeviceGamma100ObliqueMatchesHostAutoOrder)
+{
+    // The device must evaluate exactly the same algebra as the host for the
+    // order the shared auto rule selects.  Absolute gamma-100 accuracy of this
+    // evaluator is bounded separately: the Duffy box does not converge at
+    // gamma 100 (see the implementation note), so this guards consistency and
+    // the precomputed multi-order tables rather than a 1e-2 claim.
+    if(!picBunch::pbfast::fastNearDeviceAvailable())
+        GTEST_SKIP() << "no CUDA device";
+    Vec3 const u = oblique45(kGamma100Beta);
+    int const order = picBunch::pbfast::autoObliqueOrder(100.0);
+    EXPECT_EQ(order, 8);
+    for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.2, -0.3, 0.4}, Vec3{0.0, 0.5, 0.0}})
+    {
+        picBunch::pbfast::Settings settings;
+        settings.order = 5;
+        settings.obliqueOrder = order;
+        settings.tolerance = 1.0e9; // Duffy only, no controlled fallback
+        Vec3 hostE, hostB;
+        picBunch::pbfast::shape_field(obs, Vec3{}, u, 1.0, 1.0, 1.0, settings, hostE, hostB);
+        Vec3 const dev = deviceField(obs, u, order);
+        EXPECT_LT(relativeErrorV(dev, hostE), 1.0e-12)
+            << obs.x << "," << obs.y << "," << obs.z;
+    }
+}
+
+TEST(NearShellAccuracy, DeviceGamma10AutoEqualsExplicitOrder4)
+{
+    if(!picBunch::pbfast::fastNearDeviceAvailable())
+        GTEST_SKIP() << "no CUDA device";
+    Vec3 const u = oblique45(kGamma10Beta);
+    for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.0, 0.5, 0.0}})
+    {
+        Vec3 const a = deviceField(obs, u, 4);
+        Vec3 const b = deviceField(obs, u, picBunch::pbfast::autoObliqueOrder(10.0));
+        EXPECT_EQ(a.x, b.x);
+        EXPECT_EQ(a.y, b.y);
+        EXPECT_EQ(a.z, b.z);
+    }
+}
+#endif

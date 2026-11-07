@@ -70,7 +70,7 @@ TEST(MpiOptions, FingerprintCoversNearShellFastOrder)
     // Restoring the values restores the digest: the hash has no rank or
     // process state.
     options.nearShell.fastOrder = 5;
-    options.nearShell.fastObliqueOrder = 8;
+    options.nearShell.fastObliqueOrder = 0;
     EXPECT_EQ(picBunch::computeOptionsFingerprint(options), base);
 }
 

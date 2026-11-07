@@ -68,6 +68,7 @@ int main(int argc, char** argv)
         std::size_t tile = 4;
         std::string shell = "exact";
         int fastOrder = 5;
+        std::string obliqueOrder = "auto";
         std::size_t sources = 1;
         double cloudCells = 0.0;
         std::string prefix = "near_shell";
@@ -102,6 +103,8 @@ int main(int argc, char** argv)
                 shell = next();
             else if(a == "--order")
                 fastOrder = std::stoi(next());
+            else if(a == "--oblique-order")
+                obliqueOrder = next();
             else if(a == "--sources")
                 sources = static_cast<std::size_t>(std::stoul(next()));
             else if(a == "--cloud-cells")
@@ -168,6 +171,7 @@ int main(int argc, char** argv)
         ns.mode = (shell == "fast") ? picBunch::NearShellOptions::Mode::Fast
                                     : picBunch::NearShellOptions::Mode::Exact;
         ns.fastOrder = fastOrder;
+        ns.fastObliqueOrder = (obliqueOrder == "auto") ? 0 : std::stoi(obliqueOrder);
         ns.radiusCells = radius;
         ns.tileNodes = tile;
         std::size_t pairs = 0;
@@ -195,6 +199,7 @@ int main(int argc, char** argv)
         meta << "moving_in_support_truth " << (moving ? "reference-with-residual" : "yes")
              << "\n";
         meta << "order " << fastOrder << "\n";
+        meta << "oblique_order " << obliqueOrder << "\n";
         meta << "sources " << sources << "\n";
         meta << "cloud_cells " << cloudCells << "\n";
         meta << "pairs " << pairs << "\n";

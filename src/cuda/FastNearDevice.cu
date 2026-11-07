@@ -144,6 +144,7 @@ namespace picBunch::pbfast
                         1.5 * cells[1] + R0[1],
                         1.5 * cells[2] + R0[2]};
                     int const n = prm.obliqueOrder;
+                    int const slot = n >= 12 ? 4 : n >= 10 ? 3 : n >= 8 ? 2 : n >= 6 ? 1 : 0;
                     double acc[3] = {0.0, 0.0, 0.0};
                     auto applyMmin = [&](double const v[3], double out[3]) {
                         double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
@@ -188,16 +189,16 @@ namespace picBunch::pbfast
                                     double const BA[3] = {Bv[0] - A[0], Bv[1] - A[1], Bv[2] - A[2]};
                                     for(int iu = 0; iu < n; ++iu)
                                     {
-                                        double const tu = 0.5 * prm.oxi[iu] + 0.5;
-                                        double const wu = 0.5 * prm.owi[iu];
+                                        double const tu = 0.5 * prm.oxi[slot][iu] + 0.5;
+                                        double const wu = 0.5 * prm.owi[slot][iu];
                                         for(int iv = 0; iv < n; ++iv)
                                         {
-                                            double const tv = 0.5 * prm.oxi[iv] + 0.5;
-                                            double const wv = 0.5 * prm.owi[iv];
+                                            double const tv = 0.5 * prm.oxi[slot][iv] + 0.5;
+                                            double const wv = 0.5 * prm.owi[slot][iv];
                                             for(int iw = 0; iw < n; ++iw)
                                             {
-                                                double const tw = 0.5 * prm.oxi[iw] + 0.5;
-                                                double const ww = 0.5 * prm.owi[iw];
+                                                double const tw = 0.5 * prm.oxi[slot][iw] + 0.5;
+                                                double const ww = 0.5 * prm.owi[slot][iw];
                                                 double const a0 = (1.0 - tv) * (1.0 - tw);
                                                 double const a1 = tv * (1.0 - tw);
                                                 double const Q[3] = {

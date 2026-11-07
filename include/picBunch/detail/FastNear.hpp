@@ -29,6 +29,7 @@
 #pragma once
 
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/ObliqueOrder.hpp"
 
 #include <algorithm>
 #include <array>
@@ -153,6 +154,10 @@ namespace picBunch::pbfast
             static Rule const r5 = makeRule(5);
             static Rule const r6 = makeRule(6);
             static Rule const r8 = makeRule(8);
+            static Rule const r10 = makeRule(10);
+            static Rule const r12 = makeRule(12);
+            // The allowed oblique orders are precomputed so a tile never pays
+            // for Gauss-table generation on the evaluation path.
             if(n == 4)
                 return r4;
             if(n == 5)
@@ -161,6 +166,10 @@ namespace picBunch::pbfast
                 return r6;
             if(n == 8)
                 return r8;
+            if(n == 10)
+                return r10;
+            if(n == 12)
+                return r12;
             static std::mutex mutex;
             static std::map<int, Rule> cache;
             std::lock_guard<std::mutex> lock(mutex);

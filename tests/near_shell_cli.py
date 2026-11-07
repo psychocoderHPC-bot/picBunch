@@ -140,6 +140,30 @@ def main():
     if "near shell: mode=exact" not in near_result.stdout:
         raise SystemExit("run summary does not report the near-shell mode")
 
+    # The oblique-order option accepts `auto` and an explicit order in [4, 12]
+    # and rejects anything else.  The exact path ignores the value numerically,
+    # so this exercises the parser without depending on a CUDA device.
+    for value in ("auto", "4", "8"):
+        result = run(
+            args.app,
+            common + [
+                "--output", str(work / f"near_oblique_{value}.h5"),
+                "--near-shell", "exact",
+                "--near-shell-radius", "3",
+                "--near-shell-oblique-order", value,
+            ],
+        )
+        if result.returncode != 0:
+            print(result.stderr)
+            raise SystemExit(f"--near-shell-oblique-order {value} failed")
+    bad = run(
+        args.app,
+        common + ["--output", str(work / "near_bad.h5"), "--near-shell", "exact",
+                  "--near-shell-oblique-order", "3"],
+    )
+    if bad.returncode == 0:
+        raise SystemExit("--near-shell-oblique-order 3 was accepted")
+
     mesh_fields = read_field(mesh)
     near_fields = read_field(near)
     for key, values in near_fields.items():
