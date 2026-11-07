@@ -380,7 +380,8 @@ field in $z$ slabs, one slab per rank. The transform and transpose agree with th
 replicated transform to $2.2\times10^{-16}$. The end-to-end field, including
 the device TSC deposit into the interleaved complex slab, matches the
 replicated field to $3.2\times10^{-16}$ at one rank and $5.4\times10^{-16}$
-at four ranks in the written file (HIP+MPI, hal); the automatic policy selects
+at four ranks in the written file on HIP+MPI (hal); the same four-rank case on
+CUDA+MPI (jureca-h100, four H100s) gives $2.5\times10^{-16}$. The automatic policy selects
 the slab path above its padded-node threshold. At a $640^{3}$ output the
 per-rank host memory is
 $41.1$\,GB at $2$ ranks and $20.6$\,GB at $4$, the quantity the

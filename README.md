@@ -454,7 +454,9 @@ and the roundtrip is at FFT roundoff.  The end-to-end production field was
 revalidated on hal (HIP+MPI, ROCm 7.2) after fixing the device-deposit stride:
 one rank with a single source matches the replicated field to `3.2e-16`, and a
 200-particle `64^3` run at 4 ranks matches to `5.4e-16` in the written file.
-The regression test `Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit`
+The same 4-rank case on jureca-h100 (CUDA 13.4, sm_90, four H100s) gives
+`2.48e-16` global relative and `2.9e-11` worst absolute difference on a
+`8.65e4` V/m peak.  The regression test `Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit`
 covers both the explicit and the auto-selected path with the device deposit.
 The previous mismatch was a device TSC deposit that ignored `rhoStride`, so the
 distributed complex buffer received the source at half its index; the host
