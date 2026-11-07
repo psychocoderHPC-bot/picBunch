@@ -6,10 +6,12 @@
 unit_length = 1.0e-7
 unit_e = 1.0e12
 unit_b = 1.0e3
-# Optional; defaults are the elementary charge, electron mass and c.
+# Optional; defaults are the elementary charge and c.
 # unit_charge = 1.602176634e-19
-# unit_mass = 9.1093837015e-31
 # unit_speed = 299792458.0
+# Required: must equal the deck's sim.unit.mass(), not necessarily the
+# electron mass. PIConGPU ignores the particle unitSI at restart.
+unit_mass = 9.1093837015e-31
 # Time step and checkpoint step. dt is in seconds.
 dt = 1.0e-15
 step = 0

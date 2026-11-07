@@ -702,9 +702,20 @@ consume:
 picBunch --input bunch.h5 --destination checkpoints --config params.toml
 ```
 
-`[picongpu]` supplies `unit_length`, `unit_e`, `unit_b`, `dt`, `step` and `precision`; no
-unit or conversion value is accepted on the command line. `[domain]` and `[placement]`
-supply the geometry. See [docs/configuration.md](docs/configuration.md).
+`[picongpu]` supplies `unit_length`, `unit_e`, `unit_b`, `unit_mass`, `dt`, `step` and
+`precision`; no unit or conversion value is accepted on the command line. `unit_mass`
+**must** equal the deck's `sim.unit.mass()`, not an assumed electron mass: PIConGPU
+restart ignores the particle `unitSI` and interprets momentum in
+`sim.unit.mass()*unit_speed`, so a wrong value scales every momentum. `[domain]` and
+`[placement]` supply the geometry. See [docs/configuration.md](docs/configuration.md).
+
+Placement was validated end to end on `rosi_v100`: a 12-marker bunch placed at xz middle
+and y first quarter of a 32x64x32 domain has centroid fractions
+`(0.500000, 0.250000, 0.500000)`, restarts in PIConGPU for one step, and shows no axis
+permutation or mirror; the per-particle displacement follows `dt*c*u/gamma` to
+`4.1e-7` cells with `unit_mass = sim.unit.mass()`. With an electron-mass `unit_mass` the
+restarted momentum is 1e4 too large. Evidence:
+`docs/measurements/picongpu_placement_validation.md`.
 
 The legacy CLI path `--restart-format picongpu` remains as an advanced option. It is not
 the documented interface and still requires the three advanced unit flags, which are never

@@ -159,8 +159,7 @@ namespace picBunch
         }
         if(auto const* node = picongpu.get("unit_charge"))
             config.picongpu.unitCharge = asDouble(*node, "picongpu.unit_charge");
-        if(auto const* node = picongpu.get("unit_mass"))
-            config.picongpu.unitMass = asDouble(*node, "picongpu.unit_mass");
+        config.picongpu.unitMass = asDouble(require(picongpu, "unit_mass"), "picongpu.unit_mass");
         if(auto const* node = picongpu.get("unit_speed"))
             config.picongpu.unitSpeed = asDouble(*node, "picongpu.unit_speed");
 

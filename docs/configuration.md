@@ -29,7 +29,7 @@ convolution target and the optional exact near shell.
 | `precision` | no | `"float32"` (default) or `"float64"`, applied uniformly to every field component and every particle property record. `positionOffset` stays int32 and `id` stays uint64. |
 | `species` | yes | Species to read from `--input` and write to the checkpoint. |
 | `unit_charge` | no | Charge unit in C. Default `1.602176634e-19`. |
-| `unit_mass` | no | Mass unit in kg. Default `9.1093837015e-31`. |
+| `unit_mass` | yes | PIConGPU mass unit in kg, i.e. `sim.unit.mass()`. It must match the deck; do not assume the electron mass. PIConGPU restart ignores the particle `unitSI` and interprets momentum in `sim.unit.mass()*unit_speed`, so a mismatch scales every momentum. |
 | `unit_speed` | no | Speed unit in m/s. Default `299792458.0`. |
 
 Particle momenta are written in PIConGPU internal units, i.e. the SI momentum

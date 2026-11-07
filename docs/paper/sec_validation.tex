@@ -102,6 +102,22 @@ PIConGPU with exit 0, and after one step all six field components are
 bitwise-equal to the checkpoint,
 $\max_\mathrm{abs\,diff}=0.0$.
 
+\paragraph{Placement and particle-data integrity.}
+A 12-marker bunch with an asymmetric position and momentum pattern was
+placed at the xz middle and the y first quarter of a $32\times64\times32$
+domain.  picBunch reports centroid fractions
+$(0.500000,0.250000,0.500000)$; after one PIConGPU step the centroid is
+$(0.500755,0.250446,0.501466)$, the raw momentum records are preserved
+exactly, and the per-particle displacement matches $dt\,c\,u/\gamma$ to
+$4.1\times10^{-7}$ cells.  The displacement-to-momentum ratio is one
+positive scalar on all three axes (spread $8.9\times10^{-6}$), so the
+restart has no axis permutation and no mirror.  One metadata requirement is
+sharp: PIConGPU restart ignores the particle \texttt{unitSI} and interprets
+momentum in \texttt{sim.unit.mass()}$\cdot$\texttt{unit\_speed}, so a
+checkpoint written with the electron mass as \texttt{unit\_mass} restarts
+with all momenta $10^{4}$ too large; \texttt{unit\_mass} must equal the
+deck's \texttt{sim.unit.mass()}.
+
 On a $24\times24\times12$ deck the restart is exit 0 with
 \texttt{--periodic 1 1 1}, and the $16$ electrons load; initialization
 drops from the $\sim116$\,s neuralBunch path to $1.8$\,s because the

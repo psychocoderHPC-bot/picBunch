@@ -37,6 +37,7 @@ namespace
 unit_length = 1.0e-7
 unit_e = 1.0e12
 unit_b = 1.0e3
+unit_mass = 9.1093837015e-31
 dt = 1.0e-15
 step = 42
 precision = "float64"
