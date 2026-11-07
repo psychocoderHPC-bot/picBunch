@@ -178,3 +178,51 @@ ranks & wall (s) & speedup & eff.\ & wall (ms) & speedup & wall (s) & speedup \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\subsection{H100 remeasurement}
+\label{sec:h100}
+
+A fresh campaign on \texttt{jureca-h100} (four H100 PCIe 80\,GB, sm\_90,
+CUDA 13.4, serialized on one GPU, medians of three runs) reproduces the
+scaling picture with current hardware.  At $N=2\times10^{6}$, a 20-cell box
+takes $60.5$\,ms end to end (deposit $36.1$, FFT $1.53$, read-out $17.5$,
+writer $5.1$\,ms); a 100-cell box takes $147.9$\,ms (deposit $38.9$, FFT
+$31.3$, read-out $21.4$, writer $53.8$\,ms).  The deposit remains linear in
+$N$; the 100-cell case is FFT- and writer-bound.  For $N=200$ particles the
+16- and 64-bin multi-velocity runs take $92.2$ and $100.6$\,ms; the $B_z$
+peak differs by $4.6\%$, within the shot noise of 200 particles.
+
+Rank scaling at $N=2\times10^{6}$ is flat in total time because the shared
+HDF5 writer dominates: at $256^3$ the total is $3899$, $3737$ and
+$3664$\,ms and the writer $3319$, $3327$ and $3323$\,ms at $1$, $2$ and $4$
+ranks, while the read-out falls from $204$ to $44$\,ms.  The writer is the
+remaining multi-rank bottleneck at this size; the compute stages scale only
+modestly because the deposit and source spectrum are replicated.
+
+\begin{table}[t]
+\centering
+\small
+\caption{H100 remeasurement, medians of three serialized runs.  Top:
+$N=2\times10^{6}$, one bin, one rank, stage times in ms.  Bottom: $256^3$
+output, $N=2\times10^{6}$, total, writer and read-out in ms.}
+\label{tab:h100}
+\begin{tabular}{lrrrrr}
+\toprule
+box & deposit & FFT & read-out & writer & total \\
+\midrule
+20 cells  & $36.1$ & $1.53$ & $17.5$ & $5.1$  & $60.5$ \\
+100 cells & $38.9$ & $31.3$ & $21.4$ & $53.8$ & $147.9$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{4pt}
+\begin{tabular}{lrrr}
+\toprule
+$256^3$ & 1 rank & 2 ranks & 4 ranks \\
+\midrule
+total (ms)  & $3899$ & $3737$ & $3664$ \\
+writer (ms) & $3319$ & $3327$ & $3323$ \\
+read-out (ms) & $204$ & $106$ & $44$ \\
+\bottomrule
+\end{tabular}
+\end{table}
