@@ -168,6 +168,39 @@ overhead and does not scale.}
 \label{fig:h100mpiscaling}
 \end{figure}
 
+\paragraph{Distributed-mode scaling and its limits.}
+The writer column above is the replicated path: only rank 0 writes the full
+field, so it cannot scale by construction.  Forcing the slab-local production
+mode (\texttt{--fft-mode distributed}) at $256^3$, $N=2\times10^{6}$, gives a
+total of $21.6$, $12.3$ and $13.0$\,s and a writer of $4.19$, $2.88$ and
+$6.46$\,s at $1$, $2$ and $4$ ranks; the FFT is $2.30$, $1.16$ and
+$0.63$\,s.  The writer scales to two ranks ($1.45\times$) and regresses at
+four ($0.65\times$), a collective-HDF5 contention on the shared series, not a
+serialisation in picBunch.  The near shell partitions tiles but still
+all-reduces the full correction array; at $32^3$ that communication and the
+tile imbalance dominate, which is why the near-shell column reverses.  A
+local-slab reduction and a writer with per-rank contiguous slabs are the
+required fixes for many-rank runs.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Distributed-mode strong scaling, $256^3$, $N=2\times10^{6}$,
+medians of three serialized runs.  The writer is the collective HDF5 series;
+the replicated writer (only rank 0 writes) is flat by construction and is not
+shown here.}
+\label{tab:h100dist}
+\begin{tabular}{lrrr}
+\toprule
+ & 1 rank & 2 ranks & 4 ranks \\
+\midrule
+total (s)   & $21.6$ & $12.3$ & $13.0$ \\
+FFT (s)     & $2.30$ & $1.16$ & $0.63$ \\
+writer (s)  & $4.19$ & $2.88$ & $6.46$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{H100 remeasurement}
 \label{sec:h100}
 
