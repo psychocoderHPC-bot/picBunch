@@ -335,3 +335,22 @@ TEST(VelocityMoments, NearShellComposesWithMomentField)
     EXPECT_LT(nearRelL2, 5.0e-2)
         << "near-shell subtraction did not cancel the same moment operator as the global mesh";
 }
+
+TEST(VelocityMoments, AutoDoesNotFailAtTheVelocityBinCap)
+{
+    // The binned auto policy alone would throw here (maxBins = 2, tol 1e-12).
+    // With the moment path enabled it must run the moments instead of failing
+    // at the cap; if the probe declines, the binned path may use the cap.
+    Bunch const bunch = spreadBunch(216, 10.0, 0.05);
+    auto options = momentOptions();
+    options.velocityBinning.maxBins = 2u;
+    options.tolerance = 1e-12;
+    options.velocityMoments.mode = VelocityMomentsOptions::Mode::Auto;
+    VelocityMomentsReport rep{};
+    picBunch::Field field;
+    EXPECT_NO_THROW(field = picBunch::computeField(bunch, options, nullptr, nullptr, &rep));
+    EXPECT_TRUE(rep.used || rep.fellBack);
+    for(auto const& component : field.data)
+        for(double v : component)
+            EXPECT_TRUE(std::isfinite(v));
+}

@@ -984,8 +984,30 @@ namespace picBunch
             = options.fixedBinning ? &*options.fixedBinning : nullptr;
         if(!binningPointer)
         {
-            derivedBinning = deriveVelocityBinning(
-                bunch, options.tolerance, options.velocityBinning);
+            try
+            {
+                derivedBinning = deriveVelocityBinning(
+                    bunch, options.tolerance, options.velocityBinning);
+            }
+            catch(std::runtime_error const& error)
+            {
+                // An enabled moment path does not use the velocity boxes.  Let
+                // it proceed instead of failing at the bin-count cap; only when
+                // its a-posteriori probe declines does the binned path below run,
+                // and then with the largest count the policy allows.
+                if(options.velocityMoments.mode == VelocityMomentsOptions::Mode::Off)
+                    throw;
+                std::fprintf(
+                    stderr,
+                    "picBunch: velocity-bin auto policy exceeded the %zu-box cap (%s); "
+                    "trying the velocity-moment path\n",
+                    options.velocityBinning.maxBins,
+                    error.what());
+                VelocityBinningOptions capped = options.velocityBinning;
+                capped.mode = VelocityBinningOptions::Mode::Explicit;
+                capped.explicitBins = capped.maxBins;
+                derivedBinning = deriveVelocityBinning(bunch, options.tolerance, capped);
+            }
             binningPointer = &derivedBinning;
         }
         if(outBinning)
