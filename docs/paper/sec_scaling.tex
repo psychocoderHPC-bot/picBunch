@@ -121,60 +121,37 @@ timing boundary, so neither is the other's total plus the writer.
 \subsection{MPI rank scaling}
 \label{sec:mpi-scale}
 
-The rank-parallel compute (Section~\ref{sec:mpi}) and the chunked writer
-were measured on an idle \texttt{rosi\_v100} window, medians of three runs.
-The node was checked idle before the block (no CPU worker, 1-min load below
-$2$), but each rank block starts from the preceding measurement, so the
-1-min load rises within the block: the near-shell block starts at $1.9$,
-$8.4$ and $11.8$ for $1$, $2$ and $4$ ranks (mesh block $1.4$--$1.5$, write
-block $1.1$--$1.6$); no foreign process was active during the window.
-Correctness was verified at $1$, $2$ and $4$ ranks on a $128$-particle,
-$32^3$, cell $8\times10^{-7}$\,m, tolerance $10^{-3}$, near-shell $R=1.5$,
-tile $8$ problem: the mesh and the near shell are bitwise identical at
-$1$-vs-$2$ and $1$-vs-$4$, all six components,
-$\max_\mathrm{abs\,diff}=0.0$.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling.pdf}
-\caption{Strong scaling of the three rank-parallel pieces on
-\texttt{rosi\_v100} (idle window, medians of three runs) for $1$--$4$
-ranks, with dashed ideal $1/n$ and $S=n$ references. The near shell reaches
-$1.34\times$, the component-parallel mesh $1.20\times$, and the collective
-writer stays within $13\%$ from one to four ranks.}
-\label{fig:mpiscaling}
-\end{figure}
-
-Figure~\ref{fig:mpiscaling} shows the speedup for the three parallel
-pieces. The mesh is component-parallel: the replicated deposit
-($307$--$332$\,ms, flat in rank count) and the replicated source-spectrum
-FFT cap it, so the speedup plateaus at $1.20\times$ at both $2$ and $4$
-ranks. The near shell is tile-parallel: the static round-robin tile split
-plus the all-reduce of the full correction array leave static-tile imbalance
-that plateaus it at $1.34\times$ at $4$ ranks. The writer is a collective
-HDF5 write of one shared series: on a $256^3$ ($0.80$\,GB) output it takes
-$1.26$, $1.33$ and $1.43$\,s at $1$, $2$ and $4$ ranks ($0.88\times$ at four
-ranks), so the parallel writer stays within $13\%$ and does not become the
-bottleneck at this size.
+The rank-parallel compute and the collective writer were remeasured on
+\texttt{jureca-h100} (four H100 PCIe 80\,GB, sm\_90, CUDA 13.4,
+medians of three serialized runs).  The mesh stage
+(deposit + kernel + FFT + read-out) at $N=2\times10^{6}$, $256^3$ takes
+$581$, $411$ and $325$\,ms at $1$, $2$ and $4$ ranks ($1.41\times$ and
+$1.79\times$); the replicated deposit and source spectrum cap the speedup.
+The fast-GPU near shell at $32^3$, $R=1.5$, tile 8 takes $519$, $653$ and
+$1112$\,ms: at this small size the tile split and the correction all-reduce
+dominate, so more ranks do not help.  The collective HDF5 writer at
+$256^3$ takes $3319$, $3327$ and $3323$\,ms at $1$, $2$ and $4$ ranks
+($1.00\times$), essentially flat and the dominant part of the total.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Rank scaling on \texttt{rosi\_v100}, idle window, medians of three
-runs. Mesh: $N=2\times10^{6}$, $112^3$, component-parallel (replicated
-deposit and source FFT). Near shell: $N=128$, $32^3$, $R=1.5$, tile $8$,
-tile-parallel. Write: $256^3$, $0.80$ GB, collective HDF5. Mesh and near shell are bitwise identical at $1/2/4$
-ranks.}
+\caption{Rank scaling on \texttt{jureca-h100}, medians of three serialized
+runs.  Mesh: $N=2\times10^{6}$, $256^3$, component-parallel (replicated
+deposit and source FFT).  Near shell: $N=200$, $32^3$, $R=1.5$, tile 8,
+tile-parallel, fast-GPU.  Write: $256^3$, collective HDF5.  The near-shell
+column is a small-size case where the all-reduce dominates; the mesh and
+writer are the production-relevant columns.}
 \label{tab:mpi}
 \begin{tabular}{lccc|cc|cc}
 \toprule
  & \multicolumn{3}{c}{near shell} & \multicolumn{2}{c}{mesh} & \multicolumn{2}{c}{write} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
-ranks & wall (s) & speedup & eff.\ & wall (ms) & speedup & wall (s) & speedup \\
+ranks & wall (ms) & speedup & eff.\ & wall (ms) & speedup & wall (ms) & speedup \\
 \midrule
-1 & $36.61$ & $1.00$ & $100\%$ & $522.2$ & $1.00$ & $1.26$ & $1.00$ \\
-2 & $29.60$ & $1.24$ & $62\%$  & $436.3$ & $1.20$ & $1.33$ & $0.95$ \\
-4 & $27.29$ & $1.34$ & $34\%$  & $433.6$ & $1.20$ & $1.43$ & $0.88$ \\
+1 & $519.4$ & $1.00$ & $100\%$ & $581$ & $1.00$ & $3319$ & $1.00$ \\
+2 & $652.9$ & $0.80$ & $40\%$  & $411$ & $1.41$ & $3327$ & $1.00$ \\
+4 & $1112.2$ & $0.47$ & $12\%$ & $325$ & $1.79$ & $3323$ & $1.00$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -192,22 +169,16 @@ $N$; the 100-cell case is FFT- and writer-bound.  For $N=200$ particles the
 16- and 64-bin multi-velocity runs take $92.2$ and $100.6$\,ms; the $B_z$
 peak differs by $4.6\%$, within the shot noise of 200 particles.
 
-Rank scaling at $N=2\times10^{6}$ is flat in total time because the shared
-HDF5 writer dominates: at $256^3$ the total is $3899$, $3737$ and
-$3664$\,ms and the writer $3319$, $3327$ and $3323$\,ms at $1$, $2$ and $4$
-ranks, while the read-out falls from $204$ to $44$\,ms.  The writer is the
-remaining multi-rank bottleneck at this size; the compute stages scale only
-modestly because the deposit and source spectrum are replicated.  The
-fast-GPU near shell at $32^3$, $R=1.5$, tile 8 takes $519$, $653$ and
-$1112$\,ms at $1$, $2$ and $4$ ranks: at this small size the tile split and
-the correction all-reduce dominate, so more ranks do not help.
+Rank scaling at $N=2\times10^{6}$ and the near-shell case are in
+Section~\ref{sec:mpi-scale}: the shared HDF5 writer dominates the total and
+is flat across ranks, while the mesh stage reaches $1.79\times$ at four
+ranks.
 
 \begin{table}[t]
 \centering
 \small
 \caption{H100 remeasurement, medians of three serialized runs.  Top:
-$N=2\times10^{6}$, one bin, one rank, stage times in ms.  Bottom: $256^3$
-output, $N=2\times10^{6}$, total, writer and read-out in ms.}
+$N=2\times10^{6}$, one bin, one rank, stage times in ms.}
 \label{tab:h100}
 \begin{tabular}{lrrrrr}
 \toprule
@@ -218,14 +189,4 @@ box & deposit & FFT & read-out & writer & total \\
 \bottomrule
 \end{tabular}
 
-\vspace{4pt}
-\begin{tabular}{lrrr}
-\toprule
-$256^3$ & 1 rank & 2 ranks & 4 ranks \\
-\midrule
-total (ms)  & $3899$ & $3737$ & $3664$ \\
-writer (ms) & $3319$ & $3327$ & $3323$ \\
-read-out (ms) & $204$ & $106$ & $44$ \\
-\bottomrule
-\end{tabular}
 \end{table}
