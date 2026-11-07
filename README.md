@@ -519,9 +519,10 @@ source on every rank. Two stages are rank-parallel.
   `c % size == rank`, then one `MPI_Allreduce` sums the six arrays. This is component
   parallelism. It is a global transform on every rank, not a per-rank transform of a
   truncated subdomain.
-* **Distributed FFT (optional, validated).** `--fft-mode distributed`, or `auto`
-  above the configured padded-node threshold, decomposes the padded grid into
-  contiguous z-slabs. Each rank
+* **Distributed FFT (validated, automatic under MPI).** `--fft-mode distributed`,
+  or `auto` whenever MPI runs with more than one rank, decomposes the padded grid
+  into contiguous z-slabs; single-rank `auto` keeps the replicated path below the
+  configured padded-node threshold. Each rank
   performs the local x and y 1-D transforms, transposes with `MPI_Alltoallv` so that z
   becomes local, transforms z, multiplies the kernel spectrum, and inverts in reverse
   order. This is the exact global transform, with one copy of each work array per rank.

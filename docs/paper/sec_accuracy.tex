@@ -393,7 +393,8 @@ at four ranks in the written file on HIP+MPI (hal); the same four-rank case on
 CUDA+MPI (jureca-h100, four H100s) gives $2.5\times10^{-16}$. The host
 FFTW backend supports strided plans in the current alpakaVendor and matches
 the replicated field to $1.9\times10^{-16}$ at two MPI ranks. The automatic
-policy selects the slab path above its padded-node threshold. At a $640^{3}$ output the
+policy selects the slab path for every multi-rank run (single-rank auto keeps the
+replicated path below its padded-node threshold). At a $640^{3}$ output the
 per-rank host memory is
 $41.1$\,GB at $2$ ranks and $20.6$\,GB at $4$, the quantity the
 decomposition buys: the output field is slab-local, while the bunch remains

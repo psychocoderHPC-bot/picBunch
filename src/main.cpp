@@ -1495,6 +1495,37 @@ int main(int argc, char** argv)
                     writeOptions,
                     field.grid.n,
                     field.grid.origin);
+            else if(picBunch::mpiSize() > 1)
+            {
+                // Replicated field: every rank holds the full array, so each
+                // rank can write its own z-slab in parallel.  Copy only the
+                // owned slab into a view and use the collective chunked writer.
+                std::size_t const nx = field.grid.n[0];
+                std::size_t const ny = field.grid.n[1];
+                std::size_t const nz = field.grid.n[2];
+                std::size_t const plane = nx * ny;
+                int const rank = picBunch::mpiRank();
+                int const size = picBunch::mpiSize();
+                std::size_t const z0
+                    = (static_cast<std::size_t>(rank) * nz) / static_cast<std::size_t>(size);
+                std::size_t const z1
+                    = ((static_cast<std::size_t>(rank) + 1u) * nz) / static_cast<std::size_t>(size);
+                picBunch::Field slab;
+                slab.grid = field.grid;
+                slab.zSlab = true;
+                slab.slabOffset = z0;
+                slab.slabCount = z1 - z0;
+                for(int c = 0; c < 6; ++c)
+                    slab.data[c].assign(
+                        field.data[c].begin() + static_cast<std::ptrdiff_t>(z0 * plane),
+                        field.data[c].begin() + static_cast<std::ptrdiff_t>(z1 * plane));
+                picBunch::writeFieldToDomain(
+                    slab,
+                    *args.output,
+                    writeOptions,
+                    field.grid.n,
+                    field.grid.origin);
+            }
             else if(root)
                 picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);

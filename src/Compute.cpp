@@ -1284,9 +1284,13 @@ namespace picBunch
         // threshold; the explicit mode also runs it on one rank so its written
         // field can be compared with a multi-rank run.  The end-to-end field is
         // covered by Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit.
+        // With MPI every rank must keep only its slab: auto uses the
+        // distributed transform for any multi-rank run.  Single-rank auto keeps
+        // the replicated path until the padded box exceeds the configured
+        // threshold, where the replicated buffers would be too large.
         bool const distributedRequested = options.fftMode == FftMode::Distributed
             || (options.fftMode == FftMode::Auto
-                && paddedNodes > options.distributedFftMinNodes);
+                && (parSize > 1 || paddedNodes > options.distributedFftMinNodes));
         bool const useDistributed = distributedRequested && par != nullptr
             && (parSize > 1 || options.fftMode == FftMode::Distributed);
 

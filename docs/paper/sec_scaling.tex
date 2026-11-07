@@ -121,37 +121,36 @@ timing boundary, so neither is the other's total plus the writer.
 \subsection{MPI rank scaling}
 \label{sec:mpi-scale}
 
-The rank-parallel compute and the collective writer were remeasured on
-\texttt{jureca-h100} (four H100 PCIe 80\,GB, sm\_90, CUDA 13.4,
-medians of three serialized runs).  The mesh stage
-(deposit + kernel + FFT + read-out) at $N=2\times10^{6}$, $256^3$ takes
-$581$, $411$ and $325$\,ms at $1$, $2$ and $4$ ranks ($1.41\times$ and
-$1.79\times$); the replicated deposit and source spectrum cap the speedup.
-The fast-GPU near shell at $32^3$, $R=1.5$, tile 8 takes $519$, $653$ and
-$1112$\,ms: at this small size the tile split and the correction all-reduce
-dominate, so more ranks do not help.  The collective HDF5 writer at
-$256^3$ takes $3319$, $3327$ and $3323$\,ms at $1$, $2$ and $4$ ranks
-($1.00\times$), essentially flat and the dominant part of the total.
+With MPI the production policy is the slab-local distributed transform:
+\texttt{auto} selects it for every multi-rank run, and each rank keeps only
+its output z-slab.  The measurements below force the same path at one rank so
+all three rows are comparable.  At $N=2\times10^{6}$, $256^3$, the total is
+$21.6$, $12.3$ and $13.0$\,s at $1$, $2$ and $4$ ranks; the FFT is $2.30$,
+$1.16$ and $0.63$\,s and the collective HDF5 writer $4.19$, $2.88$ and
+$6.46$\,s.  The FFT scales to $3.65\times$ at four ranks and the writer to
+$1.45\times$ at two; both regress at four because of collective-HDF5
+contention on the shared series.  The writer is the remaining many-rank
+bottleneck, not the field calculation.
+
+The near shell still partitions tiles but all-reduces the full correction
+array; at $32^3$ that communication and the tile imbalance dominate, so its
+rank scaling is not reported as a speedup.  A local-slab correction reduction
+is required before the near shell is a many-rank feature.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Rank scaling on \texttt{jureca-h100}, medians of three serialized
-runs.  Mesh: $N=2\times10^{6}$, $256^3$, component-parallel (replicated
-deposit and source FFT).  Near shell: $N=200$, $32^3$, $R=1.5$, tile 8,
-tile-parallel, fast-GPU.  Write: $256^3$, collective HDF5.  The near-shell
-column is a small-size case where the all-reduce dominates; the mesh and
-writer are the production-relevant columns.}
+\caption{Distributed-mode strong scaling on \texttt{jureca-h100}, medians of
+three serialized runs.  $N=2\times10^{6}$, $256^3$, one bin.  The distributed
+path is forced at one rank and is the automatic path for the multi-rank rows.}
 \label{tab:mpi}
-\begin{tabular}{lccc|cc|cc}
+\begin{tabular}{lrrr}
 \toprule
- & \multicolumn{3}{c}{near shell} & \multicolumn{2}{c}{mesh} & \multicolumn{2}{c}{write} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
-ranks & wall (ms) & speedup & eff.\ & wall (ms) & speedup & wall (ms) & speedup \\
+ & 1 rank & 2 ranks & 4 ranks \\
 \midrule
-1 & $519.4$ & $1.00$ & $100\%$ & $581$ & $1.00$ & $3319$ & $1.00$ \\
-2 & $652.9$ & $0.80$ & $40\%$  & $411$ & $1.41$ & $3327$ & $1.00$ \\
-4 & $1112.2$ & $0.47$ & $12\%$ & $325$ & $1.79$ & $3323$ & $1.00$ \\
+total (s)  & $21.6$ & $12.3$ & $13.0$ \\
+FFT (s)    & $2.30$ & $1.16$ & $0.63$ \\
+writer (s) & $4.19$ & $2.88$ & $6.46$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -159,47 +158,13 @@ ranks & wall (ms) & speedup & eff.\ & wall (ms) & speedup & wall (ms) & speedup 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling_h100.pdf}
-\caption{Strong scaling of the three rank-parallel pieces on
-\texttt{jureca-h100} for $1$--$4$ ranks, medians of three serialized runs:
-near shell ($32^3$, $R=1.5$, tile 8), mesh ($2\times10^{6}$ particles,
-$256^3$), and the collective writer ($256^3$).  The writer is flat; the
-mesh reaches $1.79\times$; the small near-shell case has all-reduce
-overhead and does not scale.}
+\caption{Distributed-mode strong scaling on \texttt{jureca-h100} for
+$1$--$4$ ranks, medians of three serialized runs: total, FFT and collective
+writer at $256^3$, $N=2\times10^{6}$.  The FFT reaches $3.65\times$; the
+writer peaks at two ranks and regresses at four due to collective-HDF5
+contention.}
 \label{fig:h100mpiscaling}
 \end{figure}
-
-\paragraph{Distributed-mode scaling and its limits.}
-The writer column above is the replicated path: only rank 0 writes the full
-field, so it cannot scale by construction.  Forcing the slab-local production
-mode (\texttt{--fft-mode distributed}) at $256^3$, $N=2\times10^{6}$, gives a
-total of $21.6$, $12.3$ and $13.0$\,s and a writer of $4.19$, $2.88$ and
-$6.46$\,s at $1$, $2$ and $4$ ranks; the FFT is $2.30$, $1.16$ and
-$0.63$\,s.  The writer scales to two ranks ($1.45\times$) and regresses at
-four ($0.65\times$), a collective-HDF5 contention on the shared series, not a
-serialisation in picBunch.  The near shell partitions tiles but still
-all-reduces the full correction array; at $32^3$ that communication and the
-tile imbalance dominate, which is why the near-shell column reverses.  A
-local-slab reduction and a writer with per-rank contiguous slabs are the
-required fixes for many-rank runs.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Distributed-mode strong scaling, $256^3$, $N=2\times10^{6}$,
-medians of three serialized runs.  The writer is the collective HDF5 series;
-the replicated writer (only rank 0 writes) is flat by construction and is not
-shown here.}
-\label{tab:h100dist}
-\begin{tabular}{lrrr}
-\toprule
- & 1 rank & 2 ranks & 4 ranks \\
-\midrule
-total (s)   & $21.6$ & $12.3$ & $13.0$ \\
-FFT (s)     & $2.30$ & $1.16$ & $0.63$ \\
-writer (s)  & $4.19$ & $2.88$ & $6.46$ \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \subsection{H100 remeasurement}
 \label{sec:h100}
