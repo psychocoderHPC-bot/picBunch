@@ -165,8 +165,11 @@ namespace picBunch
         std::size_t tileNodes = 4;
         //! Gauss order per panel of the fast remainder (default 5).
         int fastOrder = 5;
-        //! Rest-frame octant order of the fast oblique singular box (default 8).
-        int fastObliqueOrder = 8;
+        //! Order of the fast oblique singular box.  0 selects the shared
+        //! host/device `auto` rule (gamma-driven, per tile); an explicit value
+        //! is clamped to an allowed even order in [4, 12].  The value 4 is the
+        //! fast path and reproduces the historical device behaviour.
+        int fastObliqueOrder = 0;
         //! Diagnostic counter: number of exact (source, node, component) evaluations.
         std::size_t* exactPairs = nullptr;
     };

@@ -74,6 +74,414 @@ namespace picBunch::pbfast
             return E;
         }
 
+        ALPAKA_FN_ACC inline void dapplyContract(
+            double const v[3],
+            double const n[3],
+            double k,
+            double out[3])
+        {
+            double const vn = v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
+            out[0] = vn * n[0] + k * (v[0] - vn * n[0]);
+            out[1] = vn * n[1] + k * (v[1] - vn * n[1]);
+            out[2] = vn * n[2] + k * (v[2] - vn * n[2]);
+        }
+
+        ALPAKA_FN_ACC inline double dboxEdgePrimitive(double l, double hh, double d)
+        {
+            constexpr double kPi = 3.141592653589793238462643383279502884;
+            double const a = std::sqrt(hh * hh + d * d);
+            double const r = std::sqrt(a * a + l * l);
+            double const asinhTerm = d * std::asinh(l / a);
+            double atanTerm;
+            if(d == 0.0)
+                atanTerm = (l > 0.0 ? 0.5 * kPi : (l < 0.0 ? -0.5 * kPi : 0.0)) * hh;
+            else
+                atanTerm = hh * std::atan(hh * l / (d * r));
+            return asinhTerm + atanTerm;
+        }
+
+        ALPAKA_FN_ACC inline double dboxFaceIntegral(double const q[4][3], double const n[3])
+        {
+            constexpr double kPi = 3.141592653589793238462643383279502884;
+            double const h = q[0][0] * n[0] + q[0][1] * n[1] + q[0][2] * n[2];
+            double const hh = h < 0.0 ? -h : h;
+            double I = 0.0;
+            for(int i = 0; i < 4; ++i)
+            {
+                int const j = (i + 1) % 4;
+                double const e[3]
+                    = {q[j][0] - q[i][0], q[j][1] - q[i][1], q[j][2] - q[i][2]};
+                double const L = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+                double const m[3] = {e[0] / L, e[1] / L, e[2] / L};
+                double const n2[3] = {
+                    m[1] * n[2] - m[2] * n[1],
+                    m[2] * n[0] - m[0] * n[2],
+                    m[0] * n[1] - m[1] * n[0]};
+                double const d = q[i][0] * n2[0] + q[i][1] * n2[1] + q[i][2] * n2[2];
+                double const la = q[i][0] * m[0] + q[i][1] * m[1] + q[i][2] * m[2];
+                double const lb = q[j][0] * m[0] + q[j][1] * m[1] + q[j][2] * m[2];
+                I += dboxEdgePrimitive(lb, hh, d) - dboxEdgePrimitive(la, hh, d);
+            }
+            double const foot[3] = {h * n[0], h * n[1], h * n[2]};
+            double u[3] = {q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]};
+            double const ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+            u[0] /= ul;
+            u[1] /= ul;
+            u[2] /= ul;
+            double const w[3] = {
+                n[1] * u[2] - n[2] * u[1],
+                n[2] * u[0] - n[0] * u[2],
+                n[0] * u[1] - n[1] * u[0]};
+            bool inside = false;
+            int jj = 3;
+            for(int i = 0; i < 4; ++i)
+            {
+                double const xi = (q[i][0] - foot[0]) * u[0] + (q[i][1] - foot[1]) * u[1]
+                    + (q[i][2] - foot[2]) * u[2];
+                double const yi = (q[i][0] - foot[0]) * w[0] + (q[i][1] - foot[1]) * w[1]
+                    + (q[i][2] - foot[2]) * w[2];
+                double const xj = (q[jj][0] - foot[0]) * u[0] + (q[jj][1] - foot[1]) * u[1]
+                    + (q[jj][2] - foot[2]) * u[2];
+                double const yj = (q[jj][0] - foot[0]) * w[0] + (q[jj][1] - foot[1]) * w[1]
+                    + (q[jj][2] - foot[2]) * w[2];
+                if(((yi > 0.0) != (yj > 0.0))
+                   && (0.0 < (xj - xi) * (0.0 - yi) / (yj - yi) + xi))
+                    inside = !inside;
+                jj = i;
+            }
+            if(inside)
+                I -= 2.0 * kPi * hh;
+            return I;
+        }
+
+        ALPAKA_FN_ACC inline void dexactObliqueBox(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            double Eraw[3])
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const gam = std::sqrt(1.0 + uu2);
+            double const un = std::sqrt(uu2);
+            double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
+            double const invg = 1.0 / gam;
+            double c0[3];
+            dapplyContract(R0, n, invg, c0);
+            double const ev[3][3] = {
+                {1.5 * cells[0], 0.0, 0.0},
+                {0.0, 1.5 * cells[1], 0.0},
+                {0.0, 0.0, 1.5 * cells[2]}};
+            double e[3][3];
+            for(int a = 0; a < 3; ++a)
+                dapplyContract(ev[a], n, invg, e[a]);
+            double V[2][2][2][3];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        for(int k = 0; k < 3; ++k)
+                            V[a][b][c][k] = c0[k] + (a ? e[0][k] : -e[0][k])
+                                + (b ? e[1][k] : -e[1][k]) + (c ? e[2][k] : -e[2][k]);
+            int const FI[6][4][3] = {
+                {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}},
+                {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0, 0}},
+                {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}},
+                {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}, {1, 0, 1}}};
+            double S[3] = {0.0, 0.0, 0.0};
+            for(int f = 0; f < 6; ++f)
+            {
+                double q[4][3];
+                for(int v = 0; v < 4; ++v)
+                    for(int k = 0; k < 3; ++k)
+                        q[v][k] = V[FI[f][v][0]][FI[f][v][1]][FI[f][v][2]][k];
+                double nn[3] = {
+                    (q[1][1] - q[0][1]) * (q[2][2] - q[0][2])
+                        - (q[1][2] - q[0][2]) * (q[2][1] - q[0][1]),
+                    (q[1][2] - q[0][2]) * (q[2][0] - q[0][0])
+                        - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
+                    (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
+                        - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
+                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                nn[0] /= nl;
+                nn[1] /= nl;
+                nn[2] /= nl;
+                double cen[3] = {0.0, 0.0, 0.0};
+                for(int v = 0; v < 4; ++v)
+                    for(int k = 0; k < 3; ++k)
+                        cen[k] += 0.25 * q[v][k];
+                if((cen[0] - c0[0]) * nn[0] + (cen[1] - c0[1]) * nn[1]
+                       + (cen[2] - c0[2]) * nn[2]
+                   < 0.0)
+                {
+                    for(int k = 0; k < 3; ++k)
+                    {
+                        double const t = q[0][k];
+                        q[0][k] = q[3][k];
+                        q[3][k] = t;
+                    }
+                    for(int k = 0; k < 3; ++k)
+                    {
+                        double const t = q[1][k];
+                        q[1][k] = q[2][k];
+                        q[2][k] = t;
+                    }
+                    nn[0] = (q[1][1] - q[0][1]) * (q[2][2] - q[0][2])
+                        - (q[1][2] - q[0][2]) * (q[2][1] - q[0][1]);
+                    nn[1] = (q[1][2] - q[0][2]) * (q[2][0] - q[0][0])
+                        - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]);
+                    nn[2] = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
+                        - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
+                    double const l2 = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                    nn[0] /= l2;
+                    nn[1] /= l2;
+                    nn[2] /= l2;
+                }
+                double const I = dboxFaceIntegral(q, nn);
+                S[0] += I * nn[0];
+                S[1] += I * nn[1];
+                S[2] += I * nn[2];
+            }
+            double const F[3] = {-S[0], -S[1], -S[2]};
+            dapplyContract(F, n, gam, Eraw); // M^{-1}
+        }
+
+        ALPAKA_FN_ACC inline void dsupportPlanes(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            double planesN[6][3],
+            double planesH[6])
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const gam = std::sqrt(1.0 + uu2);
+            double const un = std::sqrt(uu2);
+            double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
+            double const invg = 1.0 / gam;
+            double c0[3];
+            dapplyContract(R0, n, invg, c0);
+            double const ev[3][3] = {
+                {1.5 * cells[0], 0.0, 0.0},
+                {0.0, 1.5 * cells[1], 0.0},
+                {0.0, 0.0, 1.5 * cells[2]}};
+            double e[3][3];
+            for(int a = 0; a < 3; ++a)
+                dapplyContract(ev[a], n, invg, e[a]);
+            double V[2][2][2][3];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        for(int k = 0; k < 3; ++k)
+                            V[a][b][c][k] = c0[k] + (a ? e[0][k] : -e[0][k])
+                                + (b ? e[1][k] : -e[1][k]) + (c ? e[2][k] : -e[2][k]);
+            int const FI[6][4][3] = {
+                {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}},
+                {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0, 0}},
+                {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}},
+                {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}, {1, 0, 1}}};
+            for(int f = 0; f < 6; ++f)
+            {
+                double q[4][3];
+                for(int v = 0; v < 4; ++v)
+                    for(int k = 0; k < 3; ++k)
+                        q[v][k] = V[FI[f][v][0]][FI[f][v][1]][FI[f][v][2]][k];
+                double nn[3] = {
+                    (q[1][1] - q[0][1]) * (q[2][2] - q[0][2])
+                        - (q[1][2] - q[0][2]) * (q[2][1] - q[0][1]),
+                    (q[1][2] - q[0][2]) * (q[2][0] - q[0][0])
+                        - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
+                    (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
+                        - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
+                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                nn[0] /= nl;
+                nn[1] /= nl;
+                nn[2] /= nl;
+                double cen[3] = {0.0, 0.0, 0.0};
+                for(int v = 0; v < 4; ++v)
+                    for(int k = 0; k < 3; ++k)
+                        cen[k] += 0.25 * q[v][k];
+                if((cen[0] - c0[0]) * nn[0] + (cen[1] - c0[1]) * nn[1]
+                       + (cen[2] - c0[2]) * nn[2]
+                   < 0.0)
+                {
+                    for(int k = 0; k < 3; ++k)
+                    {
+                        double const t = q[0][k];
+                        q[0][k] = q[3][k];
+                        q[3][k] = t;
+                    }
+                    for(int k = 0; k < 3; ++k)
+                    {
+                        double const t = q[1][k];
+                        q[1][k] = q[2][k];
+                        q[2][k] = t;
+                    }
+                    nn[0] = (q[1][1] - q[0][1]) * (q[2][2] - q[0][2])
+                        - (q[1][2] - q[0][2]) * (q[2][1] - q[0][1]);
+                    nn[1] = (q[1][2] - q[0][2]) * (q[2][0] - q[0][0])
+                        - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]);
+                    nn[2] = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
+                        - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
+                    double const l2 = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                    nn[0] /= l2;
+                    nn[1] /= l2;
+                    nn[2] /= l2;
+                }
+                planesN[f][0] = nn[0];
+                planesN[f][1] = nn[1];
+                planesN[f][2] = nn[2];
+                planesH[f] = q[0][0] * nn[0] + q[0][1] * nn[1] + q[0][2] * nn[2];
+            }
+        }
+
+        ALPAKA_FN_ACC inline void dobliObliqueRayField(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            double Erem[3])
+        {
+            constexpr double kPi = 3.141592653589793238462643383279502884;
+            constexpr double kMuX[16] = {-0.98940093499164994, -0.9445750230732326, -0.86563120238783176, -0.755404408355003, -0.61787624440264377, -0.45801677765722737, -0.28160355077925892, -0.095012509837637441, 0.095012509837637441, 0.28160355077925892, 0.45801677765722737, 0.61787624440264377, 0.755404408355003, 0.86563120238783176, 0.9445750230732326, 0.98940093499164994};
+            constexpr double kMuW[16] = {0.027152459411754176, 0.062253523938647456, 0.095158511682492605, 0.12462897125553407, 0.14959598881657671, 0.16915651939500265, 0.18260341504492364, 0.18945061045506864, 0.18945061045506864, 0.18260341504492364, 0.16915651939500265, 0.14959598881657671, 0.12462897125553407, 0.095158511682492605, 0.062253523938647456, 0.027152459411754176};
+            constexpr double kPhX[32] = {-0.99726386184948157, -0.98561151154526838, -0.96476225558750639, -0.93490607593773967, -0.89632115576605209, -0.84936761373256997, -0.79448379596794239, -0.73218211874028971, -0.66304426693021523, -0.5877157572407623, -0.50689990893222936, -0.42135127613063533, -0.33186860228212767, -0.23928736225213706, -0.14447196158279649, -0.048307665687738324, 0.048307665687738324, 0.14447196158279649, 0.23928736225213706, 0.33186860228212767, 0.42135127613063533, 0.50689990893222936, 0.5877157572407623, 0.66304426693021523, 0.73218211874028971, 0.79448379596794239, 0.84936761373256997, 0.89632115576605209, 0.93490607593773967, 0.96476225558750639, 0.98561151154526838, 0.99726386184948157};
+            constexpr double kPhW[32] = {0.0070186100094705058, 0.016274394730905743, 0.025392065309262024, 0.034273862913021765, 0.042835898022226836, 0.050998059262376091, 0.058684093478535565, 0.065822222776361683, 0.072345794108848338, 0.078193895787070228, 0.083311924226946707, 0.087652093004403783, 0.09117387869576378, 0.093844399080804511, 0.095638720079274708, 0.096540088514727659, 0.096540088514727659, 0.095638720079274708, 0.093844399080804511, 0.09117387869576378, 0.087652093004403783, 0.083311924226946707, 0.078193895787070228, 0.072345794108848338, 0.065822222776361683, 0.058684093478535565, 0.050998059262376091, 0.042835898022226836, 0.034273862913021765, 0.025392065309262024, 0.016274394730905743, 0.0070186100094705058};
+            constexpr double kRadX[4] = {
+                -0.86113631159405258, -0.33998104358485626, 0.33998104358485626,
+                0.86113631159405258};
+            constexpr double kRadW[4] = {
+                0.34785484513745386, 0.65214515486254609, 0.65214515486254609,
+                0.34785484513745386};
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const gam = std::sqrt(1.0 + uu2);
+            double const un = std::sqrt(uu2);
+            double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
+            double const sstar[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
+            double planesN[6][3];
+            double planesH[6];
+            dsupportPlanes(R0, cells, u, planesN, planesH);
+
+            double helper[3] = {1.0, 0.0, 0.0};
+            if(std::abs(n[0]) >= 0.9)
+            {
+                helper[0] = 0.0;
+                helper[1] = 1.0;
+            }
+            double e1[3] = {
+                n[1] * helper[2] - n[2] * helper[1],
+                n[2] * helper[0] - n[0] * helper[2],
+                n[0] * helper[1] - n[1] * helper[0]};
+            double const l1 = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+            for(int k = 0; k < 3; ++k)
+                e1[k] /= l1;
+            double const e2[3] = {
+                n[1] * e1[2] - n[2] * e1[1],
+                n[2] * e1[0] - n[0] * e1[2],
+                n[0] * e1[1] - n[1] * e1[0]};
+
+            double acc[3] = {0.0, 0.0, 0.0};
+            for(int im = 0; im < 16; ++im)
+            {
+                double const mu = kMuX[im];
+                double const st = std::sqrt(mu * mu < 1.0 ? 1.0 - mu * mu : 0.0);
+                double const wmu = kMuW[im];
+                for(int ip = 0; ip < 32; ++ip)
+                {
+                    double const phi = kPi * (kPhX[ip] + 1.0);
+                    double const wphi = kPi * kPhW[ip];
+                    double const cph = std::cos(phi);
+                    double const sph = std::sin(phi);
+                    double Om[3];
+                    for(int k = 0; k < 3; ++k)
+                        Om[k] = mu * n[k] + st * (cph * e1[k] + sph * e2[k]);
+                    double rmax = 1e300;
+                    for(int f = 0; f < 6; ++f)
+                    {
+                        double const dn = planesN[f][0] * Om[0] + planesN[f][1] * Om[1]
+                            + planesN[f][2] * Om[2];
+                        if(dn > 1e-15)
+                        {
+                            double const cand = planesH[f] / dn;
+                            rmax = cand < rmax ? cand : rmax;
+                        }
+                    }
+                    if(!(rmax > 1e-14))
+                        continue;
+                    double BO[3];
+                    dapplyContract(Om, n, gam, BO);
+                    BO[0] /= cells[0];
+                    BO[1] /= cells[1];
+                    BO[2] /= cells[2];
+
+                    double bp[16];
+                    int nb = 0;
+                    bp[nb++] = 0.0;
+                    bp[nb++] = rmax;
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        if(std::abs(BO[a]) < 1e-300)
+                            continue;
+                        for(int k = 0; k < 4; ++k)
+                        {
+                            double const r = (sstar[a] - knots[k]) / BO[a];
+                            if(r > 1e-14 && r < rmax - 1e-14)
+                            {
+                                bool dup = false;
+                                for(int q = 0; q < nb; ++q)
+                                    if(std::abs(bp[q] - r) < 1e-12 * rmax)
+                                        dup = true;
+                                if(!dup)
+                                    bp[nb++] = r;
+                            }
+                        }
+                    }
+                    for(int i = 1; i < nb; ++i)
+                    {
+                        double const key = bp[i];
+                        int j = i - 1;
+                        while(j >= 0 && bp[j] > key)
+                        {
+                            bp[j + 1] = bp[j];
+                            --j;
+                        }
+                        bp[j + 1] = key;
+                    }
+                    double const wa = wmu * wphi;
+                    for(int i = 0; i + 1 < nb; ++i)
+                    {
+                        double const r0 = bp[i];
+                        double const r1 = bp[i + 1];
+                        if(r1 - r0 <= 1e-15)
+                            continue;
+                        double const mid = 0.5 * (r0 + r1);
+                        double const half = 0.5 * (r1 - r0);
+                        for(int ir = 0; ir < 4; ++ir)
+                        {
+                            double const r = mid + half * kRadX[ir];
+                            double const wr = half * kRadW[ir];
+                            double s[3];
+                            for(int k = 0; k < 3; ++k)
+                                s[k] = sstar[k] - r * BO[k];
+                            double const q = dtsc(s[0]) * dtsc(s[1]) * dtsc(s[2]);
+                            double const w = wa * wr * q;
+                            acc[0] += w * Om[0];
+                            acc[1] += w * Om[1];
+                            acc[2] += w * Om[2];
+                        }
+                    }
+                }
+            }
+            double tmp[3];
+            dapplyContract(acc, n, gam, tmp);
+            double const invVol = 1.0 / (cells[0] * cells[1] * cells[2]);
+            Erem[0] = invVol * tmp[0];
+            Erem[1] = invVol * tmp[1];
+            Erem[2] = invVol * tmp[2];
+        }
+
         ALPAKA_FN_ACC inline void dboxTerm(
             double const R0[3],
             double const cells[3],
@@ -128,116 +536,14 @@ namespace picBunch::pbfast
                 }
                 else
                 {
-                    // Oblique: Lorentz-contracted tetrahedral Duffy quadrature.
-                    // In d-space the kernel is |M R|^{-3} R; with d' = M R the
-                    // (1-beta^2) prefactor cancels the Jacobian and the
-                    // integrand becomes the plain Coulomb field M^{-1} d'/|d'|^3.
-                    // Each corner box is split into the six tetrahedra of a
-                    // cube and mapped with the collapsed tetrahedral map, which
-                    // turns the vertex singularity into a smooth integrand.
-                    double const Lp[3] = {
-                        1.5 * cells[0] - R0[0],
-                        1.5 * cells[1] - R0[1],
-                        1.5 * cells[2] - R0[2]};
-                    double const Ln[3] = {
-                        1.5 * cells[0] + R0[0],
-                        1.5 * cells[1] + R0[1],
-                        1.5 * cells[2] + R0[2]};
-                    int const n = prm.obliqueOrder;
-                    double acc[3] = {0.0, 0.0, 0.0};
-                    auto applyMmin = [&](double const v[3], double out[3]) {
-                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
-                        double const f = 1.0 / gam - 1.0;
-                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
-                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
-                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
-                    };
-                    auto applyMplus = [&](double const v[3], double out[3]) {
-                        double const vn = v[0] * betaH[0] + v[1] * betaH[1] + v[2] * betaH[2];
-                        double const f = gam - 1.0;
-                        out[0] = v[0] + f * (v[0] - vn * betaH[0]);
-                        out[1] = v[1] + f * (v[1] - vn * betaH[1]);
-                        out[2] = v[2] + f * (v[2] - vn * betaH[2]);
-                    };
-                    int const perm[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
-                    for(int sx = -1; sx <= 1; sx += 2)
-                        for(int sy = -1; sy <= 1; sy += 2)
-                            for(int sz = -1; sz <= 1; sz += 2)
-                            {
-                                double const L[3] = {
-                                    sx > 0 ? Lp[0] : Ln[0],
-                                    sy > 0 ? Lp[1] : Ln[1],
-                                    sz > 0 ? Lp[2] : Ln[2]};
-                                if(L[0] <= 1e-14 || L[1] <= 1e-14 || L[2] <= 1e-14)
-                                    continue;
-                                double ev[3][3] = {{sx * L[0], 0.0, 0.0}, {0.0, sy * L[1], 0.0},
-                                                   {0.0, 0.0, sz * L[2]}};
-                                double e[3][3];
-                                for(int a = 0; a < 3; ++a)
-                                    applyMmin(ev[a], e[a]);
-                                for(int pi = 0; pi < 6; ++pi)
-                                {
-                                    int const i0 = perm[pi][0];
-                                    int const i1 = perm[pi][1];
-                                    int const i2 = perm[pi][2];
-                                    double const A[3] = {e[i0][0], e[i0][1], e[i0][2]};
-                                    double const Bv[3]
-                                        = {A[0] + e[i1][0], A[1] + e[i1][1], A[2] + e[i1][2]};
-                                    double const C[3]
-                                        = {Bv[0] + e[i2][0], Bv[1] + e[i2][1], Bv[2] + e[i2][2]};
-                                    double const BA[3] = {Bv[0] - A[0], Bv[1] - A[1], Bv[2] - A[2]};
-                                    for(int iu = 0; iu < n; ++iu)
-                                    {
-                                        double const tu = 0.5 * prm.oxi[iu] + 0.5;
-                                        double const wu = 0.5 * prm.owi[iu];
-                                        for(int iv = 0; iv < n; ++iv)
-                                        {
-                                            double const tv = 0.5 * prm.oxi[iv] + 0.5;
-                                            double const wv = 0.5 * prm.owi[iv];
-                                            for(int iw = 0; iw < n; ++iw)
-                                            {
-                                                double const tw = 0.5 * prm.oxi[iw] + 0.5;
-                                                double const ww = 0.5 * prm.owi[iw];
-                                                double const a0 = (1.0 - tv) * (1.0 - tw);
-                                                double const a1 = tv * (1.0 - tw);
-                                                double const Q[3] = {
-                                                    a0 * A[0] + a1 * Bv[0] + tw * C[0],
-                                                    a0 * A[1] + a1 * Bv[1] + tw * C[1],
-                                                    a0 * A[2] + a1 * Bv[2] + tw * C[2]};
-                                                double const Qv[3]
-                                                    = {(1.0 - tw) * BA[0], (1.0 - tw) * BA[1],
-                                                       (1.0 - tw) * BA[2]};
-                                                double const Qw[3] = {
-                                                    -(1.0 - tv) * A[0] - tv * Bv[0] + C[0],
-                                                    -(1.0 - tv) * A[1] - tv * Bv[1] + C[1],
-                                                    -(1.0 - tv) * A[2] - tv * Bv[2] + C[2]};
-                                                double const det = Q[0] * (Qv[1] * Qw[2] - Qv[2] * Qw[1])
-                                                    - Q[1] * (Qv[0] * Qw[2] - Qv[2] * Qw[0])
-                                                    + Q[2] * (Qv[0] * Qw[1] - Qv[1] * Qw[0]);
-                                                double const dp[3] = {tu * Q[0], tu * Q[1], tu * Q[2]};
-                                                double const rho2
-                                                    = dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2];
-                                                if(rho2 < 1e-300)
-                                                    continue;
-                                                double const rho = std::sqrt(rho2);
-                                                double Rv[3];
-                                                applyMplus(dp, Rv);
-                                                double const jac = tu * tu * std::abs(det) * wu * wv * ww;
-                                                double const f = -jac / (rho2 * rho);
-                                                acc[0] += f * Rv[0];
-                                                acc[1] += f * Rv[1];
-                                                acc[2] += f * Rv[2];
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                    Ebox[0] = acc[0];
-                    Ebox[1] = acc[1];
-                    Ebox[2] = acc[2];
-                    B[0] = beta[1] * acc[2] - beta[2] * acc[1];
-                    B[1] = beta[2] * acc[0] - beta[0] * acc[2];
-                    B[2] = beta[0] * acc[1] - beta[1] * acc[0];
+                    // Oblique: exact field of the Lorentz-contracted support
+                    // parallelepiped (polyhedron gravity, see FastNear.hpp).
+                    // The oblique order is irrelevant on this path and is kept
+                    // only for CLI/settings compatibility.
+                    dexactObliqueBox(R0, cells, u, Ebox);
+                    B[0] = beta[1] * Ebox[2] - beta[2] * Ebox[1];
+                    B[1] = beta[2] * Ebox[0] - beta[0] * Ebox[2];
+                    B[2] = beta[0] * Ebox[1] - beta[1] * Ebox[0];
                 }
             }
             double const invVolume = 1.0 / (cells[0] * cells[1] * cells[2]);
@@ -262,6 +568,26 @@ namespace picBunch::pbfast
             double const sstar[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
             double const Wstar = dtsc(sstar[0]) * dtsc(sstar[1]) * dtsc(sstar[2]);
             bool const singular = Wstar > 0.0;
+
+            double const uu2all = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            if(singular && uu2all > 0.0)
+            {
+                double const un = std::sqrt(uu2all);
+                bool axial = false;
+                for(int a = 0; a < 3; ++a)
+                    if(std::abs(std::abs(u[a] / un) - 1.0) < 1e-12)
+                        axial = true;
+                if(!axial)
+                {
+                    dobliObliqueRayField(R0, cells, u, E);
+                    double const gam = std::sqrt(1.0 + uu2all);
+                    double const beta[3] = {u[0] / gam, u[1] / gam, u[2] / gam};
+                    B[0] = beta[1] * E[2] - beta[2] * E[1];
+                    B[1] = beta[2] * E[0] - beta[0] * E[2];
+                    B[2] = beta[0] * E[1] - beta[1] * E[0];
+                    return;
+                }
+            }
 
             double Ebox[3] = {0.0, 0.0, 0.0};
             double Bbox[3] = {0.0, 0.0, 0.0};

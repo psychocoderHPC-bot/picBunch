@@ -105,6 +105,10 @@ namespace
             "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
             "                        (default: 4)\n"
             "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
+            "  --near-shell-oblique-order <auto|N>\n"
+            "                        oblique singular-box order: auto (default) raises it\n"
+            "                        per tile from the source gamma, N in [4,12] forces it\n"
+            "                        (4 is the fast path)\n"
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0)\n"
@@ -116,6 +120,10 @@ namespace
             "                        an infeasible requirement fails with the needed\n"
             "                        count\n"
             "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
+            "  --near-shell-oblique-order <auto|N>\n"
+            "                        oblique singular-box order: auto (default) raises it\n"
+            "                        per tile from the source gamma, N in [4,12] forces it\n"
+            "                        (4 is the fast path)\n"
             "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
@@ -165,6 +173,7 @@ namespace
         double nearShellRadius = 0.0;
         std::size_t nearShellTile = 4;
         int nearShellFastOrder = 5;
+        std::string nearShellObliqueOrder = "auto";
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
@@ -356,6 +365,8 @@ namespace
             else if(option == "--near-shell-fast-order")
                 args.nearShellFastOrder
                     = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
+            else if(option == "--near-shell-oblique-order")
+                args.nearShellObliqueOrder = value("--near-shell-oblique-order");
             else if(option == "--velocity-bins")
                 args.velocityBins = parseIteration(value("--velocity-bins"), "--velocity-bins");
             else if(option == "--bin-model-constant")
@@ -455,6 +466,25 @@ namespace
             throw std::invalid_argument("--near-shell-tile must be positive");
         if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
             throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
+        if(args.nearShellObliqueOrder != "auto")
+        {
+            int order = 0;
+            try
+            {
+                std::size_t used = 0;
+                order = std::stoi(args.nearShellObliqueOrder, &used);
+                if(used != args.nearShellObliqueOrder.size())
+                    throw std::invalid_argument("trailing characters");
+            }
+            catch(std::exception const&)
+            {
+                throw std::invalid_argument(
+                    "--near-shell-oblique-order must be 'auto' or an integer in [4, 12]");
+            }
+            if(order < 4 || order > 12)
+                throw std::invalid_argument(
+                    "--near-shell-oblique-order must be 'auto' or an integer in [4, 12]");
+        }
         if(args.maxVelocityBins < 1u)
             throw std::invalid_argument("--max-velocity-bins must be >= 1");
         if(!(args.binModelConstant > 0.0) || !std::isfinite(args.binModelConstant))
@@ -577,6 +607,7 @@ namespace
                     ? picBunch::NearShellOptions::Mode::FastGpu
                     : picBunch::NearShellOptions::Mode::None;
         options.nearShell.fastOrder = config.accuracy.nearShellFastOrder;
+        options.nearShell.fastObliqueOrder = config.accuracy.nearShellObliqueOrder;
         options.nearShell.radiusCells = config.accuracy.nearShellRadius;
         options.nearShell.tileNodes = config.accuracy.nearShellTile;
         std::printf(
@@ -705,6 +736,9 @@ namespace
                     ? picBunch::NearShellOptions::Mode::FastGpu
                     : picBunch::NearShellOptions::Mode::None;
         options.nearShell.fastOrder = args.nearShellFastOrder;
+        options.nearShell.fastObliqueOrder = (args.nearShellObliqueOrder == "auto")
+            ? 0
+            : std::stoi(args.nearShellObliqueOrder);
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
         options.fftMode = (args.fftMode == "replicated")
@@ -949,6 +983,9 @@ int main(int argc, char** argv)
                     ? picBunch::NearShellOptions::Mode::FastGpu
                     : picBunch::NearShellOptions::Mode::None;
         options.nearShell.fastOrder = args.nearShellFastOrder;
+        options.nearShell.fastObliqueOrder = (args.nearShellObliqueOrder == "auto")
+            ? 0
+            : std::stoi(args.nearShellObliqueOrder);
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
         options.velocityBinning.mode

@@ -215,6 +215,22 @@ namespace picBunch
                 fail("accuracy.near_shell_fast_order", "must be between 2 and 32");
             config.accuracy.nearShellFastOrder = static_cast<int>(order);
         }
+        if(auto const* node = accuracy.get("near_shell_oblique_order"))
+        {
+            if(auto const text = node->value<std::string>())
+            {
+                if(*text != "auto")
+                    fail("accuracy.near_shell_oblique_order", "expected \"auto\" or an integer");
+                config.accuracy.nearShellObliqueOrder = 0;
+            }
+            else
+            {
+                auto const order = asInteger(*node, "accuracy.near_shell_oblique_order");
+                if(order < 4 || order > 12)
+                    fail("accuracy.near_shell_oblique_order", "must be between 4 and 12");
+                config.accuracy.nearShellObliqueOrder = static_cast<int>(order);
+            }
+        }
 
         // Validation.
         auto positive = [](double value, std::string const& key) {
@@ -291,7 +307,8 @@ namespace picBunch
              "accuracy.near_shell",
              "accuracy.near_shell_radius",
              "accuracy.near_shell_tile",
-             "accuracy.near_shell_fast_order"},
+             "accuracy.near_shell_fast_order",
+             "accuracy.near_shell_oblique_order"},
             config.warnings);
         for(auto const& [key, node] : document)
         {

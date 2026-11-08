@@ -191,6 +191,39 @@ TEST(Config, StrictAcceptsNearShellFastOrder)
     EXPECT_TRUE(config.warnings.empty());
 }
 
+TEST(Config, ParsesNearShellObliqueOrder)
+{
+    ConfigTest fixture;
+    std::string autoText
+        = "strict = true\n" + fullConfig + "near_shell_oblique_order = \"auto\"\n";
+    auto const autoConfig
+        = picBunch::loadConfig(fixture.write("oblique-auto.toml", autoText));
+    EXPECT_EQ(autoConfig.accuracy.nearShellObliqueOrder, 0);
+    EXPECT_TRUE(autoConfig.warnings.empty());
+
+    std::string explicitText
+        = "strict = true\n" + fullConfig + "near_shell_oblique_order = 8\n";
+    auto const explicitConfig
+        = picBunch::loadConfig(fixture.write("oblique-8.toml", explicitText));
+    EXPECT_EQ(explicitConfig.accuracy.nearShellObliqueOrder, 8);
+    EXPECT_TRUE(explicitConfig.warnings.empty());
+}
+
+TEST(Config, RejectsInvalidNearShellObliqueOrder)
+{
+    ConfigTest fixture;
+    std::string low
+        = "strict = true\n" + fullConfig + "near_shell_oblique_order = 2\n";
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("oblique-low.toml", low)),
+        std::runtime_error);
+    std::string bad
+        = "strict = true\n" + fullConfig + "near_shell_oblique_order = \"fast\"\n";
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("oblique-bad.toml", bad)),
+        std::runtime_error);
+}
+
 TEST(Config, ParsesDomainPatch)
 {
     ConfigTest fixture;

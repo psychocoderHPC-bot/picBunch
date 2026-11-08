@@ -212,7 +212,16 @@ namespace picBunch
         std::uint64_t pairs = 0;
         std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
-        pbfast::Settings fastSettings{nearShell.fastOrder, nearShell.fastObliqueOrder, 5};
+        // Resolve the oblique-box policy once.  0 (or a negative value) means
+        // `auto`; an explicit value is mapped to an allowed even order in
+        // [4, 12].  Under `auto` the per-tile resolution below may raise
+        // `tileObliqueOrder` from the largest oblique, support-overlapping
+        // source gamma.
+        bool const autoObliqueOrderPolicy = nearShell.fastObliqueOrder <= 0;
+        int const explicitObliqueOrder = autoObliqueOrderPolicy
+            ? pbfast::kObliqueOrderMin
+            : pbfast::normalizeObliqueOrder(nearShell.fastObliqueOrder);
+        pbfast::Settings fastSettings{nearShell.fastOrder, explicitObliqueOrder, 5};
         fastSettings.tolerance = options.tolerance;
         bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
         bool useFastGpu = false;
@@ -249,12 +258,7 @@ namespace picBunch
 #if defined(PICBUNCH_BACKEND_CUDA)
         pbfast::DeviceParams deviceParams;
         deviceParams.order = fastSettings.order;
-        // The device oblique box uses the six-tetrahedron Duffy map, i.e. 6x
-        // the nodes of the octant box per order^3.  Cap its order so the near
-        // shell stays inside the 1.5x wall budget of the 2e3-particle case;
-        // the host path keeps the requested order and adds the controlled
-        // residual fallback.
-        deviceParams.obliqueOrder = std::min(fastSettings.obliqueOrder, 4);
+        deviceParams.obliqueOrder = explicitObliqueOrder;
         {
             auto const& xi = pbfast::detail::rule(fastSettings.order).x;
             auto const& wi = pbfast::detail::rule(fastSettings.order).w;
@@ -263,12 +267,19 @@ namespace picBunch
                 deviceParams.xi[i] = xi[static_cast<std::size_t>(i)];
                 deviceParams.wi[i] = wi[static_cast<std::size_t>(i)];
             }
-            auto const& oxi = pbfast::detail::rule(fastSettings.obliqueOrder).x;
-            auto const& owi = pbfast::detail::rule(fastSettings.obliqueOrder).w;
-            for(int i = 0; i < fastSettings.obliqueOrder; ++i)
+            // Precompute every allowed oblique rule once.  The kernel selects
+            // the slot matching the tile's resolved order, so no thread ever
+            // regenerates a Gauss table.
+            for(int slotIndex = 0; slotIndex < pbfast::kObliqueOrderCount; ++slotIndex)
             {
-                deviceParams.oxi[i] = oxi[static_cast<std::size_t>(i)];
-                deviceParams.owi[i] = owi[static_cast<std::size_t>(i)];
+                int const order = pbfast::kObliqueOrders[slotIndex];
+                auto const& oxi = pbfast::detail::rule(order).x;
+                auto const& owi = pbfast::detail::rule(order).w;
+                for(int i = 0; i < order; ++i)
+                {
+                    deviceParams.oxi[slotIndex][i] = oxi[static_cast<std::size_t>(i)];
+                    deviceParams.owi[slotIndex][i] = owi[static_cast<std::size_t>(i)];
+                }
             }
             for(int c = 0; c < 6; ++c)
                 for(int a = 0; a < 3; ++a)
@@ -387,6 +398,53 @@ namespace picBunch
                         continue;
 
                     Bunch const near = selectSources(bunch, nearIndex);
+
+                    // One coherent oblique-box order per output tile.  Under
+                    // `auto`, raise it only for oblique sources whose TSC
+                    // support can reach this tile and whose gamma puts the
+                    // contracted peak below the order-4 resolution.  Axial
+                    // sources are skipped here (their box is exact and does
+                    // not use the Duffy order), so the gamma-10 and axial
+                    // behaviour is untouched.  The scan is O(near.size()) and
+                    // runs once per tile.
+                    int tileObliqueOrder = explicitObliqueOrder;
+                    if(autoObliqueOrderPolicy)
+                    {
+                        double maxObliqueGamma = 0.0;
+                        for(std::size_t q = 0; q < near.size(); ++q)
+                        {
+                            double const ux = near.ux[q];
+                            double const uy = near.uy[q];
+                            double const uz = near.uz[q];
+                            double const uu2 = ux * ux + uy * uy + uz * uz;
+                            if(uu2 == 0.0)
+                                continue;
+                            double const invLen = 1.0 / std::sqrt(uu2);
+                            bool const axial = std::abs(std::abs(ux * invLen) - 1.0) < 1e-12
+                                || std::abs(std::abs(uy * invLen) - 1.0) < 1e-12
+                                || std::abs(std::abs(uz * invLen) - 1.0) < 1e-12;
+                            if(axial)
+                                continue;
+                            double const pos[3] = {near.x[q], near.y[q], near.z[q]};
+                            bool overlaps = true;
+                            for(int a = 0; a < 3; ++a)
+                            {
+                                double const reach = 1.5 * cells[a];
+                                if(pos[a] < low[a] - reach || pos[a] > high[a] + reach)
+                                {
+                                    overlaps = false;
+                                    break;
+                                }
+                            }
+                            if(!overlaps)
+                                continue;
+                            maxObliqueGamma = std::max(maxObliqueGamma, std::sqrt(1.0 + uu2));
+                        }
+                        tileObliqueOrder = pbfast::autoObliqueOrder(maxObliqueGamma);
+                    }
+                    deviceParams.obliqueOrder = tileObliqueOrder;
+                    pbfast::Settings tileFastSettings = fastSettings;
+                    tileFastSettings.obliqueOrder = tileObliqueOrder;
 
                     // The local FFT subtraction is only needed on the legacy
                     // path.  The direct 27-point TSC stencil performs the same
@@ -569,7 +627,7 @@ namespace picBunch
                                                     cells[0],
                                                     cells[1],
                                                     cells[2],
-                                                    fastSettings,
+                                                    tileFastSettings,
                                                     E,
                                                     B);
                                             }

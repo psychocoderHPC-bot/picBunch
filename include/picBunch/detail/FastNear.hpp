@@ -21,14 +21,21 @@
 // fired for every u < 0 and produced 30-400x wrong fields for points outside a
 // box face.
 //
-// Moving sources: axial beta has the exact gamma-stretched box; oblique beta
-// has no closed form and uses the rest-frame octant quadrature (8*order^3
-// nodes).  The oblique remainder is not a controlled approximation in the
-// beamed peak, hence the documented 7.7e-2 interior limit.
+// Moving sources: axial beta has the exact gamma-stretched box.  Oblique
+// in-support pairs are integrated directly in the Lorentz-contracted
+// d = M R frame, where the kernel becomes the isotropic Coulomb field: the
+// support box maps to a parallelepiped and the TSC shape to a piecewise
+// polynomial along each ray.  The radial integral is exact with four Gauss
+// nodes per knot interval and the angular rule is polar-aligned with beta,
+// so the beamed tube is resolved without the former Duffy sliver problem.
+// The exact constant-density polyhedron field is kept as
+// detail::exactObliqueBox (closed-form face/edge terms) for validation and
+// as the analytic reference for the d-space integral.
 
 #pragma once
 
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/ObliqueOrder.hpp"
 
 #include <algorithm>
 #include <array>
@@ -153,6 +160,10 @@ namespace picBunch::pbfast
             static Rule const r5 = makeRule(5);
             static Rule const r6 = makeRule(6);
             static Rule const r8 = makeRule(8);
+            static Rule const r10 = makeRule(10);
+            static Rule const r12 = makeRule(12);
+            // The allowed oblique orders are precomputed so a tile never pays
+            // for Gauss-table generation on the evaluation path.
             if(n == 4)
                 return r4;
             if(n == 5)
@@ -161,6 +172,10 @@ namespace picBunch::pbfast
                 return r6;
             if(n == 8)
                 return r8;
+            if(n == 10)
+                return r10;
+            if(n == 12)
+                return r12;
             static std::mutex mutex;
             static std::map<int, Rule> cache;
             std::lock_guard<std::mutex> lock(mutex);
@@ -296,6 +311,330 @@ namespace picBunch::pbfast
             return std::sqrt(nbref::dot(v, v));
         }
 
+        constexpr double kBoxPi = 3.141592653589793238462643383279502884;
+
+        //! Stable Lorentz contraction v_par + k v_perp.  Never subtracts O(1)
+        //! terms, so it stays accurate for gamma ~ 1e2 and beyond.
+        inline Vec3 applyContract(Vec3 const& v, Vec3 const& n, double k)
+        {
+            double const vn = nbref::dot(v, n);
+            return vn * n + k * (v - vn * n);
+        }
+
+        //! Primitive d*J(l) of a parallelogram edge contribution to the face
+        //! integral I = int_face dA/|x|.  J(l) = asinh(l/a) + (h/d) atan(h l/(d r)),
+        //! a^2 = h^2 + d^2, r^2 = a^2 + l^2.  Ordinary atan (not atan2) keeps the
+        //! branch continuous for d < 0.
+        inline double boxEdgePrimitive(double l, double hh, double d)
+        {
+            double const a = std::sqrt(hh * hh + d * d);
+            double const r = std::sqrt(a * a + l * l);
+            double const asinhTerm = d * std::asinh(l / a);
+            double atanTerm;
+            if(d == 0.0)
+                atanTerm = (l > 0.0 ? 0.5 * kBoxPi : (l < 0.0 ? -0.5 * kBoxPi : 0.0)) * hh;
+            else
+                atanTerm = hh * std::atan(hh * l / (d * r));
+            return asinhTerm + atanTerm;
+        }
+
+        //! Closed-form int_face dA/|x| over a parallelogram face with outward
+        //! unit normal n.  q must be in cyclic order.  The interior disk term
+        //! 2*pi*|h| is removed when the origin projects inside the face.
+        inline double boxFaceIntegral(Vec3 const q[4], Vec3 const& n)
+        {
+            double const h = nbref::dot(q[0], n);
+            double const hh = std::abs(h);
+            double I = 0.0;
+            for(int i = 0; i < 4; ++i)
+            {
+                Vec3 const a = q[i];
+                Vec3 const b = q[(i + 1) % 4];
+                Vec3 const e = b - a;
+                double const L = norm3(e);
+                Vec3 const m = e / L;
+                Vec3 const n2 = nbref::cross(m, n);
+                double const d = nbref::dot(a, n2);
+                double const la = nbref::dot(a, m);
+                double const lb = nbref::dot(b, m);
+                I += boxEdgePrimitive(lb, hh, d) - boxEdgePrimitive(la, hh, d);
+            }
+            Vec3 const foot = h * n;
+            Vec3 u = q[1] - q[0];
+            u = u / norm3(u);
+            Vec3 const w = nbref::cross(n, u);
+            bool inside = false;
+            int j = 3;
+            for(int i = 0; i < 4; ++i)
+            {
+                double const xi = nbref::dot(q[i] - foot, u);
+                double const yi = nbref::dot(q[i] - foot, w);
+                double const xj = nbref::dot(q[j] - foot, u);
+                double const yj = nbref::dot(q[j] - foot, w);
+                if(((yi > 0.0) != (yj > 0.0)) && (0.0 < (xj - xi) * (0.0 - yi) / (yj - yi) + xi))
+                    inside = !inside;
+                j = i;
+            }
+            if(inside)
+                I -= 2.0 * kBoxPi * hh;
+            return I;
+        }
+
+        /*! Exact box term for oblique motion.
+         *
+         * Ebox = int_B R / |M R|^3 dR over the support box B centred at R0.
+         * With d = M R and P = M B this is M^{-1} int_P d/|d|^3 dd, the
+         * Newtonian field at the origin of the Lorentz-contracted
+         * parallelepiped P.  The polyhedron field is a pure boundary term
+         * (Werner & Scheeres 1996),
+         *
+         *     int_P d/|d|^3 dd = -sum_faces n_f int_face dA/|d|,
+         *
+         * and every face integral is the closed form above.  This is exact
+         * (up to FP rounding), O(1) per pair and has no sliver-tetrahedron or
+         * M^{-1}-cancellation failure mode.
+         */
+        inline Vec3 exactObliqueBox(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = u / std::sqrt(uu2);
+            double const invg = 1.0 / gam;
+            auto const M = [&](Vec3 const& v) { return applyContract(v, n, invg); };
+            Vec3 const c0 = M(R0);
+            Vec3 const e[3] = {
+                M(Vec3{1.5 * cells.x, 0.0, 0.0}),
+                M(Vec3{0.0, 1.5 * cells.y, 0.0}),
+                M(Vec3{0.0, 0.0, 1.5 * cells.z})};
+            Vec3 V[2][2][2];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        V[a][b][c] = c0 + (a ? e[0] : -1.0 * e[0]) + (b ? e[1] : -1.0 * e[1])
+                            + (c ? e[2] : -1.0 * e[2]);
+            Vec3 S{};
+            auto addFace = [&](Vec3 const qin[4]) {
+                Vec3 q[4] = {qin[0], qin[1], qin[2], qin[3]};
+                Vec3 nn = nbref::cross(q[1] - q[0], q[2] - q[0]);
+                nn = nn / norm3(nn);
+                Vec3 const cen = (q[0] + q[1] + q[2] + q[3]) / 4.0;
+                if(nbref::dot(cen - c0, nn) < 0.0)
+                {
+                    q[0] = qin[3];
+                    q[1] = qin[2];
+                    q[2] = qin[1];
+                    q[3] = qin[0];
+                    nn = nbref::cross(q[1] - q[0], q[2] - q[0]);
+                    nn = nn / norm3(nn);
+                }
+                S = S + boxFaceIntegral(q, nn) * nn;
+            };
+            for(int a = 0; a < 2; ++a)
+            {
+                Vec3 const q[4] = {V[a][0][0], V[a][0][1], V[a][1][1], V[a][1][0]};
+                addFace(q);
+            }
+            for(int b = 0; b < 2; ++b)
+            {
+                Vec3 const q[4] = {V[0][b][0], V[0][b][1], V[1][b][1], V[1][b][0]};
+                addFace(q);
+            }
+            for(int c = 0; c < 2; ++c)
+            {
+                Vec3 const q[4] = {V[0][0][c], V[0][1][c], V[1][1][c], V[1][0][c]};
+                addFace(q);
+            }
+            Vec3 const F = -1.0 * S;
+            return applyContract(F, n, gam); // M^{-1}
+        }
+
+        struct BoxPlane
+        {
+            Vec3 n;
+            double h;
+        };
+
+        //! Outward face planes of the Lorentz-contracted support parallelepiped.
+        //! The origin is strictly inside when the observer is in support.
+        inline void supportPlanes(
+            Vec3 const& R0,
+            Vec3 const& cells,
+            Vec3 const& u,
+            BoxPlane planes[6])
+        {
+            double const uu2 = nbref::dot(u, u);
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = u / std::sqrt(uu2);
+            auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
+            Vec3 const c0 = M(R0);
+            Vec3 const e[3] = {
+                M(Vec3{1.5 * cells.x, 0.0, 0.0}),
+                M(Vec3{0.0, 1.5 * cells.y, 0.0}),
+                M(Vec3{0.0, 0.0, 1.5 * cells.z})};
+            Vec3 V[2][2][2];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        V[a][b][c] = c0 + (a ? e[0] : -1.0 * e[0]) + (b ? e[1] : -1.0 * e[1])
+                            + (c ? e[2] : -1.0 * e[2]);
+            int const FI[6][4][3] = {
+                {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}},
+                {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0, 0}},
+                {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}},
+                {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}, {1, 0, 1}}};
+            for(int f = 0; f < 6; ++f)
+            {
+                Vec3 q[4];
+                for(int v = 0; v < 4; ++v)
+                    q[v] = V[FI[f][v][0]][FI[f][v][1]][FI[f][v][2]];
+                Vec3 nn = nbref::cross(q[1] - q[0], q[2] - q[0]);
+                nn = nn / norm3(nn);
+                Vec3 const cen = (q[0] + q[1] + q[2] + q[3]) / 4.0;
+                if(nbref::dot(cen - c0, nn) < 0.0)
+                {
+                    Vec3 const t0 = q[0], t1 = q[1], t2 = q[2], t3 = q[3];
+                    q[0] = t3;
+                    q[1] = t2;
+                    q[2] = t1;
+                    q[3] = t0;
+                    nn = nbref::cross(q[1] - q[0], q[2] - q[0]);
+                    nn = nn / norm3(nn);
+                }
+                planes[f].n = nn;
+                planes[f].h = nbref::dot(q[0], nn);
+            }
+        }
+
+        /*! Full in-support field of an oblique pair in d-space.
+         *
+         * With d = M R the integrand becomes a plain radial factor,
+         * d/|d|^3 dV = Omega dr dOmega, so
+         *
+         *   int S(s) K ds^3
+         *     = (1/V) M^{-1} int_{S^2} Omega [ int_0^rmax S(s(r Omega)) dr ] dOmega.
+         *
+         * The inner integral is a piecewise polynomial of degree 6 along the
+         * ray; four Gauss nodes on every knot interval integrate it exactly.
+         * The polar axis of the angular rule is aligned with beta, which puts
+         * the beamed tube near mu = 1 where Gauss-Legendre clusters strongly.
+         * This direct form avoids the large W*box/(S-W*) cancellation of the
+         * constant-density split, whose finite-angle odd residual would show
+         * up in the small transverse field components.
+         */
+        inline Vec3 obliqueRayField(
+            Vec3 const& R0,
+            Vec3 const& cells,
+            Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = u / std::sqrt(uu2);
+            Vec3 const sstar{R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
+            BoxPlane planes[6];
+            supportPlanes(R0, cells, u, planes);
+
+            Vec3 const helper = std::abs(n.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
+            Vec3 e1 = nbref::cross(n, helper);
+            e1 = e1 / norm3(e1);
+            Vec3 const e2 = nbref::cross(n, e1);
+
+            Rule const& muR = rule(16);
+            Rule const& phR = rule(32);
+            Rule const& radR = rule(4);
+            // pi*(x+1) for the phi rule is evaluated per node below.
+            constexpr double pi = 3.141592653589793238462643383279502884;
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+
+            Vec3 acc{};
+            auto const Minv = [&](Vec3 const& v) { return applyContract(v, n, gam); };
+            for(int im = 0; im < 16; ++im)
+            {
+                double const mu = muR.x[static_cast<std::size_t>(im)];
+                double const st = std::sqrt(std::max(0.0, 1.0 - mu * mu));
+                double const wmu = muR.w[static_cast<std::size_t>(im)];
+                for(int ip = 0; ip < 32; ++ip)
+                {
+                    double const phi = pi * (phR.x[static_cast<std::size_t>(ip)] + 1.0);
+                    double const wphi = pi * phR.w[static_cast<std::size_t>(ip)];
+                    Vec3 const Om = mu * n + st * (std::cos(phi) * e1 + std::sin(phi) * e2);
+                    double rmax = 1e300;
+                    for(int f = 0; f < 6; ++f)
+                    {
+                        double const dn = nbref::dot(planes[f].n, Om);
+                        if(dn > 1e-15)
+                            rmax = std::min(rmax, planes[f].h / dn);
+                    }
+                    if(!(rmax > 1e-14))
+                        continue;
+                    Vec3 const BO = Minv(Om);
+                    double const BOa[3] = {
+                        BO.x / cells.x,
+                        BO.y / cells.y,
+                        BO.z / cells.z};
+                    double const sst[3] = {sstar.x, sstar.y, sstar.z};
+                    double bp[16];
+                    int nb = 0;
+                    bp[nb++] = 0.0;
+                    bp[nb++] = rmax;
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        if(std::abs(BOa[a]) < 1e-300)
+                            continue;
+                        for(int k = 0; k < 4; ++k)
+                        {
+                            double const r = (sst[a] - knots[k]) / BOa[a];
+                            if(r > 1e-14 && r < rmax - 1e-14)
+                            {
+                                bool dup = false;
+                                for(int q = 0; q < nb; ++q)
+                                    if(std::abs(bp[q] - r) < 1e-12 * rmax)
+                                        dup = true;
+                                if(!dup)
+                                    bp[nb++] = r;
+                            }
+                        }
+                    }
+                    for(int i = 1; i < nb; ++i)
+                    {
+                        double const key = bp[i];
+                        int j = i - 1;
+                        while(j >= 0 && bp[j] > key)
+                        {
+                            bp[j + 1] = bp[j];
+                            --j;
+                        }
+                        bp[j + 1] = key;
+                    }
+                    double const wa = wmu * wphi;
+                    for(int i = 0; i + 1 < nb; ++i)
+                    {
+                        double const r0 = bp[i];
+                        double const r1 = bp[i + 1];
+                        if(r1 - r0 <= 1e-15)
+                            continue;
+                        double const mid = 0.5 * (r0 + r1);
+                        double const half = 0.5 * (r1 - r0);
+                        for(int ir = 0; ir < 4; ++ir)
+                        {
+                            double const r
+                                = mid + half * radR.x[static_cast<std::size_t>(ir)];
+                            double const wr
+                                = half * radR.w[static_cast<std::size_t>(ir)];
+                            Vec3 const s{
+                                sstar.x - r * BOa[0],
+                                sstar.y - r * BOa[1],
+                                sstar.z - r * BOa[2]};
+                            double const q = tsc(s.x) * tsc(s.y) * tsc(s.z);
+                            acc = acc + (wa * wr * q) * Om;
+                        }
+                    }
+                }
+            }
+            return Minv(acc) / (cells.x * cells.y * cells.z);
+        }
+
         struct Panels
         {
             std::array<double, 4> lo{};
@@ -346,13 +685,14 @@ namespace picBunch::pbfast
             Vec3 const& R0,
             Vec3 const& cells,
             Vec3 const& u,
-            int obliqueOrder,
-            int obliquePower,
+            int /*obliqueOrder*/,
+            int /*obliquePower*/,
             Vec3& E,
             Vec3& B)
         {
             double const uu2 = nbref::dot(u, u);
-            double Ebox[3] = {0.0, 0.0, 0.0};
+            Vec3 Ebox{};
+            Vec3 Bbox{};
             if(uu2 == 0.0)
             {
                 double const p[3] = {R0.x, R0.y, R0.z};
@@ -360,13 +700,11 @@ namespace picBunch::pbfast
                 double const hi[3] = {1.5 * cells.x, 1.5 * cells.y, 1.5 * cells.z};
                 for(int c = 0; c < 3; ++c)
                     Ebox[c] = boxField8T(p, lo, hi, c);
-                B = Vec3{};
             }
             else
             {
                 double const gam = std::sqrt(1.0 + uu2);
                 Vec3 const beta = u / gam;
-                // Axial beta: exact gamma-stretched box, no oblique quadrature.
                 Vec3 const betaH = u / std::sqrt(uu2);
                 int stretchAxis = -1;
                 for(int a = 0; a < 3; ++a)
@@ -374,7 +712,6 @@ namespace picBunch::pbfast
                         stretchAxis = a;
                 if(stretchAxis >= 0)
                 {
-                    // t-box in the stretched coordinate; E' = boxField(0, -hi, -lo).
                     double const p[3] = {R0[0], R0[1], R0[2]};
                     double lo[3], hi[3];
                     for(int a = 0; a < 3; ++a)
@@ -390,77 +727,22 @@ namespace picBunch::pbfast
                     for(int c = 0; c < 3; ++c)
                         Ebox[c] = boxField8T(zero, tlo, thi, c);
                     Ebox[stretchAxis] /= gam;
-                    B = nbref::cross(beta, Vec3{Ebox[0], Ebox[1], Ebox[2]});
+                    Bbox = nbref::cross(beta, Ebox);
                 }
                 else
                 {
-                    // Oblique: rest-frame octant quadrature over the lab box.
-                    double const mm = gam - 1.0;
-                    // Symmetric M = I + (gamma-1) n n^T, applied to d.
-                    auto applyM = [&](Vec3 const& d) -> Vec3 {
-                        double const dn = nbref::dot(d, betaH);
-                        return d + mm * dn * betaH;
-                    };
-                    double const Lp[3] = {
-                        1.5 * cells.x - R0.x,
-                        1.5 * cells.y - R0.y,
-                        1.5 * cells.z - R0.z};
-                    double const Ln[3] = {
-                        1.5 * cells.x + R0.x,
-                        1.5 * cells.y + R0.y,
-                        1.5 * cells.z + R0.z};
-                    Rule const& gl = rule(obliqueOrder);
-                    int const n = obliqueOrder;
-                    double const power = obliquePower;
-                    Vec3 acc{};
-                    for(int sx = -1; sx <= 1; sx += 2)
-                        for(int sy = -1; sy <= 1; sy += 2)
-                            for(int sz = -1; sz <= 1; sz += 2)
-                            {
-                                double const L[3] = {
-                                    sx > 0 ? Lp[0] : Ln[0],
-                                    sy > 0 ? Lp[1] : Ln[1],
-                                    sz > 0 ? Lp[2] : Ln[2]};
-                                if(L[0] <= 1e-14 || L[1] <= 1e-14 || L[2] <= 1e-14)
-                                    continue;
-                                for(int ix = 0; ix < n; ++ix)
-                                    for(int iy = 0; iy < n; ++iy)
-                                        for(int iz = 0; iz < n; ++iz)
-                                        {
-                                            double const tx = 0.5 * gl.x[ix] + 0.5;
-                                            double const ty = 0.5 * gl.x[iy] + 0.5;
-                                            double const tz = 0.5 * gl.x[iz] + 0.5;
-                                            double const px = L[0] * std::pow(tx, power);
-                                            double const py = L[1] * std::pow(ty, power);
-                                            double const pz = L[2] * std::pow(tz, power);
-                                            double const jx = 0.5 * L[0] * power
-                                                * std::pow(tx, power - 1.0) * gl.w[ix];
-                                            double const jy = 0.5 * L[1] * power
-                                                * std::pow(ty, power - 1.0) * gl.w[iy];
-                                            double const jz = 0.5 * L[2] * power
-                                                * std::pow(tz, power - 1.0) * gl.w[iz];
-                                            Vec3 const d{sx * px, sy * py, sz * pz};
-                                            Vec3 const md = applyM(d);
-                                            double const rho2 = nbref::dot(md, md);
-                                            double const rho = std::sqrt(rho2);
-                                            double const f = -gam / (rho2 * rho) * jx * jy * jz;
-                                            acc = acc + f * d;
-                                        }
-                            }
-                    Ebox[0] = acc.x;
-                    Ebox[1] = acc.y;
-                    Ebox[2] = acc.z;
-                    B = nbref::cross(beta, acc);
+                    // Exact Lorentz-contracted support-box field.  The oblique
+                    // order/power arguments are irrelevant on this path and
+                    // are kept only for CLI/settings compatibility.
+                    Ebox = exactObliqueBox(R0, cells, u);
+                    Bbox = nbref::cross(beta, Ebox);
                 }
             }
-            // The box integrals above are over the physical displacement box
-            // (units 1/m^2 * m^3).  The TSC shape integral is over the
-            // dimensionless cell coordinate s, ds^3 = d^3R / (dx dy dz), so the
-            // singular term carries one inverse cell volume.
             double const invVolume = 1.0 / (cells.x * cells.y * cells.z);
-            E = invVolume * Vec3{Ebox[0], Ebox[1], Ebox[2]};
-            B = invVolume * B;
+            E = invVolume * Ebox;
+            B = invVolume * Bbox;
         }
+
     } // namespace detail
 
     //! TSC-convolved per-unit-charge field of one uniformly moving source.
@@ -480,6 +762,23 @@ namespace picBunch::pbfast
         Vec3 const sstar{R0.x / dx, R0.y / dy, R0.z / dz};
         double const Wstar = detail::tsc(sstar.x) * detail::tsc(sstar.y) * detail::tsc(sstar.z);
         bool const singular = Wstar > 0.0;
+
+        // Oblique in-support: exact Lorentz-contracted support-box field plus
+        // a stable d-space ray integral of the TSC remainder.  This replaces
+        // the beamed-peak Duffy quadrature; the oblique order is irrelevant
+        // here and is kept only for CLI/settings compatibility.
+        if(singular)
+        {
+            double const uu2 = nbref::dot(u, u);
+            Vec3 const betaH = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            if(uu2 > 0.0 && !detail::isAxialBeta(u, betaH))
+            {
+                E = detail::obliqueRayField(R0, cells, u);
+                Vec3 const beta = u / std::sqrt(1.0 + uu2);
+                B = nbref::cross(beta, E);
+                return;
+            }
+        }
 
         Vec3 Ebox{}, Bbox{};
         if(singular)
@@ -548,36 +847,7 @@ namespace picBunch::pbfast
         E = Wstar * Ebox + Erem;
         B = Wstar * Bbox + nbref::cross(beta, Erem);
 
-        // Oblique in-support: the octant box is only a bounded approximation in
-        // the beamed peak.  Estimate its residual against the singularity-aware
-        // Duffy box and keep the expensive controlled variant only when the
-        // estimate exceeds the per-pair budget.
-        if(singular && uu2 > 0.0 && !settings.legacyOblique)
-        {
-            Vec3 const betaH = u / std::sqrt(uu2);
-            if(!detail::isAxialBeta(u, betaH))
-            {
-                Vec3 EboxD{}, BboxD{};
-                detail::boxTermDuffy(R0, cells, u, settings.obliqueOrder, EboxD, BboxD);
-                Vec3 const Eref = E + Wstar * (EboxD - Ebox);
-                double const scale = std::max(detail::norm3(Eref), 1e-300);
-                double const residual = Wstar * detail::norm3(EboxD - Ebox) / scale;
-                double const budget = std::max(1e-6, 0.25 * settings.tolerance);
-                if(residual > budget)
-                {
-                    // Controlled fallback: the validated Lorentz-contracted
-                    // quadrature (same evaluator as --near-shell exact).  Its
-                    // in-support path resolves the beamed peak; this branch is
-                    // reached only for pairs the cheap octant cannot certify.
-                    nbref::Settings ref;
-                    nbref::shape_field(
-                        x_obs, x_src, u, dx, dy, dz, ref, E, B);
-                    return;
-                }
-                E = Eref;
-                B = B + Wstar * (BboxD - Bbox);
-            }
-        }
+
     }
 
 } // namespace picBunch::pbfast
