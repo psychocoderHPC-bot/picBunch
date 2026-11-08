@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
 #include "picBunch/Config.hpp"
+#include "picBunch/Placement.hpp"
+#include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -51,9 +53,7 @@ cells = [32, 24, 16]
 origin = [1.0e-6, 2.0e-6, 0.0]
 
 [placement]
-left = 0.5
-front = 0.25
-top = 0.75
+position = [0.5, 0.25, 0.75]
 offset_unit = "fraction"
 patch_count = 4
 
@@ -121,9 +121,7 @@ species = "electrons"
 cells = [16, 16, 16]
 
 [placement]
-left = 0.5
-front = 0.5
-top = 0.5
+position = [0.5, 0.5, 0.5]
 offset_unit = "fraction"
 
 [accuracy]
@@ -410,4 +408,97 @@ TEST(Config, PrecisionSwitchRejectsUnknownValue)
     EXPECT_THROW(
         (void)picBunch::loadConfig(fixture.write("precision.toml", text)),
         std::runtime_error);
+}
+
+namespace
+{
+    void replaceOnce(std::string& text, std::string const& needle, std::string const& replacement)
+    {
+        auto const at = text.find(needle);
+        ASSERT_NE(at, std::string::npos);
+        text.replace(at, needle.size(), replacement);
+    }
+} // namespace
+
+TEST(Config, ParsesPositionVectorInMetres)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]", "position = [1.0e-6, 2.0e-6, 3.0e-6]");
+    replaceOnce(text, "offset_unit = \"fraction\"", "offset_unit = \"metres\"");
+    auto const config = picBunch::loadConfig(fixture.write("position-metres.toml", text));
+    EXPECT_FALSE(config.placement.fraction);
+    EXPECT_DOUBLE_EQ(config.placement.offset[0], 1.0e-6);
+    EXPECT_DOUBLE_EQ(config.placement.offset[1], 2.0e-6);
+    EXPECT_DOUBLE_EQ(config.placement.offset[2], 3.0e-6);
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, ParsesPositionVectorAsFraction)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write("position-fraction.toml", fullConfig));
+    EXPECT_TRUE(config.placement.fraction);
+    EXPECT_DOUBLE_EQ(config.placement.offset[0], 0.5);
+    EXPECT_DOUBLE_EQ(config.placement.offset[1], 0.25);
+    EXPECT_DOUBLE_EQ(config.placement.offset[2], 0.75);
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, MissingPositionNamesTheKey)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]\n", "");
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("missing-position.toml", text));
+        FAIL() << "expected a missing-position error";
+    }
+    catch(std::exception const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("placement.position"), std::string::npos);
+    }
+}
+
+TEST(Config, RejectsPositionFractionOutsideRange)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]", "position = [0.5, 1.5, 0.75]");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("position-range.toml", text)),
+        std::runtime_error);
+}
+
+TEST(Config, PositionDrivesTargetCentreFromDomainOrigin)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]", "position = [2.0e-6, 1.0e-6, 1.0e-6]");
+    replaceOnce(text, "offset_unit = \"fraction\"", "offset_unit = \"metres\"");
+    auto const config = picBunch::loadConfig(fixture.write("position-shift.toml", text));
+
+    picBunch::Bunch bunch;
+    bunch.resize(3);
+    double const target[3] = {3.0e-6, 3.0e-6, 1.0e-6};
+    double const delta[3] = {1.0e-8, 1.0e-8, 1.0e-8};
+    for(std::size_t p = 0; p < 3; ++p)
+    {
+        double const sign = static_cast<double>(p) - 1.0;
+        bunch.x[p] = target[0] + sign * delta[0];
+        bunch.y[p] = target[1] + sign * delta[1];
+        bunch.z[p] = target[2] + sign * delta[2];
+        bunch.ux[p] = bunch.uy[p] = bunch.uz[p] = 0.0;
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = picBunch::kDeckElectronCharge;
+        bunch.restMass[p] = picBunch::kDeckElectronMass;
+    }
+    auto const placed = picBunch::placeBunch(bunch, config);
+    for(int a = 0; a < 3; ++a)
+    {
+        EXPECT_NEAR(placed.targetCentre[a], config.domain.origin[a] + config.placement.offset[a], 1e-18);
+        EXPECT_NEAR(placed.centroid[a], target[a], 1e-18);
+        EXPECT_NEAR(placed.shift[a], 0.0, 1e-18);
+    }
 }

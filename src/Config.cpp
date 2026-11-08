@@ -240,9 +240,13 @@ namespace picBunch
         if(auto const* node = domain.get("origin"))
             config.domain.origin = asTriple(*node, "domain.origin");
 
-        config.placement.offset[0] = asDouble(require(placement, "left"), "placement.left");
-        config.placement.offset[1] = asDouble(require(placement, "front"), "placement.front");
-        config.placement.offset[2] = asDouble(require(placement, "top"), "placement.top");
+        // placement.position = [x, y, z], ordered x, y, z (PIConGPU
+        // notation): the offset from the domain origin to the bunch centroid,
+        // in the unit selected by placement.offset_unit.
+        if(auto const* positionNode = placement.get("position"))
+            config.placement.offset = asTriple(*positionNode, "placement.position");
+        else
+            fail("placement.position", "required key is missing");
         std::string const unit = asString(require(placement, "offset_unit"), "placement.offset_unit");
         if(unit == "fraction")
             config.placement.fraction = true;
@@ -361,12 +365,12 @@ namespace picBunch
             if(!std::isfinite(config.domain.origin[a]))
                 fail("domain.origin", "must be finite");
             if(!std::isfinite(config.placement.offset[a]))
-                fail("placement.offset", "must be finite");
+                fail("placement.position", "must be finite");
         }
         if(config.placement.fraction)
             for(std::size_t a = 0; a < 3; ++a)
                 if(config.placement.offset[a] < 0.0 || config.placement.offset[a] > 1.0)
-                    fail("placement.offset", "fractional offsets must be in [0, 1]");
+                    fail("placement.position", "fractional offsets must be in [0, 1]");
         positive(config.accuracy.tolerance, "accuracy.tolerance");
         if(config.accuracy.nearShell != "none" && config.accuracy.nearShell != "exact"
            && config.accuracy.nearShell != "fast" && config.accuracy.nearShell != "fast-gpu")
@@ -407,9 +411,7 @@ namespace picBunch
         warnUnknown(
             placement,
             "placement",
-            {"placement.left",
-             "placement.front",
-             "placement.top",
+            {"placement.position",
              "placement.offset_unit",
              "placement.patch",
              "placement.patch_count"},

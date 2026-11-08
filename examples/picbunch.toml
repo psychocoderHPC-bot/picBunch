@@ -38,12 +38,12 @@ cells = [64, 64, 64]
 origin = [0.0, 0.0, 0.0]
 
 [placement]
-# Offset from the domain origin to the bunch centre, along +x (left),
-# +y (front) and +z (top). offset_unit selects the interpretation.
+# Offset from the domain origin to the bunch centroid, given as a vector.
+# The first component is x, then y, then z (PIConGPU notation).
+#   offset_unit = "metres"   -> position is metres from the domain origin.
+#   offset_unit = "fraction" -> position is 0..1 of the domain extent.
 offset_unit = "fraction"
-left = 0.5
-front = 0.5
-top = 0.5
+position = [0.5, 0.5, 0.5]
 # "bbox" (default) covers only the shifted bunch bounding box and is validated
 # for single-rank restarts. "domain" covers the full domain and is the safe
 # choice for a multi-rank restart.

@@ -77,18 +77,21 @@ The checkpoint fields cover exactly `cells` nodes on this domain.
 
 ### `[placement]`
 
-The operator names the axes by intent: `left` is `+x`, `front` is `+y`, and
-`top` is `+z`. Each value is the offset from the PIConGPU domain origin to the
-bunch centre.
+`position` is a vector ordered `[x, y, z]`, following PIConGPU notation: the
+first component is `x`, then `y`, then `z`. It is the offset from the PIConGPU
+domain origin to the bunch centroid. `offset_unit` selects the interpretation:
+`"metres"` means metres from the domain origin, and `"fraction"` means a
+fraction of the domain extent (one full domain length is `1.0`).
 
 | key | required | meaning |
 | --- | --- | --- |
-| `offset_unit` | yes | `"fraction"` of the domain extent or `"metres"`. |
-| `left` | yes | Offset along `+x`. |
-| `front` | yes | Offset along `+y`. |
-| `top` | yes | Offset along `+z`. |
+| `position` | yes | Three components `[x, y, z]`: the offset from the domain origin to the bunch centroid, in the unit selected by `offset_unit`. |
+| `offset_unit` | yes | `"metres"` or `"fraction"` of the domain extent. |
 | `patch` | no | `"bbox"` (default) or `"domain"`. |
 | `patch_count` | no | Positive integer (default `1`): split the generated species along `z` into this many rank-overlap regions. |
+
+The old `left`, `front` and `top` scalar keys are no longer accepted; the error
+names `placement.position`. Use the vector.
 
 Fractional values must be in `[0, 1]`. The placement uses the charge-weighted
 centroid `sum(q w r) / sum(q w)`. The bounding-box centre is printed in the log

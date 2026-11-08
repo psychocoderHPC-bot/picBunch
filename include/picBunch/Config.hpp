@@ -75,8 +75,10 @@ namespace picBunch
                 Domain //!< cover the full PIConGPU domain
             };
 
-            //! Offsets from the PIConGPU domain origin along +x (left), +y
-            //! (front), +z (top); metres or a fraction of the domain extent.
+            //! Offset from the PIConGPU domain origin to the bunch centroid,
+            //! ordered x, y, z, in metres or as a fraction of the domain
+            //! extent.  Parsed from ``placement.position``; the deprecated
+            //! ``left``/``front``/``top`` scalars map to x/y/z.
             std::array<double, 3> offset{0.0, 0.0, 0.0};
             bool fraction = true;
             //! ``bbox`` (default) or ``domain``.  A single domain-covering patch
