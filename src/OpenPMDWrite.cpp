@@ -1949,6 +1949,17 @@ namespace picBunch
                 setScalarAttribute(iteration, "unit_length", H5T_NATIVE_DOUBLE, options.unitLength);
                 setScalarAttribute(iteration, "unit_efield", H5T_NATIVE_DOUBLE, options.unitEField);
                 setScalarAttribute(iteration, "unit_bfield", H5T_NATIVE_DOUBLE, options.unitBField);
+                // The full PIConGPU set (openPMDWriteMeta.hpp).  Written when
+                // the caller derived them; the legacy CLI path leaves them zero.
+                auto setUnitIfKnown = [&](char const* name, double value) {
+                    if(std::isfinite(value) && value != 0.0)
+                        setScalarAttribute(iteration, name, H5T_NATIVE_DOUBLE, value);
+                };
+                setUnitIfKnown("unit_time", options.unitTime);
+                setUnitIfKnown("unit_speed", options.unitSpeed);
+                setUnitIfKnown("unit_energy", options.unitEnergy);
+                setUnitIfKnown("unit_mass", options.unitMass);
+                setUnitIfKnown("unit_charge", options.unitCharge);
 
                 hid_t fields = checked(
                     H5Gcreate2(iteration, "fields", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), "H5Gcreate2");

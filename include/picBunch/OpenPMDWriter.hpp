@@ -159,6 +159,17 @@ namespace picBunch
         double unitEField = 1.0;
         //! PIConGPU magnetic-field unit in T (``sim.unit.bField()``).
         double unitBField = 1.0;
+        //! PIConGPU time unit in seconds (``sim.unit.time()``).  Zero leaves the
+        //! attribute unwritten (legacy CLI path, which has no deck inputs).
+        double unitTime = 0.0;
+        //! PIConGPU speed unit in m/s (``sim.unit.speed()``).
+        double unitSpeed = 0.0;
+        //! PIConGPU energy unit in J (``sim.unit.energy()``).
+        double unitEnergy = 0.0;
+        //! PIConGPU mass unit in kg (``sim.unit.mass()``).
+        double unitMass = 0.0;
+        //! PIConGPU charge unit in C (``sim.unit.charge()``).
+        double unitCharge = 0.0;
         //! Lower bound for ``fields/picongpu_idProvider/nextId``.  The writer
         //! stores at least the total number of particles copied across all
         //! species, so it is never written smaller.

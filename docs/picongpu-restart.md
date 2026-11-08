@@ -81,11 +81,14 @@ A raw HDF5 diff against a PIConGPU-written checkpoint leaves the following
 differences. PIConGPU restart does not read them, so they do not block a restart.
 
 - Iteration metadata: `cell_width`, `cell_height`, `cell_depth`, `eps0`,
-  `mue0`, `unit_charge`, `unit_energy`, `unit_mass`, `unit_speed`,
-  `unit_time`, `particleBoundary`, `particleBoundaryParameters` are absent.
-- Iteration defaults: `dt` is stored as the caller's value (default `0`) and
-  `timeUnitSI` defaults to `1.0`; PIConGPU's own checkpoint stores the deck
-  values.
+  `mue0`, `particleBoundary`, `particleBoundaryParameters` are absent. The
+  `[picongpu]` TOML path now writes the full PIConGPU unit set
+  (`unit_time`, `unit_speed`, `unit_length`, `unit_mass`, `unit_charge`,
+  `unit_energy`, `unit_efield`, `unit_bfield`); the legacy CLI path writes
+  only `unit_length`, `unit_efield` and `unit_bfield`.
+- Iteration defaults: `dt` is stored as the deck `delta_t` and `timeUnitSI` is
+  `1.0` (numerically equal to `unit_time`); PIConGPU writes `timeUnitSI =
+  unit_time`. Restart ignores both.
 - `RNGProvider3XorMin` is absent. PIConGPU reinitializes the RNG and logs a
   binning warning.
 - Fields group metadata: `chargeCorrection`, `fieldBoundary` and

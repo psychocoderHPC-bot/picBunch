@@ -2,18 +2,27 @@
 # All physical values are SI unless a key says otherwise.
 
 [picongpu]
-# PIConGPU internal units (sim.unit.length(), eField(), bField()).
-unit_length = 1.0e-7
-unit_e = 1.0e12
-unit_b = 1.0e3
-# Optional; defaults are the elementary charge and c.
-# unit_charge = 1.602176634e-19
-# unit_speed = 299792458.0
-# Required: must equal the deck's sim.unit.mass(), not necessarily the
-# electron mass. PIConGPU ignores the particle unitSI at restart.
-unit_mass = 9.1093837015e-31
-# Time step and checkpoint step. dt is in seconds.
-dt = 1.0e-15
+# Independent PIConGPU deck inputs. Copy these values 1:1 from the deck that
+# will restart the checkpoint; picBunch derives every SI unit factor exactly as
+# include/picongpu/unitless/simulation.unitless. Do not transcribe unit_*
+# factors: they are derived and no longer part of the schema.
+#
+# delta_t    = SI::DELTA_T_SI                       (simulation.param)
+# cell_size  = SI::CELL_WIDTH/HEIGHT/DEPTH_SI        (simulation.param)
+# base_mass  = SI::BASE_MASS_SI                      (speciesConstants.param)
+# base_charge= SI::BASE_CHARGE_SI (signed)           (speciesConstants.param)
+# base_density = SI::BASE_DENSITY_SI                 (simulation.param)
+# typical_particles_per_cell = TYPICAL_PARTICLES_PER_CELL (simulation.param)
+delta_t = 1.0e-15
+cell_size = [1.0e-7, 1.0e-7, 1.0e-7]
+base_mass = 9.1093837139e-31
+base_charge = -1.602176634e-19
+base_density = 1.0e24
+typical_particles_per_cell = 2
+# Optional; defaults to the 2022 CODATA value used by the deck.
+# speed_of_light = 2.99792458e8
+
+# Checkpoint step; also the file suffix.
 step = 0
 # "float32" (default) or "float64", applied uniformly to every field and
 # particle property record. float64 is only usable with a PIConGPU that can
@@ -25,18 +34,16 @@ species = "electrons"
 [domain]
 # PIConGPU domain cell counts (one patch per axis).
 cells = [64, 64, 64]
-# Physical cell size in metres.
-cell_size = [1.0e-7, 1.0e-7, 1.0e-7]
 # Physical position of domain cell (0,0,0); omit when the domain starts at zero.
 origin = [0.0, 0.0, 0.0]
 
 [placement]
-# Offset from the domain origin to the bunch centre, along +x (left),
-# +y (front) and +z (top). offset_unit selects the interpretation.
+# Offset from the domain origin to the bunch centroid, given as a vector.
+# The first component is x, then y, then z (PIConGPU notation).
+#   offset_unit = "metres"   -> position is metres from the domain origin.
+#   offset_unit = "fraction" -> position is 0..1 of the domain extent.
 offset_unit = "fraction"
-left = 0.5
-front = 0.5
-top = 0.5
+position = [0.5, 0.5, 0.5]
 # "bbox" (default) covers only the shifted bunch bounding box and is validated
 # for single-rank restarts. "domain" covers the full domain and is the safe
 # choice for a multi-rank restart.
