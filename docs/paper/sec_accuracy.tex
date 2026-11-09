@@ -310,7 +310,7 @@ distance in cells.
 \small
 \caption{Fast near evaluator, worst per-component relative error against
 the order-12 independent continuum reference, cells $10^{-7}$\,m,
-\texttt{jrc0880.jureca} (\texttt{sm\_90}). Regions: interior (inside the TSC
+CPU pointwise evaluator (host-independent; no CUDA/FFT linked). Regions: interior (inside the TSC
 support), face (on its boundary), outside ($1.6$--$3.6$ cells). The
 ``remainder order'' column is the Gauss--Legendre order of the smooth
 remainder; the singular $\mathrm{asinh}$ box is $\mathrm{O}(1)$ in every
@@ -448,7 +448,7 @@ rules out throttling; neither term is a clock effect. A distributed FFT
 decomposes the output
 field in $z$ slabs, one slab per rank. The end-to-end field, with
 the device TSC deposit into the interleaved complex slab, matches the
-replicated field to $3.2\times10^{-16}$ at one rank and $5.4\times10^{-16}$
+replicated field to $3.2\times10^{-16}$ at one rank and $5.3\times10^{-16}$
 at four ranks in the written file on HIP+MPI (hal); the same four-rank case on
 CUDA+MPI (jureca-h100, four H100s) gives $2.5\times10^{-16}$. The host
 FFTW backend supports strided plans in the current alpakaVendor and matches

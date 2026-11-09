@@ -645,7 +645,11 @@ The generic transform and transpose match a replicated c2c plan to `1.6e-16`,
 and the roundtrip is at FFT roundoff.  The end-to-end production field was
 revalidated on hal (HIP+MPI, ROCm 7.2) after fixing the device-deposit stride:
 one rank with a single source matches the replicated field to `3.2e-16`, and a
-200-particle `64^3` run at 4 ranks matches to `5.4e-16` in the written file.
+200-particle `64^3` run at 4 ranks matches to `5.3e-16` in the written file.
+Both values were re-measured on the current tree (`688c228`) on 2026-11-09 with
+the same inputs and parameters: the one-rank value is unchanged and the
+four-rank value is `5.35e-16`, a roundoff-level change
+(`docs/measurements/distributed_fft_revalidation_20261109.json`).
 The same 4-rank case on jureca-h100 (CUDA 13.4, sm_90, four H100s) gives
 `2.48e-16` global relative and `2.9e-11` worst absolute difference on a
 `8.65e4` V/m peak.  The host FFTW backend, with the strided-plan support in

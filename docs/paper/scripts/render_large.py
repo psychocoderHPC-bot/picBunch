@@ -84,6 +84,17 @@ def build(outdir, case, plane, part, source):
     err_items = [dict(it) for it in items]
     for it in err_items:
         it["title"] = it["title"] + " err"
+        if "symbol" in it:
+            sym = it["symbol"].replace("_{", "").replace("_", "") \
+                .replace("}", "")
+            ref = d[f"{plane}_{sym}_ref"]
+            if float(np.max(np.abs(ref))) == 0.0:
+                # Identically-zero reference component: the relative error
+                # is undefined and the panel renders fully masked; annotate
+                # it.
+                it["annotation"] = (
+                    rf"$\mathbf{{{it['symbol']}}}\equiv0$"
+                    " (beam axis); relative error undefined")
     rows = [
         {"kind": "field", "part": part, "items": items},
         {"kind": "error", "part": part, "items": err_items},

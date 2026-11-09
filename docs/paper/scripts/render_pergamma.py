@@ -115,12 +115,24 @@ def load(path):
         "pos_m": np.asarray(d["particle_pos_m"], float),
         "x": x, "y": y,
         "field": {k: field(d, plane, k) for k in COMP + ["E2", "B2"]},
-        "err": {}, "valid": {},
+        "err": {}, "valid": {}, "undef": {},
     }
     for k in COMP + ["E2", "B2"]:
         e, v = error(d, plane, k)
         out["err"][k] = e
         out["valid"][k] = v
+    # A reference component that is exactly zero everywhere (stationary
+    # bunch: all B; beam along +y: By) has an undefined relative error: its
+    # error panel renders fully masked and carries an in-panel annotation
+    # instead of the bare "no valid pixels" text.
+    for part in ("E", "B"):
+        if float(np.max(np.abs(field(d, plane, part + "2")))) <= 1e-30:
+            continue
+        for j, c in enumerate((f"{part}x", f"{part}y", f"{part}z")):
+            if float(np.max(np.abs(field(d, plane, c)))) == 0.0:
+                out["undef"][c] = (
+                    rf"$\mathbf{{{c[0]}}}_{{{'xyz'[j]}}}\equiv0$"
+                    " (beam axis); relative error undefined")
     for part in ("E", "B"):
         e2 = out["field"][part + "2"]
         rec = sum(out["field"][c] ** 2 for c in (f"{part}x", f"{part}y", f"{part}z"))
@@ -158,10 +170,16 @@ def log_ticks(vmin, vmax, nmax=3):
 
 
 def add_cbar(fig, cax, image, ticks, labels, title):
+    # Numeric ticks sit left of the bar, the rotated quantity label right of
+    # it.  The two columns get separate horizontal slots below; previously
+    # both were on the right and overran the E^2/B^2 panel.
     cb = fig.colorbar(image, cax=cax)
     cb.set_ticks(ticks)
     cb.set_ticklabels(labels)
-    cb.ax.tick_params(labelsize=9, pad=1.5, length=2)
+    cb.ax.yaxis.set_ticks_position("left")
+    cb.ax.yaxis.set_label_position("right")
+    cb.ax.tick_params(labelsize=9, labelleft=True, labelright=False,
+                      pad=1.5, length=2)
     cb.outline.set_linewidth(0.6)
     cb.set_label(title, fontsize=9, labelpad=3)
     return cb
@@ -179,37 +197,44 @@ def draw_case(case, outdir):
              "the colour ramp spans finite errors only",
              ha="center", va="center", fontsize=9)
 
-    # horizontal geometry (figure fractions)
+    # horizontal geometry (figure fractions).  Each colour bar has two
+    # dedicated text slots: tick labels to its left (bg) and the rotated
+    # quantity label to its right (ba for the first bar, R for the last).
     left = 0.125
-    pwg = 0.008          # panel-to-panel gap
-    bg = 0.014           # panel-to-bar gap
+    pwg = 0.008          # panel-to-panel gap (single-digit x tick labels)
+    bg = 0.098           # panel-to-bar gap (colour-bar tick labels)
     bw = 0.012           # bar width
-    ba = 0.080           # bar-to-next-panel gap (tick labels live here)
+    ba = 0.032           # bar-to-next-panel gap (rotated bar label)
+    R = 0.032            # final-bar-to-edge gap (rotated bar label)
     right = 0.995
-    fixed = left + 2 * (bg + bw + ba) + (right - right)
-    pw = (right - left - 2 * (bg + bw + ba) - 3 * pwg) / 4.0
+    pw = (right - left - 2 * pwg - 2 * (bg + bw) - ba - R) / 4.0
     xs = [left]
     xs.append(xs[-1] + pw + pwg)
     xs.append(xs[-1] + pw + pwg)
     cb1 = xs[-1] + pw + bg
     p4 = cb1 + bw + ba
     cb2 = p4 + pw + bg
-    assert cb2 + bw <= right + 1e-9
+    assert cb2 + bw + R <= right + 1e-9
     panel_x = [xs[0], xs[1], xs[2], p4]
 
     # vertical geometry: four rows, extra gap between the E and B blocks
+    # The B error row is omitted for the stationary case: the reference
+    # magnetic field is identically zero at beta=0, so the relative B error
+    # is undefined and the whole row would be fully masked.
+    berr_omitted = (float(np.max(np.abs(case["field"]["B2"]))) <= 1e-30)
     top, bottom = 0.948, 0.060
-    g1, g2, g3 = 0.045, 0.075, 0.045
-    rh = (top - bottom - g1 - g2 - g3) / 4.0
+    gaps = [0.045, 0.075, 0.045]
+    if berr_omitted:
+        gaps = [0.045, 0.120]
+    rowkeys = ["Efield", "Eerr", "Bfield"] + (["Berr"] if not berr_omitted
+                                              else [])
+    rh = (top - bottom - sum(gaps)) / len(rowkeys)
     rows = {}
     y = top - rh
-    rows["Efield"] = y
-    y -= g1 + rh
-    rows["Eerr"] = y
-    y -= g2 + rh
-    rows["Bfield"] = y
-    y -= g3 + rh
-    rows["Berr"] = y
+    for i, key in enumerate(rowkeys):
+        rows[key] = y
+        if i + 1 < len(rowkeys):
+            y -= gaps[i] + rh
 
     x = case["x"]
     yc = case["y"]
@@ -318,7 +343,11 @@ def draw_case(case, outdir):
                         transform=ax.transAxes, ha="center", va="center",
                         fontsize=9, color="0.25")
             if log and not np.any(valid):
-                ax.text(0.5, 0.5, "no valid pixels", transform=ax.transAxes,
+                note = case["undef"].get(c, "no valid pixels")
+                # The caption carries the full reason; keep the in-panel note
+                # to the short component identity so it stays inside the axes.
+                note = note.split(" (")[0]
+                ax.text(0.5, 0.5, note, transform=ax.transAxes,
                         ha="center", va="center", fontsize=9, color="0.25")
             ax.set_xticks(xticks)
             ax.set_yticks(yticks)
@@ -421,10 +450,13 @@ def draw_case(case, outdir):
             "no_valid_pixels": bool(no_valid),
         }
 
-    draw_row("Efield", "E", False)
-    draw_row("Eerr", "E", True)
-    draw_row("Bfield", "B", False)
-    draw_row("Berr", "B", True)
+    for key in rowkeys:
+        draw_row(key, key[0], key.endswith("err"))
+    if berr_omitted:
+        fig.text(0.5, 0.035,
+                 "B error row omitted: the reference B is identically zero "
+                 "at beta=0, so the relative B error is undefined",
+                 ha="center", va="center", fontsize=9)
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()

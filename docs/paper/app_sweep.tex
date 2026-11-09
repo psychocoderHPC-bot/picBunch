@@ -56,9 +56,13 @@ $x$ is vertical. The $E$ block and the $B$ block each put $E_x,E_y,E_z$ (or $B_x
 on one shared colour scale with its own bar and $E^2$ (or $B^2$) on a
 separate colour scale with its own bar, so the squared-magnitude scale never
 dominates the component scale. Error rows are logarithmic, carry the
-$10^{-3}$ contour, and are masked below $10^{-3}$ of the reference peak; at
-$\gamma=1.0$ the $B$ error bars are omitted because no pixel exceeds the
-mask threshold; the worst component error is $3.474\times10^{-3}$.}
+$10^{-3}$ contour. Grey pixels are masked: the reference field there is below
+$10^{-3}$ of the largest component peak on the plane, so the relative error is
+undefined. At $\gamma=1.0$ the $B$ error row is omitted entirely, since the
+reference magnetic field is identically zero at $\beta=0$ and the relative
+magnetic error is therefore undefined. The $B$ field row shows the
+identically-zero components; the worst component error is
+$3.474\times10^{-3}$.}
 \label{fig:gp1}
 \end{figure}
 
@@ -68,7 +72,9 @@ mask threshold; the worst component error is $3.474\times10^{-3}$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.4166$ ($\gamma=1.1$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The $B_y$ error panel is fully masked in every
+figure of this series, since $B_y\equiv0$ for $+y$ motion and the relative
+error of a zero reference is undefined. The worst component error is
 $3.669\times10^{-3}$.}
 \label{fig:gp1p1}
 \end{figure}
@@ -79,7 +85,7 @@ $3.669\times10^{-3}$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.7454$ ($\gamma=1.5$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
 $3.719\times10^{-3}$.}
 \label{fig:gp1p5}
 \end{figure}
@@ -90,7 +96,8 @@ $3.719\times10^{-3}$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.8660$ ($\gamma=2.0$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is $5.098\times10^{-3}$.}
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
+$5.098\times10^{-3}$.}
 \label{fig:gp2}
 \end{figure}
 
@@ -100,7 +107,7 @@ as Fig.~\ref{fig:gp1}. The worst component error is $5.098\times10^{-3}$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.9950$ ($\gamma=10$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
 $1.197\times10^{-1}$.}
 \label{fig:gp10}
 \end{figure}
@@ -111,7 +118,8 @@ $1.197\times10^{-1}$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.99980$ ($\gamma=50$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is $1.426$.}
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
+$1.426$.}
 \label{fig:gp50}
 \end{figure}
 
@@ -121,7 +129,8 @@ as Fig.~\ref{fig:gp1}. The worst component error is $1.426$.}
 \caption{Single-electron field and error on the x-y plane at mid-$z$ for
 $\beta=0.99995$ ($\gamma=100$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
-as Fig.~\ref{fig:gp1}. The worst component error is $3.213$.}
+as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
+$3.213$.}
 \label{fig:gp100}
 \end{figure}
 

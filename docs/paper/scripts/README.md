@@ -82,29 +82,48 @@ convention as `gp_*`. A shared linear bar maps a real but suppressed component
 (for example the gamma=10 longitudinal `E_x` at about 0.5% of the dominant
 component) onto the near-white zero centre and hides its structure. Each
 component panel therefore also prints its own peak as a percentage of the
-shared-row maximum. The triad keeps one shared bar; the annotation makes the
-per-panel scale explicit without changing the layout.
+shared-row maximum: the in-panel annotation reads `peak <p>% of max`, where
+`<p>` is the plane peak of that component (`max |arr_c|` over the plane)
+divided by `cvmax`, the largest plane peak over the three components of the
+row, which sets the shared colour scale (`vmin=-cvmax`, `vmax=+cvmax`); a
+small percentage means the component is faint on that scale. The triad keeps
+one shared bar; the annotation makes the per-panel scale explicit without
+changing the layout.
 
 The `E^2`/`B^2` panel in a field row uses `LogNorm` from `1e-6` of that
 panel's peak to its peak, with decade ticks plus the peak and a `(log)` bar
 label. Zero magnitude is the physical floor and is drawn with the colormap's
 lowest colour, not the masked grey. Error rows use `LogNorm` from the fixed
 `1e-6` floor to a decade ceiling, with a marked `1e-3` gate tick and the bar
-label "relative error (dimensionless)". The TSC-support contour is dark grey
-and solid so it stays visible on both the grey mask and the finite colours.
+label "relative error"; the error is dimensionless. Colour-bar tick labels sit
+left of the bar and the rotated quantity label right of it, each in its own
+reserved slot. The TSC-support contour is dark grey and solid so it stays
+visible on both the grey mask and the finite colours.
+
+## Layout guard
+
+`figstyle.save` draws every figure and asserts that no text box (including
+tick labels, axis labels and titles, colour-bar labels, in-panel annotations,
+and figure text) intersects a non-owning axes rectangle or another text box.
+Each record in `<outdir>/layout_assertions.json` tags every text as
+`tick_label`, `axis_label`, `annotation`, or `figure_text` and stores the
+minimum signed clearance in points (positive gap, negative overlap) between
+axis text and foreign axes or foreign axis text. Any collision raises
+`AssertionError` before the PDF is saved, so a new collision fails the render
+instead of shipping.
 
 ## Scripts
 
 | file | role | inputs | outputs |
 |---|---|---|---|
-| `figstyle.py` | shared style, palette, field/error renderers, deterministic save | none | PDF, PNG, `audit/*.json` |
+| `figstyle.py` | shared style, palette, field/error renderers, deterministic save, layout guard | none | PDF, PNG, `audit/*.json`, `layout_assertions.json` |
 | `axis.py` | beam-axis convention, array-axis table, coordinate helpers, assertions, `self_test` | none | assertion dicts |
 | `cases.py` | repo-relative paths and the case registry | `docs/paper/data/cases.json` | path helpers |
 | `render_slices.py` | `val_*` BDATA2 forward/fluctuation and VAR1b 1 mrad slices | `data/bdata2/*.npz`, `data/var1b/*.npz` | 10 PDF/PNG |
 | `render_large.py` | `large_*` LARGE1 128x128x64 slices | `data/large1/slices_g{1,10}.npz` | 6 PDF/PNG |
 | `render_pergamma.py` | `gp_*` HIRES 128^3 single-electron slices | `data/hires/hi_*.npz` | 7 PDF/PNG |
  | `render_scaling.py` | `F_a`, `F_b`, `F_w4b_rel_error`, `F_gamma_err_dist`, `F_multivel_dist`, and `F_mpi_rank_scaling_h100` when its reduced table exists; the V100 `F_mpi_rank_scaling` stays callable but is not in the default set | `data/scaling/matrix.csv`, `data/line/*.csv`, `data/line/multivel_*.npz`, `data/line/h100_mpi_scaling.csv` | 5 PDF/PNG by default, plus the H100 figure once data lands |
-| `run_all.py` | render every included figure and write the assertion log; `--strict` fails when a figure's reduced data is pending | all of the above | 28 PDF/PNG by default, 29 once the H100 table lands, 30 with `--include-unreferenced`, `axis-assertions.txt`, `render-summary.json` |
+| `run_all.py` | render every included figure and write the assertion log; `--strict` fails when a figure's reduced data is pending | all of the above | 28 PDF/PNG by default, 29 once the H100 table lands, 30 with `--include-unreferenced`, `axis-assertions.txt`, `render-summary.json`, `layout_assertions.json` |
 | `check_provenance.py` | validate provenance records, verify SHA-256 digests, require every figure to be covered or declared not-reproduced; `--strict` requires fresh-h100 or a reference-only fresh-reference record for data figures | `provenance/records/*.json`, `provenance/provenance.schema.json`, `provenance/not_reproduced.json`, `provenance/non_data_figures.json`, `figs/*.pdf` | report; exit code |
 | `make_provenance.py` | emit a schema-valid record for a case from hashed paths and host metadata | `data/cases.json` | `provenance/records/<case>.json` |
 | `compose_mpi_scaling.py` | reduce per-rank H100 campaign CSVs into the single H100 MPI-scaling table | `mpi_g256_r{1,2,4}.csv` | `data/line/h100_mpi_scaling.csv` |

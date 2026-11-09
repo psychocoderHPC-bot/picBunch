@@ -12,11 +12,13 @@ helper: one bar per row, at the row's right edge.
 import datetime as _dt
 import json
 import os
+import textwrap
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.text as mtext
 import matplotlib.ticker as mticker
 from matplotlib.patches import Patch
 import numpy as np
@@ -86,8 +88,166 @@ def apply_style(base=9.0):
     })
 
 
+_LAYOUT_RECORDS = {}
+
+
+def _axes_kind(ax):
+    if getattr(ax, "_colorbar", None) is not None:
+        return "colourbar"
+    if ax.get_label() in ("<colorbar>",):
+        return "colourbar"
+    return "panel"
+
+
+def _text_kind(t):
+    if t.axes is None:
+        return "figure"
+    if getattr(t.axes, "_colorbar", None) is not None:
+        return "colourbar"
+    return "panel"
+
+
+def _box(b):
+    return [round(float(v), 2) for v in (b.x0, b.y0, b.x1, b.y1)]
+
+
+def layout_collisions(fig, name):
+    """Return every text/axes and text/text overlap of the drawn figure.
+
+    Every visible text box is tested: tick labels, axis labels and titles,
+    colour-bar labels, in-panel annotations, and figure text.  A text is
+    allowed to sit inside its own axes rectangle only; it must stay clear of
+    every other axes rectangle and of every other text box.  The record also
+    stores the minimum signed clearance (positive = gap, negative = overlap)
+    for axis text, so the layout margins are auditable per figure.
+    """
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    axes = [a for a in fig.axes if a.get_visible()]
+    ax_boxes = [(a, a.get_window_extent(renderer)) for a in axes]
+
+    tick_ids = set()
+    label_ids = set()
+    for a in axes:
+        for t in list(a.get_xticklabels()) + list(a.get_yticklabels()):
+            tick_ids.add(id(t))
+        for t in (a.title, a.xaxis.label, a.yaxis.label):
+            label_ids.add(id(t))
+
+    texts = [t for t in fig.findobj(mtext.Text)
+             if t.get_visible() and t.get_text().strip()]
+    collisions = []
+
+    def role(t):
+        if id(t) in tick_ids:
+            return "tick_label"
+        if id(t) in label_ids:
+            return "axis_label"
+        if t.axes is None:
+            return "figure_text"
+        return "annotation"
+
+    def is_axis_text(t):
+        return role(t) in ("tick_label", "axis_label")
+
+    def overlap(a, b):
+        return (min(a.x1, b.x1) - max(a.x0, b.x0),
+                min(a.y1, b.y1) - max(a.y0, b.y0))
+
+    def clearance(a, b):
+        dx = max(a.x0 - b.x1, b.x0 - a.x1)
+        dy = max(a.y0 - b.y1, b.y0 - a.y1)
+        if dx >= 0 or dy >= 0:
+            return max(dx, dy) * 72.0 / fig.dpi
+        return -min(min(a.x1, b.x1) - max(a.x0, b.x0),
+                    min(a.y1, b.y1) - max(a.y0, b.y0)) * 72.0 / fig.dpi
+
+    def detail(kind, t, other, other_role, a, b, ix, iy):
+        return {
+            "kind": kind,
+            "text": t.get_text(),
+            "text_role": role(t),
+            "text_owner": _text_kind(t),
+            "other": other,
+            "other_role": other_role,
+            "overlap_px": [round(ix, 2), round(iy, 2)],
+            "overlap_pt": [round(ix * 72.0 / fig.dpi, 2),
+                           round(iy * 72.0 / fig.dpi, 2)],
+            "text_bbox": _box(a),
+            "other_bbox": _box(b),
+        }
+
+    minima = {
+        "axis_text_to_foreign_axes": None,
+        "axis_text_to_foreign_text": None,
+        "any_text_to_foreign_axes": None,
+        "any_text_to_text": None,
+    }
+
+    def remember(key, value):
+        if minima[key] is None or value < minima[key]:
+            minima[key] = value
+
+    tboxes = [(t, t.get_window_extent(renderer)) for t in texts]
+    for t, tb in tboxes:
+        own = t.axes
+        for a, ab in ax_boxes:
+            if own is a:
+                continue
+            s = clearance(tb, ab)
+            remember("any_text_to_foreign_axes", s)
+            if is_axis_text(t):
+                remember("axis_text_to_foreign_axes", s)
+            ix, iy = overlap(tb, ab)
+            if ix > 0.5 and iy > 0.5:
+                collisions.append(detail("text/axes", t, _axes_kind(a),
+                                         _axes_kind(a), tb, ab, ix, iy))
+    for i in range(len(tboxes)):
+        for j in range(i + 1, len(tboxes)):
+            ta, a = tboxes[i]
+            tb, b = tboxes[j]
+            s = clearance(a, b)
+            remember("any_text_to_text", s)
+            if is_axis_text(ta) and is_axis_text(tb):
+                remember("axis_text_to_foreign_text", s)
+            ix, iy = overlap(a, b)
+            if ix > 0.5 and iy > 0.5:
+                collisions.append(detail(
+                    "text/text", ta, tb.get_text(), role(tb), a, b, ix, iy))
+
+    minima = {k: (None if v is None else round(float(v), 2))
+              for k, v in minima.items()}
+    return {"figure": name, "n_axes": len(axes), "n_texts": len(texts),
+            "collisions": collisions, "min_clearance_pt": minima}
+
+
+def _record_layout(outdir, record):
+    _LAYOUT_RECORDS[(outdir, record["figure"])] = record
+    rows = [r for (od, _), r in sorted(_LAYOUT_RECORDS.items())
+            if od == outdir]
+    path = os.path.join(outdir, "layout_assertions.json")
+    with open(path, "w") as fh:
+        json.dump({"figures": rows}, fh, indent=1, sort_keys=True)
+    return path
+
+
+def assert_no_layout_collisions(fig, outdir, name):
+    """Fail loudly (and persist the evidence) on any layout collision."""
+    record = layout_collisions(fig, name)
+    path = _record_layout(outdir, record)
+    if record["collisions"]:
+        first = record["collisions"][0]
+        raise AssertionError(
+            f"layout collision in {name}: {len(record['collisions'])} "
+            f"pair(s); first {first['kind']} {first['text']!r} vs "
+            f"{first['other']!r} overlap {first['overlap_px']} px "
+            f"({first['overlap_pt']} pt); details in {path}")
+    return record
+
+
 def save(fig, outdir, name, manifest):
     """Save PDF+PNG at the exact canvas size (no bbox_inches) and audit JSON."""
+    assert_no_layout_collisions(fig, outdir, name)
     os.makedirs(outdir, exist_ok=True)
     audit_dir = os.path.join(outdir, "audit")
     os.makedirs(audit_dir, exist_ok=True)
@@ -189,7 +349,7 @@ def _error_ticks(vmin, vmax):
     if float(vmin) <= ERR_GATE <= float(vmax):
         ticks.add(float(ERR_GATE))
     ticks = sorted(ticks)
-    labels = ["1e-3 gate" if np.isclose(t, ERR_GATE, rtol=1e-9, atol=0.0)
+    labels = ["1e-3\ngate" if np.isclose(t, ERR_GATE, rtol=1e-9, atol=0.0)
               else _fmt_sci(t) for t in ticks]
     return ticks, labels
 
@@ -202,8 +362,8 @@ def _sq_ticks(peak, decades=SQ_LOG_DECADES):
 
 def _peak_fraction(peak, shared):
     if not np.isfinite(peak) or shared <= 0:
-        return "peak 0% of max"
-    return f"peak {100.0 * float(peak) / float(shared):.3g}% of max"
+        return "peak\n0%\nof max"
+    return f"peak\n{100.0 * float(peak) / float(shared):.3g}%\nof max"
 
 
 def _masked_note(fig):
@@ -356,12 +516,19 @@ def _fmt_tick(v):
 
 
 def _bar_title(fig, cax, image, ticks, ticklabels, title):
-    """Compact colour bar for the split layout: label above the bar."""
+    """Compact colour bar: numeric ticks left, rotated quantity label right.
+
+    The two text columns are separate so each can be sized and kept out of the
+    neighbouring image panels; putting both on the same side overran the
+    squared-field panel in the old layout.
+    """
     cb = fig.colorbar(image, cax=cax)
     cb.set_ticks(ticks)
     cb.set_ticklabels(ticklabels)
-    cb.ax.tick_params(labelsize=plt.rcParams["xtick.labelsize"], pad=1.5,
-                      length=2)
+    cb.ax.yaxis.set_ticks_position("left")
+    cb.ax.yaxis.set_label_position("right")
+    cb.ax.tick_params(labelsize=plt.rcParams["xtick.labelsize"],
+                      labelleft=True, labelright=False, pad=1.5, length=2)
     cb.outline.set_linewidth(0.6)
     cb.set_label(title, fontsize=plt.rcParams["axes.labelsize"], labelpad=3)
     return cb
@@ -381,16 +548,24 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     nrow = len(rows)
     fig = plt.figure(figsize=(width_in(width_frac), fig_height))
     left, right = 0.105, 0.995
-    pwg, bg, bw, ba = 0.008, 0.014, 0.012, 0.080
-    pw = (right - left - 2 * (bg + bw + ba) - 3 * pwg) / 4.0
+    # Slots in figure fractions (figure width tuned for 9 pt text):
+    #   pwg  panel-to-panel gap for the horizontal tick labels;
+    #   bg   panel-to-bar gap for the colour-bar tick labels (left side);
+    #   ba   bar-to-next-panel gap for the rotated colour-bar label (right);
+    #   R    final-bar-to-edge gap for its rotated label.
+    pwg, bg, bw, ba, R = 0.040, 0.098, 0.012, 0.050, 0.035
+    pw = (right - left - 2 * pwg - 2 * (bg + bw) - ba - R) / 4.0
     xs = [left, left + pw + pwg, left + 2 * (pw + pwg)]
     cb1 = xs[-1] + pw + bg
     p4 = cb1 + bw + ba
     cb2 = p4 + pw + bg
-    assert cb2 + bw <= right + 1e-9
+    assert cb2 + bw + R <= right + 1e-9
     panel_x = [xs[0], xs[1], xs[2], p4]
 
-    top, bottom = 0.950, 0.105
+    top = 0.950
+    # Error rows carry the shared "masked" legend at the very bottom; reserve
+    # enough margin that it cannot touch the x tick labels or axis labels.
+    bottom = 0.170 if any(r["kind"] == "error" for r in rows) else 0.105
     gap = 0.075 if nrow > 1 else 0.0
     rh = (top - bottom - gap * (nrow - 1)) / nrow
     row_y = []
@@ -457,7 +632,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             ccmap = scmap = err_cmap
             cticks, clabels = _error_ticks(cvmin, cvmax)
             sticks, slabels = _error_ticks(svmin, svmax)
-            clabel = slabel = "relative error (dimensionless)"
+            clabel = slabel = "relative error"
             _assert_masked_distinct(cnorm, ccmap, f"{part} error components")
             _assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
 
@@ -471,6 +646,24 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                 v = np.asarray(it["valid"], bool)
                 z = np.ma.masked_where(~v | ~np.isfinite(e), e)
                 ax.pcolormesh(x, y, z, cmap=cmap, norm=norm, shading=shading)
+                if not bool(np.any(v & np.isfinite(e))):
+                    # A fully masked error panel: say why, so the grey cannot
+                    # be read as missing data.  An identically-zero reference
+                    # (peak 0) makes the relative error undefined; a zero
+                    # component among live ones is named in the item
+                    # annotation.
+                    note = it.get("annotation",
+                                  "fully masked: relative error undefined")
+                    # Keep the note inside its own panel: a long single line
+                    # would spill across the neighbouring axes and trip the
+                    # layout guard.  The caption carries the full reason, so
+                    # the in-panel note is the short component identity.
+                    short = note.split(" (")[0]
+                    note = short if len(short) <= 30 else "fully masked"
+                    ax.text(0.5, 0.5, note, transform=ax.transAxes,
+                            ha="center", va="center",
+                            fontsize=min(plt.rcParams["font.size"], 6.5),
+                            color="0.25")
                 try:
                     ax.contour(xc, yc, np.where(v & np.isfinite(e), e, np.nan),
                                levels=[1e-3], colors=[GATE_STYLE["color"]],
@@ -491,8 +684,13 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             ax.set_title(title, pad=2.5,
                          fontsize=plt.rcParams["axes.titlesize"])
             ax.tick_params(length=2, pad=1.5)
-            ax.xaxis.set_major_locator(mticker.MaxNLocator(3, prune=None))
-            ax.yaxis.set_major_locator(mticker.MaxNLocator(3, prune=None))
+            # MaxNLocator(4, prune="both") keeps ticks strictly inside the
+            # visible limits and away from the panel corners.  The old
+            # MaxNLocator(3) emitted a 7.5 tick beyond a 6.4-wide x range whose
+            # label spilled into the next panel, and edge ticks collided with
+            # the first tick label of the neighbouring axis.
+            ax.xaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
+            ax.yaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
 
         for j, it in enumerate(comps):
             ax = fig.add_axes([panel_x[j], y0, pw, rh])

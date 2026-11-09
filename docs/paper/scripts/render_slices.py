@@ -113,8 +113,24 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
     rows = [{"kind": "field", "part": part, "items": field_items}]
     smask = None
     if has_error:
-        rows.append({"kind": "error", "part": part,
-                     "items": [dict(it) for it in field_items]})
+        err_items = []
+        for it in field_items:
+            e = dict(it)
+            # it["symbol"] is the LaTeX form (E_{x}, E^2); the raw
+            # component names are Ex..Ez, Bx..Bz.
+            sym = (it["symbol"].replace("_{", "").replace("_", "")
+                   .replace("}", "").replace("^2", "2")
+                   if "symbol" in it
+                   else part + "2")
+            if sym.startswith(part) and sym != part + "2" and float(
+                    np.max(np.abs(plane_data[sym]["ref"]))) == 0.0:
+                # Identically-zero reference component: the relative error is
+                # undefined and the panel renders fully masked; annotate it.
+                e["annotation"] = (
+                    rf"$\mathbf{{{e['symbol']}}}\equiv0$"
+                    " (beam axis); relative error undefined")
+            err_items.append(e)
+        rows.append({"kind": "error", "part": part, "items": err_items})
         smask = support_mask(plane, field_items[0]["arr"].shape, sources, coord)
     xl, yl = axis.axis_labels(dataset, plane, source)
     man = {"source_data": os.path.relpath(source, cases.REPO_ROOT),

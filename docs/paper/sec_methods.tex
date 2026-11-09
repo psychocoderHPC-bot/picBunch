@@ -108,8 +108,8 @@ mid slices, both & 10 / 5.06\,MeV; 1 / 0 & 1 each; $2\times10^{-7}$\,m & $32\tim
 large-domain, both & 10 / 5.06\,MeV; 1 / 0 & \dots; $2\times10^{-7}$\,m & $128\times128\times64$ ($25.6\times25.6\times12.8$), jureca-h100 \\
 cost, both & 1 / 0; 10 / 5.06\,MeV & \dots; $2.5\times10^{-7}$\,m & $66\times68\times66$, jureca-h100 \\
 landscape, aspect 1 & 10/50/100 & 1; $10^{-7}$\,m & $96^3$ ($h\!=\!1$), $384^3$ ($h\!=\!1/4$), jureca-h100 (ref: rosi\_v100) \\
-landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\!1$, host \dots \\
- multi-velocity, both & 10 / 5.06\,MeV & $3.12\times10^{6}\,e$ ($5\times10^{-13}$\,C) each; $10^{-7}$\,m & $64^3$, hal (A30, \texttt{sm\_80}) \\
+landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\!1$, rosi\_v100 \\
+ multi-velocity, both & 10 / 5.06\,MeV & $3.12\times10^{6}\,e$ ($5\times10^{-13}$\,C) each; $10^{-7}$\,m & $64^3$, jureca-h100 (jrc0880) \\
  divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
 \end{longtable}
 \end{table}
@@ -139,12 +139,11 @@ outside the domain is rejected at start-up.
 The measurement hosts and toolchains are: \texttt{rosi\_v100} (node
 \texttt{gv002}, V100 \texttt{sm\_70}, CUDA 12.6,
 \texttt{PICBUNCH\_ARCH=70}, Release); \texttt{jrc0880.jureca} (H100
-\texttt{sm\_90}, CUDA 13.4); \texttt{hal}, in two toolchains: the CUDA
-builds (the multi-velocity measurements of
-Appendix~\ref{app:multivel}, the hires and line series) ran on an NVIDIA A30
-\texttt{sm\_80} under CUDA 13.4.92, and the distributed-FFT and CTest
-validation ran on an AMD Radeon RX 7900 XTX \texttt{gfx1100} under ROCm
-7.2.0 with rocFFT. The checkpoint writer follows openPMD standard version
+\texttt{sm\_90}, CUDA 13.4); the multi-velocity measurements of
+Appendix~\ref{app:multivel}, the hires and line series ran on
+\texttt{jrc0880.jureca} (H100 \texttt{sm\_90}, CUDA 13.4); \texttt{hal} is
+used for the AMD Radeon RX 7900 XTX \texttt{gfx1100} ROCm 7.2.0 toolchain
+(rocFFT) in the distributed-FFT HIP run and the CTest portability check. The checkpoint writer follows openPMD standard version
 1.1.0~\citep{openpmd} and is built against the openPMD-api 0.17.1 software.
 The reference PIConGPU is PIConGPU 0.9.0-dev (deck commit \texttt{b87c053}),
 the release whose \texttt{referenceOnly} field-initializer mode is used in

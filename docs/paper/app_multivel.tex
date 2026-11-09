@@ -9,7 +9,7 @@ splitting the velocity distribution into $B$ classes and running one
 convolution per class; the near shell needs no binning, because each pair
 carries its own velocity. The measurements below are on a $64^3$ grid of cell
 $10^{-7}$\,m with $200$ sources of weight $5\times10^{-13}$\,C
-($Q=-100$\,pC) on \texttt{hal} (NVIDIA A30, \texttt{sm\_80}, CUDA 13.4.92).
+($Q=-100$\,pC) on jureca-h100 (\texttt{jrc0880}, H100 \texttt{sm\_90}, CUDA 13.4).
 
 \paragraph{Box representative.}
 Each box is represented by its absolute-charge-weighted mean momentum, not by
@@ -69,6 +69,9 @@ longitudinal current. With a $5^\circ$ angular spread the $B_z$ peak moves
 from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T and $B_y$ from
 $1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is $5.22\times10^{-2}$, and
 the two bin counts agree to $0.0043\%$ in $B_z$ and $0.056\%$ in $B_y$.
+The tabulated angular peaks $2.48202\times10^{4}$ and
+$2.48213\times10^{4}$\,T come from the pre-final code
+(\texttt{c0bf82c}), whose host was not recorded.
 On the final code the angular case gives $B_z=2.4663\times10^{4}$\,T,
 $0.63\%$ below the tabulated $2.4820\times10^{4}$\,T, the velocity-binning
 change in \texttt{VelocityBinning.cpp} between \texttt{c0bf82c} (table) and
@@ -95,7 +98,7 @@ on each plane---and the $B_y/B_z$ ratio; the worst deviation is $1.4\%$
 (x-y ratio) and every per-component peak on every slice is within $1.0\%$.
 
 Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
-($R=3$, tile 4, order 5), 248\,s on the A30.
+($R=3$, tile 4, order 5), 248\,s, a legacy A30 value.
 
 \section*{Far-tail switch validation}
 \label{app:far-tail}
