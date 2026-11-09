@@ -12,7 +12,9 @@ Two cases share the positions and differ only in a $1.046$\,mrad rms
 transverse divergence in $x$ (Figs.~\ref{fig:valforwardE},
 \ref{fig:valforwardB}, \ref{fig:valfluctE}, \ref{fig:valfluctB}). A
 separate unit-weight bunch (the first 200 of the 1000-particle seed-43 case
-of Table~\ref{tab:configs}, $Q=-32$\,aC) is binned on the
+of Table~\ref{tab:configs}, $Q=-32$\,aC) propagates along $+y$ and is
+different from the seed-42 mono-energetic bunch that moves along $+x$ in
+the $\gamma=10$ case of Table~\ref{tab:slices}. It is binned on the
 $32\times32\times16$ grid of cell $2\times10^{-7}$\,m and sliced at its
 mid-plane (Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal and increases
 left to right, so the bunch moves rightwards and $y$ is the beam axis; the
@@ -148,7 +150,8 @@ component peak on the plane), x-y plane
 at $z=1.60\,\si{\micro\metre}$ and z-y plane at $x=3.20\,\si{\micro\metre}$,
 $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m, mesh against the
 independent exact TSC driver (FP64 quadrature, order $4$, max level $5$,
-tolerance $10^{-3}$). The $\gamma=10$ bunch moves along $+x$ ($B_x\equiv0$);
+tolerance $10^{-3}$). The $\gamma=10$ case is the seed-42 mono-energetic
+bunch, which moves along $+x$ ($B_x\equiv0$);
 $x$ is horizontal in the x-y cut and is the beam axis there, while $y$ is
 horizontal in the z-y cut (beam out of plane) and $z$ vertical. Node spacing $h=1$ PIC cell; no near shell.
 Measured on \texttt{rosi\_v100} (V100, v0.9.2; the near-shell numbers in
@@ -195,7 +198,10 @@ is measured at the same geometry below.
 \label{app:slices-runs}
 
 On the same $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m
-geometry, the exact near shell was run at the radius the envelope case
+geometry (the seed-42 mono-energetic bunch of Table~\ref{tab:slices},
+beam axis $+x$; not the seed-43 $+y$ bunch of
+Fig.~\ref{fig:val1mrad}), the exact near shell was run at the radius the
+envelope case
 assumed, $R=3$ for $\gamma=1$ and $R=4$ for $\gamma=10$, in mesh nodes of
 this $h=1$ grid; the mesh-only table and the near-shell numbers in this
 subsection are the v0.9.2 library runs, in contrast to the v0.4.0
