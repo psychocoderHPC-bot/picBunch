@@ -70,7 +70,7 @@ source & measured magnitude & statement \\
 mesh / deposit & $1.38\times10^{-7}$ ($M\!-\!T$, $\gamma=1$, aspect 1, $d=48$); $2.6\times10^{-4}$ ($\gamma=10$, aspect 1, $d=48$) & Table~\ref{tab:d48}; far-field sweeps of Section~\ref{sec:farfield} \\
 velocity binning & $4.3\times10^{-6}$ relative ($B=16$ vs $64$, 5\% energy spread); $4.3\times10^{-4}\%$ in $B_z$ for the 5\% energy case; $1.4\%$ worst against the arbiter for the 1\,mrad case & Appendix~\ref{app:multivel}, Table~\ref{tab:multivel} \\
 near-source quadrature & $6.82\times10^{-4}$ stationary interior; $1.40\times10^{-4}$ moving axial interior; $1.94\times10^{-3}$ moving oblique interior (measured limit) & Table~\ref{tab:fast} \\
-far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the $512^3$ output (legacy rosi\_v100 direct-charge-sum run, not re-measured) & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
+far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the $512^3$ output (rosi\_v100 direct-charge-sum run; comparison data not in the repository, not re-measured) & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
 output precision & float32 checkpoint: bitwise arrival under PIConGPU, $\max_\mathrm{abs\,diff}=0.0$ after one step; float64 opt-in records a warning attribute & Section~\ref{sec:validation} \\
 \bottomrule
 \end{tabular}
@@ -110,7 +110,7 @@ $1.4\times10^{-3}$). $M\!-\!T$: mesh vs TSC-convolved continuum;
 $M\!-\!P$: mesh vs point field; $T\!-\!P$: TSC smoothing, mesh-independent.
 At $\gamma=10$, aspect 1 the $M\!-\!P$ vs $M\!-\!T$ gap is the smoothing
 (L2 ratio $58\times$), not the mesh. Measured on \texttt{rosi\_v100}
-(V100; the $d\le32$ sweeps of Section~\ref{sec:farfield} were re-measured on
+(V100), while the $d\le32$ sweeps of Section~\ref{sec:farfield} are on
 JURECA H100, so this $d=48$ table and those sweeps are on different
 hosts).}
 \label{tab:d48}
@@ -213,9 +213,9 @@ at or below the gate, $h=1$, L2 over the six components, per axis
 direction, worst over the three positive axis directions ($>$48: beyond the
 measured window). $T$: TSC-convolved continuum; $P$: point field. Oblique
 directions are $\sim1.5\times$ larger. Measured on \texttt{rosi\_v100}
-(V100); like Table~\ref{tab:d48} this comes from the original W4 campaign,
-while the $d\le32$ sweeps of Section~\ref{sec:farfield} are the
-JURECA H100 re-measurement, so the two are on different hosts.}
+(V100); like Table~\ref{tab:d48} this is a V100 value,
+while the $d\le32$ sweeps of Section~\ref{sec:farfield} are on
+JURECA H100, so the two are on different hosts.}
 \label{tab:crossover}
 \begin{tabular}{lcc|cc|cc}
 \toprule
@@ -340,11 +340,12 @@ $1.40\times10^{-4}$, $1.35\times10^{-4}$, $2.20\times10^{-5}$,
 $1.35\times10^{-4}$, $1.40\times10^{-4}$, $0$; the moving oblique interior
 row is $7.01\times10^{-4}$, $1.94\times10^{-3}$, $9.78\times10^{-4}$,
 $6.44\times10^{-4}$, $4.15\times10^{-4}$, $5.54\times10^{-4}$. The interior
-entries are below the published values because the evaluator (the
-\texttt{obaRayField} oblique ray integral) and the reference (a refined
-\texttt{indfield}) changed after publication; the change is largest for the
-moving oblique interior, $8.15\times10^{-2}$ published to
-$1.94\times10^{-3}$ now.
+entries are below the published values, because the evaluator
+(\texttt{obaRayField} oblique ray integral) and the reference (a refined
+\texttt{indfield}) of this table are later revisions of the published
+ones; the difference is largest for the moving oblique interior,
+$8.15\times10^{-2}$ in the published table,
+$1.94\times10^{-3}$ in this table.
 
 The validity of each mode follows from the table. \texttt{exact} is the
 adaptive FP64 quadrature shared with the reference driver. Its in-support
@@ -430,16 +431,17 @@ $1.36\times10^{6}$ pairs/s for the three radii, about $2\times$ slower per
 component than the standalone kernel, the overhead of the per-tile local FFT
 and launch in the integrated path. The measured per-pair penalty is
 $1.79\times$ at $R=1.5$, $1.40\times$ at $R=3$ and $1.29\times$ at $R=4$
-against the previously published rates, so the gap is concentrated at small
+against the published rates, so the gap is concentrated at small
 $R$ rather than uniform. At $R=1.5$ it splits into two parts on this
-host and stack: the final code is $1.42\times$ slower than the v0.9.1
+host and stack: the v0.9.2 binary is $1.42\times$ slower than the v0.9.1
 binary (near-shell wall $498.24$ vs $352.30$\,s) on the same node, input
-and pair count. The cause is the oblique near-shell convergence fix: its
+and pair count. The difference between the two versions is the oblique
+near-shell convergence fix: its
 ray integral raises the near-shell kernel arithmetic $1.44\times$ at
 unchanged occupancy, while the co-changed stencil term adds $<1\%$, and
-the same change is what improved the moving-oblique interior accuracy from
+it is what improves the moving-oblique interior accuracy from
 $8.15\times10^{-2}$ to $1.94\times10^{-3}$ (\S\ref{sec:fastacc}).
-The residual host/stack term is unchanged: the
+The residual host/stack term: the
 v0.9.1 binary rebuilt on this stack is $1.26\times$ the published value
 (end-to-end $353.47$ vs $281.0$\,s), the residual host/stack difference.
 A clock probe over the whole block (idle $345$ MHz, load $1755$ MHz, the

@@ -6,6 +6,26 @@ runs from a fresh clone without environment variables. The measurement ingest
 is the exception: it requires a campaign root through `--measurement-root` or
 `PICBUNCH_MEASUREMENT_ROOT`.
 
+## Shared field style
+
+All field figures (`gp_*`, `val_*`, `large_*`) use one geometry and one font
+ladder from `figstyle.py`. The canvas is the full text width
+(`6.268 in`), with four data panels per row, two colour bars per row, and
+fixed inch margins. `field_layout` solves the figure height from the row
+count so every data panel is the same physical square: `0.9245 in` wide and
+`0.9245 in` high, aspect ratio `1.0000`, independent of the number of rows
+and columns. Only the figure height changes with the row count.
+
+The font ladder is fixed: axis labels `9 pt`, panel titles and figure notes
+`8 pt`, tick labels and legends `7.5 pt`, in-panel annotations `7 pt`. Every
+value is at or below the `10 pt` body text. Field data are never smoothed:
+`pcolormesh` uses `antialiased=False`, `edgecolors='none'` and the shading
+that matches the array shape, and `imshow` uses `interpolation='nearest',
+resample=False`. A data pixel is drawn as a visible block; only text and
+line art are anti-aliased. The disabled cell edges also guarantee that no
+white seam appears between adjacent cells at 300 dpi (checked by a raster
+scan of the data rectangles).
+
 ## Axis convention
 
 The propagation axis is a property of each data set, not a single global
@@ -50,8 +70,8 @@ asserts all B components are zero and checks labels only, since a stationary
 bunch has no beam axis. A mapping self-test fails if a stored band is not
 placed on the recorded horizontal axis.
 
-The paper captions must keep the wording "earlier axial-x data set (not the
-+y beam-axis set)" and "Bx = 0" for LARGE1. A future +y large-domain run is an
+The paper captions must state the axial-$x$ geometry and keep "$B_x = 0$"
+for LARGE1. A future +y large-domain run is an
 optional cross-orientation validation, not a relabel of these figures.
 
 ## Error-panel mask
@@ -88,8 +108,8 @@ components of the row, which sets the shared colour scale (`vmin=-cvmax`,
 `vmax=+cvmax`). The value is shown as a percentage to at most one decimal;
 peaks below 1% are given to one significant figure (e.g. `.04%`), the panel
 that sets the shared maximum reads `max`, and only an exactly zero peak reads
-`0%`. The label is drawn at 5.5 pt and `render_split_field_rows` asserts that
-the rendered text stays below 22% of its panel width. A small percentage means the component is
+`0%`. The label is drawn at 7 pt and `render_split_field_rows` asserts that
+the rendered text stays below 30% of its square panel width. A small percentage means the component is
 faint on that scale. The triad keeps one shared bar; the annotation makes the
 per-panel scale explicit without changing the layout.
 

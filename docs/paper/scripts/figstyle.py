@@ -25,6 +25,18 @@ import numpy as np
 
 # A4 (210 mm) minus 2 x 25.4 mm geometry margins.
 TEXT_BLOCK_IN = 6.268
+
+# ---- Shared font ladder -------------------------------------------------
+# The body text is 10 pt.  No figure text may exceed it; axis labels stay at
+# 9 pt and everything secondary is smaller, so the data panels get the room.
+BODY_TEXT_PT = 10.0
+FIG_TEXT_PT = 8.0       # figure-level notes / row labels
+AXIS_LABEL_PT = 9.0     # x/y axis labels and colour-bar quantity labels
+TITLE_PT = 8.0          # in-panel titles
+TICK_PT = 7.5           # axis and colour-bar tick labels
+ANNOT_PT = 7.0          # in-panel annotations (peak labels, blank notes)
+LEGEND_PT = 7.5
+
 FIXED_DATE = "D:20261102000000+00'00'"
 FIXED_DATE_OBJ = _dt.datetime(2026, 11, 2, tzinfo=_dt.timezone.utc)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -67,8 +79,125 @@ def width_in(fraction):
     return TEXT_BLOCK_IN * float(fraction)
 
 
+# ---- Shared field-figure geometry --------------------------------------
+# Every field family (gp_*, val_*, large_*) uses this one grid: four square
+# data panels per row (three signed components plus the squared magnitude),
+# two colour bars per row, and fixed inch margins/gaps.  The horizontal
+# layout is fixed in figure fractions, so the panel width in inches is fixed
+# by the canvas width.  The figure height is then solved from the number of
+# rows so that every panel has the same physical width and height (aspect
+# ratio exactly 1).  Only the height grows with the row count.
+FIELD_LEFT = 0.105          # left margin: y label + row labels
+FIELD_RIGHT = 0.995
+FIELD_PANEL_GAP = 0.008     # panel-to-panel gap (horizontal tick labels)
+FIELD_BAR_GAP = 0.098       # panel-to-colour-bar gap (bar tick labels)
+FIELD_BAR_WIDTH = 0.012
+FIELD_BAR_LABEL_GAP = 0.032  # bar-to-next-panel / bar-to-edge (rotated label)
+FIELD_EDGE_GAP = 0.032
+
+FIELD_TOP_IN = 0.30          # above the first row (panel titles)
+FIELD_BOTTOM_IN = 0.46       # below the last row (ticks + x label)
+FIELD_BOTTOM_ERR_IN = 0.66   # extra room for the shared "masked" legend
+FIELD_ROW_GAP_IN = 0.48      # enough for title, ticks and a row x label
+FIELD_TOP_NOTE_IN = 0.55     # per-gamma top note
+FIELD_BOTTOM_NOTE_IN = 0.86  # per-gamma bottom note (omitted B error row)
+
+FIELD_NCOL = 4
+
+
+def field_panel_width_frac():
+    """Width of one of the four data panels, as a figure fraction."""
+    reserved = (FIELD_LEFT + 2 * FIELD_PANEL_GAP
+                + 2 * (FIELD_BAR_GAP + FIELD_BAR_WIDTH)
+                + FIELD_BAR_LABEL_GAP + FIELD_EDGE_GAP
+                + (1.0 - FIELD_RIGHT))
+    return (1.0 - reserved) / FIELD_NCOL
+
+
+def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
+                 bottom_in=FIELD_BOTTOM_IN, row_gap_in=FIELD_ROW_GAP_IN):
+    """Unified square-panel layout for a field figure.
+
+    Returns a dict with the canvas size, the four panel x positions, the
+    panel width/height (both in figure fractions and in inches), the colour
+    bar positions and the y origin of every row.  ``panel_width_in`` equals
+    ``panel_height_in`` by construction, independent of ``nrows``.
+    """
+    nrows = int(nrows)
+    if nrows < 1:
+        raise ValueError("field_layout needs at least one row")
+    fig_w_in = width_in(width_frac)
+    pw = field_panel_width_frac()
+    panel_in = pw * fig_w_in
+    fig_h_in = (float(top_in) + nrows * panel_in
+                + (nrows - 1) * float(row_gap_in) + float(bottom_in))
+    top = 1.0 - float(top_in) / fig_h_in
+    bottom = float(bottom_in) / fig_h_in
+    rh = panel_in / fig_h_in
+    gap = float(row_gap_in) / fig_h_in
+
+    xs = [FIELD_LEFT,
+          FIELD_LEFT + pw + FIELD_PANEL_GAP,
+          FIELD_LEFT + 2 * (pw + FIELD_PANEL_GAP)]
+    cb1 = xs[-1] + pw + FIELD_BAR_GAP
+    p4 = cb1 + FIELD_BAR_WIDTH + FIELD_BAR_LABEL_GAP
+    cb2 = p4 + pw + FIELD_BAR_GAP
+    if cb2 + FIELD_BAR_WIDTH + FIELD_EDGE_GAP > FIELD_RIGHT + 1e-9:
+        raise AssertionError("field_layout: colour bars overrun the canvas")
+    panel_x = [xs[0], xs[1], xs[2], p4]
+
+    row_y = []
+    yy = top - rh
+    for _ in range(nrows):
+        row_y.append(yy)
+        yy -= gap + rh
+    return {
+        "fig_w_in": fig_w_in, "fig_h_in": fig_h_in,
+        "width_frac": float(width_frac),
+        "panel_x": panel_x, "pw": pw, "rh": rh,
+        "panel_width_in": panel_in, "panel_height_in": rh * fig_h_in,
+        "panel_aspect": (rh * fig_h_in) / panel_in,
+        "cb1": cb1, "cb2": cb2, "bar_width": FIELD_BAR_WIDTH,
+        "row_y": row_y, "top": top, "bottom": bottom, "row_gap": gap,
+        "nrows": nrows,
+    }
+
+
+def _layout_manifest(geo):
+    """Record the measured square-panel geometry and the font ladder."""
+    return {
+        "panel_width_in": round(geo["panel_width_in"], 4),
+        "panel_height_in": round(geo["panel_height_in"], 4),
+        "panel_aspect": round(geo["panel_aspect"], 4),
+        "font_ladder_pt": {
+            "figure_text": FIG_TEXT_PT, "axis_label": AXIS_LABEL_PT,
+            "title": TITLE_PT, "tick": TICK_PT, "annotation": ANNOT_PT,
+            "legend": LEGEND_PT, "body_text": BODY_TEXT_PT,
+        },
+    }
+
+
+def draw_field_panel(ax, x, y, arr, cmap, norm, shading="nearest"):
+    """Draw a field raster with no white seams between adjacent pixels.
+
+    ``pcolormesh`` anti-aliases cell edges by default; on a fine raster this
+    leaves hair-width white seams at 300 dpi.  Cell edges are disabled and
+    anti-aliasing is turned off so neighbouring cells share an exact edge.
+    """
+    mesh = ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm, shading=shading,
+                         antialiased=False, edgecolors="none",
+                         linewidth=0.0)
+    mesh.set_edgecolor("none")
+    mesh.set_antialiased(False)
+    return mesh
+
+
 def apply_style(base=9.0):
-    """Print-size rcParams: no text below ``base`` points."""
+    """Deterministic rcParams for the non-field (line/bar) figures.
+
+    The field families use :func:`apply_field_style`; the line/bar figures
+    keep their established 9 pt look.
+    """
     plt.rcParams.update({
         "figure.dpi": 120,
         "savefig.dpi": 300,
@@ -85,6 +214,24 @@ def apply_style(base=9.0):
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
         "svg.fonttype": "none",
+    })
+
+
+def apply_field_style():
+    """Apply the shared field-figure font ladder (the one style for gp/val/large).
+
+    The body text is 10 pt; axis labels are 9 pt, everything else 7-8 pt, so
+    no figure text can exceed the body text and the square data panels get
+    the room.
+    """
+    apply_style(base=FIG_TEXT_PT)
+    plt.rcParams.update({
+        "font.size": FIG_TEXT_PT,
+        "axes.titlesize": TITLE_PT,
+        "axes.labelsize": AXIS_LABEL_PT,
+        "xtick.labelsize": TICK_PT,
+        "ytick.labelsize": TICK_PT,
+        "legend.fontsize": LEGEND_PT,
     })
 
 
@@ -245,8 +392,14 @@ def assert_no_layout_collisions(fig, outdir, name):
     return record
 
 
-def save(fig, outdir, name, manifest):
-    """Save PDF+PNG at the exact canvas size (no bbox_inches) and audit JSON."""
+def save(fig, outdir, name, manifest, tight=True):
+    """Save PDF+PNG and audit JSON.
+
+    Field figures pass ``tight=False`` so the PDF canvas is exactly the shared
+    figure width.  LaTeX then includes it at ``1:1`` scale and every family
+    prints the same physical square panel.  Other figures keep the historical
+    tight crop.
+    """
     assert_no_layout_collisions(fig, outdir, name)
     os.makedirs(outdir, exist_ok=True)
     audit_dir = os.path.join(outdir, "audit")
@@ -255,8 +408,14 @@ def save(fig, outdir, name, manifest):
     png = os.path.join(outdir, name + ".png")
     meta_pdf = {"CreationDate": FIXED_DATE_OBJ, "ModDate": FIXED_DATE_OBJ}
     meta_png = {"CreationDate": FIXED_DATE, "ModDate": FIXED_DATE}
-    fig.savefig(pdf, metadata=meta_pdf, bbox_inches="tight", pad_inches=0.03)
-    fig.savefig(png, dpi=300, metadata=meta_png, bbox_inches="tight", pad_inches=0.03)
+    if tight:
+        fig.savefig(pdf, metadata=meta_pdf, bbox_inches="tight",
+                    pad_inches=0.03)
+        fig.savefig(png, dpi=300, metadata=meta_png, bbox_inches="tight",
+                    pad_inches=0.03)
+    else:
+        fig.savefig(pdf, metadata=meta_pdf)
+        fig.savefig(png, dpi=300, metadata=meta_png)
     plt.close(fig)
     manifest = dict(manifest)
     manifest.update({
@@ -364,8 +523,8 @@ def _sq_ticks(peak, decades=SQ_LOG_DECADES):
 # combined slice panels are much smaller than the per-gamma ones, so a 9 pt
 # label covered most of the panel.  5.5 pt keeps the compact two-line label
 # below ~22 % of the panel width (checked at render time).
-PEAK_ANNOT_PT = 5.5
-PEAK_ANNOT_MAX_WIDTH_FRAC = 0.22
+PEAK_ANNOT_PT = ANNOT_PT
+PEAK_ANNOT_MAX_WIDTH_FRAC = 0.30
 
 
 def _peak_fraction(peak, shared):
@@ -418,7 +577,7 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
     x, y : coordinate centres/edges along horizontal / vertical axes.
     support : optional bool mask; drawn as a white outline on error panels.
     """
-    apply_style()
+    apply_field_style()
     ncol = max(len(r["items"]) for r in rows)
     nrow = len(rows)
     fig = plt.figure(figsize=(width_in(width_frac), fig_height))
@@ -474,8 +633,7 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
             if kind == "field":
                 arr = np.asarray(it["arr"], float)
                 if np.isfinite(arr).any() and np.nanmax(np.abs(arr)) > 0:
-                    ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm,
-                                  shading=shading)
+                    draw_field_panel(ax, x, y, arr, cmap, norm, shading)
                 else:
                     ax.set_facecolor("0.90")
                     ax.text(0.5, 0.5, rf"${it.get('symbol', '')}\equiv0$",
@@ -487,8 +645,7 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
                 valid = np.asarray(it["valid"], bool)
                 masked = np.ma.masked_where(~valid | ~np.isfinite(arr), arr)
                 if np.any(valid) and np.isfinite(arr[valid]).any():
-                    ax.pcolormesh(x, y, masked, cmap=cmap, norm=norm,
-                                  shading=shading)
+                    draw_field_panel(ax, x, y, masked, cmap, norm, shading)
                     xc = 0.5 * (x[:-1] + x[1:]) if shading == "flat" else x
                     yc = 0.5 * (y[:-1] + y[1:]) if shading == "flat" else y
                     try:
@@ -568,57 +725,31 @@ def _bar_title(fig, cax, image, ticks, ticklabels, title):
 
 
 def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
-                            width_frac, fig_height, shading="nearest",
+                            width_frac, shading="nearest",
                             support=None, suptitle=None, manifest=None,
-                            compact=False, row_gap=0.075,
-                            bottom_margin=None):
+                            compact=False, row_gap_in=FIELD_ROW_GAP_IN,
+                            bottom_in=None):
     """Field/error rows with a component triad and a separate squared panel.
 
     Every row has four items: three signed components sharing one colour bar,
     then the squared magnitude on its own scale with its own bar and unit
-    label.  Layout follows the per-gamma figures so the same three-panel plus
-    bar, gap, squared-panel plus bar geometry is used everywhere.
-
-    ``compact`` shortens the colour-bar labels and reduces the squared-panel
-    log ticks to three, so a four-row block fits the appendix page at full
-    9 pt size.  ``row_gap`` sets the vertical gap between rows (figure
-    fractions).
+    label.  Geometry comes from :func:`field_layout`, so every field family
+    gets the same square panels; only the figure height changes with the row
+    count.  ``compact`` shortens the colour-bar labels and the squared-panel
+    log ticks.  ``row_gap_in`` and ``bottom_in`` are inches.
     """
-    apply_style()
+    apply_field_style()
     nrow = len(rows)
-    fig = plt.figure(figsize=(width_in(width_frac), fig_height))
-    left, right = 0.105, 0.995
-    # Slots in figure fractions (figure width tuned for 9 pt text):
-    #   pwg  panel-to-panel gap for the horizontal tick labels;
-    #   bg   panel-to-bar gap for the colour-bar tick labels (left side);
-    #   ba   bar-to-next-panel gap for the rotated colour-bar label (right);
-    #   R    final-bar-to-edge gap for its rotated label.
-    # Slots match the per-gamma figures (render_pergamma): a tight
-    # panel-to-panel gap and the same bar geometry give the same readable
-    # panel area.  The old pwg=0.040/ba=0.050/R=0.035 shrank every panel.
-    pwg, bg, bw, ba, R = 0.008, 0.098, 0.012, 0.032, 0.032
-    pw = (right - left - 2 * pwg - 2 * (bg + bw) - ba - R) / 4.0
-    xs = [left, left + pw + pwg, left + 2 * (pw + pwg)]
-    cb1 = xs[-1] + pw + bg
-    p4 = cb1 + bw + ba
-    cb2 = p4 + pw + bg
-    assert cb2 + bw + R <= right + 1e-9
-    panel_x = [xs[0], xs[1], xs[2], p4]
-
-    top = 0.950
-    # Error rows carry the shared "masked" legend at the very bottom; reserve
-    # enough margin that it cannot touch the x tick labels or axis labels.
-    if bottom_margin is not None:
-        bottom = float(bottom_margin)
-    else:
-        bottom = 0.170 if any(r["kind"] == "error" for r in rows) else 0.105
-    gap = float(row_gap) if nrow > 1 else 0.0
-    rh = (top - bottom - gap * (nrow - 1)) / nrow
-    row_y = []
-    yy = top - rh
-    for _ in range(nrow):
-        row_y.append(yy)
-        yy -= gap + rh
+    has_error = any(r["kind"] == "error" for r in rows)
+    if bottom_in is None:
+        bottom_in = FIELD_BOTTOM_ERR_IN if has_error else FIELD_BOTTOM_IN
+    geo = field_layout(nrow, width_frac=width_frac, top_in=FIELD_TOP_IN,
+                       bottom_in=bottom_in, row_gap_in=row_gap_in)
+    fig = plt.figure(figsize=(geo["fig_w_in"], geo["fig_h_in"]))
+    panel_x = geo["panel_x"]
+    pw, rh, bw = geo["pw"], geo["rh"], geo["bar_width"]
+    cb1, cb2 = geo["cb1"], geo["cb2"]
+    row_y = geo["row_y"]
 
     if shading == "flat":
         xlo, xhi = float(x[0]), float(x[-1])
@@ -705,13 +836,12 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             transform=ax.transAxes, ha="center", va="center",
                             fontsize=plt.rcParams["font.size"], color="0.25")
                 else:
-                    ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm,
-                                  shading=shading)
+                    draw_field_panel(ax, x, y, arr, cmap, norm, shading)
             else:
                 e = np.asarray(it["err"], float)
                 v = np.asarray(it["valid"], bool)
                 z = np.ma.masked_where(~v | ~np.isfinite(e), e)
-                ax.pcolormesh(x, y, z, cmap=cmap, norm=norm, shading=shading)
+                draw_field_panel(ax, x, y, z, cmap, norm, shading)
                 if not bool(np.any(v & np.isfinite(e))):
                     # A fully masked error panel: say why, so the grey cannot
                     # be read as missing data.  An identically-zero reference
@@ -728,8 +858,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                     note = short if len(short) <= 30 else "fully masked"
                     ax.text(0.5, 0.5, note, transform=ax.transAxes,
                             ha="center", va="center",
-                            fontsize=min(plt.rcParams["font.size"], 6.5),
-                            color="0.25")
+                            fontsize=ANNOT_PT, color="0.25")
                 try:
                     ax.contour(xc, yc, np.where(v & np.isfinite(e), e, np.nan),
                                levels=[1e-3], colors=[GATE_STYLE["color"]],
@@ -840,4 +969,5 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     man["masked_color"] = MASKED_COLOR
     man["error_floor"] = ERR_FLOOR
     man["error_gate_tick"] = ERR_GATE
-    return save(fig, outdir, name, man)
+    man.update(_layout_manifest(geo))
+    return save(fig, outdir, name, man, tight=False)

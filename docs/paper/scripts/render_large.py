@@ -143,10 +143,7 @@ def build(outdir, case, plane, source):
     fs.render_split_field_rows(
         name, outdir, rows, horiz_e * US, vert_e * US,
         xlabel=xl, ylabel=yl, width_frac=1.0,
-        fig_height=3.55 if gamma == 10.0 else 3.72,
-        shading="flat", compact=True,
-        row_gap=0.05 if gamma == 10.0 else 0.055,
-        bottom_margin=0.155 if gamma == 10.0 else None, manifest=man)
+        shading="flat", compact=True, manifest=man)
     horiz_c, vert_c = axis.coords(DATASET, plane, n, cell, origin,
                                   centres=True, source=source)
     signature = _signature(d, plane, source)

@@ -178,63 +178,39 @@ def add_cbar(fig, cax, image, ticks, labels, title):
     cb.set_ticklabels(labels)
     cb.ax.yaxis.set_ticks_position("left")
     cb.ax.yaxis.set_label_position("right")
-    cb.ax.tick_params(labelsize=9, labelleft=True, labelright=False,
-                      pad=1.5, length=2)
+    cb.ax.tick_params(labelsize=figstyle.TICK_PT, labelleft=True,
+                      labelright=False, pad=1.5, length=2)
     cb.outline.set_linewidth(0.6)
-    cb.set_label(title, fontsize=9, labelpad=3)
+    cb.set_label(title, fontsize=figstyle.AXIS_LABEL_PT, labelpad=3)
     return cb
 
 
 def draw_case(case, outdir):
-    figstyle.apply_style(9.0)
-    # exact A4 text width: 210 mm - 2 x 25.4 mm = 159.2 mm
-    W = 159.2 / 25.4
-    H = 7.85
-    fig = plt.figure(figsize=(W, H))
+    figstyle.apply_field_style()
+    # The B error row is omitted for the stationary case: the reference
+    # magnetic field is identically zero at beta=0, so its relative error is
+    # undefined and the whole row would be fully masked.
+    berr_omitted = (float(np.max(np.abs(case["field"]["B2"]))) <= 1e-30)
+    rowkeys = ["Efield", "Eerr", "Bfield"] + (["Berr"] if not berr_omitted
+                                              else [])
+    # Shared square-panel geometry: the same canvas width, panel size and
+    # gaps as render_slices/render_large.  Only the height depends on rows.
+    geo = figstyle.field_layout(
+        len(rowkeys), width_frac=1.0, top_in=figstyle.FIELD_TOP_NOTE_IN,
+        bottom_in=(figstyle.FIELD_BOTTOM_NOTE_IN if berr_omitted
+                   else figstyle.FIELD_BOTTOM_ERR_IN),
+        row_gap_in=figstyle.FIELD_ROW_GAP_IN)
+    fig = plt.figure(figsize=(geo["fig_w_in"], geo["fig_h_in"]))
     fig.patch.set_facecolor("white")
     fig.text(0.5, 0.985,
              "Error rows: grey = masked / no finite error; "
              "the colour ramp spans finite errors only",
-             ha="center", va="center", fontsize=9)
-
-    # horizontal geometry (figure fractions).  Each colour bar has two
-    # dedicated text slots: tick labels to its left (bg) and the rotated
-    # quantity label to its right (ba for the first bar, R for the last).
-    left = 0.125
-    pwg = 0.008          # panel-to-panel gap (single-digit x tick labels)
-    bg = 0.098           # panel-to-bar gap (colour-bar tick labels)
-    bw = 0.012           # bar width
-    ba = 0.032           # bar-to-next-panel gap (rotated bar label)
-    R = 0.032            # final-bar-to-edge gap (rotated bar label)
-    right = 0.995
-    pw = (right - left - 2 * pwg - 2 * (bg + bw) - ba - R) / 4.0
-    xs = [left]
-    xs.append(xs[-1] + pw + pwg)
-    xs.append(xs[-1] + pw + pwg)
-    cb1 = xs[-1] + pw + bg
-    p4 = cb1 + bw + ba
-    cb2 = p4 + pw + bg
-    assert cb2 + bw + R <= right + 1e-9
-    panel_x = [xs[0], xs[1], xs[2], p4]
-
-    # vertical geometry: four rows, extra gap between the E and B blocks
-    # The B error row is omitted for the stationary case: the reference
-    # magnetic field is identically zero at beta=0, so the relative B error
-    # is undefined and the whole row would be fully masked.
-    berr_omitted = (float(np.max(np.abs(case["field"]["B2"]))) <= 1e-30)
-    top, bottom = 0.948, 0.060
-    gaps = [0.045, 0.075, 0.045]
-    if berr_omitted:
-        gaps = [0.045, 0.120]
-    rowkeys = ["Efield", "Eerr", "Bfield"] + (["Berr"] if not berr_omitted
-                                              else [])
-    rh = (top - bottom - sum(gaps)) / len(rowkeys)
-    rows = {}
-    y = top - rh
-    for i, key in enumerate(rowkeys):
-        rows[key] = y
-        if i + 1 < len(rowkeys):
-            y -= gaps[i] + rh
+             ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
+    panel_x = geo["panel_x"]
+    pw, rh = geo["pw"], geo["rh"]
+    cb1, cb2, bw = geo["cb1"], geo["cb2"], geo["bar_width"]
+    rows = {key: geo["row_y"][i] for i, key in enumerate(rowkeys)}
+    x = case["x"]
 
     x = case["x"]
     yc = case["y"]
@@ -322,7 +298,8 @@ def draw_case(case, outdir):
                     np.ma.masked_where((~valid) | (~np.isfinite(arr)), arr),
                     "hires", "xy", case["source"])
                 im = ax.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                               cmap=cmap_err, norm=cnorm, interpolation="nearest")
+                               cmap=cmap_err, norm=cnorm,
+                               interpolation="nearest", resample=False)
                 zz = Z
                 try:
                     ax.contour(xc, yv, zz, levels=[1e-3],
@@ -336,33 +313,33 @@ def draw_case(case, outdir):
                                                case["source"]),
                                origin="lower", extent=ext, aspect="auto",
                                cmap=cmap_comp, norm=cnorm,
-                               interpolation="nearest")
+                               interpolation="nearest", resample=False)
             imgs.append(im)
             if not log and float(np.nanmax(np.abs(arr))) == 0.0:
                 ax.text(0.5, 0.5, rf"${part}_{'xyz'[j]}\equiv0$",
                         transform=ax.transAxes, ha="center", va="center",
-                        fontsize=9, color="0.25")
+                        fontsize=figstyle.ANNOT_PT, color="0.25")
             if log and not np.any(valid):
                 note = case["undef"].get(c, "no valid pixels")
                 # The caption carries the full reason; keep the in-panel note
                 # to the short component identity so it stays inside the axes.
                 note = note.split(" (")[0]
                 ax.text(0.5, 0.5, note, transform=ax.transAxes,
-                        ha="center", va="center", fontsize=9, color="0.25")
+                        ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
             ax.set_xticks(xticks)
             ax.set_yticks(yticks)
-            ax.tick_params(labelsize=9, length=2, pad=1.5)
+            ax.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
             if rowkey.endswith("err"):
-                ax.set_xlabel(r"$y$ ($\mu$m)", fontsize=9, labelpad=1)
+                ax.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
             else:
                 ax.set_xticklabels([])
             if j == 0:
-                ax.set_ylabel(r"$x$ ($\mu$m)", fontsize=9, labelpad=1)
+                ax.set_ylabel(r"$x$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
             else:
                 ax.set_yticklabels([])
             if rowkey.endswith("field"):
                 ax.set_title(f"${part}_{'xyz'[j]}$" if j < 3 else f"${part}^2$",
-                             fontsize=9, pad=2)
+                             fontsize=figstyle.TITLE_PT, pad=2)
             else:
                 ax.set_title("", pad=0)
 
@@ -374,7 +351,8 @@ def draw_case(case, outdir):
                 np.ma.masked_where((~valid) | (~np.isfinite(arrq)), arrq),
                 "hires", "xy", case["source"])
             imq = axq.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                             cmap=cmap_err, norm=snorm, interpolation="nearest")
+                             cmap=cmap_err, norm=snorm,
+                             interpolation="nearest", resample=False)
             try:
                 axq.contour(xc, yv, Z, levels=[1e-3],
                             colors=[figstyle.GATE_STYLE["color"]],
@@ -387,25 +365,25 @@ def draw_case(case, outdir):
                                              case["source"]),
                              origin="lower", extent=ext, aspect="auto",
                              cmap=cmap_sq, norm=snorm,
-                             interpolation="nearest")
+                             interpolation="nearest", resample=False)
         if not log and float(np.nanmax(np.abs(arrq))) == 0.0:
             axq.text(0.5, 0.5, rf"${part}^2\equiv0$", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=9, color="0.25")
+                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
         if log and not np.any(case["valid"][sq]):
             axq.text(0.5, 0.5, "no valid pixels", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=9, color="0.25")
+                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
         axq.set_xticks(xticks)
         axq.set_yticks(yticks)
-        axq.tick_params(labelsize=9, length=2, pad=1.5)
+        axq.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
         if rowkey.endswith("err"):
-            axq.set_xlabel(r"$y$ ($\mu$m)", fontsize=9, labelpad=1)
+            axq.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
         else:
             axq.set_xticklabels([])
         axq.set_yticklabels([])
         if rowkey.endswith("field"):
             sq_title = (f"${part}^2$ (log)" if sq_scale == "log"
                         else f"${part}^2$")
-            axq.set_title(sq_title, fontsize=9, pad=2)
+            axq.set_title(sq_title, fontsize=figstyle.TITLE_PT, pad=2)
         else:
             axq.set_title("", pad=0)
 
@@ -430,8 +408,8 @@ def draw_case(case, outdir):
         rl = (f"{part} {'error' if log else 'field'}\n"
               rf"$\gamma$={case['gamma']:.4g}, $\beta$={case['beta']:.4g}"
               f"\nN=1, {case['n']}$^3$")
-        fig.text(0.033, y0 + rh / 2, rl, rotation=90, ha="center", va="center",
-                 fontsize=9, linespacing=1.15)
+        fig.text(0.0315, y0 + rh / 2, rl, rotation=90, ha="center", va="center",
+                 fontsize=figstyle.FIG_TEXT_PT, linespacing=1.15)
 
         info["rows"][rowkey] = {
             "comp": {"vmin": float(cnorm.vmin), "vmax": float(cnorm.vmax),
@@ -456,7 +434,7 @@ def draw_case(case, outdir):
         fig.text(0.5, 0.035,
                  "B error row omitted: the reference B is identically zero "
                  "at beta=0, so the relative B error is undefined",
-                 ha="center", va="center", fontsize=9)
+                 ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -467,9 +445,9 @@ def draw_case(case, outdir):
     for t in fig.findobj(mtext.Text):
         if not t.get_visible() or not t.get_text().strip():
             continue
-        if t.get_fontsize() < 9.0 - 1e-6:
-            raise AssertionError(f"font below 9 pt: {t.get_text()!r} "
-                                 f"{t.get_fontsize()} pt")
+        if t.get_fontsize() > figstyle.BODY_TEXT_PT + 1e-6:
+            raise AssertionError(f"font larger than the 10 pt body text: "
+                                 f"{t.get_text()!r} {t.get_fontsize()} pt")
         texts.append(t)
     boxes = [(t.get_text(), t.get_window_extent(renderer)) for t in texts]
     overlaps = []
@@ -527,10 +505,12 @@ def draw_case(case, outdir):
                        "z": float(pos_um[2])},
         require_longitudinal_contraction=bool(g >= 10.0))
     info["axis_assertion"] = axis_result
-    figstyle.save(fig, outdir, name,
-                  {"case": case["case"], "gamma": case["gamma"],
-                   "beta": case["beta"], "split_scale": True,
-                   "assertions": checks, "data": os.path.relpath(case["path"], cases.REPO_ROOT)})
+    man = {"case": case["case"], "gamma": case["gamma"],
+           "beta": case["beta"], "split_scale": True,
+           "assertions": checks,
+           "data": os.path.relpath(case["path"], cases.REPO_ROOT)}
+    man.update(figstyle._layout_manifest(geo))
+    figstyle.save(fig, outdir, name, man, tight=False)
     info["figure"] = name
     return info, name, axis_result
 

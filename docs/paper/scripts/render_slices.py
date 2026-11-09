@@ -162,8 +162,7 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=1.0, fig_height=3.55 if has_error else 1.85,
-        support=smask, manifest=man)
+        width_frac=1.0, support=smask, manifest=man)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
 
@@ -197,9 +196,7 @@ def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=1.0, fig_height=3.36 if has_error else 3.6,
-        compact=True, row_gap=0.05 if has_error else 0.075,
-        bottom_margin=0.17 if has_error else None,
+        width_frac=1.0, compact=True,
         support=smask, manifest=man)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
