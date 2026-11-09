@@ -61,7 +61,9 @@ percentage of the shared maximum, while $E^2$ has its own logarithmic scale
 from $10^{-6}$ of the panel peak to the peak and its own unit label. Each
 component panel states its peak as a percentage of the largest component peak
 on that plane, which sets the shared colour scale; a small percentage means
-the component is faint on that scale. The lower
+the component is faint on that scale. A panel labelled $0\%$ has an exactly
+zero plane peak, since the label is the percentage to three significant
+figures and never rounds a nonzero peak to $0\%$. The lower
 row is logarithmic error, floored at $10^{-6}$ and marked at the $10^{-3}$
 gate, with light-grey pixels where the local field magnitude is below
 $10^{-3}$ of the largest component peak on the plane; the dark outline marks
@@ -268,7 +270,9 @@ x-y and z-y planes, each showing four columns $E_x,E_y,E_z,E^2$: the three
 components share one symmetric-logarithmic scale and bar
 (peak in percent of the shared maximum), and $E^2$ has its own
 logarithmic scale and unit label, above a logarithmic error row against the
-order-4 driver reference. Grey pixels are masked. The colour scale is set by the bunch, so the far
+order-4 driver reference. Grey pixels are masked. $E_x$ is suppressed but
+nonzero, peaking at $0.5475\%$ (x-y) and $0.1385\%$ (z-y) of the shared
+maximum on this scale. The colour scale is set by the bunch, so the far
 decay is visible inside the frame.}
 \label{fig:large}
 \end{figure}

@@ -60,7 +60,7 @@
     "four_rank_worst_abs": 5.820766091346741e-11,
     "one_rank_replicated_bit_identical_to_original": true,
     "four_rank_replicated_vs_original_rel": 2.6978384736485404e-16,
-    "comparison": "The one-rank value is identical to the published 3.2e-16. The four-rank value is 5.35e-16 versus the original 5.375e-16, a 0.5% change at the roundoff floor; the paper's 5.4e-16 is unchanged at the quoted precision."
+    "comparison": "The one-rank value is identical to the published 3.2e-16. The four-rank value is 5.35e-16 versus the original 5.375e-16, a 0.5% change at the roundoff floor; the paper now quotes 5.3e-16 for this value (measured 5.348e-16), the rounding of 5.35e-16 down to one significant figure, consistent with the current paper text."
   },
   "raw_logs": {
     "location": "hal:/tmp/dfft-val/{cur_one8_rep.log,cur_one8_dist.log,cur_four_rep.log,cur_four_dist.log}",
