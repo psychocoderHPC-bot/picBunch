@@ -84,6 +84,13 @@ def field(d, plane, key):
     return comp_array(d, plane, key)
 
 
+def ref_field(d, plane, key):
+    """Reference field for one component or the squared magnitude."""
+    if key in ("E2", "B2"):
+        return np.asarray(d[f"{plane}_ref_{key}"], dtype=float)
+    return comp_array(d, plane, "ref_" + key)
+
+
 def error(d, plane, key):
     if key in ("E2", "B2"):
         pic = field(d, plane, key)
@@ -115,6 +122,7 @@ def load(path):
         "pos_m": np.asarray(d["particle_pos_m"], float),
         "x": x, "y": y,
         "field": {k: field(d, plane, k) for k in COMP + ["E2", "B2"]},
+        "ref": {k: ref_field(d, plane, k) for k in COMP + ["E2", "B2"]},
         "err": {}, "valid": {}, "undef": {},
     }
     for k in COMP + ["E2", "B2"]:
@@ -126,10 +134,10 @@ def load(path):
     # error panel renders fully masked and carries an in-panel annotation
     # instead of the bare "no valid pixels" text.
     for part in ("E", "B"):
-        if float(np.max(np.abs(field(d, plane, part + "2")))) <= 1e-30:
+        if float(np.max(np.abs(out["ref"][part + "2"]))) == 0.0:
             continue
         for j, c in enumerate((f"{part}x", f"{part}y", f"{part}z")):
-            if float(np.max(np.abs(field(d, plane, c)))) == 0.0:
+            if float(np.max(np.abs(out["ref"][c]))) == 0.0:
                 out["undef"][c] = (
                     rf"$\mathbf{{{c[0]}}}_{{{'xyz'[j]}}}\equiv0$"
                     " (beam axis); relative error undefined")
@@ -187,10 +195,16 @@ def add_cbar(fig, cax, image, ticks, labels, title):
 
 def draw_case(case, outdir):
     figstyle.apply_field_style()
-    # The B error row is omitted for the stationary case: the reference
-    # magnetic field is identically zero at beta=0, so its relative error is
-    # undefined and the whole row would be fully masked.
-    berr_omitted = (float(np.max(np.abs(case["field"]["B2"]))) <= 1e-30)
+    # The B error row is omitted only when all three reference magnetic
+    # components vanish (stationary bunch, beta=0).  A moving bunch keeps
+    # B_x and B_z nonzero even though its axial B component is zero, so the
+    # row and their error panels must stay.  The decision uses the reference
+    # field, not the measured field, which can carry round-off near 1e-18 T.
+    bref = [float(np.max(np.abs(case["ref"][c]))) for c in ("Bx", "By", "Bz")]
+    berr_omitted = all(v == 0.0 for v in bref)
+    assert not berr_omitted or float(
+        np.max(np.abs(case["ref"]["B2"]))) == 0.0, (
+        f"{case['case']}: B error row omitted but the reference B2 is nonzero")
     rowkeys = ["Efield", "Eerr", "Bfield"] + (["Berr"] if not berr_omitted
                                               else [])
     # Shared square-panel geometry: the same canvas width, panel size and
@@ -239,13 +253,18 @@ def draw_case(case, outdir):
         comps = [f"{part}x", f"{part}y", f"{part}z"]
         sq = part + "2"
         if not log:
-            cvals = [np.abs(case["field"][c]) for c in comps]
-            cvmax = max(float(np.nanmax(v)) for v in cvals)
+            zero = {c: float(np.max(np.abs(case["ref"][c]))) == 0.0
+                    for c in comps}
+            cvals = [np.abs(case["field"][c]) for c in comps if not zero[c]]
+            cvmax = (max(float(np.nanmax(v)) for v in cvals)
+                     if cvals else 0.0)
             if not np.isfinite(cvmax) or cvmax <= 0:
                 cvmax = 1.0
             cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * 1e-3, 1e-30),
                                        vmin=-cvmax, vmax=cvmax, base=10)
-            svmax = float(np.nanmax(case["field"][sq]))
+            sq_zero = float(np.max(np.abs(case["ref"][sq]))) == 0.0
+            svmax = (0.0 if sq_zero
+                     else float(np.nanmax(case["field"][sq])))
             if np.isfinite(svmax) and svmax > 0:
                 svmin = max(svmax * SQ_FLOOR_RATIO, np.finfo(float).tiny)
                 snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
@@ -292,6 +311,11 @@ def draw_case(case, outdir):
         for j, c in enumerate(comps):
             ax = fig.add_axes([panel_x[j], y0, pw, rh])
             arr = case["field"][c] if not log else case["err"][c]
+            if not log and zero[c]:
+                # A reference component that is exactly zero everywhere is
+                # blank: the measured field may still hold round-off at the
+                # 1e-18 T level, which must not be drawn as a real field.
+                arr = np.zeros_like(arr)
             if log:
                 valid = case["valid"][c]
                 Z = axis.to_display(
@@ -315,7 +339,7 @@ def draw_case(case, outdir):
                                cmap=cmap_comp, norm=cnorm,
                                interpolation="nearest", resample=False)
             imgs.append(im)
-            if not log and float(np.nanmax(np.abs(arr))) == 0.0:
+            if not log and zero[c]:
                 ax.text(0.5, 0.5, rf"${part}_{'xyz'[j]}\equiv0$",
                         transform=ax.transAxes, ha="center", va="center",
                         fontsize=figstyle.ANNOT_PT, color="0.25")
@@ -345,6 +369,8 @@ def draw_case(case, outdir):
 
         axq = fig.add_axes([panel_x[3], y0, pw, rh])
         arrq = case["field"][sq] if not log else case["err"][sq]
+        if not log and sq_zero:
+            arrq = np.zeros_like(arrq)
         if log:
             valid = case["valid"][sq]
             Z = axis.to_display(
@@ -366,7 +392,7 @@ def draw_case(case, outdir):
                              origin="lower", extent=ext, aspect="auto",
                              cmap=cmap_sq, norm=snorm,
                              interpolation="nearest", resample=False)
-        if not log and float(np.nanmax(np.abs(arrq))) == 0.0:
+        if not log and sq_zero:
             axq.text(0.5, 0.5, rf"${part}^2\equiv0$", transform=axq.transAxes,
                      ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
         if log and not np.any(case["valid"][sq]):
