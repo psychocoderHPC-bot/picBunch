@@ -140,7 +140,9 @@ namespace picBunch
             std::vector<std::pair<fs::path, fs::path>> renames;
             for(auto const& entry : fs::directory_iterator(directory))
             {
-                if(!entry.is_regular_file())
+                // HDF5 series are regular files; an ADIOS2/BP5 series is a
+                // directory (``md.0``, ``data.0`` ...).  Both must be published.
+                if(!entry.is_regular_file() && !entry.is_directory())
                     continue;
                 std::smatch match;
                 std::string const candidate = entry.path().filename().string();
@@ -152,6 +154,22 @@ namespace picBunch
             return renames;
         }
 
+        //! Publish one temporary series path, replacing an existing target.
+        /*! ``remove_all`` also removes a non-empty ADIOS2/BP5 directory; plain
+         * ``remove`` only deletes an empty directory and would make a repeated
+         * write to the same ``.bp`` path fail.  The temporary path is already
+         * fully finalised (Series closed) when this runs, so the replace is
+         * still an atomic rename for both backends.
+         */
+        void publishTemporary(
+            std::filesystem::path const& from,
+            std::filesystem::path const& to)
+        {
+            std::error_code error;
+            std::filesystem::remove_all(to, error);
+            std::filesystem::rename(from, to);
+        }
+
         void removeTemporary(std::string const& temporary, std::string const& finalName) noexcept
         {
             namespace fs = std::filesystem;
@@ -159,7 +177,7 @@ namespace picBunch
             try
             {
                 for(auto const& entry : planRenames(temporary, finalName))
-                    fs::remove(entry.first, ignored);
+                    fs::remove_all(entry.first, ignored);
             }
             catch(...)
             {
@@ -261,11 +279,7 @@ namespace picBunch
                 throw std::runtime_error(
                     "writeField: the temporary series '" + temporary + "' produced no output file");
             for(auto const& [from, to] : renames)
-            {
-                std::error_code error;
-                std::filesystem::remove(to, error);
-                std::filesystem::rename(from, to);
-            }
+                publishTemporary(from, to);
         }
         catch(...)
         {
@@ -592,6 +606,17 @@ namespace picBunch
                 series->flush();
             }
 
+            // Close (and thereby finalise) the openPMD Series before the
+            // directory is renamed.  With ADIOS2/BP5 the engine writes deferred
+            // metadata such as ``profiling.json`` into the series directory at
+            // finalize time; renaming first made ADIOS2 2.11 reopen the old
+            // temporary path and abort (rc=134).  HDF5 happened to finish all
+            // deferred writes inside the last flush, which is why only BP5 hit
+            // the race.  Series::close() is collective for an MPI series, so
+            // every rank must reach it.
+            series->close();
+            series.reset();
+
             if(collective)
                 mpiBarrier();
 
@@ -608,16 +633,17 @@ namespace picBunch
             else
             {
                 for(auto const& [from, to] : renames)
-                {
-                    std::error_code error;
-                    std::filesystem::remove(to, error);
-                    std::filesystem::rename(from, to);
-                }
+                    publishTemporary(from, to);
             }
+            // Keep the other ranks from reopening the shared temporary name
+            // (for the next iteration) until rank 0 has published it.
+            if(collective)
+                mpiBarrier();
         }
         catch(...)
         {
-            removeTemporary(temporary, outputName);
+            if(!collective || rank == 0)
+                removeTemporary(temporary, outputName);
             throw;
         }
     }

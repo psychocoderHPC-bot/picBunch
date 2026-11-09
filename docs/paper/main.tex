@@ -14,8 +14,11 @@
 \bibliographystyle{unsrtnat}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,backgrounds,shapes.geometric}
 \usepackage[margin=1in]{geometry}
 \usepackage{float}
+\usepackage{caption}
 \usepackage{seqsplit}
 \usepackage{longtable}
 \usepackage{needspace}
@@ -25,8 +28,9 @@
 \newcommand{\Rthree}{\mathbb{R}^3}
 
 \title{A free-space convolution on a staggered mesh for the initial field of a uniformly moving particle bunch}
-\author{Author list\\[2pt]
-\small Affiliation list}
+\author{Ren\'e Widera\\[2pt]
+\small Helmholtz-Zentrum Dresden-Rossendorf (HZDR), Dresden, Germany\\
+\small \texttt{r.widera@hzdr.de}}
 \date{}
 
 \setlength{\emergencystretch}{3em}
@@ -41,12 +45,14 @@ has no physical basis. We compute the present-time field of a uniformly
 moving bunch as a zero-padded free-space FFT convolution of a TSC charge
 deposit with the sampled TSC-convolved Li\'enard--Wiechert kernel, read out
 on the staggered Yee grid, and we measure its accuracy and cost. Against an
-independent quadrature reference the mesh reaches $3\times10^{-4}$ relative
+independent quadrature reference the mesh reaches $3\times10^{-4}$ L2-pooled relative
 error within eight cells of the bunch axis for a stationary particle and
 within forty-eight cells for $\gamma=10$ perpendicular to the beam. The
-deposit dominates the compute time at large particle counts, linear in $N$,
-while the FFT scales with the padded grid; the total for $2\times10^{6}$
-particles in a $20$-cell box is $64.8$\,ms on one V100. An opt-in near
+deposit dominates the compute time at large particle counts, growing with
+$N$ and approaching linear in $N$ at the top of the sweep, while the FFT
+scales with the padded grid; the total for $2\times10^{6}$
+particles in a $20$-cell box is $51.9$\,ms on one H100 of
+JURECA H100 (compute-only, median of nine repeats). An opt-in near
 shell replaces the mesh inside the TSC support with a closed-form evaluator,
 assembles exactly to roundoff, and is bitwise independent of the MPI rank
 count. The method writes a float32 openPMD checkpoint that restarts under a

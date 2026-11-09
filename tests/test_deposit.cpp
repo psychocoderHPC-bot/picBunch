@@ -108,15 +108,15 @@ TEST(Deposit, WeightAndChargeScaleLinearly)
     EXPECT_NEAR(total(bunch, grid), -7.5, 1.0e-13);
 }
 
-TEST(Deposit, PaddedDepositConservesChargeForRefinement)
+TEST(Deposit, PaddedDepositConservesCharge)
 {
-    // Regression for the padded host deposit: the TSC shape is sampled in node
-    // units, so the total deposited charge must be exactly the particle charge
-    // for every refinement value.  Before the fix the weights were evaluated as
-    // tscShape(refinement*(ia-t)) with support 1.5/refinement while the grid
-    // spacing already contained the refinement; refinement=2 then summed to
-    // 0.421875 on a node instead of 1.  The assertion below is the one that
-    // fails on that pre-fix code.
+    // The padded host deposit must deposit exactly the particle charge: the TSC
+    // shape is sampled in node units and the grid spacing already carries the
+    // node spacing.  Before the fix the weights were evaluated as
+    // tscShape(refinement*(ia-t)) with a support shrunk by 1/refinement while
+    // the grid spacing already contained the refinement, so the sum dropped
+    // (e.g. to 0.421875) instead of 1.  The assertion below fails on that code
+    // and on any clipped boundary support.
     picBunch::Grid grid;
     grid.n = {16, 16, 16};
     grid.spacing = {1.0, 1.0, 1.0};
@@ -130,22 +130,20 @@ TEST(Deposit, PaddedDepositConservesChargeForRefinement)
     }};
     char const* const label[3] = {"node", "cell-centre", "sub-cell"};
 
-    for(double refinement : {1.0, 2.0, 3.0})
-        for(std::size_t p = 0; p < positions.size(); ++p)
-        {
-            picBunch::Bunch bunch;
-            bunch.resize(1);
-            bunch.x[0] = positions[p][0];
-            bunch.y[0] = positions[p][1];
-            bunch.z[0] = positions[p][2];
-            bunch.weight[0] = 1.0;
-            bunch.charge[0] = 1.0;
+    for(std::size_t p = 0; p < positions.size(); ++p)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x[0] = positions[p][0];
+        bunch.y[0] = positions[p][1];
+        bunch.z[0] = positions[p][2];
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = 1.0;
 
-            auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, refinement);
-            double const sum = std::accumulate(rho.begin(), rho.end(), 0.0);
-            EXPECT_NEAR(sum, 1.0, 1.0e-12)
-                << "refinement=" << refinement << " position=" << label[p];
-        }
+        auto const rho = picBunch::depositTSCPaddedHost(bunch, grid);
+        double const sum = std::accumulate(rho.begin(), rho.end(), 0.0);
+        EXPECT_NEAR(sum, 1.0, 1.0e-12) << "position=" << label[p];
+    }
 }
 
 TEST(Deposit, PaddedSourceHaloConservesChargeAtBoundaries)
@@ -179,7 +177,7 @@ TEST(Deposit, PaddedSourceHaloConservesChargeAtBoundaries)
                 bunch.weight[0] = 1.0;
                 bunch.charge[0] = 1.0;
 
-                auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, 1.0);
+                auto const rho = picBunch::depositTSCPaddedHost(bunch, grid);
                 EXPECT_EQ(rho.size(), 16u * 16u * 16u);
                 double const sum = std::accumulate(rho.begin(), rho.end(), 0.0);
                 EXPECT_NEAR(sum, 1.0, 1.0e-14)
@@ -205,7 +203,7 @@ TEST(Deposit, PaddedSourceHaloWrapsNegativeSupport)
     bunch.weight[0] = 1.0;
     bunch.charge[0] = 1.0;
 
-    auto const rho = picBunch::depositTSCPaddedHost(bunch, grid, 1.0);
+    auto const rho = picBunch::depositTSCPaddedHost(bunch, grid);
     std::size_t const M = 8u * 2u;
     // Logical (ia,ib,ic) maps to (ia+M)%M etc.  The -1 support is at x=M-1.
     std::size_t const idx = static_cast<std::size_t>(M - 1u)

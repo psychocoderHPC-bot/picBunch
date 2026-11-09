@@ -101,10 +101,8 @@ namespace picBunch
     }
 
     template<Shape S>
-    std::vector<double> depositPaddedShape(Bunch const& bunch, Grid const& grid, double refinement)
+    std::vector<double> depositPaddedShape(Bunch const& bunch, Grid const& grid)
     {
-        if(refinement <= 0.0)
-            throw std::invalid_argument("depositTSCPaddedHost: refinement must be positive");
         if(grid.fftPadding < 2u)
             throw std::invalid_argument(
                 "depositTSCPaddedHost: a source halo needs fftPadding >= 2");
@@ -120,7 +118,7 @@ namespace picBunch
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
         // The TSC shape is sampled in node units: grid.spacing already carries the
-        // refinement, so no extra refinement factor belongs in the argument.
+        // node spacing, so no extra refinement factor belongs in the weights.
         double const support = shapeSupport<S>();
         std::vector<double> rho(Mx * My * Mz, 0.0);
         auto const wrap = [](long i, std::size_t m) {
@@ -186,17 +184,17 @@ namespace picBunch
         }
     }
 
-    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement)
+    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid)
     {
         switch(grid.shape)
         {
         case Shape::CIC:
-            return depositPaddedShape<Shape::CIC>(bunch, grid, refinement);
+            return depositPaddedShape<Shape::CIC>(bunch, grid);
         case Shape::PQS:
-            return depositPaddedShape<Shape::PQS>(bunch, grid, refinement);
+            return depositPaddedShape<Shape::PQS>(bunch, grid);
         case Shape::TSC:
         default:
-            return depositPaddedShape<Shape::TSC>(bunch, grid, refinement);
+            return depositPaddedShape<Shape::TSC>(bunch, grid);
         }
     }
 

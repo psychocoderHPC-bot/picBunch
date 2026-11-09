@@ -1,0 +1,5 @@
+{
+  "schema": "picbunch-paper-non-data-figures/1",
+  "description": "Figures that illustrate a definition or geometry rather than presenting measured data. The strict gate does not require fresh-h100 provenance for these, but they still need a record or a not-reproduced declaration in a normal run.",
+  "figures": {}
+}

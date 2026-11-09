@@ -2,8 +2,8 @@
 
 Run `pr24-20261102`, task W7t. Host `rosi_v100` (exclusive, 48 cores; CPU runs,
 `env -u LD_PRELOAD -u FAKEROOTKEY`, `-j 8`; GPU 0 left idle). Read-only on repos,
-no GitHub writes. Remote workdir `/home/ubuntu/pr24/w7s-20261102/`; mirror of this
-file and the scripts/logs in `/tmp/alpaka-orchestration/pr24-20261102/W7t/`.
+no GitHub writes. Remote workdir `/home/ubuntu/pr24/w7s-20261102/`; mirror of
+this file and the scripts/logs in the external `pr24-20261102` run mirror.
 
 The previous attempt (W7s) left only a RESULTS.md stub and partial scripts; its
 `q2sub.py` sub-packing was wrong (treated the reference `.bin` as interleaved

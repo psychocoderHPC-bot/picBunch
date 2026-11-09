@@ -36,16 +36,20 @@ bibliography database is required. After the sources change, copy
 
 ## Figures
 
-Every figure PDF in `figs/` was regenerated from the recorded measurement
+Every figure PDF in `figs/` is rendered from the recorded measurement
 data at its print width (A4 text block, 6.268 in) so that the 9 pt fonts
 print at 9 pt. The shared style module fixes the canvas width to the
 LaTeX inclusion width, uses Okabe-Ito hues for the gamma encoding, one
-colour bar per row with the quantity and SI unit (E in V/m, B in T, error
-dimensionless), and no text below 9 pt. The audit
+colour bar per row with the quantity and SI unit (E in V/m, B in T, a
+dimensionless relative error), and no text below 9 pt except the compact
+5.5 pt peak label in the combined slice panels (its width is checked against
+22 % of the panel). The audit
 (`audit_figures.py` in the rework directory, output in `audit/`) records
 for every included figure the printed minimum font size, the colour bars
 per row, the colour-bar labels, and any overlapping text boxes; all
-figures pass. The `gp_g*` per-gamma figures were regenerated from the
+figures pass. `figstyle.save` enforces the same text/axes and text/text
+clearance at render time and writes `layout_assertions.json`; a collision
+aborts the render. The `gp_g*` per-gamma figures are rendered from the
 `HIRES/hi_*.npz` slices; the `val_*` and `large_*` slice figures and the
-line/scatter figures were regenerated from their recorded npz/CSV inputs
+line/scatter figures are rendered from their recorded npz/CSV inputs
 via the `FIGS_REPLOT` rebuild scripts.

@@ -11,7 +11,11 @@ bunches is
 \seqsplit{generate\_bunch.py --model gamma --gamma G --seed 42 --grid 64 64 32
 --cell-size 1e-7 1e-7 1e-7 --centroid 32 32 16 --sigma 6 6 6 --weights
 uniform}. The total charge is $N$ times $-e$ for the electron bunches with
-one unit weight, where $e = 1.602176634\times10^{-19}$\,C; the kinetic
+one unit weight, where $e = 1.602176634\times10^{-19}$\,C. The multi-velocity
+cases of Appendix~\ref{app:multivel} and the forward/fluctuation slice cases
+of Appendix~\ref{app:slices} carry the macro weight
+$5\times10^{-13}$\,C per particle ($Q=-100$\,pC for $N=200$); all other cases
+are unit weight. The kinetic
 energy is $(\gamma-1)\,m_ec^2$ with $m_ec^2 = 510.999$\,keV. The mid-bunch
 bunches are mono-energetic: the read-back records
 $\gamma_{\min}=\gamma_{\max}=1$ for the $\gamma=1$ bunch and
@@ -22,20 +26,19 @@ $\gamma_{\min}=\gamma_{\max}=10$ for the $\gamma=10$ bunch.
 \footnotesize
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.05}
-\caption{Configurations of every measured case and the section that uses it
-(recorded values of this work; ``not recorded'' means no value was
-recorded). The two mid-slice entries give the bunch generation grid; the
+\caption{Configurations of every measured case and the section that uses it.
+The two mid-slice entries give the bunch generation grid; the
 field grid for those cases ($32\times32\times16$ @ $2\times10^{-7}$ m) is
 in the second block. Kinetic energy is $(\gamma-1) m_ec^2$; the
 multi-velocity driver cell size is $10^{-6}$ m.}
 \label{tab:configs}
 \begin{longtable}{@{}p{1.9cm}cp{2.2cm}p{2.7cm}p{2.7cm}p{2.7cm}@{}}
 \toprule
-case & $N$ & total charge ($-e$ each) & size (cells/axis) & spread & used in \\
+case & $N$ & total charge (per-particle weight) & size (cells/axis) & spread & used in \\
 \midrule
 \endfirsthead
 \toprule
-case & $N$ & total charge ($-e$ each) & size (cells/axis) & spread & used in \\
+case & $N$ & total charge (per-particle weight) & size (cells/axis) & spread & used in \\
 \midrule
 \endhead
 \bottomrule
@@ -50,17 +53,17 @@ mid slices, g1 & 1000 & $1.602\times10^{-16}$\,C
   & \S\ref{app:slices}, \S\ref{sec:validation} \\
 large-domain, g10 & 100 & $1.602\times10^{-17}$\,C
   & extent $2.74\times3.78\times2.65$
-  & not recorded
+  & \dots
   & \S\ref{app:slices} (Fig.~\ref{fig:large}) \\
 large-domain, g1 & 100 & $1.602\times10^{-17}$\,C
   & extent $2.74\times3.78\times2.65$
-  & not recorded
+  & \dots
   & \S\ref{app:slices} (Fig.~\ref{fig:largeg1}) \\
-cost, stationary & $2\times10^6$ & not recorded
+cost, stationary & $2\times10^6$ & \dots
   & 20-cell bunch
   & none
   & \S\ref{sec:cost} \\
-cost, moving axial & $2\times10^6$ & not recorded
+cost, moving axial & $2\times10^6$ & \dots
   & 20-cell bunch
   & none
   & \S\ref{sec:cost} \\
@@ -72,22 +75,22 @@ landscape, aspect 4 & 1 & $1.602\times10^{-19}$\,C
   & single particle at the origin
   & none
   & Table~\ref{tab:d48} \\
- multi-velocity, E 5\% & 200 & $3.2\times10^{-17}$\,C
+ multi-velocity, E 5\% & 200 & $1.0\times10^{-10}$\,C ($-100$\,pC, weight $3.12\times10^{6}\,e$ each)
     & $\sigma\!=\!6$ cells, centroid $(32,32,32)$
     & 5\% energy, $+y$ drift
     & \S\ref{app:multivel} \\
- multi-velocity, A $5^\circ$ & 200 & $3.2\times10^{-17}$\,C
+ multi-velocity, A $5^\circ$ & 200 & $1.0\times10^{-10}$\,C ($-100$\,pC, weight $3.12\times10^{6}\,e$ each)
     & $\sigma\!=\!6$ cells, centroid $(32,32,32)$
     & $5^\circ$ angular, $+y$ drift
     & \S\ref{app:multivel} \\
- 1\,mrad, binned & 200 & $3.2\times10^{-17}$\,C
-    & $\sigma\!=\!6$ cells, centroid $(32,32,32)$, 1.046\,mrad rms $x$-div
-    & 1\,mrad, $+y$ drift
-    & \S\ref{app:multivel} \\
- divergence, 1\,mrad & 1000 & $1.602\times10^{-16}$\,C
-    & $\sigma\!=\!0.6$ each axis, centroid $(3.197,3.208,1.615)$
-    & 1\,mrad paraxial, $+y$ (seed 43)
-    & \S\ref{app:slices} (reference pending) \\
+  1\,mrad, binned & 200 & $1.0\times10^{-10}$\,C ($-100$\,pC, weight $3.12\times10^{6}\,e$ each)
+     & $\sigma\!=\!6$ cells, centroid $(32,32,32)$, 1.046\,mrad rms $x$-div
+     & 1\,mrad, $+y$ drift
+     & \S\ref{app:multivel}, \S\ref{app:slices} (Fig.~\ref{fig:valfluct}) \\
+  divergence, 1\,mrad & 1000 & $1.602\times10^{-16}$\,C
+     & $\sigma\!=\!0.6$ each axis, centroid $(3.197,3.208,1.615)$
+      & 1\,mrad paraxial, $+y$ (seed 43)
+     & \S\ref{app:slices} (Fig.~\ref{fig:val1mrad}; first 200 at unit weight, $-32$\,aC) \\
 \end{longtable}
 
 \begin{longtable}{@{}p{2.3cm}p{3.4cm}p{4.5cm}p{4.4cm}@{}}
@@ -102,11 +105,11 @@ case & $\gamma$, kinetic E ($m_ec^2\!=\!510.999$\,keV) & weight, cell & field gr
 \bottomrule
 \endfoot
 mid slices, both & 10 / 5.06\,MeV; 1 / 0 & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
-large-domain, both & 10 / 5.06\,MeV; 1 / 0 & not recorded; $2\times10^{-7}$\,m & $128\times128\times64$ ($25.6\times25.6\times12.8$), jureca-h100 \\
-cost, both & 1 / 0; 10 / 5.06\,MeV & not recorded; $2.5\times10^{-7}$\,m & $66\times68\times66$, jureca-h100 \\
+large-domain, both & 10 / 5.06\,MeV; 1 / 0 & \dots; $2\times10^{-7}$\,m & $128\times128\times64$ ($25.6\times25.6\times12.8$), jureca-h100 \\
+cost, both & 1 / 0; 10 / 5.06\,MeV & \dots; $2.5\times10^{-7}$\,m & $66\times68\times66$, jureca-h100 \\
 landscape, aspect 1 & 10/50/100 & 1; $10^{-7}$\,m & $96^3$ ($h\!=\!1$), $384^3$ ($h\!=\!1/4$), jureca-h100 (ref: rosi\_v100) \\
-landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\!1$, host not recorded \\
- multi-velocity, both & 10 / 5.06\,MeV & 1 each; $10^{-7}$\,m & $64^3$, hal (A30, \texttt{sm\_80}) \\
+landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\!1$, rosi\_v100 \\
+ multi-velocity, both & 10 / 5.06\,MeV & $3.12\times10^{6}\,e$ ($5\times10^{-13}$\,C) each; $10^{-7}$\,m & $64^3$, JURECA H100 \\
  divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
 \end{longtable}
 \end{table}
@@ -135,13 +138,17 @@ outside the domain is rejected at start-up.
 
 The measurement hosts and toolchains are: \texttt{rosi\_v100} (node
 \texttt{gv002}, V100 \texttt{sm\_70}, CUDA 12.6,
-\texttt{PICBUNCH\_ARCH=70}, Release); \texttt{jrc0880} (H100
-\texttt{sm\_90}, CUDA 13.4); \texttt{hal} (NVIDIA A30, \texttt{sm\_80},
-CUDA 13.4.92). The openPMD standard is version 5.0~\citep{openpmd}; the
-reference PIConGPU is the release whose \texttt{referenceOnly}
-field-initializer mode is used in
+\texttt{PICBUNCH\_ARCH=70}, Release); JURECA H100 (H100
+\texttt{sm\_90}, CUDA 13.4); the multi-velocity measurements of
+Appendix~\ref{app:multivel}, the hires and line series ran on
+JURECA H100 (H100 \texttt{sm\_90}, CUDA 13.4); \texttt{hal} is
+used for the AMD Radeon RX 7900 XTX \texttt{gfx1100} ROCm 7.2.0 toolchain
+(rocFFT) in the distributed-FFT HIP run and the CTest portability check. The checkpoint writer follows openPMD standard version
+1.1.0~\citep{openpmd} and is built against the openPMD-api 0.17.1 software.
+The reference PIConGPU is PIConGPU 0.9.0-dev (deck commit \texttt{b87c053}),
+the release whose \texttt{referenceOnly} field-initializer mode is used in
 Section~\ref{sec:validation}. The FFT library is cuFFT in the unnormalized
-form of the vendor documentation~\citep{cudacc2024}.
+form of the vendor documentation~\citep{cufft2024}.
 
 \paragraph{Particle shape.}
 The charge deposit uses the PIConGPU species shape selected with
@@ -149,8 +156,8 @@ The charge deposit uses the PIConGPU species shape selected with
 \texttt{tsc}).  The support radii are 1, 1.5 and 2 PIC cells.  The shape is not
 recorded in the openPMD particle data, so it must mirror the simulation's
 \texttt{shape.param}.  The shape sets the source smoothing; the FFT kernel
-remains the sampled point kernel.  The near shell currently supports TSC only
-and rejects CIC/PQS, while the mesh path supports all three.
+remains the sampled point kernel.  The near shell supports TSC only and
+rejects CIC/PQS, while the mesh path supports all three.
 
 \paragraph{Chunked particle input.}
 \texttt{--max-particle-chunk-gb} (a float, for example $1.5$) streams the
@@ -158,8 +165,8 @@ selected species in chunks of at most that many gigabytes instead of loading
 it once.  Each chunk is read on rank 0, broadcast, computed on the same fixed
 grid, and added to the output field.  The mode requires explicit
 \texttt{--grid}, \texttt{--origin} and \texttt{--cell-size} and a single
-velocity class; the global-domain writer is not combined with it yet.  On a
-200-electron test, 1-particle chunks reproduce the unchunked field to
+velocity class, and the global-domain writer is not applied in this mode.
+On a 200-electron test, 1-particle chunks reproduce the unchunked field to
 $4.8\times10^{-16}$.
 
 \subsection{Data and code availability}
@@ -175,11 +182,11 @@ Coulomb anchor), and the
 per-case \texttt{accuracy\_results.json} and \texttt{n1b\_padding\_*.csv}
 files (Appendix~\ref{app:padding}), with SHA-256 checksums in
 \texttt{MANIFEST.sha256}. The field-slice \texttt{.npz} arrays behind
-Figs.~\ref{fig:valforwardE}--\ref{fig:val1mrad} and
+Figs.~\ref{fig:valforward}--\ref{fig:val1mrad} and
 Figs.~\ref{fig:large}--\ref{fig:largeg1} are recorded in the measurement
 campaign (Appendix~\ref{app:slices}); individual measurements name the
 artifact they used. The figures are rendered at their print width from the
 recorded data with the shared style module described in the repository
-documentation; every figure PDF in \texttt{figs/} was regenerated from
+documentation; each figure PDF in \texttt{figs/} is rendered from
 recorded inputs, and the figure audit records the minimum printed font size
 and colour-bar label of each.

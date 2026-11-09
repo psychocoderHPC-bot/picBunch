@@ -1,0 +1,50 @@
+{
+  "case_id": "fastnear-reference-52pt",
+  "description": "CPU exact-field reference for the fast-near 52-point validation set (20 interior, 16 face, 16 outside per configuration)",
+  "git_commit": "a70c7e98620bcd0aaea71f7c11c96d0c822317d6",
+  "commit_note": "integration tip of repro/figures-20261108 used as the final code; the generator and data are added in its child commit",
+  "generated_utc": "2026-11-08T20:06:56Z",
+  "host": "fwk394",
+  "hostname": "337def6dbb2f",
+  "python": "3.12.3",
+  "numpy": "2.5.4",
+  "parameters": {
+    "configurations": {
+      "g1": [0.0, 0.0, 0.0],
+      "g10-axial": [0.0, 0.0, 9.9498743710662],
+      "g10-oblique": [8.12403840463596, 16.24807680927192, 8.12403840463596]
+    },
+    "cells_m": [1.0, 1.0, 1.0],
+    "source_m": [0.0, 0.0, 0.0],
+    "seed": 12345,
+    "order": 12,
+    "refine": 2,
+    "component_order": ["Ex", "Ey", "Ez", "Bx", "By", "Bz"],
+    "normalization": "per-unit-charge: E_n = 4*pi*eps0*E/q, B_n = 4*pi*eps0*c*B/q"
+  },
+  "values": {
+    "path": "docs/measurements/fastnear_reference_52pt.csv",
+    "sha256": "15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81",
+    "rows": 156
+  },
+  "generator": {
+    "path": "tools/verify/gen_fastnear_reference.py",
+    "sha256": "105efa3f8c3a492073984e41db02fdc0cccaa68822e51babb8971e50cd45a539",
+    "command": "python3 tools/verify/gen_fastnear_reference.py --out docs/measurements/fastnear_reference_52pt.csv"
+  },
+  "reference_implementation": {
+    "path": "tools/velocity-bins/indfield.py",
+    "sha256": "a135598041a3dbe134667585631ea53fc6bdb7cf7a84419b5a8d762202599519"
+  },
+  "determinism": {
+    "runs": 2,
+    "byte_identical": true,
+    "sha256_run1": "15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81",
+    "sha256_run2": "15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81"
+  },
+  "self_consistency": {
+    "check": "python3 tools/verify/gen_fastnear_reference.py --check docs/measurements/fastnear_reference_52pt.csv",
+    "result": "PASS: 156 stored values reproduce exactly; reference against itself = 0"
+  },
+  "notes": "Values are the order-12/refine-2 TSC-convolved continuum field, independent of picBunch, GPU and the output backend. A local reproducer on the same CPU produced the same rows with last-bit differences (max 4.4e-16), consistent with platform math-library dispatch; the committed values are the fwk394 run recorded above. No picBunch executable was run on fwk394."
+}

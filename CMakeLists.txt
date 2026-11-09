@@ -22,6 +22,7 @@ include(FetchContent)
 # Options
 # ---------------------------------------------------------------------------
 option(PICBUNCH_BUILD_TESTS "Build the picBunch smoke test and CTest tests." ON)
+option(PICBUNCH_BUILD_BENCH "Build the synthetic scaling benchmark (picBunchBench)." OFF)
 option(PICBUNCH_ENABLE_CUDA "Compile the CUDA backend through alpaka (NVIDIA GPUs)." OFF)
 option(PICBUNCH_ENABLE_HIP "Compile the HIP backend through alpaka (AMD GPUs)." OFF)
 option(PICBUNCH_BUILD_GTESTS "Build the GoogleTest unit tests (system package or FetchContent)." ON)
@@ -358,8 +359,36 @@ alpaka_finalize(picBunchFftSizeCheck)
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 
+# Pointwise fast-near evaluator for the tab:fast 52-point validation set
+# (tools/verify/pb_fast_near_52pt.cpp).  CPU-only and header-only: it calls
+# picBunch::pbfast::shape_field directly, so it links no library symbols and
+# needs no alpaka, CUDA or FFTW.
+add_executable(picBunchFastNear52pt tools/verify/pb_fast_near_52pt.cpp)
+target_include_directories(picBunchFastNear52pt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # Measurement driver for velocity binning: synthetic mixed-velocity bunch,
 # binned fields for a list of box counts, for the continuum reference
 # comparison (tools/velocity-bins/compare_velocity_bins.py).
 add_executable(picBunchVelocityBinsMeasure tools/velocity-bins/measure_velocity_bins.cpp)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
+
+# ---------------------------------------------------------------------------
+# Synthetic scaling benchmark (additive, opt-in)
+#
+# Times picBunch::computeField() on in-memory bunches; no openPMD input, no
+# change to the library, the CLI, or any public API.
+# ---------------------------------------------------------------------------
+if(PICBUNCH_BUILD_BENCH)
+    find_package(Threads REQUIRED)
+    add_executable(picBunchBench tools/bench/bench.cpp)
+    target_link_libraries(picBunchBench PRIVATE picBunch::picBunch Threads::Threads)
+    if(PICBUNCH_ENABLE_CUDA)
+        find_package(CUDAToolkit QUIET)
+        if(CUDAToolkit_FOUND)
+            target_link_libraries(picBunchBench PRIVATE CUDA::cudart)
+            target_compile_definitions(picBunchBench PRIVATE PICBUNCH_BENCH_HAVE_CUDA=1)
+        endif()
+    endif()
+    alpaka_finalize(picBunchBench)
+    install(TARGETS picBunchBench)
+endif()

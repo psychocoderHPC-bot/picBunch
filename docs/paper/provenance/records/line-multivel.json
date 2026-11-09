@@ -1,0 +1,67 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "n/a",
+  "binary_sha256": {
+    "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+  },
+  "case_id": "line-multivel",
+  "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input /home/ubuntu/t29-valid/in/mvpaper_{e5,a5}.h5 --cell-size 1e-7 --grid 64 --origin 0,0,0 --velocity-bins {1,4,16,64,256} --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output out/mv_{e5,a5}_b*.bp",
+  "config_sha256": null,
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/line/multivel_energy.npz",
+      "sha256": "a7e8afab8e2fbf39ae4d23f4643b350b1348be107fe9b976999d4b32611a15ec"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_angular.npz",
+      "sha256": "3e7ff34ee05de02d6073d302113de17a3514937031b20a0be7fa445004990930"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_binning.csv",
+      "sha256": "38efae1cd17d750344ad2c8dc1b688a236c6bddaba366b75a7f2bac8d46a6a30"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_peaks.csv",
+      "sha256": "4fdf502c1a5d5599f67ece2e52866254c33bbfff349bd1701295fe8207db1f4e"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
+      "sha256": "f56d16a4fcafad0e818617ab69d97efa95250358a2929bdb5cea69ae5a6fcbf3"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
+      "sha256": "da5d204ad3b6ca016c9f0039e1f7e94f8cd69fe6ae5caf48a70971d9399c4f5c"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_fields_a5_b16.npz",
+      "sha256": "9f7d795c13430504ca728ac62b8bd99e23504d4fbecee1a449d2ca5e619355e3"
+    },
+    {
+      "path": "docs/paper/data/line/multivel_fields_a5_b64.npz",
+      "sha256": "4b6963a495c2cb9991564984ab235f60db1e64a8f51f4521400a73651ddf81e7"
+    }
+  ],
+  "end_utc": "2026-11-09T07:02:40Z",
+  "figure_ids": [
+    "F_multivel_dist"
+  ],
+  "git_commit": "e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Fresh 2026-11-09 jureca-h100 (jrc0880) BP5 campaign figdata2-20261109, -100 pC committed bunches: in/mvpaper_e5.h5 b7e28d73287ce42b4c51c2148847fe9ff284650cc60614aeb07d67a1fb022545 and in/mvpaper_a5.h5 3b12847d5eda83a229b2176a4b689ff9c1e13bbc9e4ec1c91fbd039011161146; 64^3 grid cell 1e-7 m, near-shell fast R=3. 10 runs (E5/A5 x B=1/4/16/64/256); output data.0 sha256 for B=16/64: e5 2ce26e2333ce1fe40b6858814b58ed40080820527a963fedbf788485eb908151 / 65898cb085f4768f06dc5a52aeb7d06dee68599ff384157172c89a71db79bb2d, a5 19b334f91d0f71626d282760ea070a092a6e9091aabba3cc92dbd38abd12be08 / fd7ca84d3cf6be8bb4783f3891f731344857c494786a960847cbf7561f1712a9. Reduced binning CSV sha256 c4df25ab1f2536afeb8877f0db853d2a066851fbf894973fe2329afe59e33ced; fresh field arrays e5_b16 f56d16a4fcafad0e818617ab69d97efa95250358a2929bdb5cea69ae5a6fcbf3, e5_b64 da5d204ad3b6ca016c9f0039e1f7e94f8cd69fe6ae5caf48a70971d9399c4f5c, a5_b16 9f7d795c13430504ca728ac62b8bd99e23504d4fbecee1a449d2ca5e619355e3, a5_b64 4b6963a495c2cb9991564984ab235f60db1e64a8f51f4521400a73651ddf81e7. Peak-scalar rows: E5 B=16/64 |Bz| 23204.907/23204.970 T vs paper 23205.0/23204.9 T with By=0; A5 B=16/64 |Bz| 24662.997/24664.274 T and By 1296.696/1297.071 T, reproducing the paper text's final-code 2.4663e4 T, which is 0.63% below the tabulated 2.4820e4 T; By agrees with the table to ~0.1%. Particle panels use the committed 512-source samples (seeds 100/103).",
+  "openpmd_version": "0.17.1",
+  "repeats": 1,
+  "script_sha256": {
+    "path": "docs/paper/scripts/ingest_measurements.py",
+    "sha256": "def79048bef0f3e166a52b73079d640f0bfeeda71fdf4db9675dfc6e3f7eb7d2"
+  },
+  "seed": [
+    100,
+    103
+  ],
+  "start_utc": "2026-11-09T07:01:43Z",
+  "statistic": "single"
+}

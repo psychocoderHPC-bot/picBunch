@@ -92,6 +92,10 @@ namespace
             "                        slower, diagnostic only)\n"
             "  --tolerance <value>   relative accuracy target of the free-space\n"
             "                        convolution (default: 1e-3; floor 1e-14)\n"
+            "  --fft-padding <N>     FFT zero-padding factor, an integer in [0,8]\n"
+            "                        (default: 0 = tolerance policy).  1 disables\n"
+            "                        padding (diagnostic: wrapped images leak into\n"
+            "                        the output); values above 3 only add cost\n"
             "  --near-shell <mode>   none|exact|fast|fast-gpu (default: none).  exact\n"
             "                        replaces the mesh contribution of every source\n"
             "                        within the shell by the adaptive reference (a\n"
@@ -119,11 +123,6 @@ namespace
             "                        box-count cap of the auto policy (default: 256);\n"
             "                        an infeasible requirement fails with the needed\n"
             "                        count\n"
-            "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
-            "  --near-shell-oblique-order <auto|N>\n"
-            "                        oblique singular-box order: auto (default) raises it\n"
-            "                        per tile from the source gamma, N in [4,12] forces it\n"
-            "                        (4 is the fast path)\n"
             "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
@@ -169,6 +168,7 @@ namespace
         std::optional<std::uint64_t> inputIteration;
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
+        unsigned fftPadding = 0; //!< 0 = tolerance policy
         std::string nearShell = "none";
         double nearShellRadius = 0.0;
         std::size_t nearShellTile = 4;
@@ -354,6 +354,15 @@ namespace
                 args.outputIteration = parseIteration(value("--output-iteration"), "--output-iteration");
             else if(option == "--tolerance")
                 args.tolerance = parseTolerance(value("--tolerance"));
+            else if(option == "--fft-padding")
+            {
+                std::uint64_t const padding
+                    = parseIteration(value("--fft-padding"), "--fft-padding");
+                if(padding > 8u)
+                    throw std::invalid_argument(
+                        "--fft-padding must be between 0 and 8 (0 selects the tolerance policy)");
+                args.fftPadding = static_cast<unsigned>(padding);
+            }
             else if(option == "--near-shell")
                 args.nearShell = value("--near-shell");
             else if(option == "--near-shell-radius")
@@ -375,9 +384,6 @@ namespace
             else if(option == "--max-velocity-bins")
                 args.maxVelocityBins
                     = parseIteration(value("--max-velocity-bins"), "--max-velocity-bins");
-            else if(option == "--near-shell-fast-order")
-                args.nearShellFastOrder
-                    = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -447,6 +453,9 @@ namespace
             throw std::invalid_argument("--destination requires --config");
         if(!(args.tolerance > 0.0) || !std::isfinite(args.tolerance))
             throw std::invalid_argument("--tolerance must be finite and positive");
+        if(args.fftPadding > 8u)
+            throw std::invalid_argument(
+                "--fft-padding must be between 0 and 8 (0 selects the tolerance policy)");
         if(args.backend != "auto" && args.backend != compiledBackend())
             throw std::invalid_argument(
                 "--backend " + args.backend + " is not available; this build uses " + compiledBackend());
@@ -489,8 +498,6 @@ namespace
             throw std::invalid_argument("--max-velocity-bins must be >= 1");
         if(!(args.binModelConstant > 0.0) || !std::isfinite(args.binModelConstant))
             throw std::invalid_argument("--bin-model-constant must be finite and positive");
-        if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
-            throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
         if(args.restartFormat != "standard" && args.restartFormat != "picongpu")
             throw std::invalid_argument("--restart-format must be 'standard' or 'picongpu'");
         if(args.restartFormat == "picongpu" && args.output)
@@ -596,6 +603,7 @@ namespace
         // The checkpoint writer consumes the full field on rank 0.
         options.fftMode = picBunch::FftMode::Replicated;
         options.tolerance = config.accuracy.tolerance;
+        options.fftPadding = args.fftPadding;
         options.cellSize = config.domain.cellSize;
         options.gridSize = config.domain.cells;
         options.gridOrigin = config.domain.origin;
@@ -722,6 +730,7 @@ namespace
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
         options.tolerance = args.tolerance;
+        options.fftPadding = args.fftPadding;
         options.deterministicDeposit = args.deterministicDeposit;
         options.shape = (args.shape == "cic") ? picBunch::Shape::CIC
             : (args.shape == "pqs") ? picBunch::Shape::PQS
@@ -976,6 +985,7 @@ int main(int argc, char** argv)
         // Geometry: an explicit --cell-size always wins over the input mesh.
         // When neither is available the run fails; nothing is assumed.
         options.tolerance = args.tolerance;
+        options.fftPadding = args.fftPadding;
         options.deterministicDeposit = args.deterministicDeposit;
         options.shape = (args.shape == "cic") ? picBunch::Shape::CIC
             : (args.shape == "pqs") ? picBunch::Shape::PQS

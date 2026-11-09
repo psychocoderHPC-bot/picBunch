@@ -442,7 +442,13 @@ namespace picBunch
                         }
                         tileObliqueOrder = pbfast::autoObliqueOrder(maxObliqueGamma);
                     }
+#if defined(PICBUNCH_BACKEND_CUDA)
+                    // Only the CUDA device evaluator consumes DeviceParams; the
+                    // host fast path reads tileFastSettings below.  Keep the
+                    // assignment behind the same guard as the declaration so a
+                    // CPU-only build compiles.
                     deviceParams.obliqueOrder = tileObliqueOrder;
+#endif
                     pbfast::Settings tileFastSettings = fastSettings;
                     tileFastSettings.obliqueOrder = tileObliqueOrder;
 

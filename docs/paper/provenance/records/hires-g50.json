@@ -1,0 +1,36 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "y",
+  "binary_sha256": {
+    "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+  },
+  "case_id": "hires-g50",
+  "command": "/home/ubuntu/block1-src/build/picBunch --input in_t29/hires_g50.h5 --species e --input-iteration 0 --output-iteration 0 --cell-size 5e-8 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/figdata-20261109/out/hires_g50.bp",
+  "config_sha256": null,
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/hires/hi_g50.npz",
+      "sha256": "b01725d14fc5288ebcb58f27631dd41a1199adeda2b01d7fe0f263da081182d8"
+    }
+  ],
+  "end_utc": "2026-11-09T00:12:48Z",
+  "figure_ids": [
+    "gp_g50"
+  ],
+  "git_commit": "88cb6bd28b90ea81807eb7428e3c23b9504c54ed",
+  "gpu_model": "NVIDIA H100 PCIe",
+  "host": "jrc0880.jureca",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Fresh jureca-h100 run 2026-11-09; input in_t29/hires_g50.h5 sha256 2b05aace73d2a6c1a2909a39f5461015c75aefd73108e97796663c99fa1524fe; BP5 output sha256 0f9c6711a1a873bdee3f7c8636a411d18e972fb8ec023d7c037c2b9c9a9299d6; HDF5 conversion extracted/out/hires_g50.h5 sha256 4a7cb987d28b69d662261963fb91f3282c7852bad4e3231186119da0eb9eb72e; binary /home/ubuntu/block1-src/build/picBunch sha256 d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275 (git e1ddfb55eff92dc12cc2067b52253aa218914ff5). BP5 was converted to openPMD HDF5 with t29-valid/tools/bp2h5 before the canonical ingest. Measured worst relative error 1.42585, matching the committed paper value 1.42585; the fresh PIC field differs from the committed field by 2.20e-13 relative.",
+  "openpmd_version": "0.17.1",
+  "repeats": 1,
+  "script_sha256": {
+    "path": "docs/paper/scripts/ingest_measurements.py",
+    "sha256": "def79048bef0f3e166a52b73079d640f0bfeeda71fdf4db9675dfc6e3f7eb7d2"
+  },
+  "seed": null,
+  "start_utc": "2026-11-09T00:12:41Z",
+  "statistic": "single"
+}

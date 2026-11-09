@@ -108,19 +108,19 @@ namespace picBunch
                     double const q = pq[p];
                     for(long ia = lo[0]; ia <= hi[0]; ++ia)
                     {
-                        double const wa = shapeWeight<S>( static_cast<double>(ia) - t[0]);
+                        double const wa = shapeWeight<S>(static_cast<double>(ia) - t[0]);
                         if(wa == 0.0)
                             continue;
                         long const ma = wrapPaddedIndex(ia, Mx);
                         for(long ib = lo[1]; ib <= hi[1]; ++ib)
                         {
-                            double const wb = wa * shapeWeight<S>( static_cast<double>(ib) - t[1]);
+                            double const wb = wa * shapeWeight<S>(static_cast<double>(ib) - t[1]);
                             if(wb == 0.0)
                                 continue;
                             long const mb = wrapPaddedIndex(ib, My);
                             for(long ic = lo[2]; ic <= hi[2]; ++ic)
                             {
-                                double const wc = wb * shapeWeight<S>( static_cast<double>(ic) - t[2]);
+                                double const wc = wb * shapeWeight<S>(static_cast<double>(ic) - t[2]);
                                 if(wc == 0.0)
                                     continue;
                                 long const mc = wrapPaddedIndex(ic, Mz);
@@ -1046,6 +1046,12 @@ namespace picBunch
         StageTimes localTimes;
         StageTimes& times = stageTimes ? *stageTimes : localTimes;
         times = StageTimes{};
+        // The region from entry to the first deposit is currently untimed:
+        // velocity binning, grid setup, allocations, and the r2c/c2r plan and
+        // workspace build.  Record it once, at the first deposit of the path
+        // that actually runs, as StageTimes::planMs.
+        auto const callStart = Clock::now();
+        bool planCaptured = false;
 
 #if defined(PICBUNCH_BACKEND_CUDA)
         auto selector = alpaka::onHost::makeDeviceSelector(alpaka::api::cuda, alpaka::deviceKind::nvidiaGpu);
@@ -1464,6 +1470,11 @@ namespace picBunch
 
                     // ---- deposit + FFT every moment density M_a (once)
                     auto const depStart = Clock::now();
+                    if(!planCaptured)
+                    {
+                        times.planMs = elapsedMs(callStart);
+                        planCaptured = true;
+                    }
                     for(auto const& mi : moments)
                     {
                         alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
@@ -1833,6 +1844,11 @@ namespace picBunch
 
                 // -------------------------------------------------------- deposit
                 auto const depositStart = Clock::now();
+                if(!planCaptured)
+                {
+                    times.planMs = elapsedMs(callStart);
+                    planCaptured = true;
+                }
                 dfft.clearWork();
                 if(options.deterministicDeposit)
                     depositHost(members[b], workReal, 2u, zOffset, nz);
@@ -1931,6 +1947,11 @@ namespace picBunch
 
             // -------------------------------------------------------- deposit
             auto const depositStart = Clock::now();
+            if(!planCaptured)
+            {
+                times.planMs = elapsedMs(callStart);
+                planCaptured = true;
+            }
             alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
             if(options.deterministicDeposit)
             {

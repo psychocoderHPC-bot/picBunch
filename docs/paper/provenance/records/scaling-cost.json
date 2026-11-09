@@ -1,0 +1,37 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "n/a",
+  "binary_sha256": {
+    "sha256": "39fbc8acac50c0585402d6b42c3a4e3f525fe133d4ba0ba1314c6fa501ecbe3d"
+  },
+  "case_id": "scaling-cost",
+  "command": "reduced from the 2026-11-08 matrix campaign (docs/measurements/matrix.csv, matrix/provenance.jsonl): appended row_class, total_iqr_ms, mode totals with per-mode stage-cluster IQR, mode counts and n_used; no original column changed",
+  "config_sha256": {
+    "path": "docs/measurements/matrix_h100_20261108.md",
+    "sha256": "02af39443d9e68a2345e7819caa9cfc7601ad49e93a8854c0afe43fb15eebf86"
+  },
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/scaling/matrix.csv",
+      "sha256": "9e25ad24e752eb9e182398c35164fb79ac7612d293a0a9d1810f403fd7410013"
+    }
+  ],
+  "end_utc": null,
+  "figure_ids": [
+    "F_a_scaling_vs_N",
+    "F_b_scaling_vs_box"
+  ],
+  "git_commit": "88cb6bd28b90ea81807eb7428e3c23b9504c54ed",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Reduced copy of docs/measurements/matrix.csv (the 2026-11-08 H100 re-measurement behind tab:matrix) with the per-row gate classification appended: row_class, total_iqr_ms, the bimodal rows' mode totals with per-mode stage-cluster IQR and mode counts, and n_used. Original columns are unchanged; per-row provenance is matrix/provenance.jsonl.",
+  "openpmd_version": "0.17.1",
+  "repeats": 9,
+  "script_sha256": null,
+  "seed": null,
+  "start_utc": null,
+  "statistic": "median"
+}

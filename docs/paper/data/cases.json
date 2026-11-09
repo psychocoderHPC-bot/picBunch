@@ -1,0 +1,681 @@
+{
+ "cases": {
+  "bdata2-fluctuation": {
+   "config": {
+    "cell_m": 1e-07,
+    "charge": "-100 pC",
+    "gamma": 10,
+    "grid": [
+     64,
+     64,
+     64
+    ],
+    "particles": 200,
+    "sigma_um": 0.6
+   },
+   "figures": [
+    "val_fluct_xy",
+    "val_fluct_zy"
+   ],
+   "host": "fwk394-local-cpu (local CPU container alpaka-bot-cli-y6h5m)",
+   "note": "reference_only=1: the plotted val_fluct panels use the order-12 exact reference freshly recomputed on the CPU; the stored pic field remains the legacy forward-case proxy because no fresh fluctuation picBunch run exists.",
+   "picbunch_version": "picBunch v0.7.0 (a152c518107e3de382312efb712ed3ce4de69027)",
+   "propagation_axis": "y",
+   "provenance": "fresh-reference",
+   "seed": 42,
+   "source_data": [
+    {
+     "bytes": 940531,
+     "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
+     "sha256": "6899c9cd5248fd9b30f6788777879a23d6a2b8470a339bb048541c13659beb05"
+    },
+    {
+     "bytes": 4830,
+     "path": "docs/paper/data/bdata2/forward_sources.npz",
+     "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+    }
+   ],
+   "measurement_kind": "fresh-reference"
+  },
+  "bdata2-forward": {
+   "config": {
+    "cell_m": 1e-07,
+    "charge": "-100 pC",
+    "gamma": 10,
+    "grid": [
+     64,
+     64,
+     64
+    ],
+    "particles": 200,
+    "sigma_um": 0.6
+   },
+   "figures": [
+    "val_forward_xy",
+    "val_forward_zy"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": 42,
+   "source_data": [
+    {
+     "bytes": 958334,
+     "path": "docs/paper/data/bdata2/forward_slice.npz",
+     "sha256": "44313e5d0730ec71afc4177ff691d06f776554c4d6b49032699f76b936f405df"
+    },
+    {
+     "bytes": 4830,
+     "path": "docs/paper/data/bdata2/forward_sources.npz",
+     "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+    }
+   ]
+  },
+  "h100-mpi-scaling": {
+   "config": {
+    "bins": 1,
+    "fft_mode": "distributed",
+    "grid": [
+     256,
+     256,
+     256
+    ],
+    "particles": 2000000,
+    "tolerance": 0.001
+   },
+   "figures": [
+    "F_mpi_rank_scaling_h100"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "io_backend": "adios2/BP5",
+   "measurement_kind": "fresh-h100",
+   "note": "BP5 distributed-FFT rank scaling, 1 warm-up + 3 repeats, medians. Reduced table docs/paper/data/line/h100_mpi_scaling.csv; source r9/raw/newstack/mpi_medians.json (final ADIOS2 2.12.1 stack).",
+   "picbunch_version": null,
+   "propagation_axis": "n/a",
+   "provenance": "fresh-h100",
+   "repeats": 3,
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": null,
+     "path": "docs/paper/data/line/h100_mpi_scaling.csv",
+     "sha256": "e8640495e754091c4fada2770cea8a546cba763aca691ace886ff88c267cee99"
+    }
+   ],
+   "statistic": "median"
+  },
+  "hires-g10": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 10.0,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g10"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1940306,
+     "path": "docs/paper/data/hires/hi_g10.npz",
+     "sha256": "28cd190d534c2e7f7ab71cc2a1cb106f157716819d5d8060dac4dd4f7304afef"
+    }
+   ]
+  },
+  "hires-g100": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 100.0,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g100"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1892279,
+     "path": "docs/paper/data/hires/hi_g100.npz",
+     "sha256": "a5d6fbf0c5141cd58afceb93c830c2e7baa64f5b3238b0bbea6e3cfbe3c9b6fa"
+    }
+   ]
+  },
+  "hires-g1p0": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 1.0,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g1p0"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1373960,
+     "path": "docs/paper/data/hires/hi_g1p0.npz",
+     "sha256": "23521eda778a40a94c8a5ce19bba571fab08bb30aa1a19784b3fea60ff6676ff"
+    }
+   ]
+  },
+  "hires-g1p1": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 1.1,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g1p1"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1939557,
+     "path": "docs/paper/data/hires/hi_g1p1.npz",
+     "sha256": "836c4f6a334f8d14798970493d96a8f549a940400e542301578741dac45f50c9"
+    }
+   ]
+  },
+  "hires-g1p5": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 1.5,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g1p5"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1938439,
+     "path": "docs/paper/data/hires/hi_g1p5.npz",
+     "sha256": "373c1e22b689c951f5cf243076a29a15a5a497c3b8ca06820ac3ef0d02cf0b08"
+    }
+   ]
+  },
+  "hires-g2p0": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 2.0,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g2p0"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1934490,
+     "path": "docs/paper/data/hires/hi_g2p0.npz",
+     "sha256": "94130a49acbc74d436fc229ab5be241aa06e90806888472ff29356d1ab44b5c9"
+    }
+   ]
+  },
+  "hires-g50": {
+   "config": {
+    "cell_m": 5e-08,
+    "gamma": 50.0,
+    "grid": [
+     128,
+     128,
+     128
+    ],
+    "particles": 1,
+    "position_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "reference": "indfield.py order 12"
+   },
+   "figures": [
+    "gp_g50"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe",
+   "host": "jrc0880.jureca",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh jureca-h100 measurement 2026-11-09; BP5 output converted to HDF5 with t29-valid/tools/bp2h5 before the canonical ingest; measured values match the committed paper values",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 1911349,
+     "path": "docs/paper/data/hires/hi_g50.npz",
+     "sha256": "b01725d14fc5288ebcb58f27631dd41a1199adeda2b01d7fe0f263da081182d8"
+    }
+   ]
+  },
+  "large1-g1": {
+   "config": {
+    "cell_m": 2e-07,
+    "gamma": 1,
+    "grid": [
+     128,
+     128,
+     64
+    ],
+    "particles": 100,
+    "reference": "order-4 max-level-5 driver tol 1e-3"
+   },
+   "figures": [
+    "large_sxy_g1",
+    "large_szy_g1"
+   ],
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",
+   "picbunch_version": "picBunch v0.8.0 (ae10ab29)",
+   "propagation_axis": "stationary",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 2068252,
+     "path": "docs/paper/data/large1/slices_g1.npz",
+     "sha256": "935f598cfb6c9465091f76f349d16ec0c58e53e4ae850d3538057ef4586410c8"
+    }
+   ],
+   "measurement_kind": "fresh-h100",
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "io_backend": "adios2/BP5"
+  },
+  "large1-g10": {
+   "config": {
+    "cell_m": 2e-07,
+    "gamma": 10,
+    "grid": [
+     128,
+     128,
+     64
+    ],
+    "particles": 100,
+    "reference": "order-4 max-level-5 driver tol 1e-3"
+   },
+   "figures": [
+    "large_sxy_g10",
+    "large_szy_g10"
+   ],
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",
+   "picbunch_version": "picBunch v0.8.0 (ae10ab29)",
+   "propagation_axis": "x",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 2828305,
+     "path": "docs/paper/data/large1/slices_g10.npz",
+     "sha256": "397ec7ae4ef7fb9d2a7513c809a53367c9d1973687b5ba2e1badd2880abeb976"
+    }
+   ],
+   "measurement_kind": "fresh-h100",
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "io_backend": "adios2/BP5"
+  },
+  "line-gamma-error": {
+   "config": {
+    "gamma": [
+     10,
+     50,
+     100
+    ],
+    "h": [
+     1.0,
+     0.25
+    ],
+    "cell_m": [
+     1e-07,
+     2.5e-08
+    ],
+    "source": "figdata2 ER1b error landscape (current node-unit model)"
+   },
+   "figures": [
+    "F_gamma_err_dist"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh 2026-11-09 jureca-h100 BP5 campaign; h=1 rows reproduce the 96^3 line-gamma values, h=1/4 rows are the current-model standard refined mesh (cell 2.5e-8 m, 384^3), not the legacy v0.5.0 kRefinement=0.25 values 0.188/6.86e-5/7.11e-4",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "n/a",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 580,
+     "path": "docs/paper/data/line/gamma_err_dist.csv",
+     "sha256": "f909a558df2db459e4722ba8d6f826d362ef8f898661db1b875c01d87cb7fbea"
+    }
+   ]
+  },
+  "line-mpi": {
+   "config": {
+    "ranks": [
+     1,
+     2,
+     4
+    ],
+    "source": "INT3 strong scaling"
+   },
+   "figures": [
+    "F_mpi_rank_scaling"
+   ],
+   "host": "rosi_v100 (gv001)",
+   "note": "values transcribed from INT3/RESULTS.md by the legacy script; unchanged",
+   "picbunch_version": "picBunch v0.6.0 (e4c7325ddabdd50740589a8c3416aab2e8b053ae)",
+   "propagation_axis": "n/a",
+   "provenance": "legacy-reduced",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 429,
+     "path": "docs/paper/data/line/mpi_scaling.csv",
+     "sha256": "88b4a9d176a87df1b1d18f43b14ca9ca3a6bf132b46fd18d9e1537b131ca4499"
+    }
+   ]
+  },
+  "line-multivel": {
+   "config": {
+    "angular_seed": 103,
+    "cell_m": 1e-07,
+    "charge": "-100 pC",
+    "energy_seed": 100,
+    "field_particles": 200,
+    "gamma": 10,
+    "grid": [
+     64,
+     64,
+     64
+    ],
+    "particles": 512,
+    "source": "figdata2 multi-velocity binning (MV2 particle samples)"
+   },
+   "figures": [
+    "F_multivel_dist"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh 2026-11-09 jureca-h100 BP5 -100 pC campaign, 10 runs at B=1/4/16/64/256; E5 peaks agree with the paper table, A5 Bz reproduces the paper text final-code 2.4663e4 T (0.63% below the 2.4820e4 T table) and By agrees to ~0.1%; multivel_peaks.csv records the B=16/64 peak scalars; the four fresh E/B field arrays (E5/A5 at B=16/64) are committed in the reduced layout and hashed in the provenance record",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "n/a",
+   "provenance": "fresh-h100",
+   "seed": [
+    100,
+    103
+   ],
+   "source_data": [
+    {
+     "bytes": 16469,
+     "path": "docs/paper/data/line/multivel_energy.npz",
+     "sha256": "a7e8afab8e2fbf39ae4d23f4643b350b1348be107fe9b976999d4b32611a15ec"
+    },
+    {
+     "bytes": 24041,
+     "path": "docs/paper/data/line/multivel_angular.npz",
+     "sha256": "3e7ff34ee05de02d6073d302113de17a3514937031b20a0be7fa445004990930"
+    },
+    {
+     "bytes": 390,
+     "path": "docs/paper/data/line/multivel_binning.csv",
+     "sha256": "38efae1cd17d750344ad2c8dc1b688a236c6bddaba366b75a7f2bac8d46a6a30"
+    },
+    {
+     "bytes": 617,
+     "path": "docs/paper/data/line/multivel_peaks.csv",
+     "sha256": "4fdf502c1a5d5599f67ece2e52866254c33bbfff349bd1701295fe8207db1f4e"
+    },
+    {
+     "bytes": 10041732,
+     "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
+     "sha256": "f56d16a4fcafad0e818617ab69d97efa95250358a2929bdb5cea69ae5a6fcbf3"
+    },
+    {
+     "bytes": 10041262,
+     "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
+     "sha256": "da5d204ad3b6ca016c9f0039e1f7e94f8cd69fe6ae5caf48a70971d9399c4f5c"
+    },
+    {
+     "bytes": 12063430,
+     "path": "docs/paper/data/line/multivel_fields_a5_b16.npz",
+     "sha256": "9f7d795c13430504ca728ac62b8bd99e23504d4fbecee1a449d2ca5e619355e3"
+    },
+    {
+     "bytes": 12071447,
+     "path": "docs/paper/data/line/multivel_fields_a5_b64.npz",
+     "sha256": "4b6963a495c2cb9991564984ab235f60db1e64a8f51f4521400a73651ddf81e7"
+    }
+   ]
+  },
+  "line-w4b": {
+   "config": {
+    "aspects": [
+     1,
+     4
+    ],
+    "d_cells": [
+     2,
+     4,
+     8,
+     12,
+     16,
+     24,
+     32
+    ],
+    "gammas": [
+     1,
+     10,
+     50,
+     100
+    ],
+    "metric": "PAPER floored max(|ref-mesh|/max(|ref|,|mesh|)) over Ex,Ey,Ez, per-component floor |ref|>=1e-3 peak(component)",
+    "source": "figdata2 W4b paper-metric sweep",
+    "tolerance": 0.001
+   },
+   "figures": [
+    "F_w4b_rel_error"
+   ],
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "measurement_kind": "fresh-h100",
+   "note": "fresh 2026-11-09 jureca-h100 BP5 campaign plus the fresh gamma=1 runs; w4b_paper_metric.csv uses the corrected paper metric (|ref-mesh|/max denominator, electric Ex/Ey/Ez, per-component floor) and all four gammas; aspect 4 coincides with aspect 1 to machine precision at padding 1",
+   "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+   "propagation_axis": "n/a",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 15653,
+     "path": "docs/paper/data/line/w4b_rel_error.csv",
+     "sha256": "0082217a7fe55ee3af7b53c191e04eb7d864e14ce24bd42086b3a07170a1996f"
+    }
+   ]
+  },
+  "scaling-cost": {
+   "config": {
+    "note": "medians of 9 timed repeats (2 warm-up), padding 2, double; per-row gate classification appended to the 2026-11-08 H100 re-measurement",
+    "source": "SB1 scaling matrix, jureca-h100 re-measurement 2026-11-08"
+   },
+   "figures": [
+    "F_a_scaling_vs_N",
+    "F_b_scaling_vs_box"
+   ],
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "picbunch_version": "picBunch e1ddfb5+47f2436",
+   "propagation_axis": "n/a",
+   "provenance": "fresh-h100",
+   "seed": null,
+   "source_data": [
+    {
+     "bytes": 3108,
+     "path": "docs/paper/data/scaling/matrix.csv",
+     "sha256": "9e25ad24e752eb9e182398c35164fb79ac7612d293a0a9d1810f403fd7410013"
+    }
+   ],
+   "measurement_kind": "fresh-h100",
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "io_backend": "adios2/BP5"
+  },
+  "var1b-1mrad": {
+   "config": {
+    "cell_m": 2e-07,
+    "charge": "-32 aC",
+    "divergence_mrad": 1.0,
+    "gamma": 10,
+    "grid": [
+     32,
+     32,
+     16
+    ],
+    "particles": 200,
+    "velocity_bins": 2048
+   },
+   "figures": [
+    "val_1mrad_xy_E",
+    "val_1mrad_xy_B"
+   ],
+   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+   "note": "first 200 rows of the VAR1 1000-particle bunch; angles from default_rng(43)",
+   "picbunch_version": "picBunch experimental/multivel 02891fe6bd9c34eea5479e91ecebbd54a44a47f7",
+   "propagation_axis": "y",
+   "provenance": "fresh-h100",
+   "seed": 43,
+   "source_data": [
+    {
+     "bytes": 153057,
+     "path": "docs/paper/data/var1b/slices_var1b.npz",
+     "sha256": "d59ec32e524163f14cd0188552153cb734d86a879c351d5231556dc07ca2b08b"
+    }
+   ],
+   "measurement_kind": "fresh-h100",
+   "gpu_model": "NVIDIA H100 PCIe 80 GB",
+   "io_backend": "adios2/BP5"
+  }
+ },
+ "convention": {
+  "description": "each 2D figure plots its recorded physical layout; +y families put y horizontal, LARGE1 is axial-x by design"
+ },
+ "data_root": "docs/paper/data",
+ "dataset_propagation_axes": {
+  "bdata2": "y",
+  "hires": "y",
+  "large1": "x at gamma=10; stationary at gamma=1",
+  "var1b": "y"
+ },
+ "schema": "picbunch-paper-cases/1"
+}

@@ -1,0 +1,38 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "x",
+  "binary_sha256": {
+    "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+  },
+  "case_id": "large1-g1",
+  "command": "picBunch --input in/large_g1_N100.h5 --cell-size 2e-7 --grid 128,128,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --output out/large_g1.bp (BP5), then BP5->HDF5; xy z=32, zy x=64",
+  "config_sha256": {
+    "sha256": "a8ecd5e48fcdebfaf03c3893dda36bd84ac56c058d098a51947ca9403ed1bb85"
+  },
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/large1/slices_g1.npz",
+      "sha256": "935f598cfb6c9465091f76f349d16ec0c58e53e4ae850d3538057ef4586410c8"
+    }
+  ],
+  "end_utc": null,
+  "figure_ids": [
+    "large_sxy_g1",
+    "large_szy_g1"
+  ],
+  "git_commit": "012333bdf1879ea374948bed2732211851a8cea4",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Fresh large_g1 field from valid3 out/large_g1.h5; reference is the raw exact-driver large_g1_128.bin scaled to SI at cell 2e-7 (manifest sha 64b7ebc8e8312bc7782b10d9c05b064139db0e9b8c01c1feae146970ee9c59ea). Config digest is waveB1.sh; harness digest is run_case.sh. The stationary gamma=1 analytic B is identically zero; reference values below 1e-12 T (double round-off ~2e-19 T after scaling) are set to zero, as recorded in the transform. The stored per-component validity masks were regenerated with the local field magnitude (sqrt(sum_c ref_c^2) for E or B) against a shared 1e-3*max_c(peak_c) floor; the error arrays and all reported error values are unchanged.",
+  "openpmd_version": "0.17.1",
+  "repeats": 1,
+  "script_sha256": {
+    "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
+  },
+  "seed": null,
+  "start_utc": null,
+  "statistic": "single-run"
+}

@@ -30,13 +30,12 @@ namespace picBunch
      * unchanged.  ``fftPadding`` must be at least 2 and every axis must satisfy
      * ``M >= n + 2`` so the two halo sides cannot alias onto each other.
      *
-     * The TSC shape is sampled in node units, so ``refinement`` does not scale
-     * the weights: ``grid.spacing`` already contains the number of nodes per PIC
-     * cell (``kRefinement``).  The argument is validated and kept for
-     * API/testing compatibility.  Kept on the host so unit tests can compare the
-     * accelerator deposit node for node.
+     * The TSC shape is sampled in node units: ``grid.spacing`` already contains
+     * the number of nodes per PIC cell (``kRefinement``), so no additional
+     * refinement factor enters the weights.  Kept on the host so unit tests can
+     * compare the accelerator deposit node for node.
      */
-    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid, double refinement);
+    std::vector<double> depositTSCPaddedHost(Bunch const& bunch, Grid const& grid);
 
     /** True if every particle lies inside the grid volume (node box). */
     bool allParticlesInside(Bunch const& bunch, Grid const& grid);

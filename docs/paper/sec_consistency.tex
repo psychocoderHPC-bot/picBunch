@@ -8,8 +8,9 @@ reproduce. Each check names its measured value.
 The kernel of Section~\ref{sec:fielddef} is the present-time
 Li\'enard--Wiechert field of a uniformly moving charge~\citep{jackson2007}.
 The mesh reproduces the TSC-convolved Coulomb field of a single stationary
-particle to a worst relative error of $4.88\times10^{-14}$
-($2.28\times10^{-25}$ absolute) at $d=8,16,24,32$ along all six axis
+particle to a worst relative error of $4.88\times10^{-14}$,
+E-component L2 residual $2.29\times10^{-25}$, and elementwise maximum
+$2.28\times10^{-25}$, at $d=8,16,24,32$ along all six axis
 directions, against the direct TSC stencil sum of the analytic Coulomb
 kernel (Coulomb anchor, Section~\ref{sec:scaling}).
 
@@ -51,7 +52,13 @@ exactly, and the mesh inherits it component by component. For a stationary
 bunch ($\gamma=1$) every measured $B$ component is exactly zero
 (Tables~\ref{tab:wholefield} and \ref{tab:multivel}); for motion along
 $+y$ the component $B_y$ is identically zero in the measured fields
-($B_y\equiv 0$ in Figs.~\ref{fig:valforwardB} and
-\ref{fig:gp10}). The magnetic field at $\gamma=10$ is about $10^{-10}$ of
-the $E$-dominated local field in the floored metric, which is why the
+($B_y\equiv 0$ in Figs.~\ref{fig:valforward} and
+\ref{fig:gp10}). Accordingly, the fully masked error panels in
+Figs.~\ref{fig:gp1}--\ref{fig:gp100} (the whole $B$ row at $\gamma=1$;
+the $B_y$ panel for $\gamma>1$), Fig.~\ref{fig:valforward} ($B_y$) and
+the $B_x$ panel of Fig.~\ref{fig:large} are fully masked, because the
+relative error of an identically zero reference component is undefined. The magnetic field at
+$\gamma=10$ is about
+$3.3\!\times\!10^{-9}$ of the $E$-dominated local field
+(Section~\ref{sec:accuracy}), which is why the
 floored error metric is electric-only there (Section~\ref{sec:accuracy}).

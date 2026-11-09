@@ -11,6 +11,7 @@
 #include "picBunch/OpenPMDWriter.hpp"
 
 #include <openPMD/openPMD.hpp>
+#include <openPMD/config.hpp>
 
 #include <gtest/gtest.h>
 
@@ -525,6 +526,57 @@ TEST(Io, WriterPublishesIterationPatternAtomically)
     }
     EXPECT_EQ(files, 1u);
     std::filesystem::remove_all(directory);
+}
+
+TEST(Io, Adios2Bp5DirectoryIsPublishedAfterSeriesClose)
+{
+#if defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2
+    // Regression: the temporary BP5 directory used to be renamed while the
+    // openPMD Series was still alive.  ADIOS2 then wrote deferred metadata
+    // (profiling.json) into the old temporary path at finalize time and
+    // aborted.  writeFieldToDomain must close the series before the rename.
+    auto const field = makeField();
+    auto const directory = std::filesystem::temp_directory_path()
+        / ("picbunch_bp5_" + std::to_string(static_cast<long long>(getpid())));
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    auto const path = directory / "field.bp";
+
+    picBunch::FieldWriteOptions options;
+    options.iteration = 7u;
+    options.time = 2.5e-13;
+    options.timeUnitSI = 1.0;
+    picBunch::writeFieldToDomain(
+        field, path.string(), options, field.grid.n, field.grid.origin);
+
+    // BP5 stores one directory per series, published under the final name.
+    ASSERT_TRUE(std::filesystem::is_directory(path));
+    ASSERT_TRUE(std::filesystem::exists(path / "md.0"));
+
+    {
+        openPMD::Series series(path.string(), openPMD::Access::READ_ONLY);
+        auto& iteration = series.iterations[options.iteration];
+        for(int c = 0; c < 6; ++c)
+        {
+            std::string const recordName = (c < 3) ? "E" : "B";
+            auto& component = iteration.meshes[recordName][std::string(1, "xyz"[c % 3])];
+            auto const values = loadComponent(series, component, field.grid.n);
+            ASSERT_EQ(values.size(), field.data[c].size());
+            for(std::size_t l = 0; l < values.size(); ++l)
+                EXPECT_EQ(values[l], field.data[c][l])
+                    << "component " << c << " value " << l;
+        }
+    }
+
+    for(auto const& entry : std::filesystem::directory_iterator(directory))
+        EXPECT_EQ(
+            entry.path().filename().string().find(".picbunch-tmp-"), std::string::npos)
+            << "temporary path left behind";
+
+    std::filesystem::remove_all(directory);
+#else
+    GTEST_SKIP() << "openPMD was built without the ADIOS2 backend";
+#endif
 }
 
 TEST(Io, ReaderAcceptsOpenPMD2ScalarRecords)

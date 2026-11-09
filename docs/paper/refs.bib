@@ -33,7 +33,7 @@
   isbn      = {0-070-05371-5},
 }
 
-@book{hockney1988,
+@book{hockney1981,
   author    = {Hockney, R. W. and Eastwood, J. W.},
   title     = {Computer Simulation Using Particles},
   publisher = {Wiley},
@@ -55,11 +55,11 @@
 % ---------- openPMD standard ----------
 
 @misc{openpmd,
-  author       = {Huebl, Axel and Lehe, R\'emi and Vay, Jean-Luc and Grote, David P. and Sbalzarini, Ivo and Kuschel, Stephan and Bussmann, Michael},
-  title        = {openPMD~1.0.0: A meta data standard for particle and mesh based data},
-  year         = {2015},
+  author       = {Huebl, Axel and Lehe, R\'emi and Vay, Jean-Luc and Grote, David P. and Sbalzarini, Ivo and Kuschel, Stephan and Sagan, David and P\'erez, Fr\'ed\'eric and Koller, Fabian and Bussmann, Michael},
+  title        = {openPMD~1.1.0: Base paths for mesh- and particle-only files and updated attributes},
+  year         = {2018},
   publisher    = {Zenodo},
-  note         = {\href{https://doi.org/10.5281/zenodo.33624}{\texttt{doi:10.5281/zenodo.33624}}},
+  note         = {\href{https://doi.org/10.5281/zenodo.1167843}{\texttt{doi:10.5281/zenodo.1167843}}},
 }
 
 % ---------- PIConGPU and the GPU-PIC line ----------
@@ -89,11 +89,23 @@
 
 % ---------- FFT library documentation (technical report) ----------
 
-@misc{cudacc2024,
+@misc{cufft2024,
   author       = {{NVIDIA Corporation}},
   title        = {{CUDA} Toolkit Documentation: cuFFT Library User Guide},
   year         = {2024},
   howpublished = {NVIDIA Corporation, Santa Clara, CA},
   url          = {https://docs.nvidia.com/cuda/cuda-cufft-api/index.html},
   note         = {Accessed 2026},
+}
+
+% ---------- Measurement records of this repository ----------
+
+@misc{restart4measure,
+  author       = {picBunch project},
+  title        = {picBunch checkpoint, 4-rank {PIConGPU} restart on a
+                  decomposable grid (24 x 24 x 96, -d 1 1 4)},
+  howpublished = {docs/measurements/picongpu\_restart\_4rank.md, with
+                  archived checkpoints, logs and configuration, in the
+                  repository},
+  year         = {2026},
 }

@@ -1,0 +1,36 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "n/a",
+  "binary_sha256": {
+    "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+  },
+  "case_id": "line-w4b",
+  "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input in/{line_g1.h5,in/w4b_g1.a4.h5,line_g10.h5,line_g50.h5,line_g100.h5,...} --cell-size 1e-7 --grid 96,96,96 or 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --fft-padding 1 --shape tsc --output out/w4b_g*_a*.bp; python3 w4b/emit_paper_metric.py --refdir /home/ubuntu/er1-20261102/ref --outdir out --csv w4b_paper_metric.csv --summary w4b_paper_metric.json",
+  "config_sha256": null,
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/line/w4b_rel_error.csv",
+      "sha256": "0082217a7fe55ee3af7b53c191e04eb7d864e14ce24bd42086b3a07170a1996f"
+    }
+  ],
+  "end_utc": "2026-11-09T07:00:46Z",
+  "figure_ids": [
+    "F_w4b_rel_error"
+  ],
+  "git_commit": "e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Fresh 2026-11-09 jureca-h100 (jrc0880) BP5 campaign figdata2-20261109 plus the fresh gamma=1 runs. Inputs: in/line_g1.h5 ebea150edbebff7dbf324d4eabb66b1decd5abfe2d919ecc8efe43ee99283b6e, in/w4b_g1.a4.h5 9fd4510da7f53a69c05f4d7824a46a2797f4e3afa215c20b468c7174febad8d2, in/line_g10.h5 cb1f9af86cd05cf304165cc754d1af3819f591b010d288b111d843cb98494c70, in/w4b_g10.a4.h5 4dd14d2f303d47f08f6aeb9ee9a5cb3c7487e302f6ebc01a3062c84c7d11fe46, in/line_g50.h5 56878f1f7e5aaf4a30fb753f9af8750519f3f3a94795c81b49f61279ada8037b, in/w4b_g50.a4.h5 e669c990b643775ee4f730b393eacf89cc9a7cffe600641b739e82b73d84d9cd, in/line_g100.h5 787c940ab0495e7b37d81f4f91bdfed68de3fd0f8780a370ae9e05e05c819ad7, in/w4b_g100.a4.h5 42df5843196b4d1369c709947e18d0a6f1ba136322c6045260da8ec2a3594dd9. Order-12 ER1b references: ref_g1_i0_n1.npz 8b2a32ff3a57bf9673c37bc8df375630369ebc86eb0a4bbb01354a434e932b23, ref_g10 d4d79faf99d8bd39fe8e936aac001dc5a4bf6f8edacb7c888ad898707b667bba, ref_g50 a533a40e86ca74cd009e9a0e7bf1512dc00462084cf4676745d74d44d42e9cbb, ref_g100 2c78eaedf1176600ad9c57a5a378053639769ba98cc472f277167a364fa26888. Output data.0 sha256: gamma1 a1 53e06258e5010389d33b74630d9262d98becda9af7b8a025d696a156371d9261, gamma1 a4 7528455fc03173be0eabf4981af6a4b2fe965589493b40647d238fde556cd411, gamma10 a1 7cd09e8b6f48eb579d6c0fad7a056c350fb9c15cf39aa55a230400c033b1a6a1, gamma10 a4 ca3cbe5820f3c42aae7a4658d96b824446492f413c57e632e84518daf216d6c4, gamma50 a1 1d0e6b169588ff4a642afbf957676fd5652477d60e62d50d302d77eaa7e03eb1, gamma50 a4 114027b900aaf732c7ef58d23284358701a0e3079f9843159a55b9c73d010eda, gamma100 a1 633ec111d5d8ad7578256f2d7b9f90969237734e30aacbc16562158a57d74460, gamma100 a4 927d4d415ba15df6e831d761ffcc8ed22b9422ec815069f26432d72b46f94d35. Reduced CSV w4b_paper_metric.csv sha256 04e170d7f8a690dcfc281c2926d70e48c7aebd9fd09ef1db28a8d8f144197dea. Corrected metric description: PAPER floored metric max(|ref-mesh|/max(|ref|,|mesh|)) over the electric components Ex,Ey,Ez with the per-component floor |ref|>=1e-3 peak(component), d=2..32, aspect 1/4; aspect 4 coincides with aspect 1 to machine precision at padding 1. All four gammas (1/10/50/100) are present.",
+  "openpmd_version": "0.17.1",
+  "repeats": 1,
+  "script_sha256": {
+    "path": "docs/paper/scripts/ingest_measurements.py",
+    "sha256": "def79048bef0f3e166a52b73079d640f0bfeeda71fdf4db9675dfc6e3f7eb7d2"
+  },
+  "seed": null,
+  "start_utc": "2026-11-09T07:00:18Z",
+  "statistic": "single"
+}

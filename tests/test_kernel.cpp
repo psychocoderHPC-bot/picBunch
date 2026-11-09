@@ -31,6 +31,42 @@ TEST(Kernel, TscShapeSymmetryAndSupport)
     EXPECT_DOUBLE_EQ(picBunch::tscShape(1.5), 0.0);
 }
 
+namespace
+{
+    //! Support radius in output-node units.  The deposit evaluates the shape in
+    //! node units (cell resolution), so this is the cell-unit support unscaled.
+    template<picBunch::Shape S>
+    constexpr double nodeSupport()
+    {
+        return picBunch::shapeSupport<S>();
+    }
+} // namespace
+
+TEST(Kernel, ShapeSupportAndWeightAtCellResolution)
+{
+    using picBunch::Shape;
+
+    // Support radii of the three assignment shapes in node units.
+    EXPECT_DOUBLE_EQ(nodeSupport<Shape::CIC>(), 1.0);
+    EXPECT_DOUBLE_EQ(nodeSupport<Shape::TSC>(), 1.5);
+    EXPECT_DOUBLE_EQ(nodeSupport<Shape::PQS>(), 2.0);
+
+    // The TSC weight vanishes at its support radius and forms a partition of
+    // unity over the node grid for any fractional particle offset.  This pins
+    // the node-unit deposit shape that the paper measurements rely on.
+    EXPECT_EQ(picBunch::shapeWeight<Shape::TSC>(nodeSupport<Shape::TSC>()), 0.0);
+    EXPECT_EQ(picBunch::shapeWeight<Shape::TSC>(-nodeSupport<Shape::TSC>()), 0.0);
+    for(double frac : {0.0, 0.1, 0.3, 0.5, 0.75, 0.9})
+    {
+        double sum = 0.0;
+        long const lo = static_cast<long>(std::ceil(frac - nodeSupport<Shape::TSC>()));
+        long const hi = static_cast<long>(std::floor(frac + nodeSupport<Shape::TSC>()));
+        for(long i = lo; i <= hi; ++i)
+            sum += picBunch::shapeWeight<Shape::TSC>(static_cast<double>(i) - frac);
+        EXPECT_NEAR(sum, 1.0, 1.0e-13) << "frac=" << frac;
+    }
+}
+
 TEST(Kernel, PointFieldSymmetryAndAntisymmetry)
 {
     // E(-R) = -E(R); B(-R) = -B(R); B(R,-u) = -B(R,u).

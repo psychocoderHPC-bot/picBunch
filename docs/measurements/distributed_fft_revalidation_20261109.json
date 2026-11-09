@@ -1,0 +1,70 @@
+{
+  "case_id": "distributed-fft-revalidation-20261109",
+  "description": "HIP/gfx1100 re-validation of the distributed-FFT written-field agreement on the current branch tip, using the same inputs and parameters as the original commit defc079 run.",
+  "git_commit": "688c2288137d4e2efacd14116b203a0525c444f5",
+  "branch": "repro/figures-20261108",
+  "commit_note": "Current tip is 93 commits after defc079, which produced the original 3.2e-16 / 5.4e-16 rows. The source used for the re-run is a git archive of this commit with sha256 72d55db6650b2d8c065d9da1a8a3f944e33d67a9ad5138e1344e168de542104d.",
+  "generated_utc": "2026-11-09T11:46:24Z",
+  "host": "hal",
+  "hostname": "c692209a108c",
+  "gpu": "AMD Radeon RX 7900 XTX, gfx1100, 96 compute units (device 0x744c)",
+  "cpu": "AMD EPYC 7452 32-Core (64 threads)",
+  "toolchain": {
+    "hipcc": "HIP version 7.2.26015-fc0010cf6a",
+    "rocm": "7.2.0 (/opt/rocm-7.2.0)",
+    "rocfft": "librocfft.so.0.1.70200",
+    "openpmd": "0.17.0",
+    "hdf5": "1.10.10",
+    "mpi": "Open MPI 3.1 (mpicxx from g++ 13.3.0)",
+    "cmake": "3.28.3",
+    "build": "Release, HIP, MPI, CMAKE_HIP_ARCHITECTURES=gfx1100"
+  },
+  "binary_sha256": "7c9fac29771ac3d7bb4ce96acc892d146fed235b2ed16f87434d4609c9d57785",
+  "original_run": {
+    "git_commit": "defc0796c2f5421baaf143dce8dc17a88f9b5fac",
+    "date": "2026-11-07",
+    "note": "Original hal HIP run whose values were published as 3.2e-16 and 5.4e-16. Its replicated and distributed output files are still on hal under /tmp/fix_replicated.h5, /tmp/fix_distributed.h5, /tmp/fix4_replicated.h5 and /tmp/fix4_distributed.h5.",
+    "one_rank_global_rel": 3.2121896677605427e-16,
+    "four_rank_global_rel": 5.375291e-16
+  },
+  "parameters": {
+    "one_rank": {
+      "input": "/tmp/one8.h5 (one electron at 8e-6 m in x and z, uz=0)",
+      "ranks": 1,
+      "grid": [32, 32, 32],
+      "cell_size_m": [1.0e-6, 1.0e-6, 1.0e-6],
+      "origin_m": [-1.6e-5, -1.6e-5, -1.6e-5],
+      "tolerance": 1.0e-3,
+      "fft_modes": ["replicated", "distributed"]
+    },
+    "four_rank": {
+      "input": "/tmp/bunch.h5 (200 electrons, 20-cell box)",
+      "ranks": 4,
+      "grid": [64, 64, 64],
+      "cell_size_m": [1.0e-6, 1.0e-6, 1.0e-6],
+      "origin_m": [-3.2e-5, -3.2e-5, -3.2e-5],
+      "tolerance": 1.0e-3,
+      "velocity_bins": 1,
+      "fft_modes": ["replicated", "distributed"]
+    },
+    "metric": "global L2 relative over the six written E/B components, sqrt(sum((dist-rep)^2)/sum(rep^2)), and the worst absolute difference"
+  },
+  "commands": {
+    "one_rank": "HIP_VISIBLE_DEVICES=0 OMP_NUM_THREADS=1 picBunch --input /tmp/one8.h5 --species electrons --output cur_one8_{rep,dist}.h5 --grid 32,32,32 --cell-size 1e-6 --origin -1.6e-5,-1.6e-5,-1.6e-5 --tolerance 1e-3 --fft-mode {replicated,distributed} --backend hip",
+    "four_rank": "HIP_VISIBLE_DEVICES=0 OMP_NUM_THREADS=1 mpirun -n 4 picBunch --input /tmp/bunch.h5 --species electrons --output cur_four_{rep,dist}.h5 --grid 64,64,64 --cell-size 1e-6 --origin -3.2e-5,-3.2e-5,-3.2e-5 --tolerance 1e-3 --velocity-bins 1 --fft-mode {replicated,distributed} --backend hip"
+  },
+  "result": {
+    "one_rank_global_rel": 3.2121896677605427e-16,
+    "one_rank_worst_abs": 4.547473508864641e-13,
+    "four_rank_global_rel": 5.347764590901743e-16,
+    "four_rank_worst_abs": 5.820766091346741e-11,
+    "one_rank_replicated_bit_identical_to_original": true,
+    "four_rank_replicated_vs_original_rel": 2.6978384736485404e-16,
+    "comparison": "The one-rank value is identical to the published 3.2e-16. The four-rank value is 5.35e-16 versus the original 5.375e-16, a 0.5% change at the roundoff floor; the paper now quotes 5.3e-16 for this value (measured 5.348e-16), the rounding of 5.35e-16 down to one significant figure, consistent with the current paper text."
+  },
+  "raw_logs": {
+    "location": "hal:/tmp/dfft-val/{cur_one8_rep.log,cur_one8_dist.log,cur_four_rep.log,cur_four_dist.log}",
+    "bundle": "hal:/tmp/dfft-revalidation-20261109.tar.gz",
+    "bundle_note": "Contains provenance.txt, binary.sha256 and the four run logs."
+  }
+}
