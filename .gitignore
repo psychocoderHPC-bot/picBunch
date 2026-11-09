@@ -26,3 +26,6 @@ CMakeUserPresets.json
 *.bp
 *.json.tmp
 *.log
+
+# Reduced figure data committed so the paper figures are reproducible
+!docs/paper/data/**/*.npz

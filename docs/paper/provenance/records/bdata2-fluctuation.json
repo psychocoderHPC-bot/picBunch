@@ -1,0 +1,57 @@
+{
+  "adios2_version": null,
+  "axis_rule": "y",
+  "binary_sha256": {
+    "sha256": "7c8d65a1a66adf63231f01f8a5f3c8d076e163cf5014ab4b78d73a3d49ad2c8c"
+  },
+  "case_id": "bdata2-fluctuation",
+  "command": null,
+  "config_sha256": null,
+  "cuda_version": null,
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
+      "sha256": "5257bd1897ae21dbedd59e4151cd078b14497a395d582ff0617ded704f7328db"
+    },
+    {
+      "path": "docs/paper/data/bdata2/forward_sources.npz",
+      "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+    }
+  ],
+  "end_utc": null,
+  "figure_ids": [
+    "val_fluct_xy_E",
+    "val_fluct_xy_B",
+    "val_fluct_zy_E",
+    "val_fluct_zy_B"
+  ],
+  "generator": {
+    "driver_binary": {
+      "sha256": "7c8d65a1a66adf63231f01f8a5f3c8d076e163cf5014ab4b78d73a3d49ad2c8c"
+    },
+    "driver_source": {
+      "sha256": "d8344463298e0f08e56336cfd8e9d5af931f37e001e0c140eb6ef306ecd53082"
+    },
+    "kernel_header": {
+      "sha256": "7d59675bf42e807275091dd43cf647e484c3efe55a4f0eafec19b07b1c98a47f"
+    },
+    "reduce_script": {
+      "sha256": "137e5bd576cb0ae537c3158563041aa85685a39ae4956cf748df5f050d011958"
+    }
+  },
+  "git_commit": "55fd839950f489dfb7a604e36a56d0ea00815103",
+  "gpu_model": null,
+  "host": "fwk394-local-cpu (local CPU container alpaka-bot-cli-y6h5m)",
+  "io_backend": null,
+  "measurement_kind": "fresh-reference",
+  "notes": "Reference-only figure: the four val_fluct panels plot the order-12 exact_field_driver reference, recomputed on the CPU (fwk394-local-cpu), not a GPU measurement. Reference parameters: TSC shape, order 12, max_level 5, tol 1e-4, grid 64^3, cell 1e-7 m, planes xy iz=32 and zy ix=32. Driver ran twice with byte-identical output (sha 9b2449dd...); the order-4 control is byte-identical to the committed fluctuation_ref.bin, validating the input/sources/points mapping. Input is BDATA2 fluctuation.bunch.h5 (sha f348a0a7...); the literal mvpaper_fluc1mrad.h5 filename is absent on this host and the byte-identical BDATA2 copy was used. build_fluct_npz.py replaced only xy_ref_*/zy_ref_* (and the derived *_err_* arrays) in the 63-key renderer layout; all other keys, shapes and dtypes are unchanged and the pic field is still the legacy forward-case proxy. Exact driver CLI was not captured by the generator, so command is null; the fixed parameters are recorded here. No GPU/CUDA/openPMD/ADIOS2 versions exist for this CPU reference run, so those fields are null.",
+  "openpmd_version": null,
+  "reference_only": true,
+  "repeats": 2,
+  "script_sha256": {
+    "sha256": "137e5bd576cb0ae537c3158563041aa85685a39ae4956cf748df5f050d011958"
+  },
+  "seed": 42,
+  "start_utc": null,
+  "statistic": "byte-identical repeat"
+}

@@ -7,8 +7,9 @@
 The single-velocity scope of Section~\ref{sec:fielddef} is extended by
 splitting the velocity distribution into $B$ classes and running one
 convolution per class; the near shell needs no binning, because each pair
-carries its own velocity. The measurements below are on a $64^3$ grid with
-$200$ sources on \texttt{hal} (NVIDIA A30, \texttt{sm\_80}, CUDA 13.4.92).
+carries its own velocity. The measurements below are on a $64^3$ grid of cell
+$10^{-7}$\,m with $200$ sources of weight $5\times10^{-13}$\,C
+($Q=-100$\,pC) on \texttt{hal} (NVIDIA A30, \texttt{sm\_80}, CUDA 13.4.92).
 
 \paragraph{Box representative.}
 Each box is represented by its absolute-charge-weighted mean momentum, not by
@@ -27,8 +28,8 @@ $B=1$ and $B=16$ give bit-identical fields in all six components
 \begin{table}[t]
 \centering
 \small
-\caption{Binned multi-velocity peaks, $64^3$ grid, $200$ sources,
-$\gamma=10$.}
+\caption{Binned multi-velocity peaks, $64^3$ grid of cell $10^{-7}$\,m,
+$200$ sources of weight $5\times10^{-13}$\,C ($Q=-100$\,pC), $\gamma=10$.}
 \label{tab:multivel}
 \begin{tabular}{lrrrr}
 \toprule
@@ -62,25 +63,36 @@ and $5.22\times10^{-2}$ ratio.}
 Figure~\ref{fig:multivel} shows the sampled distributions and the
 bin comparison. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
 $2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
-bins, $0.0003\%$ apart; $B_y=0$ exactly, which is correct for a purely
+bins, $4.3\!\times\!10^{-4}\%$ apart ($4.3\!\times\!10^{-6}$ relative);
+$B_y=0$ exactly, which is correct for a purely
 longitudinal current. With a $5^\circ$ angular spread the $B_z$ peak moves
 from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T and $B_y$ from
 $1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is $5.22\times10^{-2}$, and
 the two bin counts agree to $0.0043\%$ in $B_z$ and $0.056\%$ in $B_y$.
+On the final code the angular case gives $B_z=2.4663\times10^{4}$\,T,
+$0.63\%$ below the tabulated $2.4820\times10^{4}$\,T, the velocity-binning
+change in \texttt{VelocityBinning.cpp} between \texttt{c0bf82c} (table) and
+\texttt{478f6e1} (final); the energy case reproduces to the printed
+precision, $B_z=2.3205\times10^{4}$\,T.
 
 \paragraph{1\,mrad case against the arbiter.}
-The fluctuation bunch ($N=200$, $\gamma=10$, $+y$ drift, 1.046\,mrad rms
-$x$-divergence) was re-run at 64 bins and compared against the
-Gauss--Legendre arbiter (unbinned, per-particle $u$, 698-node slice
-subset) as the reference. On the x-y slice ($z=32$) picBunch gives
+The fluctuation bunch (Table~\ref{tab:configs} row ``1\,mrad, binned'':
+$N=200$, weight $5\times10^{-13}$\,C each, $Q=-100$\,pC, $\gamma=10$,
+$+y$ drift, 1.046\,mrad rms $x$-divergence) was re-run at 64 bins on the
+$64^3$ grid of cell $10^{-7}$\,m and compared against the Gauss--Legendre
+arbiter (unbinned, per-particle $u$, 698-node slice subset) as the
+reference. On the x-y slice at $z=32$ cells ($z=3.2\,\si{\micro\metre}$,
+the grid centre) picBunch gives
 $B_y=7.835$\,T and $B_z=2.3336\times10^{4}$\,T, against arbiter values of
 $7.759$\,T and $2.344\times10^{4}$\,T (factors $1.010\times$ and
-$0.996\times$); on the z-y slice ($x=32$) the corresponding values are
+$0.996\times$); on the z-y slice at $x=32$ cells ($x=3.2\,\si{\micro\metre}$)
+the corresponding values are
 $7.561$\,T / $7.519$\,T and $2.3159\times10^{4}$\,T /
 $2.327\times10^{4}$\,T ($1.006\times$ and $0.995\times$). The 3-D $B_y$
-peak is $8.734$\,T and $B_z$ is $2.3336\times10^{4}$\,T. The worst
-component deviation is $1.4\%$ (x-y ratio); every component on every slice
-is within $1.0\%$.
+peak is $8.734$\,T and $B_z$ is $2.3336\times10^{4}$\,T. The comparison
+criterion is the per-component slice peaks---peak $|B_y|$ and peak $|B_z|$
+on each plane---and the $B_y/B_z$ ratio; the worst deviation is $1.4\%$
+(x-y ratio) and every per-component peak on every slice is within $1.0\%$.
 
 Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
 ($R=3$, tile 4, order 5), 248\,s on the A30.
@@ -104,7 +116,9 @@ $R=16.85$ cells, tolerance level $45.72$ V/m ($10^{-3}$ of the peak
 $45722.5$ V/m). Worst per-component
 $|\mathbf{E}_{\mathrm{tail}}-\mathbf{E}_{\mathrm{direct}}|$ against an
 independent direct charge sum over $13$ directions. The switch at $6R$ is
-the chosen switch: the error is $1.87\times10^{-3}$ of the tolerance level.}
+the chosen switch: the error is $1.87\times10^{-3}$ of the tolerance level.
+Legacy rosi\_v100 run: the direct-charge-sum comparison is not re-committed
+in this repository, so these values are not re-measured here.}
 \label{tab:margin}
 \begin{tabular}{lrr}
 \toprule

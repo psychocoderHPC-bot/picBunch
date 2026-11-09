@@ -1,0 +1,37 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "n/a",
+  "binary_sha256": {
+    "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+  },
+  "case_id": "h100-mpi-scaling",
+  "command": "mpirun -np {1,2,4} picBunch --grid 256 --fft-mode distributed --output *.bp on jureca-h100 (1 warm-up + 3 repeats; median)",
+  "config_sha256": {
+    "sha256": "02e70beb8a5e9d5470d01de369f24fa80ad4bdc16141b346e5d2207001ca8557"
+  },
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/line/h100_mpi_scaling.csv",
+      "sha256": "e8640495e754091c4fada2770cea8a546cba763aca691ace886ff88c267cee99"
+    }
+  ],
+  "end_utc": null,
+  "figure_ids": [
+    "F_mpi_rank_scaling_h100"
+  ],
+  "git_commit": null,
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Ingested from r9/raw/newstack/mpi_medians.json (BP5 distributed FFT, final 2.12.1 stack).",
+  "openpmd_version": "0.17.1",
+  "repeats": 3,
+  "script_sha256": {
+    "sha256": "02e70beb8a5e9d5470d01de369f24fa80ad4bdc16141b346e5d2207001ca8557"
+  },
+  "seed": null,
+  "start_utc": null,
+  "statistic": "median"
+}

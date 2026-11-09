@@ -39,15 +39,16 @@ docs/               algorithm and validation notes
 | alpaka3 | `e91f6f4d8d1da321a6423a8ad5b4954562c57a9a` | fetched by CMake `FetchContent` from `alpaka-group/alpaka3` |
 | alpakaVendor | `33a4a4f401de2b157de195bb68e8ec61d7460cee` | fetched by CMake `FetchContent` from `alpaka-group/alpakaVendor`; FFT via cuFFT/rocFFT/FFTW, including strided FFTW plans |
 | toml++ | `30172438cee64926dc41fdd9c11fb3ba5b2ba9de` (v3.4.0) | fetched by CMake `FetchContent`; configuration parser |
-| openPMD-api | system install | HDF5 backend required; configure fails without it |
+| openPMD-api | system install | HDF5 and/or ADIOS2 backend; the output/input extension selects the backend (see [docs/openpmd-backends.md](docs/openpmd-backends.md)) |
 | HDF5 C API | system install | checkpoint writer; the parallel build matching openPMD is preferred |
 | MPI | system install | only when HDF5 is parallel, for the HDF5 headers |
 | FFTW 3 | system (`fftw3`, `fftw3f`) | host FFT backend |
 | GoogleTest | system first, `FetchContent` fallback | only when `PICBUNCH_BUILD_GTESTS=ON` |
 
-CMake 3.25+ and a C++20 compiler are required. The CUDA build needs CUDA 12.x, the HIP
-build needs ROCm with rocFFT. The field pipeline is double precision. A float32 build is
-not supported and its accuracy is not claimed.
+CMake 3.25+ and a C++20 compiler are required. The CUDA build needs CUDA 12.x or newer;
+the measured H100 campaigns used CUDA 13.4.92 and the measured V100 runs used CUDA 12.6.
+The HIP build needs ROCm with rocFFT. The field pipeline is double precision. A float32
+build is not supported and its accuracy is not claimed.
 
 ## Build
 
@@ -130,7 +131,8 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
          [--near-shell none|exact|fast] [--near-shell-radius <cells>] \
          [--near-shell-tile <nodes>] [--near-shell-fast-order <n>]
-         [--near-shell-oblique-order <auto|N>]
+         [--near-shell-oblique-order <auto|N>] \
+         [--fft-padding <N>]
 ```
 
 Example with mesh metadata in the input:
@@ -148,6 +150,15 @@ picBunch --input bunch.h5 --species electrons --output field.h5 \
          --cell-size 1e-7,1e-7,1e-7 --grid 64,64,32 --origin 0,0,0 \
          --tolerance 1e-3
 ```
+
+`--fft-padding <N>` overrides the FFT zero-padding factor selected by
+`--tolerance`. The default, `0`, keeps the tolerance policy (`2` at or above the
+padding-2 bound, `3` below it) and reproduces earlier output exactly. `1` disables
+padding and is a diagnostic control: the FFT box equals the output box, so source
+images wrap and leak into the field. Values above `3` only add work; the CLI
+accepts `0` to `8` and rejects larger values. The zero-padded grid is still
+subject to the per-run node cap, so an explicit `--grid` that fits with padding
+`1` can be rejected with padding `2` or `3`.
 
 An explicit `--cell-size` always wins over the mesh-derived value, and the run fails with a
 clear message when neither source exists. Nothing is assumed or rescaled. The physical cell
@@ -230,8 +241,9 @@ quadrature nodes and weights, the Yee offsets and the E/B units travel as kernel
 parameters, so no device-side global table is read. `fast-gpu` (TOML
 `accuracy.near_shell = "fast-gpu"`) remains an explicit alias. On rosi_v100 (64^3
 output, R = 3, tile 4, 2000 particles, 8.77e6 evaluations) the device path runs in
-`2.5 s` against `18.3 s` on the host, a `7.3x` speedup, and the two agree to
-`5.7e-15` worst per-component relative. HIP and CPU builds use the host fallback with
+`2.5 s` against `18.3 s` on the host, a `7.2x` speedup (measured
+`7.20x` in `docs/measurements/near_shell_device_speedup.csv`), and the two
+agree to `5.7e-15` worst per-component relative. HIP and CPU builds use the host fallback with
 one stderr warning.
 
 On `hal` (A30, sm_80) the device mesh-near term evaluates the 27-point TSC stencil
@@ -246,15 +258,19 @@ the FP64 roofline, so this is far below a 10x target. The device in-kernel obliq
 accuracy limitation is in the regime limits above; a device `1e-3` path needs the
 contracted reference in the kernel and is future work.
 
-On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch the
-measured mesh compute stages (deposit + kernel + FFT + read-out) are `0.052 s`; the
-earlier conservative figure was `0.136 s`. The fast evaluator measures `1.8466e7`
+On an idle H100 (jureca-h100, `jrc0880`) at 2e6 particles in a 20-cell bunch,
+60x60x60 grid (padding 2), the measured mesh compute stages (deposit + kernel +
+FFT + read-out + writer, `matrix.csv` row 2e6/20/g10/h1, medians of nine
+repeats) are `0.052 s`; the paper's cost rows run the campaign geometry
+`66x68x66`, cell `2.5e-07` m, where the mesh compute is `0.083 s` (see
+`docs/measurements/cost_meshonly_bp5_20261108.csv`). The fast evaluator
+measures `1.8466e7`
 pairs/s stationary at order 5 and `3.9977e6` pairs/s axial gamma 10 at order 8. Pair
 counts are `1.7e8` support-only, `1.7e9` for the 3-cell shell and `3.4e9` for the
 4-cell shell. The projected wall times below add the measured mesh time to the
 near-evaluator time:
 
-| configuration | projected wall (cost floor) | worst per component (Ex, Ey, Ez, Bx, By, Bz) |
+| configuration | projected wall (cost floor, 60x60x60) | worst per component (Ex, Ey, Ez, Bx, By, Bz) |
 | --- | --- | --- |
 | mesh only | 0.052 s | no near correction (in-support O(1)) |
 | support-only shell, o5 | 9.26 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 |
@@ -431,7 +447,7 @@ The per-term controls are:
 
 | term | controlled by | scope and recorded behaviour |
 | --- | --- | --- |
-| mesh / TSC deposit | `--tolerance` (padding), fixed `kRefinement = 1`, TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order, deposit scheme or refinement. Near-source continuum error is not bounded by this term. |
+| mesh / TSC deposit | `--tolerance` (padding), TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order or deposit scheme. Near-source continuum error is not bounded by this term. |
 | velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed for the angular term. The energy term is `(2/gamma_b) * Delta_gamma_b/gamma_b`, calibrated on the archived 5% energy-spread points (gamma 10, 16-64 boxes); it is `3.4x` conservative there and claims nothing beyond that range. A 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. This is not a tolerance guarantee. See `docs/measurements/velocity_bin_calibration.csv`. |
 | near quadrature | `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order`, `--near-shell-oblique-order` (TOML `accuracy.near_shell_oblique_order`) | On the host, `fast` gates each oblique in-support pair on the octant residual and falls back to the Lorentz-contracted reference when it exceeds `max(1e-6, 0.25*tolerance)`; gated oblique in-support points reach `<=1e-3`. The CUDA in-kernel path has no contracted fallback: gamma-10 oblique in-support measures `5.34e-2` at `(0,0.5,0)` and `1.50e-1`/`1.54e-1` at two other points, and beta 0.5 oblique measures `9.3e-4` to `1.2e-3`. `exact` uses Lorentz-contracted in-support quadrature: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. See `docs/measurements/field_error_energy_spread.csv`. |
 | far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the rest-frame dipole/quadrupole evaluated at the Lorentz-stretched point and boosted back. It is exact for a single point source and in the principal dipole alignments; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
@@ -501,9 +517,9 @@ bias against the point field, not a mesh error: at 2, 4 and 8 cells the
 stationary point-charge smoothing error is `-8.31e-3`, `-5.62e-4`, `-3.55e-5`
 for CIC, `-1.20e-2`, `-8.41e-4`, `-5.33e-5` for TSC and `-1.55e-2`,
 `-1.12e-3`, `-7.10e-5` for PQS (`docs/measurements/shape_smoothing.csv`).
-TSC is the closest of the three to the point field at these distances; PQS has
-the widest support and the largest bias here.  Choose the shape for PIConGPU
-consistency, not for a smaller point-field error.
+CIC is the closest of the three to the point field at these distances,
+TSC next, and PQS the widest with the largest bias.  Choose the shape for
+PIConGPU consistency, not for a smaller point-field error.
 
 The near shell currently supports `tsc` only and exits with a clear error for
 CIC/PQS; the mesh path supports all three.
@@ -933,8 +949,8 @@ campaign workdir recorded per file as the reproduction hint.
 
 **Coulomb limit.** One stationary particle at a node, far nodes at `d = 8,16,24,32` along
 all six axis directions. The mesh field against the direct TSC stencil sum of the analytic
-Coulomb kernel agrees to **4.88e-14** (maximum absolute `2.28e-25`), above the `1e-12`
-threshold. This is the zero-padded FFT convolution checked against the discrete sum.
+Coulomb kernel has worst relative error **4.88e-14** (E-component L2 residual `2.29e-25`, elementwise maximum `2.28e-25`), below the `1e-12`
+threshold, so the check passes. This is the zero-padded FFT convolution checked against the discrete sum.
 
 Extended to non-unit cells (W3n, W3o). One stationary electron at `1e-7` m isotropic cells
 agrees to **7.8e-5** relative error at 12 cells against the absolute Coulomb field in V/m.

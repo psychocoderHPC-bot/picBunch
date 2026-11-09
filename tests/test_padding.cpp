@@ -286,3 +286,32 @@ TEST(Padding, ToleranceSelectsPaddingAndRejectsUnreachableTargets)
     options.fftPadding = 1;
     EXPECT_EQ(picBunch::makeGrid(bunch, options).fftPadding, 1u);
 }
+
+// The landscape production case runs at 384^3.  Padding 1 must yield a valid
+// grid there (the FFT box equals the output box), while padding 2 makes the
+// padded box 768^3, which exceeds the replicated 2^28-node cap in makeGrid and
+// must still raise the documented infeasibility error.
+TEST(Padding, ExplicitPaddingOneSupportsLargeGridAndPaddingTwoHitsTheGuard)
+{
+    picBunch::Bunch const bunch = latticeBunch();
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.marginCells = 6.0;
+    options.gridOrigin = {0.0, 0.0, 0.0};
+    options.gridSize = {384u, 384u, 384u};
+
+    options.fftPadding = 1;
+    picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+    EXPECT_EQ(grid.n, (std::array<std::size_t, 3>{384u, 384u, 384u}));
+    EXPECT_EQ(grid.fftPadding, 1u);
+
+    options.fftPadding = 2;
+    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error)
+        << "padding 2 at 384^3 must hit the padded-node guard";
+
+    // The default tolerance policy also selects padding 2 here, so the same
+    // guard applies unless the user asks for --fft-padding 1 explicitly.
+    options.fftPadding = 0;
+    options.tolerance = 1e-3;
+    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error);
+}

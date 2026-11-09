@@ -14,9 +14,24 @@ requirement for reading the data.
 
 ## Performance and Coulomb limit (SB1)
 
-- `matrix.csv` — scaling matrix (N x box), per-stage medians. Host `rosi_v100`, node `gv002`, 4x Tesla V100-SXM2-32GB, CUDA 12.6, sm_70. Commit: picBunch `dc69c16a21f1dc330746365e3409560cb2399ed9`; benchmark branch `experimental/bench` at `3d05752a493e12f3a0a03c6754f92f202a70a482`. Date 2026-11-03. SHA256 `b7a22e3d00998409604d7e3ecacafdd2118c637b2f76cb0108a505bfec8d2dfa`.
-- `coulomb.csv` — Coulomb-limit check of the zero-padded FFT convolution against the direct discrete TSC sum. Same host, revision and date as `matrix.csv`. SHA256 `b483e021042d8bcb84cd6f8081a3ff52d78b9300985728c48129c907cfb49584`.
-- `dsweep.csv` — d-sweep of the convolution error. Same host, revision and date as `matrix.csv`. SHA256 `e3687a3df32333b249837c3163703882073f0a6e66791c1a514aeceb10042b70`.
+- `matrix.csv` — scaling matrix (N x box), per-stage medians, plus appended `plan_min_ms,plan_median_ms`. **Re-measured on `jureca-h100` (node `jrc0880.jureca`, 4x H100 PCIe 80 GB, `sm_90`, CUDA 13.4.92), 2 warm-up + 9 timed repeats, 2026-11-08.** The committed table behind `tab:matrix` is now this H100 re-measurement (2+9 protocol, clock 1755 MHz); the original V100 values are superseded. Protocol and per-row classification in `matrix_h100_20261108.md`. Commit: picBunch `e1ddfb5` (+ `47f2436`); bench source `tools/bench/bench.cpp` sha256 `b9cff799f466bbb6900605a9af7859a0d675448fdba94cf8cb6004078134a3ec`, `tools/bench/summarize.py` sha256 `562c4cd18475392f79fef98f67b57a305856bc6f1c2371e121bf397cea4c5214`. This file carries the per-row gate-consistent totals (kept repeats, one outlier dropped where the pre-registered rule fired) and the stage medians quoted in `tab:matrix`. The paper's reduced copy, `docs/paper/data/scaling/matrix.csv`, is a byte-identical row copy of this file plus the appended classification columns `row_class`, `total_iqr_ms`, `mode_total_low_ms`, `mode_total_high_ms`, `mode_total_iqr_ms`, `mode_low_n`, `mode_high_n`, `n_used`, `bimodal_stage`; it is what `F_a`/`F_b` render from, so every plotted point lands on a table value. SHA256 `e1bc403866301410c2ce6d481dcc292c402cfa795b52290df947afa2d673b72c`.
+- `matrix_h100_20261108.md` — the H100 re-measurement record for `matrix.csv`: host, stack, binary/source sha256, 2+9 protocol, B0 gate (12.4956 %), the 14 per-row medians/IQRs, the two bimodal rows (100-cell and h=0.25) with their two modes and counts, and protocol adherence. Date 2026-11-08.
+- `coulomb.csv` — Coulomb-limit check of the zero-padded FFT convolution against the direct discrete TSC sum. Re-measured on the H100 stack with `matrix.csv` (byte-identical to the earlier `r9` snapshot). Same host and date as `matrix.csv`. SHA256 `b483e021042d8bcb84cd6f8081a3ff52d78b9300985728c48129c907cfb49584`.
+- `dsweep.csv` — d-sweep of the convolution error. Re-measured on the H100 stack with `matrix.csv` (byte-identical to the earlier `r9` snapshot). Same host and date as `matrix.csv`. SHA256 `e3687a3df32333b249837c3163703882073f0a6e66791c1a514aeceb10042b70`.
+
+## V100 MPI rank scaling (retained, not in the paper)
+
+- `mpi_writer_scaling.csv` — collective openPMD/HDF5 writer scaling on one
+  `rosi_v100` node, run 2026-11-06 (256^3 nodes, six double components,
+  0.80 GB, rosi local filesystem). The reduced plot table is
+  `docs/paper/data/line/mpi_scaling.csv`. The V100 MPI figure
+  `F_mpi_rank_scaling` is intentionally not part of the paper: the manuscript
+  includes only the H100 figure `F_mpi_rank_scaling_h100`. The data and the
+  renderer (`docs/paper/scripts/render_scaling.py::mpi`) are kept so the
+  earlier measurement stays reproducible; no shipped PDF or provenance record
+  claims the V100 figure. SHA256 `89421ae17aae70d7e3cc6e729e84468704cc54929d593d94398ff303a684df3b`
+  (source) and `88b4a9d176a87df1b1d18f43b14ca9ca3a6bf132b46fd18d9e1537b131ca4499`
+  (reduced table).
 
 ## Refinement and h-scaling (F4)
 
@@ -29,7 +44,7 @@ requirement for reading the data.
 
 ## Accuracy (W4)
 
-- `w4b_rel_error.csv` — per-component relative error versus cell distance, extracted from the W4 relative-error table. Host `rosi_v100`, node `gv002`; picBunch `bfaa1e26d6c2aff52f7b74b729d068be253e4d30`. Date 2026-11-03. Recovered from the run mirror `/tmp/alpaka-orchestration/pr24-20261102/paper/w4b_rel_error.csv`; the rosi accuracy directory holds no CSV (only the JSON and a Markdown summary). SHA256 `530bcba455da842a7241d1defa92aaf6753279a02ce48c8c21ef1ea4eb3d77d4`.
+- `w4b_rel_error.csv` — per-component relative error versus cell distance for the paper metric: worst over `Ex,Ey,Ez` of `|ref-mesh|/max(|ref|,|mesh|)` with a per-component floor `|ref|>=1e-3` of the component peak, against the order-12 independent continuum reference (refine 3). Re-measured on `jureca-h100` (node `jrc0880`, 4x H100 PCIe 80 GB), 2026-11-09; picBunch `e1ddfb55eff92dc12cc2067b52253aa218914ff5`, binary SHA256 `d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275`. Gammas 1/10/50/100, aspects 1/4, `d=2..32`; the aspect-4 curves coincide with aspect 1 to machine precision at padding 1. The legacy rosi_v100 `bfaa1e26` table is superseded; its gamma-10 aspect-1 series is reproduced within 1-14%. SHA256 `04e170d7f8a690dcfc281c2926d70e48c7aebd9fd09ef1db28a8d8f144197dea`.
 - `accuracy_results.json` — full W4 accuracy results, per case and per distance, both references and all components. Host `rosi_v100`, node `gv002`; picBunch `bfaa1e26d6c2aff52f7b74b729d068be253e4d30`. Date 2026-11-03. SHA256 `b5b68f07c4083d2744b36d3e5376350013e589481f4020c97b418485b464dc6c`.
 
 ## Reference identification and N-scaling (W7t)
@@ -39,15 +54,78 @@ requirement for reading the data.
 
 ## Velocity binning (MV1)
 
-- `velocity_bin_calibration.csv` — recorded 16- and 64-box worst-case binning errors for the 5% energy-spread and 5 degree angular-spread cases, with host, campaign commit, date and source. Host `jureca-h100`, CUDA 13.4; campaign `pr24-20261102`, commit `02891fe6`; date 2026-11-02. These are the endpoints quoted in the root README; the original 1/2/4/8-box rows, per-box model sums and `--fit` output were not archived, so `C = 1` is an assumption, not a refitted calibration. SHA256 `a4efd91976d2fb8d7d6f350ae6790fa8c4f3cf17a121bb550e9e407208557774`.
-- `velocity_bin_calibration_fit.txt` — output of `tools/velocity-bins/calibrate_velocity_bins.py` from the CSV. It records the archived points, the target verdict and the statement that `C = 1` is assumed. Generated at repository commit `6fab4a3` on 2026-11-06. SHA256 `a370973c3b892263a57557a32d304c1d6b0c574c0f1ab8cb35909cd0e7ce004d`.
+- `velocity_bin_calibration.csv` — recorded 16- and 64-box worst-case binning errors for the 5% energy-spread and 5 degree angular-spread cases, with host, campaign commit, date and source. Host `jureca-h100`, CUDA 13.4; campaign `pr24-20261102`, commit `02891fe6`; date 2026-11-02. These are the endpoints quoted in the root README; the original 1/2/4/8-box rows, per-box model sums and `--fit` output were not archived, so `C = 1` is an assumption, not a refitted calibration. SHA256 `f024347ec66287c74585f80f79e382c327d9b3000ba75cbb33921abb3c92425b`.
+- `velocity_bin_calibration_fit.txt` — output of `tools/velocity-bins/calibrate_velocity_bins.py` from the CSV. It records the archived points, the target verdict and the statement that `C = 1` is assumed. Generated at repository commit `6fab4a3` on 2026-11-06. SHA256 `01b21daa1a89b807bed6529f1bf58667ed21eae4a89afaca5b09c55e09225c1e`.
 
 ## Field-error and energy-spread gate (integrated N2/N3/N5 branch)
 
 - `field_error_energy_spread.csv`: banded relative L2 for binned `B=8/64/256` and `--velocity-moments 2/3/auto` at 200 000 particles, gamma 10, 5% energy spread, `64^3` cells of `1e-6` m, TSC, `--near-shell none`, 40 stratified nodes; reference is the TSC-convolved field (order-5 far, order-8 refine-1 near). Also records the single-velocity branch-vs-main equality, the one-rank vs two-rank moment equality, the auto-bin cap errors, and the near-shell host/device accuracy rows. Host `hal`, A30, CUDA 13.4, sm_80; branch `field-error-energy-spread-20261107` at `ca4163cff964f735fc7202a8cc743fdb4ff34259`. Date 2026-11-07. SHA256 `a6db6f1520f6f6fafd57d78f353b94e55a808018aec2ded373fbd0f556cd9c34`.
 - `field_error_timing.csv`: CLI, compute, near-shell and peak-RSS medians for the same paths, plus the 2e3-particle near-shell equivalence run and the 200 000-particle production near-shell run (231.0 s against the pre-change 282.0 s). Same host, revision and date as `field_error_energy_spread.csv`. SHA256 `2b489150b02bba9b2eb7756af8e4ef2e1d08e48a4d58c23ea53161840e5050a9`.
 
+## Fast-near exact-field reference (D2)
+
+- `fastnear_reference_52pt.csv` — exact CPU reference for the fast-near 52-point
+  set used by the fast-near validation table: per configuration 20 interior
+  points (`|s| <= 1.35` cells), 16 face points (one coordinate at +/-1.5 cells)
+  and 16 outside points (one coordinate at +/-1.6 to 3.6 cells). Configurations
+  are `g1` (`u = 0`), `g10-axial` (`u = (0,0,sqrt(99))`) and `g10-oblique`
+  (`u = sqrt(99) (1,2,1)/sqrt(6)`); each point stores all six normalized field
+  components. Values come from the host-independent
+  `tools/velocity-bins/indfield.py` at order 12, refine 2, unit cells, source at
+  the origin. Host `fwk394`, integration tip
+  `a70c7e98620bcd0aaea71f7c11c96d0c822317d6`, two runs byte-identical.
+  SHA256 `15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81`.
+- `fastnear_reference_52pt.provenance.json` — generator and reference-module
+  hashes, parameters, seed, host, determinism and self-consistency records.
+- `fastnear_fast_52pt.csv` — measured picBunch fast-near evaluator values at
+  the same 52 points, one row per point with all six normalized field
+  components, evaluated against `fastnear_reference_52pt.csv`. CPU-only and
+  header-only (no alpaka, CUDA or FFTW); two runs byte-identical. Host
+  `alpaka-bot-cli-y6h5m`, base commit
+  `4b07db214fabf8cbf16f8348aa7b85e2016855e1`, g++ 13.3.0. Face and outside
+  regions reproduce the published fast-near table to <1% for all three
+  configurations; the interior entries are below the published values
+  (notably g10-oblique, `8.15e-2` published to `1.94e-3` now) because the
+  evaluator and the reference changed after publication. SHA256
+  `0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9`.
+- `fastnear_fast_52pt.provenance.json` — tool command, base commit,
+  compiler, reference-input SHA256, determinism and self-test records.
+
+Regenerate from the repository root:
+
+```bash
+python3 tools/verify/gen_fastnear_reference.py
+python3 tools/verify/gen_fastnear_reference.py --check docs/measurements/fastnear_reference_52pt.csv
+```
+
+The generator needs only NumPy. It does not run picBunch and does not need a
+GPU. The point set is the one defined by the original validation driver
+(`default_rng(12345)`, fixed case and region order); the CSV is written with
+stable formatting so repeated runs are byte-identical.
+
+The fast-near values are evaluated by the CPU-only driver:
+
+```bash
+g++ -std=c++20 -O2 -Iinclude tools/verify/pb_fast_near_52pt.cpp -o pb_fast_near_52pt
+pb_fast_near_52pt --self-test
+pb_fast_near_52pt --ref docs/measurements/fastnear_reference_52pt.csv --out docs/measurements/fastnear_fast_52pt.csv
+```
+
+It needs only a C++20 compiler; it links no alpaka, CUDA or FFTW. The
+`--self-test` checks determinism and fast-vs-exact wiring; the `--ref` run
+reproduces the committed `fastnear_fast_52pt.csv` byte-for-byte.
+
 ## Padding and R2C/C2R (N1b)
 
 - `n1b_padding_r2c.md` — wraparound padding sweep, per-component padding detail, R2C/C2R equivalence and the bin rule. Host `rosi_v100`, CPU-only, OMP 16 threads; Python model of the picBunch `kRefinement = 1` mesh convolution, no repository commit. Date 2026-11-03. SHA256 `8146c07c6b5b989b33d0c40a299e0b7cfbe3a52958fc8be213d4d6b3dd43d8c4`.
 - `n1b_padding_distance.csv` — raw padding-versus-distance rows behind `n1b_padding_r2c.md`. Same host and date; Python model, no repository commit. SHA256 `574c79371755fdf355a8ea6a59c5b3cb3e80c12aabb12bfa8afe052cf19f72a7`.
+
+## 4-rank restart on a decomposable grid (V6b)
+
+- `picongpu_restart_4rank.md` — 4-rank PIConGPU restart of a picBunch-written openPMD checkpoint: 24 x 24 x 96 global grid, `-d 1 1 4`, per-rank 24 x 24 x 24, no auto-adjust; 256-electron compact bunch (per-slab counts [0, 133, 123, 0]); exit 0, all six E/B components bitwise, `max_abs_diff = 0.0`. Host `jureca-h100`, node `jrc0880`, 4x H100 PCIe, CUDA 13.4.92; picBunch `d6c964ae`; PIConGPU 0.9.0-dev deck `b87c053`, ADIOS2 2.12.1, openPMD 0.17.1. Date 2026-11-08. SHA256 `9186b513eceb3dfea613aed2c6439185d4fe05ac3b80bd76c0b25ac5b51dd968`.
+
+## Cost table and writer-inclusive e2e, BP5 re-measurement (2026-11-08)
+
+- `cost_e2e_bp5_20261108.md` — clock/throttle probe (no clock cap: load at the full 1755 MHz, throttle reason 0x0), the cost rows R=1.5/3/4 at 2e6 particles on the centred 20-cell drawer (printed pair counts confirm the geometry), the v0.9.1 A/B decomposition of the R=1.5 gap (1.42x final-vs-v0.9.1 device path, 1.26x v0.9.1-here-vs-published host/stack), and the writer-inclusive e2e rows (BP5 here vs HDF5 in the published rows), including the g20 readout bimodality. Host `jureca-h100`, node `jrc0880`, 4x H100 PCIe, exclusive `dc-h100` allocation, ADIOS2 2.12.1 + openPMD 0.17.1 (BP5), HDF5 1.10.10, gcc 13.3.0, CUDA 13.4.92; final binary `e1ddfb5` sha256 `d6c964ae...`, v0.9.1 `c0bf82c` rebuilt on the same stack sha256 `6948df58...`. Date 2026-11-08. SHA256 see `MANIFEST.sha256`.
+- `cost_shell_bp5_20261108.csv` — reduced cost rows (E1 R=1.5 1+3 repeats, E2 v0.9.1 A/B, E3r3, E3r4) plus the E0 probe row: command, geometry, versions, clocks, throttle, input and binary sha256, per-repeat detail in the `notes` column. Same host, stack and date as `cost_e2e_bp5_20261108.md`. SHA256 see `MANIFEST.sha256`.
+- `e2e_bp5_20261108.csv` — reduced writer-inclusive e2e rows (g20/g100, N=2e6): totals, IQR/min/max, per-repeat readout, writer share, clocks, backend and the published HDF5 comparison. Same host, stack and date. SHA256 see `MANIFEST.sha256`.

@@ -137,6 +137,9 @@ namespace picBunch
     struct StageTimes
     {
         double readerMs = 0.0;
+        //! Untimed setup before the first deposit: binning, grid, allocations,
+        //! and the FFT plan/workspace build (r2c/c2r PlanBuilder::build).
+        double planMs = 0.0;
         double depositMs = 0.0;
         double kernelMs = 0.0;
         double fftMs = 0.0;

@@ -169,7 +169,7 @@ if(Python3_Interpreter_FOUND)
     else()
         message(
             STATUS
-            "h5py not found: run tools/verify/check_openpmd.py --writer build/.../picBunchWriteSample --workdir /tmp manually"
+            "h5py not found: run tools/verify/check_openpmd.py --writer build/.../picBunchWriteSample --workdir ${CMAKE_CURRENT_BINARY_DIR}/openpmd-verify manually"
         )
     endif()
 endif()

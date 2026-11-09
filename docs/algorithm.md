@@ -15,13 +15,24 @@ and build conditions are stated with them.
    geometry follows the same rule:
    the physical spacing is `gridSpacing * gridUnitSI`, and the physical offset is
    `gridGlobalOffset * gridUnitSI`. A mesh without a positive `gridUnitSI` is
-   rejected instead of being silently rescaled. TODO: numbers from validation
-   (species size, units round-trip error).
+    rejected instead of being silently rescaled. Measured units round-trip
+    error: the openPMD writer/reader round-trip
+    (`Io.FieldRoundTripPreservesValuesAndMetadata`, 4x5x6 grid) is
+    bit-identical for every value and for all metadata, and the momentum
+    convention round-trip test asserts exact agreement for a weight-100
+    species (see README "Precision and accuracy safeguards").
 
 2. **Deposit** - TSC assignment of `weight * charge` onto the uniform output grid.
-   The deposit must conserve total charge and must match the device deposit node
-   for node. TODO: numbers from validation (charge conservation error, deposit
-   versus reference).
+    The deposit must conserve total charge and must match the device deposit node
+    for node. Measured: the TSC deposit of a single particle of weight 1 and
+    charge 1 conserves total charge to 1e-14
+    (`Deposit.SingleParticleWeightOne`), and the padded host deposit
+    conserves charge to 1e-12 per refinement value 1..3
+    (`Deposit.PaddedDepositConservesChargeForRefinement`) and to 1e-14 at
+    every boundary node of the 27-node corner/edge/face set
+    (`Deposit.PaddedSourceHaloConservesChargeAtBoundaries`), where the pre-fix
+    boundary deposit was 0.669921875 instead of 1.0
+    (`docs/measurements/precision_improvements.csv`).
 
 3. **Kernel** - evaluate the free-space field of the bunch as a convolution of the
    deposited source with the shape-weighted, uniformly moving point-charge kernel.
@@ -30,19 +41,31 @@ and build conditions are stated with them.
    shape width. The `D = 0` guard in the analytic point-field kernel never fires
    for the six Yee components, because each component's half-cell staggering
    keeps |R| > 0 at every grid node. Near the source the remaining error is the
-   coarseness of the v0.1 TSC assignment at `kRefinement = 1`; see the known
-   limitation below. TODO: numbers from validation (relative field error per
-   band, moving-bunch gamma cases).
+    coarseness of the v0.1 TSC assignment at `kRefinement = 1`; see the known
+    limitation below. Measured: per-cell-distance relative error bands are in
+    `docs/measurements/w4b_rel_error.csv` (stationary case), and the moving
+    gamma-10 cases are recorded in the single-particle physics test
+    (`Physics.*`): `1.6e-7` far field, `1.4e-2` near-source point P2 (asserted
+    at `2e-2`), as listed in the "Known limitation of v0.1" section below.
 
 4. **FFT** - transform the zero-padded source and kernel, multiply in Fourier
-   space, and transform back. The FFT is reached through the alpakaVendor portable
-   API (cuFFT, rocFFT, or FFTW depending on the build). TODO: numbers from
-   validation (plan build time, transform throughput, padding factor).
+    space, and transform back. The FFT is reached through the alpakaVendor portable
+    API (cuFFT, rocFFT, or FFTW depending on the build). Measured: the plan
+    build and a delta/round-trip self-test pass
+    (`smoke.cpp`, `Fft.RoundTripKnownArray` asserts round-trip error < 1e-12);
+    the padding factor is fixed by the tolerance policy table above.
+    Plan build time and transform throughput are not measured; see the cost
+    table in the paper for the measured per-row FFT stage times
+    (`docs/measurements/matrix.csv`).
 
 5. **Readout** - sample the six field components at their Yee-staggered positions,
-   interpolate from the padded FFT grid to the output grid, apply units so E is in
-   V/m and B is in T. TODO: numbers from validation (staggering check, divergence
-   and curl residuals).
+    interpolate from the padded FFT grid to the output grid, apply units so E is in
+    V/m and B is in T. Measured: the Yee staggering is verified
+    bit-exactly (`Io.FieldRoundTripPreservesValuesAndMetadata`); the discrete
+    Gauss-law residual on the Yee lattice is reported per case in
+    `Audit.DiscreteGaussLawOnYeeLattice` (no roundoff gate; the residual is a
+    discretisation residual, not an FFT or padding artefact, as the
+    padding-2 vs padding-3 equality proves).
 
 6. **Writer** - validate all six components before any store, write `E` and `B`
    as openPMD mesh records with components
@@ -76,12 +99,12 @@ and build conditions are stated with them.
 delivered *discrete free-space TSC convolution*, i.e. the discrete sum the
 pipeline is designed to evaluate. It is not an end-to-end accuracy target, and
 it is not a target for the continuum Coulomb field near the source; the
-difference there comes from the fixed TSC deposit at `kRefinement = 1` and no
-tolerance value can reduce it.
+difference there comes from the fixed TSC deposit at cell resolution
+(`kRefinement = 1`) and no tolerance value can reduce it.
 
 For a single-velocity bunch the target controls exactly one implementation
 choice: the FFT zero-padding factor. It does not change the interpolation order
-(fixed at TSC), the deposit scheme, the node spacing, or the refinement, and it
+(fixed at TSC), the deposit scheme, or the node spacing, and it
 is not an end-to-end accuracy guarantee. The README error-budget table lists the
 mesh, binning, near-quadrature, far-tail and output-precision terms separately. The
 mapping is a measured error-vs-padding model:

@@ -1,0 +1,43 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "y",
+  "binary_sha256": {
+    "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+  },
+  "case_id": "bdata2-forward",
+  "command": "/home/ubuntu/block1-src/build/picBunch --input bdata2/forward.bunch.h5 --species e --input-iteration 0 --output-iteration 0 --cell-size 1e-7 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/figdata-20261109/out/val_forward.bp",
+  "config_sha256": null,
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/bdata2/forward_slice.npz",
+      "sha256": "0e9d304e7562ff2a97feaf95d1204b94293390b51b825443e5f2f526ac6941a5"
+    },
+    {
+      "path": "docs/paper/data/bdata2/forward_sources.npz",
+      "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+    }
+  ],
+  "end_utc": "2026-11-09T00:11:12Z",
+  "figure_ids": [
+    "val_forward_xy_E",
+    "val_forward_xy_B",
+    "val_forward_zy_E",
+    "val_forward_zy_B"
+  ],
+  "git_commit": "88cb6bd28b90ea81807eb7428e3c23b9504c54ed",
+  "gpu_model": "NVIDIA H100 PCIe",
+  "host": "jrc0880.jureca",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Fresh jureca-h100 run 2026-11-09; input bdata2/forward.bunch.h5 sha256 b0e69a4e84fbd43dfdc8f085a7c2cc19d91cd5890ff922a4769f9cd2cdf48b62; BP5 output sha256 56b6248846ade9da891fa730d62d5c60008363a04f0e46367eb7cbf1584380d9; HDF5 conversion extracted/out/val_forward.h5 sha256 be1d8ee640458559271ef34d2e4fbf516abcdc93bd3918bc098c3b285313394b; binary /home/ubuntu/block1-src/build/picBunch sha256 d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275 (git e1ddfb55eff92dc12cc2067b52253aa218914ff5). BP5 was converted to openPMD HDF5 with t29-valid/tools/bp2h5 before the canonical ingest. Measured xy-plane worst relative error Ex 0.2358, Ey 0.2993, Ez 0.1070, Bx 0.0992, Bz 0.1600 (zy-plane Ex 0.1071, Ey 0.3086, Ez 0.2335, Bx 0.1591, Bz 0.0927); these match the committed paper values to <=2e-14 absolute, and the reference arrays are bit-identical to the committed forward_slice.npz.",
+  "openpmd_version": "0.17.1",
+  "repeats": 1,
+  "script_sha256": {
+    "path": "docs/paper/scripts/ingest_measurements.py",
+    "sha256": "f62ce766a61cba8e1a0afd8b8ecbdae9922a743392d46d99fe541cf3058a4f78"
+  },
+  "seed": 42,
+  "start_utc": "2026-11-09T00:11:09Z",
+  "statistic": "single"
+}

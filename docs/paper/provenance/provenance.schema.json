@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "picbunch-paper-provenance/1",
+  "title": "Paper figure provenance record",
+  "description": "One record documents how a set of paper figures was produced. data_sha256 lists the reduced arrays/CSVs that a renderer consumed; every referenced path is checked against the file on disk. A measurement_kind=not-reproduced record may list no data files while its renderer exists and the campaign data is pending. A measurement_kind=fresh-reference record documents a freshly recomputed analytic/exact reference for a reference-only figure; it must also set reference_only=true and carry host and generator digests. Fields the legacy runs did not record are null.",
+  "type": "object",
+  "required": [
+    "case_id", "figure_ids", "measurement_kind", "command",
+    "config_sha256", "binary_sha256", "data_sha256", "script_sha256",
+    "host", "gpu_model", "cuda_version", "openpmd_version", "adios2_version",
+    "io_backend", "seed", "start_utc", "end_utc", "git_commit", "axis_rule",
+    "repeats", "statistic", "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "case_id": {"type": "string", "minLength": 1},
+    "figure_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"}},
+    "measurement_kind": {"type": "string", "enum": ["fresh-h100", "fresh-reference", "legacy-reduced", "not-reproduced"]},
+    "reference_only": {
+      "description": "True when the plotted quantity is a freshly recomputed analytic/exact reference rather than a measured PIC field. Required for measurement_kind=fresh-reference.",
+      "type": "boolean"
+    },
+    "generator": {
+      "description": "Digests of the code and inputs that generated a fresh reference (driver binary/source, kernel header, reducer). Each value is a path/digest pair or a bare digest when the artifact is not in the checkout.",
+      "type": ["object", "null"],
+      "additionalProperties": {"$ref": "#/$defs/nullable_digest"}
+    },
+    "command": {"type": ["string", "null"], "minLength": 1},
+    "config_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "binary_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "data_sha256": {"type": "array", "items": {"$ref": "#/$defs/file_digest"}},
+    "script_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "host": {"type": ["string", "null"]},
+    "gpu_model": {"type": ["string", "null"]},
+    "cuda_version": {"type": ["string", "null"]},
+    "openpmd_version": {"type": ["string", "null"]},
+    "adios2_version": {"type": ["string", "null"]},
+    "io_backend": {"type": ["string", "null"]},
+    "seed": {"anyOf": [{"type": "null"}, {"type": "integer"}, {"type": "array", "items": {"type": "integer"}}]},
+    "start_utc": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "end_utc": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "git_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{7,40}$"},
+    "axis_rule": {"type": ["string", "null"]},
+    "repeats": {"type": ["integer", "null"], "minimum": 1},
+    "statistic": {"type": ["string", "null"]},
+    "notes": {"type": "string"}
+  },
+  "$defs": {
+    "file_digest": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "nullable_digest": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,10 +1,10 @@
 fig | file | pdf_in | target_in | scale | min_pt | bars/row | overlaps | cbar labels | verdict
 ---|---|---|---|---|---|---|---|---|---
-1 | F_w4b_rel_error.pdf | 5.955 | 5.955 | 1.0 | 10.67 | [] | 0 |  | PASS
-2 | F_gamma_err_dist.pdf | 3.886 | 3.886 | 1.0 | 10.68 | [] | 0 |  | PASS
+1 | F_w4b_rel_error.pdf | 5.586 | 5.955 | 1.066 | 11.38 | [] | 0 |  | PASS
+2 | F_gamma_err_dist.pdf | 3.655 | 3.886 | 1.063 | 11.36 | [] | 0 |  | PASS
 3 | F_a_scaling_vs_N.pdf | 3.886 | 3.886 | 1.0 | 10.68 | [] | 0 |  | PASS
 3 | F_b_scaling_vs_box.pdf | 3.886 | 3.886 | 1.0 | 10.68 | [] | 0 |  | PASS
-4 | F_mpi_rank_scaling.pdf | 3.635 | 3.635 | 1.0 | 10.68 | [] | 0 |  | PASS
+4 | F_mpi_rank_scaling_h100.pdf | 3.635 | 3.635 | 1.0 | 9.0 | [] | 0 |  | PASS
 5 | gp_g1p0.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 2, 2] | 0 | -4.2e5; 0; 4.2e5; E | PASS
 6 | gp_g1p1.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 2, 2, 2] | 0 | -4.4e5; 0; 4.4e5; E | PASS
 7 | gp_g1p5.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 2, 2, 2] | 0 | -4.9e5; 0; 4.9e5; E | PASS
@@ -28,4 +28,4 @@ fig | file | pdf_in | target_in | scale | min_pt | bars/row | overlaps | cbar la
 18 | large_szy_g10_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -3.8e-4; 0; 3.8e-4; B | PASS
 19 | large_sxy_g1_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.9e5; 0; 1.9e5; E | PASS
 19 | large_szy_g1_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.8e5; 0; 1.8e5; E | PASS
-20 | F_multivel_dist.pdf | 6.143 | 6.143 | 1.0 | 10.67 | [1] | 0 | 10; 0; 10; 1 | PASS
+20 | F_multivel_dist.pdf | 6.577 | 6.143 | 0.934 | 9.97 | [1] | 0 | 10; 0; 10; 1 | PASS

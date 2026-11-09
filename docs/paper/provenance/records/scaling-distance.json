@@ -1,0 +1,37 @@
+{
+  "adios2_version": "2.12.1",
+  "axis_rule": "n/a",
+  "binary_sha256": {
+    "sha256": "39fbc8acac50c0585402d6b42c3a4e3f525fe133d4ba0ba1314c6fa501ecbe3d"
+  },
+  "case_id": "scaling-distance",
+  "command": "picBunchBench --d-sweep on jureca-h100 (3 repeats, median); matrix/raw/dsweep.csv",
+  "config_sha256": {
+    "sha256": "ded268c149ccdcccc322f98ecdbc7fa623c8362e2f3720d66323d85e5023ba0d"
+  },
+  "cuda_version": "13.4.92",
+  "data_sha256": [
+    {
+      "path": "docs/paper/data/scaling/dsweep.csv",
+      "sha256": "e3687a3df32333b249837c3163703882073f0a6e66791c1a514aeceb10042b70"
+    }
+  ],
+  "end_utc": null,
+  "figure_ids": [
+    "SCHEM1_field_evaluation_schematic"
+  ],
+  "git_commit": "012333bdf1879ea374948bed2732211851a8cea4",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "io_backend": "adios2/BP5",
+  "measurement_kind": "fresh-h100",
+  "notes": "Ingested from matrix/dsweep.csv (3 repeats). Config digest is matrix/provenance.jsonl; driver digest is r9/scripts/more_sweeps.py.",
+  "openpmd_version": "0.17.1",
+  "repeats": 3,
+  "script_sha256": {
+    "sha256": "14a7366372e50e56e4cec13fee3e11a433d484873ba66bf97dca1738ffa8581c"
+  },
+  "seed": null,
+  "start_utc": null,
+  "statistic": "median"
+}

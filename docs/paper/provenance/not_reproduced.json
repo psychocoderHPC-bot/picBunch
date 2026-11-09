@@ -1,0 +1,5 @@
+{
+  "description": "Figures that ship in docs/paper/figs but have no reproducible data in this repository. A pending figure may instead be represented by a provenance record with measurement_kind=not-reproduced; the checker requires a non-empty reason for every entry here, and a strict run fails on any data figure listed here.",
+  "figures": {},
+  "schema": "picbunch-paper-not-reproduced/1"
+}

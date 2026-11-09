@@ -1,0 +1,48 @@
+{
+  "case_id": "fastnear-fast-52pt",
+  "description": "Measured fast-near evaluator values for the 52-point validation set (20 interior, 16 face, 16 outside per configuration), one row per point with all six normalized field components; input is the exact-field reference fastnear_reference_52pt.csv",
+  "git_commit": "4b07db214fabf8cbf16f8348aa7b85e2016855e1",
+  "commit_note": "clone base (branch repro/figures-20261108); the fast evaluator and the independent reference are both the final code in this commit",
+  "generated_utc": "2026-11-08T21:48:27Z",
+  "host": "alpaka-bot-cli-y6h5m",
+  "hostname": "10.0.2.100",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "compiler_flags": "-std=c++20 -O2 -Iinclude",
+  "parameters": {
+    "configurations": {
+      "g1": [0.0, 0.0, 0.0],
+      "g10-axial": [0.0, 0.0, 9.9498743710662],
+      "g10-oblique": [8.12403840463596, 16.24807680927192, 8.12403840463596]
+    },
+    "cells_m": [1.0, 1.0, 1.0],
+    "source_m": [0.0, 0.0, 0.0],
+    "remainder_order": {"g1": 5, "g10-axial": 8, "g10-oblique": 5},
+    "oblique_order": 8,
+    "oblique_power": 5,
+    "component_order": ["Ex", "Ey", "Ez", "Bx", "By", "Bz"],
+    "normalization": "per-unit-charge: E_n = 4*pi*eps0*E/q, B_n = 4*pi*eps0*c*B/q"
+  },
+  "values": {
+    "path": "docs/measurements/fastnear_fast_52pt.csv",
+    "sha256": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
+    "rows": 156
+  },
+  "generator": {
+    "path": "tools/verify/pb_fast_near_52pt.cpp",
+    "command": "g++ -std=c++20 -O2 -Iinclude tools/verify/pb_fast_near_52pt.cpp -o pb_fast_near_52pt && pb_fast_near_52pt --ref docs/measurements/fastnear_reference_52pt.csv --out docs/measurements/fastnear_fast_52pt.csv",
+    "self_test_command": "pb_fast_near_52pt --self-test",
+    "self_test_result": "PASS (5 points, deterministic; fast matches independent exact evaluator <1e-2)"
+  },
+  "reference_input": {
+    "path": "docs/measurements/fastnear_reference_52pt.csv",
+    "sha256": "15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81"
+  },
+  "determinism": {
+    "runs": 2,
+    "byte_identical": true,
+    "sha256_run1": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
+    "sha256_run2": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
+    "note": "two runs on this host are byte-identical; a local reproducer on fwk394 (commit 4366c69) produced the same bytes, consistent with the CPU pointwise evaluator being host-independent"
+  },
+  "notes": "Values are the picBunch fast-near evaluator (picBunch::pbfast::shape_field) at unit cells, compared against the independent exact-field reference in fastnear_reference_52pt.csv. Face and outside regions reproduce the published tab:fast to <1% for all three configurations. The interior entries are below the published values because the evaluator (obaRayField oblique ray integral) and the reference (refined indfield) changed after publication; the change is largest for the g10-oblique interior, 8.15e-2 published to 1.94e-3 now. CPU-only: no alpaka, CUDA, or FFTW is linked."
+}

@@ -8,33 +8,42 @@ and the measured error structure says exactly where that stands.
 In the far field the relative error against the TSC-convolved continuum is
 below $3\times10^{-4}$ on the beam axis from $d=6$ for every $\gamma$;
 perpendicular to the beam the crossover is $d=8$ for $\gamma=1$, aspect 1,
-$d=32$ for $\gamma=1$, aspect 4, and $d=48$ for $\gamma=10$, aspect 1. The
+$d=32$ for $\gamma=1$, aspect 4, and $d=48$ for $\gamma=10$, aspect 1; the
+perpendicular value $24$ in Table~\ref{tab:crossover} for the same
+$\gamma=1$, aspect 4 configuration is the crossover at the stricter
+$3\!\times\!10^{-4}$ gate (perpendicular direction), a different
+threshold from the $10^{-3}$-gate continuum crossover quoted here. The
 mesh against the point field carries the TSC smoothing in addition to the
 deposit error, and the two disagree by a factor of $58$ in L2 at
 $\gamma=10$, aspect 1, $d=48$ (Table~\ref{tab:d48}); a
 mesh-versus-point number measures the deposit shape, not the
 discretization. The cost is two regimes with a crossover set by the box,
-not the particle count: the deposit is linear in $N$ and dominates at large
-$N$ ($52$--$57$\,ms on the $2\times10^{6}$ rows), while the FFT and kernel
-scale with $M^3$ and dominate at large boxes ($64.8$ to $233$\,ms from
-$M=60$ to $220$). Repeated runs are bit-identical (md5
+not the particle count: the deposit grows with $N$ (sub-linear below
+$\sim10^6$, approaching linear at the top of the sweep) and dominates at
+large $N$ ($33$--$38$\,ms on the $2\times10^{6}$ rows, one H100 of
+\texttt{jrc0880.jureca}), while the FFT and
+read-out scale with $M^3$ and dominate at large boxes ($51.9$ to
+$85.7$\,ms from $M=60$ to $120$, and to the $100$-cell row, which is bimodal
+with low/high modes $115.99/241.89$\,ms at $M=220$). Repeated runs are
+bit-identical (md5
 \texttt{d3641d64\ldots}), and the Coulomb limit reproduces the
 TSC-convolved Coulomb field to $4.88\times10^{-14}$.
 
 The near field is the limit of the mesh. Where the slice planes cut the
 bunch core, the mesh-only worst per-component plane error is
-$0.12$--$0.415$ for $\gamma=1$ and $0.11$--$4.60$ for $\gamma=10$
-(Appendix~\ref{app:slices}). The opt-in near shell assembles exactly to
+$0.12$--$0.415$ for $\gamma=1$ ($E_z$) and $0.116$--$5.33$ for $\gamma=10$
+(minimum $E_y$, x-y; maximum $E_z$, x-y) (Appendix~\ref{app:slices}). The
+opt-in near shell assembles exactly to
 roundoff, and its tile subtraction is not the limiting term: at the
 measured $R=3/4$ radii on the $h=1$ slice grid the residual is the mesh
 contribution outside the shell, not the subtraction. The fast backend
-meets $10^{-3}$ stationary ($7.99\times10^{-4}$ interior) and moving axial
-($1.69\times10^{-4}$ interior); the moving oblique interior is
-$8.15\times10^{-2}$, the measured limit of the fast backend at its default
+meets $10^{-3}$ stationary ($6.82\times10^{-4}$ interior) and moving axial
+($1.40\times10^{-4}$ interior); the moving oblique interior is
+$1.94\times10^{-3}$, the measured limit of the fast backend at its default
 order (Table~\ref{tab:fast}). The shell radius is the dominant cost lever:
-at $2\times10^{6}$ particles the support-only shell is $281.0$\,s
-end-to-end at $7.99\times10^{-4}$ and the four-cell shell $1510.7$\,s at
-the same interior error, against a mesh-only wall of $2.48$\,s
+at $2\times10^{6}$ particles the support-only shell is $500.95$\,s
+end-to-end at $7.99\times10^{-4}$ and the four-cell shell $1959.31$\,s at
+the same interior error, against a mesh-only wall of $0.500$\,s
 (Section~\ref{sec:cost}).
 
 The $\gamma$ landscape states the mesh's sub-cell limit. At a fixed
@@ -42,9 +51,11 @@ distance in cells the error grows steeply with $\gamma$:
 $4.4\times10^{-2}$, $1.05$, $5.47$ for $\gamma=10,50,100$ at $d=8$,
 $h=1$ (Table~\ref{tab:gamma}, Fig.~\ref{fig:gamma-dist}). The controlling
 length is the beaming cone width $d/\gamma$; for $\gamma\ge50$ the cone is
-sub-cell and the $h$-refinement exponent $p$ falls from $1.85$ to about
-$1.0$, so refinement stops paying off and $10^{-3}$ is out of reach
-($>10^{9}$ to $10^{12}$ times the nodes). At $\gamma=50$ to $100$ the
+sub-cell, and in the node-unit kernel the $h$-refinement exponent $p$ rises
+from $1.64$ at $\gamma=10$ to $2.06$ at $\gamma=100$, so refinement
+continues to pay off, most at high $\gamma$. Sub-cell resolution of the cone
+is the binding limit: at $d=8$, $\gamma=100$ the cone is $0.08$ cells, and
+$10^{-2}$ requires $h$ below that. At $\gamma=50$ to $100$ the
 near-charge error requires a shell of radius of order $\gamma$ cells; that
 is the regime where the near shell is the working tool rather than the
 mesh.
@@ -52,8 +63,8 @@ mesh.
 The scope of the validated measurements is a single shared velocity, or a
 set of binned velocity classes with one convolution per class; the near
 shell needs no binning because each pair carries its own velocity. The
-measured binned behaviour is bin-independent to $0.004\%$ for the 5\%
-energy spread and $1.4\%$ against the arbiter for the 1\,mrad case
+measured binned behaviour is bin-independent to $4.3\times10^{-4}\%$ for
+the 5\% energy spread and $1.4\%$ against the arbiter for the 1\,mrad case
 (Appendix~\ref{app:multivel}). The computed quantity is the
 TSC-convolved uniformly-moving point-charge field; the convolution is
 free-space (no boundary condition other than zero fill beyond the far-tail

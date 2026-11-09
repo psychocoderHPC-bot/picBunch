@@ -1,0 +1,7 @@
+{
+  "schema": "picbunch-paper-non-data-figures/1",
+  "description": "Figures that illustrate a definition or geometry rather than presenting measured data. The strict gate does not require fresh-h100 provenance for these, but they still need a record or a not-reproduced declaration in a normal run.",
+  "figures": {
+    "SCHEM1_field_evaluation_schematic": "Schematic of the field-evaluation geometry; it is drawn from a scaling sweep but is not a measured data figure."
+  }
+}

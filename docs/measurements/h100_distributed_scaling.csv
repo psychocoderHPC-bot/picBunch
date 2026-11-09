@@ -1,8 +1,4 @@
-# Distributed-mode strong scaling on jureca-h100, 2026-11-07.
-# 256^3, N=2e6, one bin, tolerance 1e-3, force --fft-mode distributed,
-# serialized runs.  The replicated path (only rank 0 writes) is flat and is
-# not a writer-scaling measurement.
-ranks,total_s,fft_s,writer_s
-1,21.6,2.30,4.19
-2,12.3,1.16,2.88
-4,13.0,0.63,6.46
+ranks,total_s,fft_s,writer_s,wall_s,total_spread_pct,fft_spread_pct,writer_spread_pct
+1,18.195,2.307,0.7113,21.319,0.08,0.54,0.30
+2,10.082,1.154,0.6541,13.898,4.76,34.35,0.62
+4,7.227,0.618,0.5481,12.542,1.29,1.83,0.85

@@ -36,7 +36,7 @@ set to zero to avoid $0\times\infty$ in the FFT.
 
 The convolution is a free-space, zero-padded FFT convolution, with the
 discrete convolution theorem in the unnormalized form of the vendor
-documentation~\citep{press1986,cudacc2024}. The plan is built once,
+documentation~\citep{press1986,cufft2024}. The plan is built once,
 unnormalized, and reused for all thirteen transforms: one forward for
 $\rho$, six forwards for the kernels, and six inverse transforms. The
 unnormalized round trip is scaled by $M^3$; the read-out divides by
