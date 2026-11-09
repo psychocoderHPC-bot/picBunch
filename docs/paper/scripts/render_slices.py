@@ -4,6 +4,11 @@
 Figure family: ``val_*``.  The beam axis (+y) is horizontal, x (x-y plane) or
 z (z-y plane) is vertical; see :mod:`axis`.  No numeric value is changed from
 the legacy FIGS_REPLOT/rebuild_valid.py renderer.
+
+The forward and fluctuation cases each render one figure per plane with the
+electric block first and the magnetic block second, matching the ``gp_*`` and
+``large_*`` convention; the VAR1b 1 mrad case keeps its separate electric and
+magnetic panels stacked in one figure.
 """
 import os
 import sys
@@ -107,8 +112,8 @@ def horizontal_axis_record(dataset, plane, source):
             "display_axes": [vert, horiz]}
 
 
-def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
-         dataset, source, beam_centroid, use_ref):
+def _part_rows(plane_data, part, plane, sources, coord, has_error, use_ref):
+    """Field (and optional error) rows for one field part."""
     field_items = panels(plane_data, part, "ref" if use_ref else "pic")
     rows = [{"kind": "field", "part": part, "items": field_items}]
     smask = None
@@ -132,6 +137,23 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
             err_items.append(e)
         rows.append({"kind": "error", "part": part, "items": err_items})
         smask = support_mask(plane, field_items[0]["arr"].shape, sources, coord)
+    return rows, smask
+
+
+def _assert_axis(name, plane_data, dataset, plane, source, beam_centroid,
+                 use_ref):
+    return axis.assert_beam_axis(
+        dataset, plane, _magnitude(plane_data, use_ref),
+        plane_data["horiz"], plane_data["vert"], n=plane_data["n"],
+        cell=plane_data["cell"], origin=plane_data["origin"], gamma=10.0,
+        centres=True, source=source, figure=name, label="|E|",
+        beam_position=beam_centroid)
+
+
+def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
+         dataset, source, beam_centroid, use_ref):
+    rows, smask = _part_rows(plane_data, part, plane, sources, coord,
+                             has_error, use_ref)
     xl, yl = axis.axis_labels(dataset, plane, source)
     man = {"source_data": os.path.relpath(source, cases.REPO_ROOT),
            "dataset": dataset, "plane": plane, "part": part,
@@ -142,12 +164,45 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
         width_frac=0.92, fig_height=3.25 if has_error else 1.85,
         support=smask, manifest=man)
-    return axis.assert_beam_axis(
-        dataset, plane, _magnitude(plane_data, use_ref),
-        plane_data["horiz"], plane_data["vert"], n=plane_data["n"],
-        cell=plane_data["cell"], origin=plane_data["origin"], gamma=10.0,
-        centres=True, source=source, figure=name, label="|E|",
-        beam_position=beam_centroid)
+    return _assert_axis(name, plane_data, dataset, plane, source,
+                        beam_centroid, use_ref)
+
+
+def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
+                  dataset, source, beam_centroid, use_ref):
+    """One figure per plane with the electric block first, magnetic second.
+
+    ``val_forward`` carries both error rows (E field, E error, B field,
+    B error); the reference-only ``val_fluct`` figure has no error rows and
+    keeps its two field rows (E panels then B panels).  Layout parameters
+    follow the large-domain figures so the four-row block fits the appendix
+    page at the 9 pt print size.
+    """
+    rows = []
+    smask = None
+    for part in ("E", "B"):
+        part_rows, part_mask = _part_rows(plane_data, part, plane, sources,
+                                          coord, has_error, use_ref)
+        rows.extend(part_rows)
+        if part_mask is not None:
+            smask = part_mask
+    xl, yl = axis.axis_labels(dataset, plane, source)
+    block_order = ("E field, E error, B field, B error" if has_error
+                   else "E field, B field")
+    man = {"source_data": os.path.relpath(source, cases.REPO_ROOT),
+           "dataset": dataset, "plane": plane, "parts": ["E", "B"],
+           "block_order": block_order, "has_error": has_error,
+           "includegraphics_width": 0.92,
+           "axis_convention": horizontal_axis_record(dataset, plane, source)}
+    fs.render_split_field_rows(
+        name, outdir, rows, plane_data["horiz"], plane_data["vert"],
+        xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
+        width_frac=0.92, fig_height=3.6 if has_error else 2.2,
+        compact=True, row_gap=0.05 if has_error else 0.075,
+        bottom_margin=0.155 if has_error else None,
+        support=smask, manifest=man)
+    return _assert_axis(name, plane_data, dataset, plane, source,
+                        beam_centroid, use_ref)
 
 
 def _beam_centroid_um(sources_cells, cell):
@@ -168,13 +223,12 @@ def run(outdir):
 
     for plane in ("xy", "zy"):
         bc = _beam_centroid_um(src, cell)
-        for part in ("E", "B"):
-            results.append(make(
-                outdir, f"val_forward_{plane}_{part}", fwd[plane], part, plane,
-                src, 32.0, True, "bdata2", fwd_src, bc, False))
-            results.append(make(
-                outdir, f"val_fluct_{plane}_{part}", flc[plane], part, plane,
-                src, 32.0, False, "bdata2", flc_src, bc, True))
+        results.append(make_combined(
+            outdir, f"val_forward_{plane}", fwd[plane], plane, src, 32.0,
+            True, "bdata2", fwd_src, bc, False))
+        results.append(make_combined(
+            outdir, f"val_fluct_{plane}", flc[plane], plane, src, 32.0,
+            False, "bdata2", flc_src, bc, True))
 
     var_src = cases.data("var1b", "slices_var1b.npz")
     d = np.load(var_src, allow_pickle=False)

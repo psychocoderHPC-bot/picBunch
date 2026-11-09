@@ -18,8 +18,8 @@
   ],
   "end_utc": null,
   "figure_ids": [
-    "large_sxy_g1_E",
-    "large_szy_g1_E"
+    "large_sxy_g1",
+    "large_szy_g1"
   ],
   "git_commit": "012333bdf1879ea374948bed2732211851a8cea4",
   "gpu_model": "NVIDIA H100 PCIe 80 GB",

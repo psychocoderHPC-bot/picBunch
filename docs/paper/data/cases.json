@@ -14,10 +14,8 @@
     "sigma_um": 0.6
    },
    "figures": [
-    "val_fluct_xy_E",
-    "val_fluct_xy_B",
-    "val_fluct_zy_E",
-    "val_fluct_zy_B"
+    "val_fluct_xy",
+    "val_fluct_zy"
    ],
    "host": "fwk394-local-cpu (local CPU container alpaka-bot-cli-y6h5m)",
    "note": "reference_only=1: the plotted val_fluct panels use the order-12 exact reference freshly recomputed on the CPU; the stored pic field remains the legacy forward-case proxy because no fresh fluctuation picBunch run exists.",
@@ -53,10 +51,8 @@
     "sigma_um": 0.6
    },
    "figures": [
-    "val_forward_xy_E",
-    "val_forward_xy_B",
-    "val_forward_zy_E",
-    "val_forward_zy_B"
+    "val_forward_xy",
+    "val_forward_zy"
    ],
    "gpu_model": "NVIDIA H100 PCIe",
    "host": "jrc0880.jureca",
@@ -378,8 +374,8 @@
     "reference": "order-4 max-level-5 driver tol 1e-3"
    },
    "figures": [
-    "large_sxy_g1_E",
-    "large_szy_g1_E"
+    "large_sxy_g1",
+    "large_szy_g1"
    ],
    "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
    "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",
@@ -411,10 +407,8 @@
     "reference": "order-4 max-level-5 driver tol 1e-3"
    },
    "figures": [
-    "large_sxy_g10_E",
-    "large_szy_g10_E",
-    "large_sxy_g10_B",
-    "large_szy_g10_B"
+    "large_sxy_g10",
+    "large_szy_g10"
    ],
    "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
    "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",

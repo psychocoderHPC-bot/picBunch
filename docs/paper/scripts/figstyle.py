@@ -536,13 +536,20 @@ def _bar_title(fig, cax, image, ticks, ticklabels, title):
 
 def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             width_frac, fig_height, shading="nearest",
-                            support=None, suptitle=None, manifest=None):
+                            support=None, suptitle=None, manifest=None,
+                            compact=False, row_gap=0.075,
+                            bottom_margin=None):
     """Field/error rows with a component triad and a separate squared panel.
 
     Every row has four items: three signed components sharing one colour bar,
     then the squared magnitude on its own scale with its own bar and unit
     label.  Layout follows the per-gamma figures so the same three-panel plus
     bar, gap, squared-panel plus bar geometry is used everywhere.
+
+    ``compact`` shortens the colour-bar labels and reduces the squared-panel
+    log ticks to three, so a four-row block fits the appendix page at full
+    9 pt size.  ``row_gap`` sets the vertical gap between rows (figure
+    fractions).
     """
     apply_style()
     nrow = len(rows)
@@ -565,8 +572,11 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     top = 0.950
     # Error rows carry the shared "masked" legend at the very bottom; reserve
     # enough margin that it cannot touch the x tick labels or axis labels.
-    bottom = 0.170 if any(r["kind"] == "error" for r in rows) else 0.105
-    gap = 0.075 if nrow > 1 else 0.0
+    if bottom_margin is not None:
+        bottom = float(bottom_margin)
+    else:
+        bottom = 0.170 if any(r["kind"] == "error" for r in rows) else 0.105
+    gap = float(row_gap) if nrow > 1 else 0.0
     rh = (top - bottom - gap * (nrow - 1)) / nrow
     row_y = []
     yy = top - rh
@@ -620,10 +630,20 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             ccmap, scmap = field_cmap, sq_cmap
             cticks = [-cvmax, 0.0, cvmax]
             clabels = [_fmt_sci(-cvmax), "0", _fmt_sci(cvmax)]
-            sticks, slabels = _sq_ticks(svmax)
-            clabel = f"{part} ({UNITS[part]}) (symlog)"
+            if compact:
+                sfloor_ticks = [snorm.vmin,
+                                float(np.sqrt(snorm.vmin * svmax)), svmax]
+                sticks = sfloor_ticks
+                slabels = [_fmt_sci(t) for t in sticks]
+            else:
+                sticks, slabels = _sq_ticks(svmax)
             unit2 = "V$^2$/m$^2$" if part == "E" else "T$^2$"
-            slabel = f"{part}$^2$ ({unit2}) (log)"
+            if compact:
+                clabel = f"{part} ({UNITS[part]})"
+                slabel = f"{part}$^2$ {unit2}"
+            else:
+                clabel = f"{part} ({UNITS[part]}) (symlog)"
+                slabel = f"{part}$^2$ ({unit2}) (log)"
         else:
             cvmin, cvmax = _error_limits(comps)
             svmin, svmax = _error_limits([sqitem])
@@ -632,15 +652,24 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             ccmap = scmap = err_cmap
             cticks, clabels = _error_ticks(cvmin, cvmax)
             sticks, slabels = _error_ticks(svmin, svmax)
-            clabel = slabel = "relative error"
+            clabel = slabel = "rel. error" if compact else "relative error"
             _assert_masked_distinct(cnorm, ccmap, f"{part} error components")
             _assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
 
         def panel(ax, it, norm, cmap, title):
             arr = np.asarray(it["arr"], float)
             if kind == "field":
-                ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm,
-                              shading=shading)
+                if it.get("blank"):
+                    # An identically-zero reference component: draw the panel
+                    # blank and say which quantity vanishes.  The caption
+                    # carries the physical reason (beam axis or stationary).
+                    ax.set_facecolor("0.90")
+                    ax.text(0.5, 0.5, it.get("blank_text", ""),
+                            transform=ax.transAxes, ha="center", va="center",
+                            fontsize=plt.rcParams["font.size"], color="0.25")
+                else:
+                    ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm,
+                                  shading=shading)
             else:
                 e = np.asarray(it["err"], float)
                 v = np.asarray(it["valid"], bool)
@@ -695,7 +724,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         for j, it in enumerate(comps):
             ax = fig.add_axes([panel_x[j], y0, pw, rh])
             panel(ax, it, cnorm, ccmap, it.get("title", ""))
-            if kind == "field":
+            if kind == "field" and not it.get("blank"):
                 arr_c = np.asarray(it["arr"], float)
                 peak_c = (float(np.nanmax(np.abs(arr_c)))
                           if np.isfinite(arr_c).any() else 0.0)

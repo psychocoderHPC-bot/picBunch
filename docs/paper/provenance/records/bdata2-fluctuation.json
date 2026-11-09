@@ -20,10 +20,8 @@
   ],
   "end_utc": null,
   "figure_ids": [
-    "val_fluct_xy_E",
-    "val_fluct_xy_B",
-    "val_fluct_zy_E",
-    "val_fluct_zy_B"
+    "val_fluct_xy",
+    "val_fluct_zy"
   ],
   "generator": {
     "driver_binary": {

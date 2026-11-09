@@ -20,10 +20,8 @@
   ],
   "end_utc": "2026-11-09T00:11:12Z",
   "figure_ids": [
-    "val_forward_xy_E",
-    "val_forward_xy_B",
-    "val_forward_zy_E",
-    "val_forward_zy_B"
+    "val_forward_xy",
+    "val_forward_zy"
   ],
   "git_commit": "88cb6bd28b90ea81807eb7428e3c23b9504c54ed",
   "gpu_model": "NVIDIA H100 PCIe",
