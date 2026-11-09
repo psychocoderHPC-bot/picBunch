@@ -1597,6 +1597,44 @@ namespace picBunch::pbfast
         }
 
 
+        /*! Production validity gate for the exact s-space evaluator.
+         *
+         * Extends polyBoxUsable to the two cases the singular d-space gate
+         * rejects: the static observer (uu2 == 0) and an observer outside the
+         * TSC support.  The s-space recurrence is a pure boundary/volume
+         * identity that only needs the origin off every cell-face plane; the
+         * knot margin below guarantees that.  In-support moving pairs still
+         * go through the validated polyBoxUsable conditioning check.
+         */
+        inline bool sSpaceExactUsable(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            if(!(uu2 >= 0.0) || !std::isfinite(uu2))
+                return false;
+            if(!(cells.x > 0.0 && cells.y > 0.0 && cells.z > 0.0))
+                return false;
+            if(!(std::isfinite(cells.x) && std::isfinite(cells.y) && std::isfinite(cells.z)))
+                return false;
+            if(!(std::isfinite(R0.x) && std::isfinite(R0.y) && std::isfinite(R0.z)))
+                return false;
+            double const s[3] = {R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            bool inside = true;
+            for(int a = 0; a < 3; ++a)
+            {
+                if(!std::isfinite(s[a]))
+                    return false;
+                inside = inside && std::abs(s[a]) < 1.5;
+                for(int k = 0; k < 4; ++k)
+                    if(std::abs(s[a] - knots[k]) < 1.0e-6)
+                        return false;
+            }
+            if(inside && uu2 > 0.0)
+                return polyBoxUsable(R0, cells, u);
+            return true;
+        }
+
+
         /*! Exact box term for oblique motion.
          *
          * Ebox = int_B R / |M R|^3 dR over the support box B centred at R0.
@@ -1980,18 +2018,45 @@ namespace picBunch::pbfast
         double const Wstar = detail::tsc(sstar.x) * detail::tsc(sstar.y) * detail::tsc(sstar.z);
         bool const singular = Wstar > 0.0;
 
-        // Oblique in-support: exact Lorentz-contracted support-box field plus
-        // a stable d-space ray integral of the TSC remainder.  This replaces
-        // the beamed-peak Duffy quadrature; the oblique order is irrelevant
-        // here and is kept only for CLI/settings compatibility.
+        double const uu2 = nbref::dot(u, u);
+        Vec3 const beta = uu2 == 0.0 ? Vec3{} : u / std::sqrt(1.0 + uu2);
+        double const invg2 = 1.0 / (1.0 + uu2);
+        double const gamma = std::sqrt(1.0 + uu2);
+
+        // Exact s-space evaluator for every in-support pair whose geometry
+        // passes the validity gate (oblique, axial, and the static uu2==0
+        // observer).  Out-of-support pairs fall back to the smooth remainder
+        // unless gamma is high enough that its d/gamma tube cannot be
+        // resolved, in which case the same exact evaluator is used.
+        bool useExact = false;
+        if(detail::sSpaceExactUsable(R0, cells, u))
+        {
+            if(singular)
+                useExact = true;
+            else
+            {
+                int const need
+                    = pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order);
+                useExact = gamma >= pbfast::kOutOfSupportExactGamma
+                    || need > pbfast::kQuadratureOrderCap;
+            }
+        }
+        if(useExact)
+        {
+            E = detail::polyBoxFieldS(R0, cells, u);
+            B = nbref::cross(beta, E);
+            return;
+        }
+
+        // Legacy fallback for geometry the exact evaluator rejects.  Oblique
+        // in-support pairs use the d-space ray integral; axial pairs use the
+        // gamma-stretched box, both plus the subtracted remainder below.
         if(singular)
         {
-            double const uu2 = nbref::dot(u, u);
             Vec3 const betaH = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
             if(uu2 > 0.0 && !detail::isAxialBeta(u, betaH))
             {
                 E = detail::obliqueRayField(R0, cells, u);
-                Vec3 const beta = u / std::sqrt(1.0 + uu2);
                 B = nbref::cross(beta, E);
                 return;
             }
@@ -2001,15 +2066,17 @@ namespace picBunch::pbfast
         if(singular)
             detail::boxTerm(R0, cells, u, settings.obliqueOrder, settings.obliquePower, Ebox, Bbox);
 
-        double const uu2 = nbref::dot(u, u);
-        Vec3 const beta = uu2 == 0.0 ? Vec3{} : u / std::sqrt(1.0 + uu2);
-        double const invg2 = 1.0 / (1.0 + uu2);
-
+        // Remaining quadrature uses a tolerance- and gamma-derived order with
+        // a hard convergence cap.  Pairs above the cap are routed to the
+        // exact evaluator above, so this rule always exists.
+        int const quadOrder = std::min(
+            pbfast::kQuadratureOrderCap,
+            std::max(2, pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order)));
+        detail::Rule const& gl = detail::rule(quadOrder);
+        int const n = quadOrder;
         detail::Panels const px = detail::axisPanels(sstar.x);
         detail::Panels const py = detail::axisPanels(sstar.y);
         detail::Panels const pz = detail::axisPanels(sstar.z);
-        detail::Rule const& gl = detail::rule(settings.order);
-        int const n = settings.order;
 
         Vec3 Erem{};
         for(int ax = 0; ax < px.count; ++ax)

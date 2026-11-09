@@ -407,6 +407,27 @@ namespace picBunch
                     // not use the Duffy order), so the gamma-10 and axial
                     // behaviour is untouched.  The scan is O(near.size()) and
                     // runs once per tile.
+                    // Remainder order responds to --tolerance and to the
+                    // contracted d/gamma tube of the tile's fastest source.
+                    // The host and device dispatches use the same rule; pairs
+                    // whose requirement exceeds the cap are routed to the
+                    // exact evaluator per (source, node) pair.
+                    double tileMaxGamma = 1.0;
+                    for(std::size_t q = 0; q < near.size(); ++q)
+                    {
+                        double const uq2 = near.ux[q] * near.ux[q]
+                            + near.uy[q] * near.uy[q] + near.uz[q] * near.uz[q];
+                        if(uq2 > 0.0)
+                            tileMaxGamma
+                                = std::max(tileMaxGamma, std::sqrt(1.0 + uq2));
+                    }
+                    int const tileRemainderOrder = std::min(
+                        pbfast::kQuadratureOrderCap,
+                        std::max(
+                            nearShell.fastOrder,
+                            pbfast::quadratureOrderFor(
+                                tileMaxGamma, options.tolerance, nearShell.fastOrder)));
+
                     int tileObliqueOrder = explicitObliqueOrder;
                     if(autoObliqueOrderPolicy)
                     {
@@ -448,9 +469,20 @@ namespace picBunch
                     // assignment behind the same guard as the declaration so a
                     // CPU-only build compiles.
                     deviceParams.obliqueOrder = tileObliqueOrder;
+                    deviceParams.order = tileRemainderOrder;
+                    {
+                        auto const& tx = pbfast::detail::rule(tileRemainderOrder).x;
+                        auto const& tw = pbfast::detail::rule(tileRemainderOrder).w;
+                        for(int i = 0; i < tileRemainderOrder; ++i)
+                        {
+                            deviceParams.xi[i] = tx[static_cast<std::size_t>(i)];
+                            deviceParams.wi[i] = tw[static_cast<std::size_t>(i)];
+                        }
+                    }
 #endif
                     pbfast::Settings tileFastSettings = fastSettings;
                     tileFastSettings.obliqueOrder = tileObliqueOrder;
+                    tileFastSettings.order = tileRemainderOrder;
 
                     // The local FFT subtraction is only needed on the legacy
                     // path.  The direct 27-point TSC stencil performs the same

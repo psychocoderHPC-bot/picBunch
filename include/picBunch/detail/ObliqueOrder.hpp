@@ -11,6 +11,15 @@
 // kernel launch coherent.  Axial pairs never enter the oblique path.
 #pragma once
 
+#include <cmath>
+
+#if defined(__CUDACC__) || defined(__HIPCC__) || defined(PICBUNCH_BACKEND_CUDA)
+#    include <alpaka/alpaka.hpp>
+#    define PICBUNCH_ORDER_HOST_ACC ALPAKA_FN_HOST_ACC
+#else
+#    define PICBUNCH_ORDER_HOST_ACC
+#endif
+
 namespace picBunch::pbfast
 {
     constexpr int kObliqueOrderMin = 4;
@@ -48,5 +57,47 @@ namespace picBunch::pbfast
         if(gamma <= 40.0)
             return 6;
         return 8;
+    }
+
+    //! Gauss-order cap for a remaining smooth-remainder quadrature.  Above the
+    //! cap the pair is routed to the exact s-space evaluator instead of paying
+    //! an ever higher rule (device tables stop at 32 as well).
+    constexpr int kQuadratureOrderCap = 32;
+
+    /*! Route out-of-support pairs whose contracted d/gamma tube the fixed-order
+     * remainder cannot resolve.  At gamma 100 the tube is 1/100 of a cell
+     * across; the order-8 threshold is the validated gamma-100 design rule and
+     * larger gamma scales the requirement with it.
+     */
+    constexpr double kOutOfSupportExactGamma = 100.0;
+
+    /*! Gauss order needed by the smooth remainder for one pair.
+     *
+     * The beamed kernel feature subtends about 1/gamma of the angular range,
+     * so resolving it needs on the order of gamma/2 nodes; the historical
+     * gamma-10 case stays on the requested order (5 oblique, 8 axial) and a
+     * fixed 32-node rule is exhausted near gamma 64.  The validated gamma-100
+     * design point therefore exceeds kQuadratureOrderCap and is routed to the
+     * exact evaluator.  Every decade below the default 1e-3 error budget
+     * raises the order by one.
+     */
+    inline PICBUNCH_ORDER_HOST_ACC int quadratureOrderFor(
+        double gamma, double tolerance, int requested)
+    {
+        int order = requested >= 5 ? requested : 5;
+        if(gamma > 1.0 && std::isfinite(gamma))
+        {
+            int const tube = static_cast<int>(std::ceil(gamma / 2.0));
+            if(tube > order)
+                order = tube;
+        }
+        double tol = (tolerance > 0.0 && std::isfinite(tolerance)) ? tolerance : 1e-3;
+        int extra = 0;
+        while(tol < 1e-3 && extra < 16)
+        {
+            tol *= 10.0;
+            ++extra;
+        }
+        return order + extra;
     }
 } // namespace picBunch::pbfast

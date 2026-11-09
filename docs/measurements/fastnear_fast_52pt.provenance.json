@@ -1,30 +1,61 @@
 {
   "case_id": "fastnear-fast-52pt",
   "description": "Measured fast-near evaluator values for the 52-point validation set (20 interior, 16 face, 16 outside per configuration), one row per point with all six normalized field components; input is the exact-field reference fastnear_reference_52pt.csv",
-  "git_commit": "4b07db214fabf8cbf16f8348aa7b85e2016855e1",
-  "commit_note": "clone base (branch repro/figures-20261108); the fast evaluator and the independent reference are both the final code in this commit",
-  "generated_utc": "2026-11-08T21:48:27Z",
+  "git_commit": "7e34ff4d4aa930a56b62f1db9371973b320023a4",
+  "commit_note": "working tree above 7e34ff4 (exact s-space wiring); generated before the wiring commit was created",
+  "generated_utc": "2026-11-09T22:55:00Z",
   "host": "alpaka-bot-cli-y6h5m",
   "hostname": "10.0.2.100",
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "compiler_flags": "-std=c++20 -O2 -Iinclude",
   "parameters": {
     "configurations": {
-      "g1": [0.0, 0.0, 0.0],
-      "g10-axial": [0.0, 0.0, 9.9498743710662],
-      "g10-oblique": [8.12403840463596, 16.24807680927192, 8.12403840463596]
+      "g1": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "g10-axial": [
+        0.0,
+        0.0,
+        9.9498743710662
+      ],
+      "g10-oblique": [
+        8.12403840463596,
+        16.24807680927192,
+        8.12403840463596
+      ]
     },
-    "cells_m": [1.0, 1.0, 1.0],
-    "source_m": [0.0, 0.0, 0.0],
-    "remainder_order": {"g1": 5, "g10-axial": 8, "g10-oblique": 5},
+    "cells_m": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "source_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "remainder_order": {
+      "g1": 5,
+      "g10-axial": 8,
+      "g10-oblique": 5
+    },
     "oblique_order": 8,
     "oblique_power": 5,
-    "component_order": ["Ex", "Ey", "Ez", "Bx", "By", "Bz"],
+    "component_order": [
+      "Ex",
+      "Ey",
+      "Ez",
+      "Bx",
+      "By",
+      "Bz"
+    ],
     "normalization": "per-unit-charge: E_n = 4*pi*eps0*E/q, B_n = 4*pi*eps0*c*B/q"
   },
   "values": {
     "path": "docs/measurements/fastnear_fast_52pt.csv",
-    "sha256": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
+    "sha256": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
     "rows": 156
   },
   "generator": {
@@ -40,9 +71,9 @@
   "determinism": {
     "runs": 2,
     "byte_identical": true,
-    "sha256_run1": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
-    "sha256_run2": "0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9",
-    "note": "two runs on this host are byte-identical; a local reproducer on fwk394 (commit 4366c69) produced the same bytes, consistent with the CPU pointwise evaluator being host-independent"
+    "sha256_run1": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
+    "sha256_run2": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
+    "note": "two runs on this host are byte-identical; the CPU pointwise evaluator is host-independent"
   },
-  "notes": "Values are the picBunch fast-near evaluator (picBunch::pbfast::shape_field) at unit cells, compared against the independent exact-field reference in fastnear_reference_52pt.csv. Face and outside regions reproduce the published tab:fast to <1% for all three configurations. The interior entries are below the published values because the evaluator (obaRayField oblique ray integral) and the reference (refined indfield) changed after publication; the change is largest for the g10-oblique interior, 8.15e-2 published to 1.94e-3 now. CPU-only: no alpaka, CUDA, or FFTW is linked."
+  "notes": "Values are the picBunch fast-near evaluator (picBunch::pbfast::shape_field) at unit cells, compared against the independent exact-field reference in fastnear_reference_52pt.csv. The exact s-space evaluator now handles every in-support pair, so the interior errors drop to 2.3e-7 (g1), 2.2e-7 (g10-axial) and 2.1e-5 (g10-oblique) from the previous 6.8e-4, 1.4e-4 and 1.9e-3. Face points sit exactly on the support boundary and outside points remain on the tolerance/gamma-derived smooth-remainder quadrature, so those rows are unchanged and still reproduce tab:fast to <1%. CPU-only: no alpaka, CUDA, or FFTW is linked."
 }

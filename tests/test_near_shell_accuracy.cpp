@@ -16,6 +16,10 @@
 
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -161,6 +165,108 @@ TEST(NearShellAccuracy, ObliquePathIndependentOfOrder)
     }
 }
 
+// ---- independent indfield golden data at near distances -------------------
+namespace
+{
+    struct GoldenRow
+    {
+        double gamma = 0.0;
+        double d = 0.0;
+        std::array<double, 3> R0{};
+        std::array<double, 3> u{};
+        std::array<double, 3> E{};
+        std::array<double, 3> B{};
+        int converged = 0;
+    };
+
+    std::vector<GoldenRow> loadNearDistanceGolden()
+    {
+        std::vector<GoldenRow> rows;
+        std::ifstream f(std::string(PICBUNCH_TEST_DATA_DIR) + "/near_distance_golden.csv");
+        if(!f)
+            return rows;
+        std::string line;
+        std::getline(f, line); // header
+        while(std::getline(f, line))
+        {
+            if(line.empty())
+                continue;
+            std::stringstream ss(line);
+            std::string cell;
+            std::vector<std::string> tok;
+            while(std::getline(ss, cell, ','))
+                tok.push_back(cell);
+            if(tok.size() < 16)
+                continue;
+            GoldenRow r;
+            // gamma,config,d,x,y,z,ux,uy,uz,Ex,Ey,Ez,Bx,By,Bz,converged,...
+            r.gamma = std::stod(tok[0]);
+            r.d = std::stod(tok[2]);
+            for(int a = 0; a < 3; ++a)
+            {
+                r.R0[a] = std::stod(tok[3 + a]);
+                r.u[a] = std::stod(tok[6 + a]);
+                r.E[a] = std::stod(tok[9 + a]);
+                r.B[a] = std::stod(tok[12 + a]);
+            }
+            r.converged = std::stoi(tok[15]);
+            rows.push_back(r);
+        }
+        return rows;
+    }
+
+    double relativeErrorA(std::array<double, 3> const& v, std::array<double, 3> const& ref)
+    {
+        return relativeError(Vec3{v[0], v[1], v[2]}, ref);
+    }
+} // namespace
+
+//! Near-distance (d=0.05..2 cells) point checks against the independent
+//! indfield reference, not NearReference.  A zero convergence flag in the
+//! golden data is a hard failure: the arbiter must have converged.
+TEST(NearShellAccuracy, NearDistanceMatchesIndfieldGolden)
+{
+    auto const rows = loadNearDistanceGolden();
+    ASSERT_FALSE(rows.empty()) << "missing tests/data/near_distance_golden.csv";
+    int inSupport = 0;
+    int outSupport = 0;
+    for(GoldenRow const& r : rows)
+    {
+        ASSERT_EQ(r.converged, 1)
+            << "indfield reference did not converge for gamma=" << r.gamma
+            << " d=" << r.d;
+        picBunch::pbfast::Settings settings;
+        settings.order = 5;
+        settings.obliqueOrder = 8;
+        // The exact evaluator must not depend on this knob.
+        settings.tolerance = 1.0e-6;
+        Vec3 E, B;
+        picBunch::pbfast::shape_field(
+            Vec3{r.R0[0], r.R0[1], r.R0[2]}, Vec3{}, Vec3{r.u[0], r.u[1], r.u[2]},
+            1.0, 1.0, 1.0, settings, E, B);
+        double const errE = relativeErrorA({E.x, E.y, E.z}, r.E);
+        double const errB = relativeErrorA({B.x, B.y, B.z}, r.B);
+        double const err = std::max(errE, errB);
+        double const s0 = r.R0[0];
+        double const s1 = r.R0[1];
+        double const s2 = r.R0[2];
+        bool const inside = std::abs(s0) < 1.5 && std::abs(s1) < 1.5 && std::abs(s2) < 1.5;
+        // The indfield golden is converged to 1e-4, but its own
+        // order-estimator underestimates the gamma-10 oblique residual by up
+        // to ~4e-4 at d<=0.25; the in-support bound is reference-limited.
+        double const bound = inside ? 2.0e-3 : 1.0e-2;
+        if(inside)
+            ++inSupport;
+        else
+            ++outSupport;
+        EXPECT_LT(err, bound) << "gamma=" << r.gamma << " d=" << r.d
+                              << " inside=" << inside << " errE=" << errE
+                              << " errB=" << errB;
+    }
+    EXPECT_GT(inSupport, 0);
+    EXPECT_GT(outSupport, 0);
+}
+
 // ---- adaptive oblique order ------------------------------------------------
 #include "picBunch/detail/ObliqueOrder.hpp"
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -299,6 +405,43 @@ TEST(NearShellAccuracy, DeviceGamma100FiveDegreeMatchesReference)
         Vec3 const dev = deviceField(c.obs, u, picBunch::pbfast::autoObliqueOrder(100.0));
         EXPECT_LT(relativeError(dev, c.ref), 1.0e-2);
     }
+}
+
+TEST(NearShellAccuracy, DeviceNearDistanceExactMatchesHost)
+{
+    if(!picBunch::pbfast::fastNearDeviceAvailable())
+        GTEST_SKIP() << "no CUDA device";
+    std::array<double, 3> const dir{0.6, 0.0, 0.8};
+    struct Config
+    {
+        char const* name;
+        double gamma;
+        std::array<double, 3> u;
+    };
+    std::array<Config, 5> const configs = {{
+        {"g1", 1.0, {0.0, 0.0, 0.0}},
+        {"g10-axial", 10.0, {0.0, 0.0, std::sqrt(99.0)}},
+        {"g10-oblique", 10.0,
+         {std::sqrt(99.0) / std::sqrt(2.0), 0.0, std::sqrt(99.0) / std::sqrt(2.0)}},
+        {"g100-axial", 100.0, {0.0, 0.0, std::sqrt(9999.0)}},
+        {"g100-oblique", 100.0,
+         {std::sqrt(9999.0) / std::sqrt(2.0), 0.0, std::sqrt(9999.0) / std::sqrt(2.0)}},
+    }};
+    for(Config const& c : configs)
+        for(double d : {0.05, 0.25, 1.0})
+        {
+            Vec3 const obs{d * dir[0], d * dir[1], d * dir[2]};
+            Vec3 const u{c.u[0], c.u[1], c.u[2]};
+            Vec3 const hostE = fastField(obs, u, 8);
+            Vec3 const dev = deviceField(obs, u, 8);
+            // The exact s-space evaluator is bit-stable through gamma 10.  At
+            // gamma 100 its own input-to-output condition number is ~1e8 (a
+            // 1e-15 relative input nudge moves the field by ~2e-7), so the
+            // device/host bound there is the conditioning floor, not 1e-10.
+            double const bound = c.gamma >= 100.0 ? 1.0e-6 : 1.0e-10;
+            EXPECT_LT(relativeErrorV(dev, hostE), bound)
+                << c.name << " d=" << d;
+        }
 }
 
 TEST(NearShellAccuracy, DeviceGamma10AutoEqualsExplicitOrder4)
