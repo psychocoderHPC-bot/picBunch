@@ -1078,8 +1078,352 @@ namespace picBunch::pbfast
                 }
         }
 
-        //! Exact TSC in-support field in d-space (27 piece sum).
-        inline Vec3 polyBoxField(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        // ------------------------------------------------------------------
+        // Exact source-frame (s-space) scalar-potential moments.
+        // ------------------------------------------------------------------
+        // The TSC density in source-index space is a tensor product of three
+        // per-axis quadratics, i.e. 27 monomials s^beta with beta_a <= 2.  For
+        // one cell B (image of a unit index cube, so an axis-aligned physical
+        // box) the field is
+        //
+        //   E = (1/V) G^{-1} [ int_B f grad_R p dR - oint p f n dA ],
+        //   f = 1/|M R|,  G = I + (gamma^2-1) n n^T = gamma^2 M^2.
+        //
+        // Both pieces reduce to face integrals of f times bivariate
+        // polynomials of degree <= 4.  The volume term uses the divergence
+        // identity  div(R^gamma R f) = (|gamma|+2) R^gamma f  on each
+        // axis-aligned cell.  Faces are whitened to |z|^2 + qmin and evaluated
+        // with the verified Euclidean face recurrence (degree 4).  Over the
+        // full support the p-weighted surface terms cancel exactly (p is
+        // continuous and vanishes on the outer boundary), so the 27-cell sum
+        // only needs the volume term.
+        inline double sIp(double x, int n)
+        {
+            double r = 1.0;
+            for(int i = 0; i < n; ++i)
+                r *= x;
+            return r;
+        }
+
+        //! W[k] = int_0^1 t^k rho(t) dt, rho = sqrt(A t^2+B t+C), k <= 4.
+        inline void sEdgeW4(double xi0, double eta0, double dxi, double deta, double Q, double W[5])
+        {
+            double const A = dxi * dxi + deta * deta;
+            double const B = 2.0 * (xi0 * dxi + eta0 * deta);
+            double const C = Q + xi0 * xi0 + eta0 * eta0;
+            double const t0 = -B / (2.0 * A);
+            double const Dd = xi0 * deta - eta0 * dxi;
+            double s2 = (A * Q + Dd * Dd) / (A * A);
+            if(s2 < 0.0)
+                s2 = 0.0;
+            double const sqA = std::sqrt(A);
+            double const u0 = -t0;
+            double const u1 = 1.0 - t0;
+            double const xi1 = xi0 + dxi;
+            double const eta1 = eta0 + deta;
+            double const rho0 = std::sqrt(C);
+            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double I0;
+            if(s2 > 0.0)
+            {
+                double const ss = std::sqrt(s2);
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0)
+                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+            }
+            else
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0);
+            W[0] = I0;
+            W[1] = (rho1 * rho1 * rho1 - rho0 * rho0 * rho0) / (3.0 * A)
+                - (B / (2.0 * A)) * W[0];
+            for(int k = 2; k <= 4; ++k)
+            {
+                double const bnd = (rho1 * rho1 * rho1) / ((k + 2.0) * A);
+                W[k] = bnd
+                    - ((2.0 * k + 1.0) * B / (2.0 * (k + 2.0) * A)) * W[k - 1]
+                    - ((k - 1.0) * C / ((k + 2.0) * A)) * W[k - 2];
+            }
+        }
+
+        //! P[n][k] = coefficient of t^k in (a + b t)^n, n <= 4.
+        inline void sLPow(double a, double b, double P[5][5])
+        {
+            for(int n = 0; n <= 4; ++n)
+                for(int k = 0; k <= 4; ++k)
+                    P[n][k] = 0.0;
+            P[0][0] = 1.0;
+            for(int n = 1; n <= 4; ++n)
+                for(int k = 0; k <= n; ++k)
+                    P[n][k] = (k <= n - 1 ? P[n - 1][k] * a : 0.0)
+                        + (k >= 1 ? P[n - 1][k - 1] * b : 0.0);
+        }
+
+        //! Foot-centred face moments F_ab = int_face xi^a eta^b / rho dA,
+        //! a+b <= 4 (the degree-6 recurrence specialised to what s-space needs).
+        inline void sFaceFab4(Vec3 const q[4], Vec3 const& n, double h, double Fab[5][5])
+        {
+            constexpr int ND = 4;
+            for(int a = 0; a <= ND; ++a)
+                for(int b = 0; b <= ND; ++b)
+                    Fab[a][b] = 0.0;
+            double const Q = h * h;
+            Vec3 const foot = h * n;
+            Vec3 u = q[1] - q[0];
+            u = u / norm3(u);
+            Vec3 const v = nbref::cross(n, u);
+            double xi[4], eta[4];
+            for(int l = 0; l < 4; ++l)
+            {
+                Vec3 const w = q[l] - foot;
+                xi[l] = nbref::dot(w, u);
+                eta[l] = nbref::dot(w, v);
+            }
+            Fab[0][0] = boxFaceIntegralSafe(q, n);
+            double U[5][5] = {}, V[5][5] = {};
+            for(int l = 0; l < 4; ++l)
+            {
+                int const m = (l + 1) % 4;
+                double const x0 = xi[l], y0 = eta[l];
+                double const dx = xi[m] - xi[l], dy = eta[m] - eta[l];
+                double W[5];
+                sEdgeW4(x0, y0, dx, dy, Q, W);
+                double PX[5][5], PY[5][5];
+                sLPow(x0, dx, PX);
+                sLPow(y0, dy, PY);
+                for(int a = 1; a <= ND; ++a)
+                    for(int b = 0; b + a <= ND; ++b)
+                    {
+                        double s = 0.0;
+                        for(int i = 0; i <= a - 1; ++i)
+                        {
+                            double const px = PX[a - 1][i];
+                            if(px == 0.0)
+                                continue;
+                            for(int j = 0; j <= b; ++j)
+                                s += px * PY[b][j] * W[i + j];
+                        }
+                        U[a][b] += dy * s;
+                    }
+                for(int b = 1; b <= ND; ++b)
+                    for(int a = 0; a + b <= ND; ++a)
+                    {
+                        double s = 0.0;
+                        for(int i = 0; i <= a; ++i)
+                        {
+                            double const px = PX[a][i];
+                            if(px == 0.0)
+                                continue;
+                            for(int j = 0; j <= b - 1; ++j)
+                                s += px * PY[b - 1][j] * W[i + j];
+                        }
+                        V[a][b] += -dx * s;
+                    }
+            }
+            for(int deg = 1; deg <= ND; ++deg)
+            {
+                if(deg == 1)
+                    Fab[0][1] = V[0][1];
+                else
+                    Fab[0][deg] = (2.0 * V[0][deg]
+                                   - (deg - 1.0) * (Q * Fab[0][deg - 2] + U[2][deg - 2]))
+                        / (deg + 1.0);
+                for(int a = 2; a <= deg; a += 2)
+                    Fab[a][deg - a] = (U[a][deg - a]
+                                       - (a - 1.0) * (Q * Fab[a - 2][deg - a]
+                                                      + Fab[a - 2][deg - a + 2]))
+                        / a;
+                Fab[1][deg - 1] = U[1][deg - 1];
+                for(int a = 3; a <= deg; a += 2)
+                    Fab[a][deg - a] = (U[a][deg - a]
+                                       - (a - 1.0) * (Q * Fab[a - 2][deg - a]
+                                                      + Fab[a - 2][deg - a + 2]))
+                        / a;
+            }
+        }
+
+        //! Per-pair face geometry of one box axis (independent of the cell).
+        struct SAxis
+        {
+            int a, b, c;
+            double Hxx, Hxy, Hyy, detH;
+            double L11, L21, L22, detL;
+            double ax, bx, by;
+            double uhx, uhy, qc;
+        };
+
+        inline void sPrepAxis(SAxis& X, int a, Vec3 const& n, double s)
+        {
+            int const b = (a + 1) % 3;
+            int const c = (a + 2) % 3;
+            double G[3][3];
+            double const nn[3] = {n.x, n.y, n.z};
+            for(int i = 0; i < 3; ++i)
+                for(int j = 0; j < 3; ++j)
+                    G[i][j] = (i == j ? 1.0 : 0.0) + s * nn[i] * nn[j];
+            X.a = a;
+            X.b = b;
+            X.c = c;
+            X.Hxx = G[b][b];
+            X.Hxy = G[b][c];
+            X.Hyy = G[c][c];
+            X.detH = X.Hxx * X.Hyy - X.Hxy * X.Hxy;
+            double const gab = G[a][b], gac = G[a][c];
+            X.uhx = -(X.Hyy * gab - X.Hxy * gac) / X.detH;
+            X.uhy = -(-X.Hxy * gab + X.Hxx * gac) / X.detH;
+            X.qc = G[a][a] + gab * X.uhx + gac * X.uhy;
+            X.L11 = std::sqrt(X.Hxx);
+            X.L21 = X.Hxy / X.L11;
+            X.L22 = std::sqrt(X.Hyy - X.L21 * X.L21);
+            X.detL = X.L11 * X.L22;
+            X.ax = 1.0 / X.L11;
+            X.bx = -X.L21 / (X.L11 * X.L22);
+            X.by = 1.0 / X.L22;
+        }
+
+        //! M[p][q] = int_face R_b^p R_c^q / |M R| dA for one face of the cell.
+        inline void sFaceM(
+            SAxis const& X,
+            double h,
+            Vec3 const& Rc,
+            Vec3 const& C,
+            double gam,
+            double M[3][3])
+        {
+            double const qmin = h * h * X.qc;
+            double const hh = std::sqrt(qmin > 0.0 ? qmin : 0.0);
+            double const u0x = h * X.uhx, u0y = h * X.uhy;
+            int const b = X.b, c = X.c;
+            double const xlo = Rc[b] - 0.5 * C[b], xhi = Rc[b] + 0.5 * C[b];
+            double const ylo = Rc[c] - 0.5 * C[c], yhi = Rc[c] + 0.5 * C[c];
+            double const xy[4][2] = {{xlo, ylo}, {xhi, ylo}, {xhi, yhi}, {xlo, yhi}};
+            Vec3 qz[4];
+            for(int i = 0; i < 4; ++i)
+            {
+                double const dx = xy[i][0] - u0x, dy = xy[i][1] - u0y;
+                qz[i] = Vec3{X.L11 * dx + X.L21 * dy, X.L22 * dy, hh};
+            }
+            double Fab[5][5];
+            sFaceFab4(qz, Vec3{0.0, 0.0, 1.0}, hh, Fab);
+            double const ax = X.ax, bx = X.bx, by = X.by;
+            double const ux[3] = {1.0, u0x, u0x * u0x};
+            double const uy[3] = {1.0, u0y, u0y * u0y};
+            double const Ax[3] = {1.0, ax, ax * ax};
+            double const Bx[3] = {1.0, bx, bx * bx};
+            double const By[3] = {1.0, by, by * by};
+            static int const CB[3][3] = {{1, 0, 0}, {1, 1, 0}, {1, 2, 1}};
+            for(int p = 0; p <= 2; ++p)
+                for(int q = 0; q <= 2; ++q)
+                {
+                    double sum = 0.0;
+                    for(int i = 0; i <= p; ++i)
+                    {
+                        double const ci = CB[p][i] * ux[p - i];
+                        for(int k = 0; k <= i; ++k)
+                        {
+                            double const ck = CB[i][k] * Ax[i - k] * Bx[k];
+                            for(int j = 0; j <= q; ++j)
+                                sum += ci * ck * (CB[q][j] * uy[q - j] * By[j])
+                                    * Fab[i - k][k + j];
+                        }
+                    }
+                    M[p][q] = gam / X.detL * sum;
+                }
+        }
+
+        //! Exact in-support TSC field in source frame (27 cells, 27 monomials).
+        inline Vec3 polyBoxFieldS(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            double const s = gam * gam - 1.0;
+            SAxis AX[3];
+            for(int a = 0; a < 3; ++a)
+                sPrepAxis(AX[a], a, n, s);
+            static double const qA[3] = {0.5, -1.0, 0.5};
+            static double const qB[3] = {1.5, 0.0, -1.5};
+            static double const qC[3] = {1.125, 0.75, 1.125};
+            Vec3 Iv{};
+            for(int sx = -1; sx <= 1; ++sx)
+                for(int sy = -1; sy <= 1; ++sy)
+                    for(int sz = -1; sz <= 1; ++sz)
+                    {
+                        int const kk[3] = {sx + 1, sy + 1, sz + 1};
+                        double pc[3][3];
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            int const k = kk[a];
+                            double const ic = 1.0 / cells[a], t = R0[a] * ic;
+                            pc[a][0] = qA[k] * t * t + qB[k] * t + qC[k];
+                            pc[a][1] = -2.0 * qA[k] * t * ic - qB[k] * ic;
+                            pc[a][2] = qA[k] * ic * ic;
+                        }
+                        double pB[27];
+                        for(int i = 0; i < 3; ++i)
+                            for(int j = 0; j < 3; ++j)
+                                for(int k = 0; k < 3; ++k)
+                                    pB[i * 9 + j * 3 + k] = pc[0][i] * pc[1][j] * pc[2][k];
+                        Vec3 const Rc{
+                            R0.x - cells.x * sx,
+                            R0.y - cells.y * sy,
+                            R0.z - cells.z * sz};
+                        double Mf[3][2][3][3];
+                        double hf[3][2];
+                        for(int a = 0; a < 3; ++a)
+                            for(int sg = 0; sg < 2; ++sg)
+                            {
+                                double const h = Rc[a] + (sg ? 0.5 : -0.5) * cells[a];
+                                hf[a][sg] = h;
+                                sFaceM(AX[a], h, Rc, cells, gam, Mf[a][sg]);
+                            }
+                        double Wt[27];
+                        for(int t = 0; t < 27; ++t)
+                            Wt[t] = 0.0;
+                        for(int fa = 0; fa < 3; ++fa)
+                            for(int sg = 0; sg < 2; ++sg)
+                            {
+                                int const fb = AX[fa].b, fc = AX[fa].c;
+                                double const sign = sg ? 1.0 : -1.0;
+                                double const h = hf[fa][sg];
+                                double const hp[3] = {h, h * h, h * h * h};
+                                double const(*M)[3] = Mf[fa][sg];
+                                for(int i = 0; i < 3; ++i)
+                                    for(int j = 0; j < 3; ++j)
+                                        for(int k = 0; k < 3; ++k)
+                                        {
+                                            int const be[3] = {i, j, k};
+                                            Wt[i * 9 + j * 3 + k]
+                                                += sign * hp[be[fa]] * M[be[fb]][be[fc]];
+                                        }
+                            }
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            double acc = 0.0;
+                            for(int i = 0; i < 3; ++i)
+                                for(int j = 0; j < 3; ++j)
+                                    for(int k = 0; k < 3; ++k)
+                                    {
+                                        int const be[3] = {i, j, k};
+                                        double const pv = pB[i * 9 + j * 3 + k];
+                                        if(be[a] == 0 || pv == 0.0)
+                                            continue;
+                                        int g[3] = {i, j, k};
+                                        g[a]--;
+                                        int const dg = g[0] + g[1] + g[2];
+                                        double const W
+                                            = Wt[g[0] * 9 + g[1] * 3 + g[2]] / (dg + 2.0);
+                                        acc += be[a] * pv * W;
+                                    }
+                            (&Iv.x)[a] += acc;
+                        }
+                    }
+            Vec3 const vn = nbref::dot(Iv, n) * n;
+            Vec3 const E = ((Iv - vn) + vn / (gam * gam))
+                * (1.0 / (cells.x * cells.y * cells.z));
+            return E;
+        }
+
+        //! Reference d-space path (kept for equivalence tests).
+        inline Vec3 polyBoxFieldD(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
             double const gam = std::sqrt(1.0 + uu2);
@@ -1124,6 +1468,12 @@ namespace picBunch::pbfast
             Vec3 const Eraw = applyContract(Jtot, n, gam); // M^{-1}
             double const invV = 1.0 / (cells.x * cells.y * cells.z);
             return Vec3{Eraw.x * invV, Eraw.y * invV, Eraw.z * invV};
+        }
+
+        //! Exact TSC in-support field, evaluated in the source frame.
+        inline Vec3 polyBoxField(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            return polyBoxFieldS(R0, cells, u);
         }
 
         /*! Geometric validity gate for the exact polynomial path.

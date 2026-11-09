@@ -250,3 +250,39 @@ TEST(FastNearPoly, GeometricValidityGate)
     // uu2 below the 1e-24 static guard is rejected.
     EXPECT_FALSE(detail::polyBoxUsable(Vec3{0.25, 0.4, 0.25}, cells, Vec3{1e-13, 0.0, 0.0}));
 }
+
+// ---- gate: source-frame path matches the verified d-space path ------------
+// The s-space evaluator only changes the algebra of the same integral.  The
+// d-space path is the oracle above gamma=10 (below gamma~30 its 84-term
+// moment basis is still well conditioned); at larger gamma it loses digits,
+// which is why the production precision probe is not the reference here.
+TEST(FastNearPoly, SourceFrameMatchesDSpace)
+{
+    double const dir[3] = {1.0, 2.0, 1.0};
+    double const dl = std::sqrt(6.0);
+    double const r0s[][3] = {
+        {0.25, 0.4, 0.25},
+        {0.1, 0.3, -0.2},
+        {1.2, 0.2, -0.1},
+        {1.3, 0.1, 0.2}};
+    double const cellsSet[][3] = {{1.0, 1.0, 1.0}, {0.7, 1.3, 1.0}};
+    for(auto const& c3 : cellsSet)
+    {
+        Vec3 const cells{c3[0], c3[1], c3[2]};
+        for(double gam : {1.0, 10.0})
+        {
+            double const um = std::sqrt(std::max(0.0, gam * gam - 1.0));
+            Vec3 const u = um == 0.0
+                ? Vec3{}
+                : Vec3{um * dir[0] / dl, um * dir[1] / dl, um * dir[2] / dl};
+            for(auto const& r3 : r0s)
+            {
+                Vec3 const R0{r3[0] * cells.x, r3[1] * cells.y, r3[2] * cells.z};
+                Vec3 const a = detail::polyBoxFieldS(R0, cells, u);
+                Vec3 const b = detail::polyBoxFieldD(R0, cells, u);
+                EXPECT_LT(relErr(a, b), 1.0e-7)
+                    << "gam=" << gam << " R0=" << R0.x << "," << R0.y << "," << R0.z;
+            }
+        }
+    }
+}
