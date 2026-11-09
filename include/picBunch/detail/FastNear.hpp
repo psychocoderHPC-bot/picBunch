@@ -630,7 +630,58 @@ namespace picBunch::pbfast
             Vec3 u;
             Vec3 v;
             double Fab[7][7];
+            //! Per-axis bivariate powers (w0_i + xi u_i + eta v_i)^n, n <= 6.
+            double P[3][7][7][7];
         };
+
+        //! Fill fd.P[axis][n] with the bivariate powers of the three linear
+        //! forms whose product gives (d-dc)^nu on the face.
+        inline void prepFacePowers(FaceData& fd, Vec3 const& dc)
+        {
+            double const w0[3] = {
+                fd.h * fd.n.x - dc.x,
+                fd.h * fd.n.y - dc.y,
+                fd.h * fd.n.z - dc.z};
+            double lin[3][3];
+            for(int i = 0; i < 3; ++i)
+            {
+                lin[i][0] = w0[i];
+                lin[i][1] = fd.u[i];
+                lin[i][2] = fd.v[i];
+            }
+            for(int i = 0; i < 3; ++i)
+            {
+                double R[7][7];
+                bivarZero(R);
+                R[0][0] = 1.0;
+                for(int n = 0; n <= 6; ++n)
+                {
+                    for(int a = 0; a <= 6; ++a)
+                        for(int b = 0; b <= 6 - a; ++b)
+                            fd.P[i][n][a][b] = R[a][b];
+                    if(n == 6)
+                        break;
+                    double T[7][7];
+                    bivarZero(T);
+                    for(int a = 0; a <= 6; ++a)
+                        for(int b = 0; b <= 6 - a; ++b)
+                        {
+                            double const val = R[a][b];
+                            if(val == 0.0)
+                                continue;
+                            T[a][b] += val * lin[i][0];
+                            if(a + b < 6)
+                            {
+                                T[a + 1][b] += val * lin[i][1];
+                                T[a][b + 1] += val * lin[i][2];
+                            }
+                        }
+                    for(int a = 0; a < 7; ++a)
+                        for(int b = 0; b < 7; ++b)
+                            R[a][b] = T[a][b];
+                }
+            }
+        }
 
         //! Foot-centred F_ab = int_face xi^a eta^b / rho dA, a+b <= 6.
         inline void faceMonomials(Vec3 const q[4], Vec3 const& n, double h, double Fab[7][7])
@@ -729,18 +780,9 @@ namespace picBunch::pbfast
         //! int_face (d-dc)^nu / |d| dA in foot-centred F_ab.
         inline double faceMono(FaceData const& fd, Vec3 const& dc, int const nu[3])
         {
-            double const w0[3] = {
-                fd.h * fd.n.x - dc.x,
-                fd.h * fd.n.y - dc.y,
-                fd.h * fd.n.z - dc.z};
-            double const uu[3] = {fd.u.x, fd.u.y, fd.u.z};
-            double const vv[3] = {fd.v.x, fd.v.y, fd.v.z};
-            double F0[7][7], F1[7][7], F2[7][7], T[7][7], R[7][7];
-            linPowBivar(w0[0], uu[0], vv[0], nu[0], F0);
-            linPowBivar(w0[1], uu[1], vv[1], nu[1], F1);
-            linPowBivar(w0[2], uu[2], vv[2], nu[2], F2);
-            bivarMul(F0, F1, T);
-            bivarMul(T, F2, R);
+            double T[7][7], R[7][7];
+            bivarMul(fd.P[0][nu[0]], fd.P[1][nu[1]], T);
+            bivarMul(T, fd.P[2][nu[2]], R);
             double sum = 0.0;
             for(int a = 0; a <= 6; ++a)
                 for(int b = 0; b <= 6 - a; ++b)
@@ -812,6 +854,7 @@ namespace picBunch::pbfast
                 fd.u = u / norm3(u);
                 fd.v = nbref::cross(fd.n, fd.u);
                 faceMonomials(q[f], fd.n, fd.h, fd.Fab);
+                prepFacePowers(fd, dc);
                 for(int a = 0; a <= 6; ++a)
                     for(int b = 0; b <= 6 - a; ++b)
                         for(int c = 0; c <= 6 - a - b; ++c)
@@ -893,6 +936,71 @@ namespace picBunch::pbfast
                         if(c > 0)
                             vol.z = c * I[polyIdx.idx[a][b][c - 1]];
                         J = J + (nF[id] * (-1.0) + vol) * av;
+                    }
+        }
+
+        //! hF-only face moments for |beta| <= 5 (the volume recurrence in polyJ
+        //! never needs degree 6).  The -nF surface term is omitted: summed over
+        //! the 27 continuous TSC pieces it cancels exactly (p vanishes on the
+        //! outer boundary), so polyBoxField can drop it.
+        inline void faceMomentSumsH(
+            Vec3 const& dc,
+            Vec3 const e[3],
+            double hF[kPolyTerms])
+        {
+            for(int i = 0; i < kPolyTerms; ++i)
+                hF[i] = 0.0;
+            Vec3 q[6][4];
+            Vec3 nrm[6];
+            double h[6];
+            polyBoxFaces(dc, e, q, nrm, h);
+            for(int f = 0; f < 6; ++f)
+            {
+                FaceData fd;
+                fd.n = nrm[f];
+                fd.h = h[f];
+                fd.Q = h[f] * h[f];
+                Vec3 u = q[f][1] - q[f][0];
+                fd.u = u / norm3(u);
+                fd.v = nbref::cross(fd.n, fd.u);
+                faceMonomials(q[f], fd.n, fd.h, fd.Fab);
+                prepFacePowers(fd, dc);
+                for(int a = 0; a <= 5; ++a)
+                    for(int b = 0; b <= 5 - a; ++b)
+                        for(int c = 0; c <= 5 - a - b; ++c)
+                        {
+                            int const nu[3] = {a, b, c};
+                            double const Fm = faceMono(fd, dc, nu);
+                            int const id = polyIdx.idx[a][b][c];
+                            hF[id] += fd.h * Fm;
+                        }
+            }
+        }
+
+        //! Volume part of J only (no surface term); see faceMomentSumsH.
+        inline void polyJVol(Vec3 const& dc, Vec3 const e[3], Poly6 const& p, Vec3& J)
+        {
+            double hF[kPolyTerms];
+            faceMomentSumsH(dc, e, hF);
+            double I[kPolyTerms];
+            volumeFromFaceMoments(dc, hF, I);
+            J = Vec3{};
+            for(int a = 0; a <= 6; ++a)
+                for(int b = 0; b <= 6 - a; ++b)
+                    for(int c = 0; c <= 6 - a - b; ++c)
+                    {
+                        int const id = polyIdx.idx[a][b][c];
+                        double const av = p.c[id];
+                        if(av == 0.0)
+                            continue;
+                        Vec3 vol{};
+                        if(a > 0)
+                            vol.x = a * I[polyIdx.idx[a - 1][b][c]];
+                        if(b > 0)
+                            vol.y = b * I[polyIdx.idx[a][b - 1][c]];
+                        if(c > 0)
+                            vol.z = c * I[polyIdx.idx[a][b][c - 1]];
+                        J = J + vol * av;
                     }
         }
 
@@ -994,16 +1102,23 @@ namespace picBunch::pbfast
                         axisQuadratic(qA[kz], qB[kz], qC[kz], sz, cells.z, gam, n, 2, qz);
                         polyMul(qx, qy, qxy);
                         polyMul(qxy, qz, p);
+                        Vec3 const scCells{sx * cells.x, sy * cells.y, sz * cells.z};
+                        Vec3 const dc = M(R0 - scCells);
+                        Vec3 e[3];
+                        if(uu2 == 0.0)
+                        {
+                            e[0] = Vec3{cells.x, 0.0, 0.0};
+                            e[1] = Vec3{0.0, cells.y, 0.0};
+                            e[2] = Vec3{0.0, 0.0, cells.z};
+                        }
+                        else
+                        {
+                            e[0] = M(Vec3{cells.x, 0.0, 0.0});
+                            e[1] = M(Vec3{0.0, cells.y, 0.0});
+                            e[2] = M(Vec3{0.0, 0.0, cells.z});
+                        }
                         Vec3 Jp;
-                        boxPolyJ(
-                            R0,
-                            cells,
-                            u,
-                            p,
-                            Vec3{static_cast<double>(sx), static_cast<double>(sy),
-                                 static_cast<double>(sz)},
-                            Vec3{0.5, 0.5, 0.5},
-                            Jp);
+                        polyJVol(dc, e, p, Jp);
                         Jtot = Jtot + Jp;
                     }
             Vec3 const Eraw = applyContract(Jtot, n, gam); // M^{-1}
