@@ -3,7 +3,7 @@
 
 LARGE1 is the axial-x data set: gamma=10 propagates along +x, gamma=1 is
 stationary.  The x-y cut is therefore plotted with the beam axis x horizontal
-and y vertical, and the z-y cut with z horizontal and y vertical (the beam
+and y vertical, and the z-y cut with y horizontal and z vertical (the beam
 axis is out of that plane).  This is the orientation of the committed paper
 figures.  :mod:`axis` records the stored layouts and the correct display
 mapping, including the fact that LARGE1 stores the z-y slice as ``[z, y]``

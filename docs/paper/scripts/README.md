@@ -28,8 +28,8 @@ component is suppressed. Measured in the reduced data:
 
 The +y families plot the beam axis y horizontally and x or z vertically.
 LARGE1 is the axial-x data set and is plotted as such: the x-y cut puts the
-beam axis x horizontally and y vertically; the z-y cut puts z horizontally and
-y vertically because the beam axis x is out of that plane. `large_*` figures
+beam axis x horizontally and y vertically; the z-y cut puts y horizontally and
+z vertically because the beam axis x is out of that plane. `large_*` figures
 must not be relabelled to +y and must keep the `Bx = 0` panel.
 
 `ARRAY_AXES` also records that the LARGE1 z-y slice is stored as `[z, y]`,

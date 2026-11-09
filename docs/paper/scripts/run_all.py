@@ -28,7 +28,7 @@ def _write_assertions(path, results, self_test):
              "Each data set plots its recorded physical layout. The +y families",
              "(bdata2, var1b, hires) put the beam axis y horizontally. LARGE1 is",
              "axial-x at gamma=10 and stationary at gamma=1; its x-y cut puts the",
-             "beam axis x horizontally and its z-y cut puts z horizontally.", ""]
+             "beam axis x horizontally and its z-y cut puts y horizontally.", ""]
     lines.append("## Mapping self-test")
     for r in self_test:
         lines.append(f"self-test {r['dataset']}/{r['plane']} "

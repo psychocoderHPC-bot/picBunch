@@ -16,10 +16,12 @@ Measured reference peaks in the reduced data:
 Consequently the display layout differs by data set.  ``ARRAY_AXES`` records
 the physical axes of ``(array.shape[0], array.shape[1])`` as stored;
 ``DISPLAY_AXES`` records the correct ``(vertical, horizontal)`` axes for the
-figure.  For the +y families the beam axis y is horizontal.  For LARGE1 the
-x-y cut puts the axial-x beam axis x horizontally, and the z-y cut puts z
-horizontally because the beam axis x is out of that plane.  The helper never
-forces y horizontal on an axial-x data set.
+figure.  The horizontal axis is the beam axis whenever the beam lies in the
+plotted plane; when the beam is out of plane (including a stationary bunch,
+which has no beam axis), the horizontal axis is y.  For the +y families the
+beam axis y is horizontal.  For LARGE1 the x-y cut puts the axial-x beam axis
+x horizontally, while the z-y cut has the beam axis x out of plane and so puts
+y horizontally and z vertically, as in the +y families' z-y cuts.
 
 A dataset/plane combination with no verified entry raises
 ``BlockedAxisError`` instead of guessing.
@@ -51,7 +53,7 @@ DISPLAY_AXES = {
     ("var1b", "xy"): ("x", "y"),
     ("hires", "xy"): ("x", "y"),
     ("large1", "xy"): ("y", "x"),   # axial-x beam horizontal
-    ("large1", "zy"): ("y", "z"),   # axial-x beam out of plane, z horizontal
+    ("large1", "zy"): ("z", "y"),   # axial-x beam out of plane, y horizontal
 }
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
