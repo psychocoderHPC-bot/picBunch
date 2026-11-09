@@ -236,6 +236,43 @@ namespace picBunch
             }
         };
 
+        //! Copy the valid ``nx*ny*nz`` subregion of the padded ``mx*my*mz`` real grid
+        //! into a compact x-fastest staging buffer.  Pure copy: no arithmetic, no
+        //! reordering, so the staged doubles are bit-identical to the source.  This
+        //! keeps the host read-out loop off the unified FFT output buffer, whose
+        //! page migration dominated the measured wall time.
+        struct CompactGatherKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                double const* src,
+                double* dst,
+                std::uint32_t nx,
+                std::uint32_t ny,
+                std::uint32_t nz,
+                std::uint32_t mx,
+                std::uint32_t my) const
+            {
+                std::uint32_t const count = nx * ny * nz;
+                for(auto [l] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    std::uint32_t const i = l % nx;
+                    std::uint32_t const rem = l / nx;
+                    std::uint32_t const j = rem % ny;
+                    std::uint32_t const k = rem / ny;
+                    dst[l] = src[
+                        static_cast<std::size_t>(i)
+                        + static_cast<std::size_t>(mx)
+                            * (static_cast<std::size_t>(j)
+                               + static_cast<std::size_t>(my) * static_cast<std::size_t>(k))];
+                }
+            }
+        };
+
         //! TSC deposit of the velocity moment ``q_p (u_p - u0)^a`` onto the padded box.
         //! Same stencil as the charge deposit, but the per-particle coefficient is the
         //! signed charge times the velocity moment (power form, no ``1/a!``).
@@ -1099,6 +1136,21 @@ namespace picBunch
         auto kernelReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
         auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
         auto outReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
+
+        // Read-out staging for the replicated path.  The c2r output stays
+        // device-resident; a no-arithmetic gather copies the valid n^3 box into
+        // a compact device buffer, one D2H copy moves it into pinned host
+        // memory, and the host accumulate loop touches only the pinned buffer.
+        // Before this, the OpenMP loop dereferenced the managed ``outReal`` and
+        // paid a page migration on every first touch.
+        std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
+        std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
+        std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
+        std::size_t const outNodes
+            = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy)
+            * static_cast<std::size_t>(outNz);
+        auto outStagingDev = alpaka::onHost::alloc<double>(device, outNodes);
+        auto outStagingHost = alpaka::onHost::allocMapped<double>(device, outNodes);
 
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
@@ -2031,29 +2083,32 @@ namespace picBunch
                 auto const readoutStart = Clock::now();
                 double const factor = scale * (c < 3 ? eFactor : bFactor);
                 // Every (k,j,i) owns one output node, so the parallel loop keeps
-                // exactly one deterministic write per node.  This is the host
-                // gather of the replicated path (the distributed path returns a
-                // z-slab through alltoallv instead).
-                std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
-                std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
-                std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
-#pragma omp parallel for collapse(2)
-                for(std::uint32_t k = 0; k < outNz; ++k)
-                    for(std::uint32_t j = 0; j < outNy; ++j)
-                        for(std::uint32_t i = 0; i < outNx; ++i)
-                        {
-                            auto const in = static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(Mx)
-                                    * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
-                            auto const out = static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(outNx)
-                                    * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(outNy) * static_cast<std::size_t>(k));
-                            // Accumulate: the field of the mixed bunch is the sum
-                            // over the velocity classes.
-                            field.data[c][out] += outReal.data()[in] * factor;
-                        }
+                // exactly one deterministic write per node.  The padded c2r
+                // output is gathered on the device into a compact n^3 buffer
+                // (pure copy, no arithmetic) and moved to pinned host memory
+                // with a single D2H copy.  The host loop then reads only the
+                // pinned staging buffer, so no managed page migration happens.
+                std::uint32_t const outCount = static_cast<std::uint32_t>(outNodes);
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{(outCount + 63u) / 64u, 64u},
+                    CompactGatherKernel{},
+                    outReal.data(),
+                    outStagingDev.data(),
+                    outNx,
+                    outNy,
+                    outNz,
+                    Mx,
+                    My);
+                alpaka::onHost::memcpy(queue, outStagingHost, outStagingDev);
+                alpaka::onHost::wait(queue);
+                double const* staged = outStagingHost.data();
+                double* fout = field.data[c].data();
+#pragma omp parallel for
+                for(std::uint32_t l = 0; l < outCount; ++l)
+                    // Accumulate: the field of the mixed bunch is the sum over
+                    // the velocity classes.  Same value, factor and order as the
+                    // former direct read of outReal, hence bit-identical.
+                    fout[l] += staged[l] * factor;
                 times.readoutMs += elapsedMs(readoutStart);
             }
         }
