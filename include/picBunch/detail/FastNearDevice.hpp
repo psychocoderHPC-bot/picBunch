@@ -41,6 +41,8 @@ namespace picBunch::pbfast
         double delta[6][3]{};
         double unitE = 0.0;
         double unitB = 0.0;
+        //! Per-pair error budget reserved for the exact-path validity gate.
+        double tolerance = 1e-3;
     };
 
 #if defined(PICBUNCH_BACKEND_CUDA)

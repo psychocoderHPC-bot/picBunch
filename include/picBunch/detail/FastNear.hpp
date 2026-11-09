@@ -380,6 +380,712 @@ namespace picBunch::pbfast
             return I;
         }
 
+
+        // ------------------------------------------------------------------
+        // Exact closed-form polynomial box field (Stage 1: oblique in-support)
+        // ------------------------------------------------------------------
+        //
+        // Integral over one parallelepiped P = dc + { sum_a t_a e_a,
+        // t_a in [-1/2,1/2] } of p(y) d/|d|^3, y = d - dc, p a polynomial of
+        // total degree <= 6.  The volume recurrence (divergence theorem)
+        // consumes *dc-centred* face moments F_beta(f) = int_face y^beta/|d| dA.
+        // The foot-centred face monomials F_ab are only the primitive used to
+        // evaluate those moments; the dc shift is carried by the expansion of
+        // y = (h n - dc) + xi u + eta v.  This is what closes (4.2).
+
+        //! Compact monomial bookkeeping for total degree <= 6 in 3 variables.
+        struct PolyIdx
+        {
+            int idx[7][7][7];
+            constexpr PolyIdx() : idx{}
+            {
+                int n = 0;
+                for(int d = 0; d <= 6; ++d)
+                    for(int a = 0; a <= d; ++a)
+                        for(int b = 0; b <= d - a; ++b)
+                        {
+                            int const c = d - a - b;
+                            idx[a][b][c] = n++;
+                        }
+            }
+        };
+        inline constexpr PolyIdx polyIdx{};
+        static constexpr int kPolyTerms = 84;
+
+        struct Poly6
+        {
+            double c[kPolyTerms];
+        };
+
+        inline void polyZero(Poly6& p)
+        {
+            for(int i = 0; i < kPolyTerms; ++i)
+                p.c[i] = 0.0;
+        }
+
+        inline void polyAdd(Poly6& p, int a, int b, int c, double v)
+        {
+            if(a + b + c <= 6)
+                p.c[polyIdx.idx[a][b][c]] += v;
+        }
+
+        //! r = p*q, total degree <= 6.
+        inline void polyMul(Poly6 const& p, Poly6 const& q, Poly6& r)
+        {
+            polyZero(r);
+            for(int a = 0; a <= 6; ++a)
+                for(int b = 0; b <= 6 - a; ++b)
+                    for(int c = 0; c <= 6 - a - b; ++c)
+                    {
+                        double const pv = p.c[polyIdx.idx[a][b][c]];
+                        if(pv == 0.0)
+                            continue;
+                        for(int a2 = 0; a2 <= 6 - a; ++a2)
+                            for(int b2 = 0; b2 <= 6 - a - a2; ++b2)
+                                for(int c2 = 0; c2 <= 6 - a - a2 - b2; ++c2)
+                                {
+                                    double const qv = q.c[polyIdx.idx[a2][b2][c2]];
+                                    if(qv == 0.0)
+                                        continue;
+                                    int const aa = a + a2;
+                                    int const bb = b + b2;
+                                    int const cc = c + c2;
+                                    if(aa + bb + cc <= 6)
+                                        r.c[polyIdx.idx[aa][bb][cc]] += pv * qv;
+                                }
+                    }
+        }
+
+        inline void bivarZero(double R[7][7])
+        {
+            for(int i = 0; i < 7; ++i)
+                for(int j = 0; j < 7; ++j)
+                    R[i][j] = 0.0;
+        }
+
+        //! R = (a + b xi + c eta)^n in the bivariate (xi,eta) basis, n <= 6.
+        inline void linPowBivar(double a, double b, double c, int n, double R[7][7])
+        {
+            bivarZero(R);
+            R[0][0] = 1.0;
+            for(int s = 0; s < n; ++s)
+            {
+                double T[7][7];
+                bivarZero(T);
+                for(int i = 0; i <= 6; ++i)
+                    for(int j = 0; j <= 6 - i; ++j)
+                    {
+                        double const v = R[i][j];
+                        if(v == 0.0)
+                            continue;
+                        T[i][j] += v * a;
+                        if(i + j < 6)
+                        {
+                            T[i + 1][j] += v * b;
+                            T[i][j + 1] += v * c;
+                        }
+                    }
+                for(int i = 0; i < 7; ++i)
+                    for(int j = 0; j < 7; ++j)
+                        R[i][j] = T[i][j];
+            }
+        }
+
+        inline void bivarMul(double const A[7][7], double const B[7][7], double R[7][7])
+        {
+            bivarZero(R);
+            for(int a = 0; a <= 6; ++a)
+                for(int b = 0; b <= 6 - a; ++b)
+                {
+                    double const av = A[a][b];
+                    if(av == 0.0)
+                        continue;
+                    for(int c = 0; c <= 6 - a - b; ++c)
+                        for(int d = 0; d <= 6 - a - b - c; ++d)
+                            R[a + c][b + d] += av * B[c][d];
+                }
+        }
+
+        //! Coefficients of (a0 + a1 t)^n, n <= 5.
+        inline void linPow1d(double a0, double a1, int n, double c[6])
+        {
+            for(int k = 0; k <= 5; ++k)
+                c[k] = 0.0;
+            for(int k = 0; k <= n; ++k)
+            {
+                double b = 1.0;
+                for(int i = 0; i < k; ++i)
+                    b *= static_cast<double>(n - i) / static_cast<double>(i + 1);
+                double p0 = 1.0;
+                for(int i = 0; i < n - k; ++i)
+                    p0 *= a0;
+                double p1 = 1.0;
+                for(int i = 0; i < k; ++i)
+                    p1 *= a1;
+                c[k] = b * p0 * p1;
+            }
+        }
+
+        //! W[k] = int_0^1 t^k rho(t) dt, rho = sqrt(A t^2 + B t + C), k = 0..5.
+        inline void edgeWeights(
+            double xi0,
+            double eta0,
+            double dxi,
+            double deta,
+            double Q,
+            double W[6])
+        {
+            double const A = dxi * dxi + deta * deta;
+            double const B = 2.0 * (xi0 * dxi + eta0 * deta);
+            double const C = Q + xi0 * xi0 + eta0 * eta0;
+            double const t0 = -B / (2.0 * A);
+            double const D = xi0 * deta - eta0 * dxi;
+            double s2 = (A * Q + D * D) / (A * A);
+            if(s2 < 0.0)
+                s2 = 0.0;
+            double const sqA = std::sqrt(A);
+            double const u0 = -t0;
+            double const u1 = 1.0 - t0;
+            double const xi1 = xi0 + dxi;
+            double const eta1 = eta0 + deta;
+            double const rho0 = std::sqrt(C);
+            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double I0;
+            if(s2 > 0.0)
+            {
+                double const ss = std::sqrt(s2);
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0)
+                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+            }
+            else
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0);
+            W[0] = I0;
+            W[1] = (rho1 * rho1 * rho1 - rho0 * rho0 * rho0) / (3.0 * A)
+                - (B / (2.0 * A)) * W[0];
+            for(int k = 2; k <= 5; ++k)
+            {
+                double const bnd = (rho1 * rho1 * rho1) / ((k + 2.0) * A);
+                W[k] = bnd
+                    - ((2.0 * k + 1.0) * B / (2.0 * (k + 2.0) * A)) * W[k - 1]
+                    - ((k - 1.0) * C / ((k + 2.0) * A)) * W[k - 2];
+            }
+        }
+
+        //! boxEdgePrimitive with the removable 0/0 (h=0, origin foot on the
+        //! edge) taken as its limit zero.
+        inline double boxEdgePrimitiveSafe(double l, double hh, double d)
+        {
+            if(hh == 0.0 && d == 0.0)
+                return 0.0;
+            return boxEdgePrimitive(l, hh, d);
+        }
+
+        //! boxFaceIntegral regularised for the degenerate face-through-origin
+        //! edge (the original returns 0*inf there).
+        inline double boxFaceIntegralSafe(Vec3 const q[4], Vec3 const& n)
+        {
+            double const h = nbref::dot(q[0], n);
+            double const hh = std::abs(h);
+            double I = 0.0;
+            for(int i = 0; i < 4; ++i)
+            {
+                Vec3 const a = q[i];
+                Vec3 const b = q[(i + 1) % 4];
+                Vec3 const e = b - a;
+                double const L = norm3(e);
+                Vec3 const m = e / L;
+                Vec3 const n2 = nbref::cross(m, n);
+                double const d = nbref::dot(a, n2);
+                double const la = nbref::dot(a, m);
+                double const lb = nbref::dot(b, m);
+                I += boxEdgePrimitiveSafe(lb, hh, d) - boxEdgePrimitiveSafe(la, hh, d);
+            }
+            Vec3 const foot = h * n;
+            Vec3 u = q[1] - q[0];
+            u = u / norm3(u);
+            Vec3 const w = nbref::cross(n, u);
+            bool inside = false;
+            int j = 3;
+            for(int i = 0; i < 4; ++i)
+            {
+                double const xi = nbref::dot(q[i] - foot, u);
+                double const yi = nbref::dot(q[i] - foot, w);
+                double const xj = nbref::dot(q[j] - foot, u);
+                double const yj = nbref::dot(q[j] - foot, w);
+                if(((yi > 0.0) != (yj > 0.0))
+                   && (0.0 < (xj - xi) * (0.0 - yi) / (yj - yi) + xi))
+                    inside = !inside;
+                j = i;
+            }
+            if(inside)
+                I -= 2.0 * kBoxPi * hh;
+            return I;
+        }
+
+        struct FaceData
+        {
+            Vec3 n;
+            double h = 0.0;
+            double Q = 0.0;
+            Vec3 u;
+            Vec3 v;
+            double Fab[7][7];
+        };
+
+        //! Foot-centred F_ab = int_face xi^a eta^b / rho dA, a+b <= 6.
+        inline void faceMonomials(Vec3 const q[4], Vec3 const& n, double h, double Fab[7][7])
+        {
+            for(int a = 0; a < 7; ++a)
+                for(int b = 0; b < 7; ++b)
+                    Fab[a][b] = 0.0;
+            double const Q = h * h;
+            Vec3 const foot = h * n;
+            Vec3 u = q[1] - q[0];
+            u = u / norm3(u);
+            Vec3 const v = nbref::cross(n, u);
+            double xi[4], eta[4];
+            for(int l = 0; l < 4; ++l)
+            {
+                Vec3 const w = q[l] - foot;
+                xi[l] = nbref::dot(w, u);
+                eta[l] = nbref::dot(w, v);
+            }
+            Fab[0][0] = boxFaceIntegralSafe(q, n);
+
+            double U[7][7];
+            double V[7][7];
+            for(int a = 0; a < 7; ++a)
+                for(int b = 0; b < 7; ++b)
+                {
+                    U[a][b] = 0.0;
+                    V[a][b] = 0.0;
+                }
+            for(int l = 0; l < 4; ++l)
+            {
+                int const m = (l + 1) % 4;
+                double const x0 = xi[l];
+                double const y0 = eta[l];
+                double const dx = xi[m] - xi[l];
+                double const dy = eta[m] - eta[l];
+                double W[6];
+                edgeWeights(x0, y0, dx, dy, Q, W);
+                for(int a = 1; a <= 6; ++a)
+                    for(int b = 0; b <= 6 - a; ++b)
+                    {
+                        double c1[6], c2[6], c[6];
+                        linPow1d(x0, dx, a - 1, c1);
+                        linPow1d(y0, dy, b, c2);
+                        for(int k = 0; k <= 5; ++k)
+                            c[k] = 0.0;
+                        for(int i = 0; i <= 5; ++i)
+                            for(int j = 0; i + j <= 5; ++j)
+                                c[i + j] += c1[i] * c2[j];
+                        double s = 0.0;
+                        for(int k = 0; k <= 5; ++k)
+                            s += c[k] * W[k];
+                        U[a][b] += dy * s;
+                    }
+                for(int b = 1; b <= 6; ++b)
+                    for(int a = 0; a <= 6 - b; ++a)
+                    {
+                        double c1[6], c2[6], c[6];
+                        linPow1d(x0, dx, a, c1);
+                        linPow1d(y0, dy, b - 1, c2);
+                        for(int k = 0; k <= 5; ++k)
+                            c[k] = 0.0;
+                        for(int i = 0; i <= 5; ++i)
+                            for(int j = 0; i + j <= 5; ++j)
+                                c[i + j] += c1[i] * c2[j];
+                        double s = 0.0;
+                        for(int k = 0; k <= 5; ++k)
+                            s += c[k] * W[k];
+                        V[a][b] += -dx * s;
+                    }
+            }
+            for(int deg = 1; deg <= 6; ++deg)
+            {
+                if(deg == 1)
+                    Fab[0][1] = V[0][1];
+                else
+                    Fab[0][deg] = (2.0 * V[0][deg]
+                                   - (deg - 1.0) * (Q * Fab[0][deg - 2] + U[2][deg - 2]))
+                        / (deg + 1.0);
+                for(int a = 2; a <= deg; a += 2)
+                    Fab[a][deg - a] = (U[a][deg - a]
+                                       - (a - 1.0)
+                                           * (Q * Fab[a - 2][deg - a]
+                                              + Fab[a - 2][deg - a + 2]))
+                        / a;
+                Fab[1][deg - 1] = U[1][deg - 1];
+                for(int a = 3; a <= deg; a += 2)
+                    Fab[a][deg - a] = (U[a][deg - a]
+                                       - (a - 1.0)
+                                           * (Q * Fab[a - 2][deg - a]
+                                              + Fab[a - 2][deg - a + 2]))
+                        / a;
+            }
+        }
+
+        //! int_face (d-dc)^nu / |d| dA in foot-centred F_ab.
+        inline double faceMono(FaceData const& fd, Vec3 const& dc, int const nu[3])
+        {
+            double const w0[3] = {
+                fd.h * fd.n.x - dc.x,
+                fd.h * fd.n.y - dc.y,
+                fd.h * fd.n.z - dc.z};
+            double const uu[3] = {fd.u.x, fd.u.y, fd.u.z};
+            double const vv[3] = {fd.v.x, fd.v.y, fd.v.z};
+            double F0[7][7], F1[7][7], F2[7][7], T[7][7], R[7][7];
+            linPowBivar(w0[0], uu[0], vv[0], nu[0], F0);
+            linPowBivar(w0[1], uu[1], vv[1], nu[1], F1);
+            linPowBivar(w0[2], uu[2], vv[2], nu[2], F2);
+            bivarMul(F0, F1, T);
+            bivarMul(T, F2, R);
+            double sum = 0.0;
+            for(int a = 0; a <= 6; ++a)
+                for(int b = 0; b <= 6 - a; ++b)
+                    sum += R[a][b] * fd.Fab[a][b];
+            return sum;
+        }
+
+        //! Build the six outward face planes of P = dc +- 0.5 e_a.
+        inline void polyBoxFaces(Vec3 const& dc, Vec3 const e[3], Vec3 q[6][4], Vec3 nrm[6], double h[6])
+        {
+            Vec3 V[2][2][2];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        V[a][b][c] = dc + (a ? 0.5 : -0.5) * e[0]
+                            + (b ? 0.5 : -0.5) * e[1] + (c ? 0.5 : -0.5) * e[2];
+            static int const FI[6][4][3] = {
+                {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}},
+                {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0, 0}},
+                {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}},
+                {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}, {1, 0, 1}}};
+            for(int f = 0; f < 6; ++f)
+            {
+                for(int v = 0; v < 4; ++v)
+                    q[f][v] = V[FI[f][v][0]][FI[f][v][1]][FI[f][v][2]];
+                Vec3 nn = nbref::cross(q[f][1] - q[f][0], q[f][2] - q[f][0]);
+                nn = nn / norm3(nn);
+                Vec3 const cen = (q[f][0] + q[f][1] + q[f][2] + q[f][3]) / 4.0;
+                if(nbref::dot(cen - dc, nn) < 0.0)
+                {
+                    Vec3 const t0 = q[f][0], t1 = q[f][1], t2 = q[f][2], t3 = q[f][3];
+                    q[f][0] = t3;
+                    q[f][1] = t2;
+                    q[f][2] = t1;
+                    q[f][3] = t0;
+                    nn = nbref::cross(q[f][1] - q[f][0], q[f][2] - q[f][0]);
+                    nn = nn / norm3(nn);
+                }
+                nrm[f] = nn;
+                h[f] = nbref::dot(q[f][0], nn);
+            }
+        }
+
+        //! Accumulate dc-centred h_f F_beta(f) and the vector sum n_f F_beta(f).
+        inline void faceMomentSums(
+            Vec3 const& dc,
+            Vec3 const e[3],
+            double hF[kPolyTerms],
+            Vec3 nF[kPolyTerms])
+        {
+            for(int i = 0; i < kPolyTerms; ++i)
+            {
+                hF[i] = 0.0;
+                nF[i] = Vec3{};
+            }
+            Vec3 q[6][4];
+            Vec3 nrm[6];
+            double h[6];
+            polyBoxFaces(dc, e, q, nrm, h);
+            for(int f = 0; f < 6; ++f)
+            {
+                FaceData fd;
+                fd.n = nrm[f];
+                fd.h = h[f];
+                fd.Q = h[f] * h[f];
+                Vec3 u = q[f][1] - q[f][0];
+                fd.u = u / norm3(u);
+                fd.v = nbref::cross(fd.n, fd.u);
+                faceMonomials(q[f], fd.n, fd.h, fd.Fab);
+                for(int a = 0; a <= 6; ++a)
+                    for(int b = 0; b <= 6 - a; ++b)
+                        for(int c = 0; c <= 6 - a - b; ++c)
+                        {
+                            int const nu[3] = {a, b, c};
+                            double const Fm = faceMono(fd, dc, nu);
+                            int const id = polyIdx.idx[a][b][c];
+                            hF[id] += fd.h * Fm;
+                            nF[id] = nF[id] + fd.n * Fm;
+                        }
+            }
+        }
+
+        //! I_beta = int_P (d-dc)^beta/|d| dV for |beta| <= 5 (components <= 2).
+        inline void volumeFromFaceMoments(Vec3 const& dc, double const hF[kPolyTerms], double I[kPolyTerms])
+        {
+            for(int i = 0; i < kPolyTerms; ++i)
+                I[i] = 0.0;
+            for(int deg = 0; deg <= 5; ++deg)
+                for(int a = 0; a <= deg; ++a)
+                    for(int b = 0; b <= deg - a; ++b)
+                    {
+                        int const c = deg - a - b;
+                        int const id = polyIdx.idx[a][b][c];
+                        double val;
+                        if(deg == 0)
+                            val = 0.5 * hF[id];
+                        else
+                        {
+                            double sub = 0.0;
+                            if(a > 0)
+                                sub += a * dc.x * I[polyIdx.idx[a - 1][b][c]];
+                            if(b > 0)
+                                sub += b * dc.y * I[polyIdx.idx[a][b - 1][c]];
+                            if(c > 0)
+                                sub += c * dc.z * I[polyIdx.idx[a][b][c - 1]];
+                            val = (hF[id] - sub) / (deg + 2.0);
+                        }
+                        I[id] = val;
+                    }
+        }
+
+        //! Exposed for the I_100@dc!=0 unit test.
+        inline void boxVolumeI(Vec3 const& dc, Vec3 const e[3], double Iout[3][3][3])
+        {
+            double hF[kPolyTerms];
+            Vec3 nF[kPolyTerms];
+            faceMomentSums(dc, e, hF, nF);
+            double I[kPolyTerms];
+            volumeFromFaceMoments(dc, hF, I);
+            for(int a = 0; a <= 2; ++a)
+                for(int b = 0; b <= 2; ++b)
+                    for(int c = 0; c <= 2; ++c)
+                        Iout[a][b][c] = I[polyIdx.idx[a][b][c]];
+        }
+
+        //! J_j = int_P p(y) d_j/|d|^3 dV, y = d - dc, box dc +- 0.5 e_a.
+        inline void polyJ(Vec3 const& dc, Vec3 const e[3], Poly6 const& p, Vec3& J)
+        {
+            double hF[kPolyTerms];
+            Vec3 nF[kPolyTerms];
+            faceMomentSums(dc, e, hF, nF);
+            double I[kPolyTerms];
+            volumeFromFaceMoments(dc, hF, I);
+            J = Vec3{};
+            for(int a = 0; a <= 6; ++a)
+                for(int b = 0; b <= 6 - a; ++b)
+                    for(int c = 0; c <= 6 - a - b; ++c)
+                    {
+                        int const id = polyIdx.idx[a][b][c];
+                        double const av = p.c[id];
+                        if(av == 0.0)
+                            continue;
+                        Vec3 vol{};
+                        if(a > 0)
+                            vol.x = a * I[polyIdx.idx[a - 1][b][c]];
+                        if(b > 0)
+                            vol.y = b * I[polyIdx.idx[a][b - 1][c]];
+                        if(c > 0)
+                            vol.z = c * I[polyIdx.idx[a][b][c - 1]];
+                        J = J + (nF[id] * (-1.0) + vol) * av;
+                    }
+        }
+
+        //! One box in source-index space: s in s_c +- halfwidth, d = M(R0 - s*cells).
+        inline void boxPolyJ(
+            Vec3 const& R0,
+            Vec3 const& cells,
+            Vec3 const& u,
+            Poly6 const& p,
+            Vec3 const& sc,
+            Vec3 const& halfwidth,
+            Vec3& J)
+        {
+            double const uu2 = nbref::dot(u, u);
+            Vec3 dc;
+            Vec3 e[3];
+            Vec3 const scCells{sc.x * cells.x, sc.y * cells.y, sc.z * cells.z};
+            if(uu2 == 0.0)
+            {
+                dc = R0 - scCells;
+                e[0] = Vec3{2.0 * halfwidth.x * cells.x, 0.0, 0.0};
+                e[1] = Vec3{0.0, 2.0 * halfwidth.y * cells.y, 0.0};
+                e[2] = Vec3{0.0, 0.0, 2.0 * halfwidth.z * cells.z};
+            }
+            else
+            {
+                double const gam = std::sqrt(1.0 + uu2);
+                Vec3 const n = u / std::sqrt(uu2);
+                auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
+                dc = M(R0 - scCells);
+                e[0] = M(Vec3{2.0 * halfwidth.x * cells.x, 0.0, 0.0});
+                e[1] = M(Vec3{0.0, 2.0 * halfwidth.y * cells.y, 0.0});
+                e[2] = M(Vec3{0.0, 0.0, 2.0 * halfwidth.z * cells.z});
+            }
+            polyJ(dc, e, p, J);
+        }
+
+        //! One axis factor q_k(s_a(y)) as a Poly6.
+        inline void axisQuadratic(
+            double Ac,
+            double Bc,
+            double Cc,
+            double sca,
+            double cell,
+            double gam,
+            Vec3 const& n,
+            int axis,
+            Poly6& q)
+        {
+            polyZero(q);
+            double const l0 = sca;
+            double l[3];
+            for(int m = 0; m < 3; ++m)
+            {
+                double const d = (m == axis ? 1.0 : 0.0);
+                l[m] = -(gam * d + (1.0 - gam) * n[axis] * n[m]) / cell;
+            }
+            polyAdd(q, 0, 0, 0, Ac * l0 * l0 + Bc * l0 + Cc);
+            for(int m = 0; m < 3; ++m)
+            {
+                int ex[3] = {0, 0, 0};
+                ex[m] = 1;
+                polyAdd(q, ex[0], ex[1], ex[2], (2.0 * Ac * l0 + Bc) * l[m]);
+            }
+            for(int m = 0; m < 3; ++m)
+                for(int k = 0; k < 3; ++k)
+                {
+                    int ex[3] = {0, 0, 0};
+                    ex[m] += 1;
+                    ex[k] += 1;
+                    if(m < k)
+                        polyAdd(q, ex[0], ex[1], ex[2], 2.0 * Ac * l[m] * l[k]);
+                    else if(m == k)
+                        polyAdd(q, ex[0], ex[1], ex[2], Ac * l[m] * l[k]);
+                }
+        }
+
+        //! Exact TSC in-support field in d-space (27 piece sum).
+        inline Vec3 polyBoxField(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
+            static double const qA[3] = {0.5, -1.0, 0.5};
+            static double const qB[3] = {1.5, 0.0, -1.5};
+            static double const qC[3] = {1.125, 0.75, 1.125};
+            Vec3 Jtot{};
+            for(int sx = -1; sx <= 1; ++sx)
+                for(int sy = -1; sy <= 1; ++sy)
+                    for(int sz = -1; sz <= 1; ++sz)
+                    {
+                        int const kx = sx + 1;
+                        int const ky = sy + 1;
+                        int const kz = sz + 1;
+                        Poly6 qx, qy, qz, qxy, p;
+                        axisQuadratic(qA[kx], qB[kx], qC[kx], sx, cells.x, gam, n, 0, qx);
+                        axisQuadratic(qA[ky], qB[ky], qC[ky], sy, cells.y, gam, n, 1, qy);
+                        axisQuadratic(qA[kz], qB[kz], qC[kz], sz, cells.z, gam, n, 2, qz);
+                        polyMul(qx, qy, qxy);
+                        polyMul(qxy, qz, p);
+                        Vec3 Jp;
+                        boxPolyJ(
+                            R0,
+                            cells,
+                            u,
+                            p,
+                            Vec3{static_cast<double>(sx), static_cast<double>(sy),
+                                 static_cast<double>(sz)},
+                            Vec3{0.5, 0.5, 0.5},
+                            Jp);
+                        Jtot = Jtot + Jp;
+                    }
+            Vec3 const Eraw = applyContract(Jtot, n, gam); // M^{-1}
+            double const invV = 1.0 / (cells.x * cells.y * cells.z);
+            return Vec3{Eraw.x * invV, Eraw.y * invV, Eraw.z * invV};
+        }
+
+        /*! Geometric validity gate for the exact polynomial path.
+         *
+         * Rejects: non-finite input, beta = 0 (static path), an observer on or
+         * too close to the outer support boundary or to an internal TSC knot
+         * (origin on a piece face/edge), and near-degenerate piece geometry
+         * (a face of the piece containing the origin passes too close to it).
+         * The origin is always inside the union of the 27 pieces for in-support
+         * pairs; only the piece containing s* has it strictly interior, and its
+         * minimum face distance is the conditioning quantity.
+         */
+        inline bool polyBoxUsable(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
+        {
+            double const uu2 = nbref::dot(u, u);
+            if(!(uu2 > 1e-24) || !std::isfinite(uu2))
+                return false;
+            if(!(cells.x > 0.0 && cells.y > 0.0 && cells.z > 0.0))
+                return false;
+            if(!(std::isfinite(cells.x) && std::isfinite(cells.y) && std::isfinite(cells.z)))
+                return false;
+            if(!(std::isfinite(R0.x) && std::isfinite(R0.y) && std::isfinite(R0.z)))
+                return false;
+            double const s[3] = {R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
+            for(int a = 0; a < 3; ++a)
+                if(!(s[a] > -1.5 && s[a] < 1.5))
+                    return false;
+            // Piece containing s*, the origin's interior margin and the piece
+            // centre in source-index units.
+            double const knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            double sc[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                int k = s[a] < -0.5 ? 0 : (s[a] < 0.5 ? 1 : 2);
+                double const lo = knots[k];
+                double const hi = knots[k + 1];
+                double const m = std::min(s[a] - lo, hi - s[a]);
+                if(!(m > 1.0e-6))
+                    return false;
+                sc[a] = static_cast<double>(k - 1);
+            }
+            double const gam = std::sqrt(1.0 + uu2);
+            Vec3 const n = u / std::sqrt(uu2);
+            auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
+            Vec3 const dc = M(Vec3{R0.x - sc[0] * cells.x, R0.y - sc[1] * cells.y,
+                                   R0.z - sc[2] * cells.z});
+            Vec3 const e[3] = {
+                M(Vec3{cells.x, 0.0, 0.0}),
+                M(Vec3{0.0, cells.y, 0.0}),
+                M(Vec3{0.0, 0.0, cells.z})};
+            if(!(std::isfinite(dc.x) && std::isfinite(dc.y) && std::isfinite(dc.z)))
+                return false;
+            double emax = 0.0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const l = norm3(e[a]);
+                if(!(l > 0.0) || !std::isfinite(l))
+                    return false;
+                emax = std::max(emax, l);
+            }
+            Vec3 q[6][4];
+            Vec3 nrm[6];
+            double h[6];
+            polyBoxFaces(dc, e, q, nrm, h);
+            double hmin = 1e300;
+            for(int f = 0; f < 6; ++f)
+            {
+                if(!std::isfinite(h[f]))
+                    return false;
+                hmin = std::min(hmin, std::abs(h[f]));
+            }
+            if(!(hmin > 1.0e-8 * emax))
+                return false;
+            return true;
+        }
+
+
         /*! Exact box term for oblique motion.
          *
          * Ebox = int_B R / |M R|^3 dR over the support box B centred at R0.
