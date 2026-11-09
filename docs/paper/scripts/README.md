@@ -81,14 +81,17 @@ bar per row (`SymLogNorm`, `linthresh = 1e-3 * shared maximum`), the same
 convention as `gp_*`. A shared linear bar maps a real but suppressed component
 (for example the gamma=10 longitudinal `E_x` at about 0.5% of the dominant
 component) onto the near-white zero centre and hides its structure. Each
-component panel therefore also prints its own peak as a percentage of the
-shared-row maximum: the in-panel annotation reads `peak <p>% of max`, where
-`<p>` is the plane peak of that component (`max |arr_c|` over the plane)
-divided by `cvmax`, the largest plane peak over the three components of the
-row, which sets the shared colour scale (`vmin=-cvmax`, `vmax=+cvmax`); a
-small percentage means the component is faint on that scale. The triad keeps
-one shared bar; the annotation makes the per-panel scale explicit without
-changing the layout.
+component panel therefore also carries a compact peak label: `peak` on one
+line and, on the next, the plane peak of that component (`max |arr_c|` over
+the plane) divided by `cvmax`, the largest plane peak over the three
+components of the row, which sets the shared colour scale (`vmin=-cvmax`,
+`vmax=+cvmax`). The value is shown as a percentage to at most one decimal;
+peaks below 1% are given to one significant figure (e.g. `.04%`), the panel
+that sets the shared maximum reads `max`, and only an exactly zero peak reads
+`0%`. The label is drawn at 5.5 pt and `render_split_field_rows` asserts that
+the rendered text stays below 22% of its panel width. A small percentage means the component is
+faint on that scale. The triad keeps one shared bar; the annotation makes the
+per-panel scale explicit without changing the layout.
 
 The `E^2`/`B^2` panel in a field row uses `LogNorm` from `1e-6` of that
 panel's peak to its peak, with decade ticks plus the peak and a `(log)` bar

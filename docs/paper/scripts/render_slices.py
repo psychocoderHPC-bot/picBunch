@@ -162,7 +162,7 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=0.92, fig_height=3.25 if has_error else 1.85,
+        width_frac=1.0, fig_height=3.55 if has_error else 1.85,
         support=smask, manifest=man)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
@@ -192,14 +192,14 @@ def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
     man = {"source_data": os.path.relpath(source, cases.REPO_ROOT),
            "dataset": dataset, "plane": plane, "parts": ["E", "B"],
            "block_order": block_order, "has_error": has_error,
-           "includegraphics_width": 0.92,
+           "includegraphics_width": 1.0,
            "axis_convention": horizontal_axis_record(dataset, plane, source)}
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=0.92, fig_height=3.6 if has_error else 2.2,
+        width_frac=1.0, fig_height=3.36 if has_error else 3.6,
         compact=True, row_gap=0.05 if has_error else 0.075,
-        bottom_margin=0.155 if has_error else None,
+        bottom_margin=0.17 if has_error else None,
         support=smask, manifest=man)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)

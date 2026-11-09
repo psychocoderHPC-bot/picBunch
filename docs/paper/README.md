@@ -41,7 +41,9 @@ data at its print width (A4 text block, 6.268 in) so that the 9 pt fonts
 print at 9 pt. The shared style module fixes the canvas width to the
 LaTeX inclusion width, uses Okabe-Ito hues for the gamma encoding, one
 colour bar per row with the quantity and SI unit (E in V/m, B in T, a
-dimensionless relative error), and no text below 9 pt. The audit
+dimensionless relative error), and no text below 9 pt except the compact
+5.5 pt peak label in the combined slice panels (its width is checked against
+22 % of the panel). The audit
 (`audit_figures.py` in the rework directory, output in `audit/`) records
 for every included figure the printed minimum font size, the colour bars
 per row, the colour-bar labels, and any overlapping text boxes; all

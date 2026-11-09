@@ -51,29 +51,26 @@ support. The measured plane errors at this radius are reported below.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figs/val_forward_xy.pdf}\\[2pt]
-\includegraphics[width=0.92\linewidth]{figs/val_forward_zy.pdf}
+\includegraphics[width=\linewidth]{figs/val_forward_xy.pdf}\\[2pt]
+\includegraphics[width=\linewidth]{figs/val_forward_zy.pdf}
 \caption{Forward-case validation ($N=200$, $Q=-100$\,pC,
 $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m; x-y plane
 at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at
 $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal, the beam axis.
 Each image carries the electric block first and the magnetic block second.
 The electric block shows four columns $E_x,E_y,E_z,E^2$: the three components
-share one symmetric-logarithmic scale and bar with each panel's peak stated as
-a percentage of the shared maximum, while $E^2$ has its own logarithmic scale
-from $10^{-6}$ of the panel peak to the peak and its own unit label. Each
-component panel states its peak as a percentage of the largest component peak
-on that plane, which sets the shared colour scale; a small percentage means
-the component is faint on that scale. A panel labelled $0\%$ has an exactly
-zero plane peak, since the label is the percentage to three significant
-figures and never rounds a nonzero peak to $0\%$. The magnetic block shows the
-same four-column layout for $B_x,B_y,B_z,B^2$, with the same
-symmetric-logarithmic component bar (peak in percent of the shared maximum)
-and the same logarithmic $B^2$ scale and unit label. $B_y$ is identically
-zero: its field panel is blank and its error panel is fully masked, since the
-relative error of an identically zero component is undefined. Under each field
-row lies a logarithmic error row, floored at $10^{-6}$ and marked at the
-$10^{-3}$ gate, with light-grey pixels where the local field magnitude is
+share one symmetric-logarithmic scale and bar, while $E^2$ has its own
+logarithmic scale from $10^{-6}$ of the panel peak to the peak and its own unit
+label. Each component panel is labelled with its peak as a percentage of the
+largest component peak on that plane (the shared colour scale): the panel that
+sets the maximum reads \texttt{max}, peaks below one percent use one
+significant figure (e.g.\ \texttt{.04\%}), and only an exactly zero peak reads
+$0\%$; a small percentage means the component is faint on that scale. The
+magnetic block shows the same layout for $B_x,B_y,B_z,B^2$. $B_y$ is
+identically zero: its field panel is blank and its error panel is fully masked,
+since the relative error of an identically zero component is undefined. Under
+each field row lies a logarithmic error row, floored at $10^{-6}$ and marked at
+the $10^{-3}$ gate, with light-grey pixels where the local field magnitude is
 below $10^{-3}$ of the largest component peak on the plane; the dark outline
 marks the TSC support. The in-support fast-versus-arbiter error against the
 order-12 independent continuum reference is $1.6\%$ at the worst node. The
@@ -84,8 +81,8 @@ field at $\gamma=10$ (Section~\ref{sec:accuracy}).}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figs/val_fluct_xy.pdf}\\[2pt]
-\includegraphics[width=0.92\linewidth]{figs/val_fluct_zy.pdf}
+\includegraphics[width=\linewidth]{figs/val_fluct_xy.pdf}\\[2pt]
+\includegraphics[width=\linewidth]{figs/val_fluct_zy.pdf}
 \caption{Fluctuation-case reference with the same geometry and bunch as
 Fig.~\ref{fig:valforward} but a $1.046$\,mrad rms $x$-divergence. Each image
 carries the electric field row first and the magnetic field row second; the
@@ -104,8 +101,8 @@ Appendix~\ref{app:multivel}.}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
-\includegraphics[width=0.92\linewidth]{figs/val_1mrad_xy_B.pdf}
+\includegraphics[width=\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
+\includegraphics[width=\linewidth]{figs/val_1mrad_xy_B.pdf}
 \caption{Binned $1$\,mrad case (first 200 of the unit-weight 1000-particle
 seed-43 bunch, $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at
 $z=1.6\,\si{\micro\metre}$ ($z=8$ of the 16-cell $32\times32\times16$ grid),
@@ -239,8 +236,8 @@ the bunch, far above the $10^{-3}$ gate.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figs/large_sxy_g10.pdf}\\[0pt]
-\includegraphics[width=0.92\linewidth]{figs/large_szy_g10.pdf}
+\includegraphics[width=\linewidth]{figs/large_sxy_g10.pdf}\\[0pt]
+\includegraphics[width=\linewidth]{figs/large_szy_g10.pdf}
 \caption{Large-domain slices ($\gamma=10$, $128\times128\times64$, cell
 $2\times10^{-7}$\,m, $N=100$, JURECA H100) from the earlier axial-$x$ data
 set (not the $+y$ beam-axis set); $x$ is horizontal in the x-y cut and is
@@ -264,8 +261,8 @@ magnetic plane peak is $1.5\times10^{-4}$\,T (x-y) and $1.4\times10^{-4}$\,T
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figs/large_sxy_g1.pdf}\\[1pt]
-\includegraphics[width=0.92\linewidth]{figs/large_szy_g1.pdf}
+\includegraphics[width=\linewidth]{figs/large_sxy_g1.pdf}\\[1pt]
+\includegraphics[width=\linewidth]{figs/large_szy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch ($\gamma=1$), same
 domain and layout as Fig.~\ref{fig:large}; $x$ is horizontal in the x-y cut
 and $y$ is horizontal in the z-y cut (the bunch is stationary; out-of-plane

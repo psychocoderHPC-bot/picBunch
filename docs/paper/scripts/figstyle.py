@@ -360,10 +360,43 @@ def _sq_ticks(peak, decades=SQ_LOG_DECADES):
     return ticks, [_fmt_sci(t) for t in ticks]
 
 
+# Size of the in-panel peak annotation in points at the final print size.  The
+# combined slice panels are much smaller than the per-gamma ones, so a 9 pt
+# label covered most of the panel.  5.5 pt keeps the compact two-line label
+# below ~22 % of the panel width (checked at render time).
+PEAK_ANNOT_PT = 5.5
+PEAK_ANNOT_MAX_WIDTH_FRAC = 0.22
+
+
 def _peak_fraction(peak, shared):
+    """Compact two-line peak label: ``peak`` over the percentage of shared max.
+
+    The percentage is rounded to at most one decimal; peaks below 1 % use one
+    significant figure with no leading zero (``.04%``, ``.5%``) so a
+    nonzero-but-tiny component is never printed as ``0%`` and the label stays
+    inside the panel-width budget.  The panel that sets the shared maximum
+    reads ``max`` (``100%`` would widen the label past that budget).
+    """
     if not np.isfinite(peak) or shared <= 0:
-        return "peak\n0%\nof max"
-    return f"peak\n{100.0 * float(peak) / float(shared):.3g}%\nof max"
+        return "peak\n0%"
+    pct = 100.0 * float(peak) / float(shared)
+    if pct == 0.0:
+        value = "0%"
+    elif pct >= 99.5:
+        value = "max"
+    elif pct >= 10.0:
+        value = f"{pct:.0f}%"
+    elif pct >= 1.0:
+        value = f"{pct:.1f}%"
+    else:
+        # One significant figure, no leading zero (".04%", ".5%"), so the
+        # label of a faint component still fits the panel-width budget.
+        value = f"{pct:.1g}%"
+        if value.startswith("0."):
+            value = value[1:]
+        if value in ("%", ".0%"):
+            value = "<.1%"
+    return f"peak\n{value}"
 
 
 def _masked_note(fig):
@@ -560,7 +593,10 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     #   bg   panel-to-bar gap for the colour-bar tick labels (left side);
     #   ba   bar-to-next-panel gap for the rotated colour-bar label (right);
     #   R    final-bar-to-edge gap for its rotated label.
-    pwg, bg, bw, ba, R = 0.040, 0.098, 0.012, 0.050, 0.035
+    # Slots match the per-gamma figures (render_pergamma): a tight
+    # panel-to-panel gap and the same bar geometry give the same readable
+    # panel area.  The old pwg=0.040/ba=0.050/R=0.035 shrank every panel.
+    pwg, bg, bw, ba, R = 0.008, 0.098, 0.012, 0.032, 0.032
     pw = (right - left - 2 * pwg - 2 * (bg + bw) - ba - R) / 4.0
     xs = [left, left + pw + pwg, left + 2 * (pw + pwg)]
     cb1 = xs[-1] + pw + bg
@@ -604,6 +640,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     err_cmap = _truncated_cmap("magma")
     err_cmap.set_bad(MASKED_COLOR)
     bar_rows = []
+    peak_texts = []
 
     for ri, row in enumerate(rows):
         y0 = row_y[ri]
@@ -728,11 +765,12 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                 arr_c = np.asarray(it["arr"], float)
                 peak_c = (float(np.nanmax(np.abs(arr_c)))
                           if np.isfinite(arr_c).any() else 0.0)
-                ax.text(0.03, 0.965, _peak_fraction(peak_c, cvmax),
-                        transform=ax.transAxes, ha="left", va="top",
-                        fontsize=plt.rcParams["font.size"], color="0.10",
-                        bbox=dict(boxstyle="round,pad=0.12", fc="white",
-                                  ec="none", alpha=0.72))
+                peak_texts.append((ax.text(
+                    0.03, 0.965, _peak_fraction(peak_c, cvmax),
+                    transform=ax.transAxes, ha="left", va="top",
+                    fontsize=PEAK_ANNOT_PT, color="0.10",
+                    bbox=dict(boxstyle="round,pad=0.12", fc="white",
+                              ec="none", alpha=0.72)), ax))
             if ri == nrow - 1:
                 ax.set_xlabel(xlabel)
             else:
@@ -771,11 +809,33 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                  fontsize=plt.rcParams["axes.titlesize"])
     if any(r["kind"] == "error" for r in rows):
         _masked_note(fig)
+
+    # The compact peak label must stay a small fraction of the panel.  Measure
+    # the drawn text against its own axes and fail loudly if it grows past the
+    # budget (for example after a font or format change).
+    fig.canvas.draw()
+    _renderer = fig.canvas.get_renderer()
+    peak_fracs = []
+    for text, tax in peak_texts:
+        tw = float(text.get_window_extent(_renderer).width)
+        aw = float(tax.get_window_extent(_renderer).width)
+        frac = tw / aw if aw > 0 else 0.0
+        peak_fracs.append(frac)
+        if frac > PEAK_ANNOT_MAX_WIDTH_FRAC + 1e-9:
+            raise AssertionError(
+                f"{name}: peak annotation {text.get_text()!r} occupies "
+                f"{frac:.3f} of the panel width "
+                f"(budget {PEAK_ANNOT_MAX_WIDTH_FRAC})")
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
     man["layout"] = "component triad bar, squared panel with its own bar"
     man["component_norm"] = "symlog, linthresh=1e-3*shared component maximum"
-    man["component_peak_annotation"] = "each panel states its peak as % of shared max"
+    man["component_peak_annotation"] = (
+        "compact two-line peak label: 'peak' over the percentage of shared max "
+        "(one significant figure below 1%, 'max' for the shared maximum)")
+    man["peak_annotation_font_pt"] = PEAK_ANNOT_PT
+    man["peak_annotation_max_panel_frac"] = (
+        round(max(peak_fracs), 4) if peak_fracs else None)
     man["squared_norm"] = "log, 1e-6*peak..peak (field rows)"
     man["masked_color"] = MASKED_COLOR
     man["error_floor"] = ERR_FLOOR

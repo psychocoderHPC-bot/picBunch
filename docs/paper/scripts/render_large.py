@@ -132,7 +132,7 @@ def build(outdir, case, plane, source):
            "block_order": "E field, E error, B field, B error"
                           " (B error omitted for the stationary case)",
            "n": n, "cell_m": [float(v) for v in d["cell"]],
-           "includegraphics_width": 0.92,
+           "includegraphics_width": 1.0,
            "axis_convention": {"propagation_axis": axis.propagation_axis(
                                    DATASET, gamma),
                                "horizontal": horiz_name, "vertical": vert_name,
@@ -142,8 +142,8 @@ def build(outdir, case, plane, source):
                                    DATASET, plane, source))}}
     fs.render_split_field_rows(
         name, outdir, rows, horiz_e * US, vert_e * US,
-        xlabel=xl, ylabel=yl, width_frac=0.92,
-        fig_height=3.6 if gamma == 10.0 else 3.4,
+        xlabel=xl, ylabel=yl, width_frac=1.0,
+        fig_height=3.55 if gamma == 10.0 else 3.72,
         shading="flat", compact=True,
         row_gap=0.05 if gamma == 10.0 else 0.055,
         bottom_margin=0.155 if gamma == 10.0 else None, manifest=man)

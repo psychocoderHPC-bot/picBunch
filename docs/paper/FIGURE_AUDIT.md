@@ -12,14 +12,14 @@ fig | file | pdf_in | target_in | scale | min_pt | bars/row | overlaps | cbar la
 9 | gp_g10.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 2, 2, 1, 1] | 0 | -6.3e5; 0; 6.3e5; E | PASS
 10 | gp_g50.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 1, 1, 2] | 0 | -1.1e6; 0; 1.1e6; E | PASS
 11 | gp_g100.pdf | 6.268 | 6.268 | 1.0 | 10.68 | [2, 2, 1, 2] | 0 | -2.2e6; 0; 2.2e6; E | PASS
-12 | val_forward_xy.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
-12 | val_forward_zy.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
-13 | val_fluct_xy.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; B (T); B$^2$ T$^2$ | PASS
-13 | val_fluct_zy.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; B (T); B$^2$ T$^2$ | PASS
-14 | val_1mrad_xy_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.3e6; 0; 1.3e6; E | PASS
-14 | val_1mrad_xy_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -7.9e-4; 0; 7.9e-4; B | PASS
-15 | large_sxy_g10.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
-15 | large_szy_g10.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
-16 | large_sxy_g1.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
-16 | large_szy_g1.pdf | 5.767 | 5.767 | 1.0 | 9.0 | [2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+12 | val_forward_xy.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+12 | val_forward_zy.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+13 | val_fluct_xy.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; B (T); B$^2$ T$^2$ | PASS
+13 | val_fluct_zy.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; B (T); B$^2$ T$^2$ | PASS
+14 | val_1mrad_xy_E.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2] | 0 | -1.3e6; 0; 1.3e6; E | PASS
+14 | val_1mrad_xy_B.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2] | 0 | -7.9e-4; 0; 7.9e-4; B | PASS
+15 | large_sxy_g10.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+15 | large_szy_g10.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+16 | large_sxy_g1.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
+16 | large_szy_g1.pdf | 6.268 | 6.268 | 1.0 | 5.5 | [2, 2, 2] | 0 | E (V/m); E$^2$ V$^2$/m$^2$; rel. error; B (T); B$^2$ T$^2$ | PASS
 17 | F_multivel_dist.pdf | 6.577 | 6.143 | 0.934 | 9.97 | [1] | 0 | 10; 0; 10; 1 | PASS
