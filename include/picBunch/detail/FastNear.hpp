@@ -1105,18 +1105,29 @@ namespace picBunch::pbfast
             return r;
         }
 
-        //! W[k] = int_0^1 t^k rho(t) dt, rho = sqrt(A t^2+B t+C), k <= 4.
-        inline void sEdgeW4(double xi0, double eta0, double dxi, double deta, double Q, double W[5])
+        //! W[k] = int_0^1 t^k rho(t) dt, rho = sqrt(A t^2+B t+C), k <= 3.
+        //! A and sqrt(A) are hoisted by the caller: opposite edges of the
+        //! whitened parallelogram share them.  Only k <= 3 is consumed by the
+        //! degree-4 face moments sFaceM needs.
+        inline void sEdgeW4(
+            double xi0,
+            double eta0,
+            double dxi,
+            double deta,
+            double Q,
+            double A,
+            double invA,
+            double sqA,
+            double W[4])
         {
-            double const A = dxi * dxi + deta * deta;
+            double const inv2A = 0.5 * invA;
             double const B = 2.0 * (xi0 * dxi + eta0 * deta);
             double const C = Q + xi0 * xi0 + eta0 * eta0;
-            double const t0 = -B / (2.0 * A);
+            double const t0 = -B * inv2A;
             double const Dd = xi0 * deta - eta0 * dxi;
             double s2 = (A * Q + Dd * Dd) / (A * A);
             if(s2 < 0.0)
                 s2 = 0.0;
-            double const sqA = std::sqrt(A);
             double const u0 = -t0;
             double const u1 = 1.0 - t0;
             double const xi1 = xi0 + dxi;
@@ -1132,43 +1143,31 @@ namespace picBunch::pbfast
             }
             else
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0);
+            double const r1c = rho1 * rho1 * rho1;
             W[0] = I0;
-            W[1] = (rho1 * rho1 * rho1 - rho0 * rho0 * rho0) / (3.0 * A)
-                - (B / (2.0 * A)) * W[0];
-            for(int k = 2; k <= 4; ++k)
+            W[1] = (r1c - rho0 * rho0 * rho0) * (invA / 3.0) - (B * inv2A) * W[0];
+            for(int k = 2; k <= 3; ++k)
             {
-                double const bnd = (rho1 * rho1 * rho1) / ((k + 2.0) * A);
-                W[k] = bnd
-                    - ((2.0 * k + 1.0) * B / (2.0 * (k + 2.0) * A)) * W[k - 1]
-                    - ((k - 1.0) * C / ((k + 2.0) * A)) * W[k - 2];
+                double const ik = invA / (k + 2.0);
+                W[k] = r1c * ik
+                    - ((2.0 * k + 1.0) * B * inv2A / (k + 2.0)) * W[k - 1]
+                    - ((k - 1.0) * C) * ik * W[k - 2];
             }
         }
 
-        //! P[n][k] = coefficient of t^k in (a + b t)^n, n <= 4.
-        inline void sLPow(double a, double b, double P[5][5])
-        {
-            for(int n = 0; n <= 4; ++n)
-                for(int k = 0; k <= 4; ++k)
-                    P[n][k] = 0.0;
-            P[0][0] = 1.0;
-            for(int n = 1; n <= 4; ++n)
-                for(int k = 0; k <= n; ++k)
-                    P[n][k] = (k <= n - 1 ? P[n - 1][k] * a : 0.0)
-                        + (k >= 1 ? P[n - 1][k - 1] * b : 0.0);
-        }
-
-        //! Foot-centred face moments F_ab = int_face xi^a eta^b / rho dA,
-        //! a+b <= 4 (the degree-6 recurrence specialised to what s-space needs).
+        //! Foot-centred face moments F_ab = int_face xi^a eta^b / rho dA for
+        //! a <= 2, a+b <= 4: exactly what sFaceM consumes.  The parallelogram
+        //! edge contributions are assembled straight from the signed edge
+        //! moments MY/MW instead of filling the full U/V tensors.
         inline void sFaceFab4(Vec3 const q[4], Vec3 const& n, double h, double Fab[5][5])
         {
-            constexpr int ND = 4;
-            for(int a = 0; a <= ND; ++a)
-                for(int b = 0; b <= ND; ++b)
+            for(int a = 0; a <= 2; ++a)
+                for(int b = 0; b <= 4; ++b)
                     Fab[a][b] = 0.0;
             double const Q = h * h;
             Vec3 const foot = h * n;
             Vec3 u = q[1] - q[0];
-            u = u / norm3(u);
+            u = u / std::sqrt(nbref::dot(u, u));
             Vec3 const v = nbref::cross(n, u);
             double xi[4], eta[4];
             for(int l = 0; l < 4; ++l)
@@ -1177,66 +1176,98 @@ namespace picBunch::pbfast
                 xi[l] = nbref::dot(w, u);
                 eta[l] = nbref::dot(w, v);
             }
-            Fab[0][0] = boxFaceIntegralSafe(q, n);
-            double U[5][5] = {}, V[5][5] = {};
+            double A[4], invA[4];
             for(int l = 0; l < 4; ++l)
             {
                 int const m = (l + 1) % 4;
-                double const x0 = xi[l], y0 = eta[l];
                 double const dx = xi[m] - xi[l], dy = eta[m] - eta[l];
-                double W[5];
-                sEdgeW4(x0, y0, dx, dy, Q, W);
-                double PX[5][5], PY[5][5];
-                sLPow(x0, dx, PX);
-                sLPow(y0, dy, PY);
-                for(int a = 1; a <= ND; ++a)
-                    for(int b = 0; b + a <= ND; ++b)
-                    {
-                        double s = 0.0;
-                        for(int i = 0; i <= a - 1; ++i)
-                        {
-                            double const px = PX[a - 1][i];
-                            if(px == 0.0)
-                                continue;
-                            for(int j = 0; j <= b; ++j)
-                                s += px * PY[b][j] * W[i + j];
-                        }
-                        U[a][b] += dy * s;
-                    }
-                for(int b = 1; b <= ND; ++b)
-                    for(int a = 0; a + b <= ND; ++a)
-                    {
-                        double s = 0.0;
-                        for(int i = 0; i <= a; ++i)
-                        {
-                            double const px = PX[a][i];
-                            if(px == 0.0)
-                                continue;
-                            for(int j = 0; j <= b - 1; ++j)
-                                s += px * PY[b - 1][j] * W[i + j];
-                        }
-                        V[a][b] += -dx * s;
-                    }
+                A[l] = dx * dx + dy * dy;
+                invA[l] = 1.0 / A[l];
             }
-            for(int deg = 1; deg <= ND; ++deg)
+            double sqA[4];
+            sqA[0] = std::sqrt(A[0]);
+            sqA[1] = std::sqrt(A[1]);
+            sqA[2] = sqA[0];
+            sqA[3] = sqA[1];
+            {
+                double const hh = std::abs(h);
+                double Ibase = 0.0;
+                for(int l = 0; l < 4; ++l)
+                {
+                    int const m = (l + 1) % 4;
+                    double const ex = xi[m] - xi[l], ey = eta[m] - eta[l];
+                    double const invL = 1.0 / std::sqrt(ex * ex + ey * ey);
+                    double const mx = ex * invL, my = ey * invL;
+                    double const d = xi[l] * my - eta[l] * mx;
+                    double const la = xi[l] * mx + eta[l] * my;
+                    double const lb = la + 1.0 / invL;
+                    Ibase += boxEdgePrimitive(lb, hh, d) - boxEdgePrimitive(la, hh, d);
+                }
+                bool inside = false;
+                int j = 3;
+                for(int i = 0; i < 4; ++i)
+                {
+                    double const xiI = xi[i], yi = eta[i];
+                    double const xj = xi[j], yj = eta[j];
+                    if(((yi > 0.0) != (yj > 0.0))
+                       && (0.0 < (xj - xiI) * (0.0 - yi) / (yj - yi) + xiI))
+                        inside = !inside;
+                    j = i;
+                }
+                if(inside)
+                    Ibase -= 2.0 * kBoxPi * hh;
+                Fab[0][0] = Ibase;
+            }
+            double U1[4] = {0.0, 0.0, 0.0, 0.0};
+            double U2[3] = {0.0, 0.0, 0.0};
+            double V0[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+            for(int l = 0; l < 4; ++l)
+            {
+                int const m = (l + 1) % 4;
+                double const xa = xi[l], ya = eta[l];
+                double const dx = xi[m] - xi[l], dy = eta[m] - eta[l];
+                double W[4];
+                sEdgeW4(xa, ya, dx, dy, Q, A[l], invA[l], sqA[l], W);
+                double PY[4][4] = {};
+                PY[0][0] = 1.0;
+                for(int nn = 1; nn <= 3; ++nn)
+                    for(int k = 0; k <= nn; ++k)
+                        PY[nn][k] = (k <= nn - 1 ? PY[nn - 1][k] * ya : 0.0)
+                            + (k >= 1 ? PY[nn - 1][k - 1] * dy : 0.0);
+                double MY[4], MW[3];
+                for(int nn = 0; nn <= 3; ++nn)
+                {
+                    double sum = 0.0;
+                    for(int j = 0; j <= nn; ++j)
+                        sum += PY[nn][j] * W[j];
+                    MY[nn] = sum;
+                }
+                for(int nn = 0; nn <= 2; ++nn)
+                {
+                    double sum = 0.0;
+                    for(int j = 0; j <= nn; ++j)
+                        sum += PY[nn][j] * W[j + 1];
+                    MW[nn] = sum;
+                }
+                for(int b = 0; b <= 3; ++b)
+                    U1[b] += dy * MY[b];
+                for(int b = 0; b <= 2; ++b)
+                    U2[b] += dy * (xa * MY[b] + dx * MW[b]);
+                for(int b = 1; b <= 4; ++b)
+                    V0[b] += -dx * MY[b - 1];
+            }
+            for(int deg = 1; deg <= 4; ++deg)
             {
                 if(deg == 1)
-                    Fab[0][1] = V[0][1];
+                    Fab[0][1] = V0[1];
                 else
-                    Fab[0][deg] = (2.0 * V[0][deg]
-                                   - (deg - 1.0) * (Q * Fab[0][deg - 2] + U[2][deg - 2]))
+                    Fab[0][deg] = (2.0 * V0[deg]
+                                   - (deg - 1.0) * (Q * Fab[0][deg - 2] + U2[deg - 2]))
                         / (deg + 1.0);
-                for(int a = 2; a <= deg; a += 2)
-                    Fab[a][deg - a] = (U[a][deg - a]
-                                       - (a - 1.0) * (Q * Fab[a - 2][deg - a]
-                                                      + Fab[a - 2][deg - a + 2]))
-                        / a;
-                Fab[1][deg - 1] = U[1][deg - 1];
-                for(int a = 3; a <= deg; a += 2)
-                    Fab[a][deg - a] = (U[a][deg - a]
-                                       - (a - 1.0) * (Q * Fab[a - 2][deg - a]
-                                                      + Fab[a - 2][deg - a + 2]))
-                        / a;
+                Fab[1][deg - 1] = U1[deg - 1];
+                if(deg >= 2)
+                    Fab[2][deg - 2]
+                        = (U2[deg - 2] - (Q * Fab[0][deg - 2] + Fab[0][deg])) / 2.0;
             }
         }
 
@@ -1330,6 +1361,10 @@ namespace picBunch::pbfast
         }
 
         //! Exact in-support TSC field in source frame (27 cells, 27 monomials).
+        //! Internal knot planes are shared by adjacent cells: the face moments
+        //! M[p][q] depend only on geometry, so they are evaluated once per
+        //! 3x4x3x3 = 108 unique face-plane/transverse-cell combination instead
+        //! of once per cell (162 evaluations).
         inline Vec3 polyBoxFieldS(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
@@ -1342,17 +1377,40 @@ namespace picBunch::pbfast
             static double const qA[3] = {0.5, -1.0, 0.5};
             static double const qB[3] = {1.5, 0.0, -1.5};
             static double const qC[3] = {1.125, 0.75, 1.125};
+            double const rr[3] = {R0.x, R0.y, R0.z};
+            double const cc[3] = {cells.x, cells.y, cells.z};
+            // Shared face moments: [axis][plane 0..3][sb+1][sc+1][p][q].
+            double Mf[3][4][3][3][3][3];
+            double hf[3][4];
+            for(int a = 0; a < 3; ++a)
+            {
+                int const b = (a + 1) % 3, c = (a + 2) % 3;
+                for(int pl = 0; pl < 4; ++pl)
+                {
+                    double const sp = -1.5 + static_cast<double>(pl);
+                    double const h = rr[a] - cc[a] * sp;
+                    hf[a][pl] = h;
+                    for(int sb = -1; sb <= 1; ++sb)
+                        for(int sc = -1; sc <= 1; ++sc)
+                        {
+                            Vec3 Rc{};
+                            (&Rc.x)[b] = rr[b] - cc[b] * static_cast<double>(sb);
+                            (&Rc.x)[c] = rr[c] - cc[c] * static_cast<double>(sc);
+                            sFaceM(AX[a], h, Rc, cells, gam, Mf[a][pl][sb + 1][sc + 1]);
+                        }
+                }
+            }
             Vec3 Iv{};
             for(int sx = -1; sx <= 1; ++sx)
                 for(int sy = -1; sy <= 1; ++sy)
                     for(int sz = -1; sz <= 1; ++sz)
                     {
-                        int const kk[3] = {sx + 1, sy + 1, sz + 1};
+                        int const sc[3] = {sx, sy, sz};
                         double pc[3][3];
                         for(int a = 0; a < 3; ++a)
                         {
-                            int const k = kk[a];
-                            double const ic = 1.0 / cells[a], t = R0[a] * ic;
+                            int const k = sc[a] + 1;
+                            double const ic = 1.0 / cc[a], t = rr[a] * ic;
                             pc[a][0] = qA[k] * t * t + qB[k] * t + qC[k];
                             pc[a][1] = -2.0 * qA[k] * t * ic - qB[k] * ic;
                             pc[a][2] = qA[k] * ic * ic;
@@ -1362,39 +1420,27 @@ namespace picBunch::pbfast
                             for(int j = 0; j < 3; ++j)
                                 for(int k = 0; k < 3; ++k)
                                     pB[i * 9 + j * 3 + k] = pc[0][i] * pc[1][j] * pc[2][k];
-                        Vec3 const Rc{
-                            R0.x - cells.x * sx,
-                            R0.y - cells.y * sy,
-                            R0.z - cells.z * sz};
-                        double Mf[3][2][3][3];
-                        double hf[3][2];
+                        double Wt[27] = {};
                         for(int a = 0; a < 3; ++a)
+                        {
+                            int const b = (a + 1) % 3, c = (a + 2) % 3;
                             for(int sg = 0; sg < 2; ++sg)
                             {
-                                double const h = Rc[a] + (sg ? 0.5 : -0.5) * cells[a];
-                                hf[a][sg] = h;
-                                sFaceM(AX[a], h, Rc, cells, gam, Mf[a][sg]);
-                            }
-                        double Wt[27];
-                        for(int t = 0; t < 27; ++t)
-                            Wt[t] = 0.0;
-                        for(int fa = 0; fa < 3; ++fa)
-                            for(int sg = 0; sg < 2; ++sg)
-                            {
-                                int const fb = AX[fa].b, fc = AX[fa].c;
-                                double const sign = sg ? 1.0 : -1.0;
-                                double const h = hf[fa][sg];
+                                int const pl = (sg == 0) ? (sc[a] + 2) : (sc[a] + 1);
+                                double const h = hf[a][pl];
                                 double const hp[3] = {h, h * h, h * h * h};
-                                double const(*M)[3] = Mf[fa][sg];
+                                double const sign = sg ? 1.0 : -1.0;
+                                double const(*M)[3] = Mf[a][pl][sc[b] + 1][sc[c] + 1];
                                 for(int i = 0; i < 3; ++i)
                                     for(int j = 0; j < 3; ++j)
                                         for(int k = 0; k < 3; ++k)
                                         {
                                             int const be[3] = {i, j, k};
                                             Wt[i * 9 + j * 3 + k]
-                                                += sign * hp[be[fa]] * M[be[fb]][be[fc]];
+                                                += sign * hp[be[a]] * M[be[b]][be[c]];
                                         }
                             }
+                        }
                         for(int a = 0; a < 3; ++a)
                         {
                             double acc = 0.0;
