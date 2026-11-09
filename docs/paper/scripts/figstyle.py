@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as mticker
+from matplotlib.patches import Patch
 import numpy as np
 
 # A4 (210 mm) minus 2 x 25.4 mm geometry margins.
@@ -45,7 +46,18 @@ GAMMA_COLORS = {
 REF_COLOR = "#333333"
 REF_STYLE = {"color": REF_COLOR, "linestyle": "--", "linewidth": 0.9}
 GATE_STYLE = {"color": REF_COLOR, "linestyle": "-.", "linewidth": 1.0}
+SUPPORT_STYLE = {"color": REF_COLOR, "linestyle": "-", "linewidth": 0.9}
 UNITS = {"E": "V/m", "B": "T"}
+
+# Error-panel presentation contract shared by the slice renderers.  The masked
+# colour is a dedicated light grey and the finite error colormap is truncated
+# below its near-white top, so "no data" cannot be confused with the worst
+# finite error.
+MASKED_COLOR = "#dddddd"
+ERR_CMAP_TOP = 0.90
+ERR_FLOOR = 1e-6
+ERR_GATE = 1e-3
+SQ_LOG_DECADES = 6.0
 
 
 def width_in(fraction):
@@ -123,6 +135,85 @@ def _fmt_sci(v):
     return f"{m:.2g}e{e}"
 
 
+def _truncated_cmap(name, top=ERR_CMAP_TOP, n=256):
+    """Finite colormap truncated below its near-white top end."""
+    base = plt.get_cmap(name)
+    rgba = base(np.linspace(0.0, float(top), n))
+    return mcolors.ListedColormap(rgba, name=f"{name}_trunc")
+
+
+def _assert_masked_distinct(norm, cmap, label="error"):
+    """Fail if a finite value maps to the masked grey or a white/grey top."""
+    if isinstance(norm, mcolors.LogNorm):
+        vals = np.geomspace(float(norm.vmin), float(norm.vmax), 257)
+    else:
+        vals = np.linspace(float(norm.vmin), float(norm.vmax), 257)
+    cols = np.asarray(cmap(norm(vals)))[:, :3]
+    bad = np.asarray(mcolors.to_rgba(MASKED_COLOR))[:3]
+    dist = np.max(np.abs(cols - bad), axis=1)
+    if not np.all(dist > 0.02):
+        i = int(np.argmin(dist))
+        raise AssertionError(
+            f"{label}: finite value {vals[i]:.3g} maps to the masked colour "
+            f"{tuple(np.round(cols[i], 3))}")
+    top = np.asarray(cmap(1.0))[:3]
+    if float(top.min()) > 0.90 or float(np.ptp(top)) < 0.08:
+        raise AssertionError(
+            f"{label}: finite colormap top {tuple(np.round(top, 3))} is "
+            "near-white or grey")
+
+
+def _error_limits(items):
+    """Error range floored at ERR_FLOOR, ceiling at a decade (or the gate)."""
+    good = []
+    for it in items:
+        e = np.asarray(it["err"], float)
+        v = np.asarray(it["valid"], bool)
+        e = e[v & np.isfinite(e) & (e > 0)]
+        if e.size:
+            good.append(e)
+    hi = 1.0
+    if good:
+        cat = np.concatenate(good)
+        hi = 10.0 ** np.ceil(np.log10(float(cat.max())))
+    vmin = ERR_FLOOR
+    vmax = max(float(hi), ERR_GATE)
+    if vmax <= vmin:
+        vmax = vmin * 10.0
+    return vmin, vmax
+
+
+def _error_ticks(vmin, vmax):
+    """Lower floor, the marked 1e-3 gate, and the ceiling."""
+    ticks = {float(vmin), float(vmax)}
+    if float(vmin) <= ERR_GATE <= float(vmax):
+        ticks.add(float(ERR_GATE))
+    ticks = sorted(ticks)
+    labels = ["1e-3 gate" if np.isclose(t, ERR_GATE, rtol=1e-9, atol=0.0)
+              else _fmt_sci(t) for t in ticks]
+    return ticks, labels
+
+
+def _sq_ticks(peak, decades=SQ_LOG_DECADES):
+    """Decade ticks from peak*10^-decades up to the peak."""
+    ticks = [float(peak) * 10.0 ** d for d in np.arange(-int(decades), 1)]
+    return ticks, [_fmt_sci(t) for t in ticks]
+
+
+def _peak_fraction(peak, shared):
+    if not np.isfinite(peak) or shared <= 0:
+        return "peak 0% of max"
+    return f"peak {100.0 * float(peak) / float(shared):.3g}% of max"
+
+
+def _masked_note(fig):
+    handle = Patch(facecolor=MASKED_COLOR, edgecolor="0.4", label="masked")
+    fig.legend(handles=[handle], loc="lower center",
+               bbox_to_anchor=(0.5, 0.002), frameon=False, handlelength=1.2,
+               handletextpad=0.5, borderaxespad=0.0,
+               fontsize=plt.rcParams["legend.fontsize"])
+
+
 def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
                       fig_height, shading="nearest", support=None,
                       suptitle=None, manifest=None):
@@ -148,9 +239,9 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
         wspace=0.16, hspace=0.46,
     )
     field_cmap = plt.get_cmap("RdBu_r").copy()
-    field_cmap.set_bad("white")
-    err_cmap = plt.get_cmap("magma").copy()
-    err_cmap.set_bad("white")
+    field_cmap.set_bad(MASKED_COLOR)
+    err_cmap = _truncated_cmap("magma")
+    err_cmap.set_bad(MASKED_COLOR)
 
     if shading == "flat":
         xlo, xhi = float(x[0]), float(x[-1])
@@ -171,32 +262,19 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
             vmax = max((float(v.max()) for v in finite if v.size), default=1.0)
             if not np.isfinite(vmax) or vmax <= 0:
                 vmax = 1.0
-            norm = mcolors.Normalize(vmin=-vmax, vmax=vmax)
+            norm = mcolors.SymLogNorm(linthresh=max(vmax * ERR_GATE, 1e-30),
+                                      vmin=-vmax, vmax=vmax, base=10)
             cmap = field_cmap
-            cbar_label = f"{part} [{UNITS[part]}]"
+            cbar_label = f"{part} [{UNITS[part]}] (symlog)"
             ticks = [-vmax, 0.0, vmax]
             ticklabels = [_fmt_sci(-vmax), "0", _fmt_sci(vmax)]
         else:
-            evals = []
-            for it in items:
-                e = np.asarray(it["err"], float)
-                v = np.asarray(it["valid"], bool)
-                good = e[v & np.isfinite(e) & (e > 0)]
-                if good.size:
-                    evals.append(good)
-            if evals:
-                cat = np.concatenate(evals)
-                vmin = 10.0 ** np.floor(np.log10(float(cat.min())))
-                vmax = 10.0 ** np.ceil(np.log10(float(cat.max())))
-                if vmax <= vmin:
-                    vmax = vmin * 10
-            else:
-                vmin, vmax = 1e-4, 1.0
+            vmin, vmax = _error_limits(items)
             norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
             cmap = err_cmap
             cbar_label = "relative error (dimensionless)"
-            ticks = [vmin, np.sqrt(vmin * vmax), vmax]
-            ticklabels = [_fmt_sci(t) for t in ticks]
+            ticks, ticklabels = _error_ticks(vmin, vmax)
+            _assert_masked_distinct(norm, cmap, f"{part} error row")
 
         for ci, it in enumerate(items):
             ax = fig.add_subplot(gs[ri, ci])
@@ -235,7 +313,9 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
                 yc = 0.5 * (y[:-1] + y[1:]) if shading == "flat" else y
                 try:
                     ax.contour(xc, yc, support.astype(float), levels=[0.5],
-                               colors=["white"], linewidths=0.9)
+                               colors=[SUPPORT_STYLE["color"]],
+                               linewidths=SUPPORT_STYLE["linewidth"],
+                               linestyles=SUPPORT_STYLE["linestyle"])
                 except Exception:
                     pass
             ax.set_xlim(xlo, xhi)
@@ -261,9 +341,13 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
     if suptitle:
         fig.text(0.5, 0.975, suptitle, ha="center", va="top",
                  fontsize=plt.rcParams["axes.titlesize"])
+    if any(r["kind"] == "error" for r in rows):
+        _masked_note(fig)
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
     man["layout"] = "one shared colour bar per row at row right edge"
+    man["masked_color"] = MASKED_COLOR
+    man["error_floor"] = ERR_FLOOR
     return save(fig, outdir, name, man)
 
 
@@ -325,9 +409,15 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         ylo, yhi = float(y[0] - dy / 2), float(y[-1] + dy / 2)
         xc, yc = x, y
 
-    field_cmap = plt.get_cmap("RdBu_r").copy(); field_cmap.set_bad("white")
-    sq_cmap = plt.get_cmap("viridis").copy(); sq_cmap.set_bad("white")
-    err_cmap = plt.get_cmap("magma").copy(); err_cmap.set_bad("white")
+    field_cmap = plt.get_cmap("RdBu_r").copy()
+    field_cmap.set_bad(MASKED_COLOR)
+    sq_cmap = plt.get_cmap("viridis").copy()
+    # Zero is the physical log floor of the squared panel, not a mask: show it
+    # with the colormap's own lowest colour.
+    sq_cmap.set_bad(sq_cmap(0.0))
+    sq_cmap.set_under(sq_cmap(0.0))
+    err_cmap = _truncated_cmap("magma")
+    err_cmap.set_bad(MASKED_COLOR)
     bar_rows = []
 
     for ri, row in enumerate(rows):
@@ -342,43 +432,34 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                         for it in comps)
             if not np.isfinite(cvmax) or cvmax <= 0:
                 cvmax = 1.0
-            cnorm = mcolors.Normalize(vmin=-cvmax, vmax=cvmax)
+            # One shared symmetric-log bar for the triad: a real but suppressed
+            # component (for example the longitudinal E_x at gamma=10) keeps
+            # visible structure instead of collapsing onto the white centre.
+            cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * ERR_GATE, 1e-30),
+                                       vmin=-cvmax, vmax=cvmax, base=10)
             svmax = float(np.nanmax(np.abs(np.asarray(sqitem["arr"], float))))
             if not np.isfinite(svmax) or svmax <= 0:
                 svmax = 1.0
-            snorm = mcolors.Normalize(vmin=0.0, vmax=svmax)
+            sfloor = max(svmax * 10.0 ** (-SQ_LOG_DECADES), 1e-30)
+            snorm = mcolors.LogNorm(vmin=sfloor, vmax=svmax)
             ccmap, scmap = field_cmap, sq_cmap
             cticks = [-cvmax, 0.0, cvmax]
-            sticks = [0.0, svmax * 0.5, svmax]
-            clabel = f"{part} ({UNITS[part]})"
+            clabels = [_fmt_sci(-cvmax), "0", _fmt_sci(cvmax)]
+            sticks, slabels = _sq_ticks(svmax)
+            clabel = f"{part} ({UNITS[part]}) (symlog)"
             unit2 = "V$^2$/m$^2$" if part == "E" else "T$^2$"
-            slabel = f"{part}$^2$ ({unit2})"
+            slabel = f"{part}$^2$ ({unit2}) (log)"
         else:
-            def err_span(its):
-                good = []
-                for it in its:
-                    e = np.asarray(it["err"], float)
-                    v = np.asarray(it["valid"], bool)
-                    e = e[v & np.isfinite(e) & (e > 0)]
-                    if e.size:
-                        good.append(e)
-                if not good:
-                    return 1e-4, 1.0
-                cat = np.concatenate(good)
-                lo = 10.0 ** np.floor(np.log10(float(cat.min())))
-                hi = 10.0 ** np.ceil(np.log10(float(cat.max())))
-                return (lo, hi if hi > lo else lo * 10.0)
-            cvmin, cvmax = err_span(comps)
-            svmin, svmax = err_span([sqitem])
+            cvmin, cvmax = _error_limits(comps)
+            svmin, svmax = _error_limits([sqitem])
             cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax)
             snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax)
             ccmap = scmap = err_cmap
-            cticks = [cvmin, np.sqrt(cvmin * cvmax), cvmax]
-            sticks = [svmin, np.sqrt(svmin * svmax), svmax]
-            clabel, slabel = f"{part} err", f"{part}$^2$ err"
-
-        clabels = [_fmt_tick(t) for t in cticks]
-        slabels = [_fmt_tick(t) for t in sticks]
+            cticks, clabels = _error_ticks(cvmin, cvmax)
+            sticks, slabels = _error_ticks(svmin, svmax)
+            clabel = slabel = "relative error (dimensionless)"
+            _assert_masked_distinct(cnorm, ccmap, f"{part} error components")
+            _assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
 
         def panel(ax, it, norm, cmap, title):
             arr = np.asarray(it["arr"], float)
@@ -400,7 +481,9 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                 if support is not None:
                     try:
                         ax.contour(xc, yc, support.astype(float), levels=[0.5],
-                                   colors=["white"], linewidths=0.9)
+                                   colors=[SUPPORT_STYLE["color"]],
+                                   linewidths=SUPPORT_STYLE["linewidth"],
+                                   linestyles=SUPPORT_STYLE["linestyle"])
                     except Exception:
                         pass
             ax.set_xlim(xlo, xhi); ax.set_ylim(ylo, yhi)
@@ -414,6 +497,15 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         for j, it in enumerate(comps):
             ax = fig.add_axes([panel_x[j], y0, pw, rh])
             panel(ax, it, cnorm, ccmap, it.get("title", ""))
+            if kind == "field":
+                arr_c = np.asarray(it["arr"], float)
+                peak_c = (float(np.nanmax(np.abs(arr_c)))
+                          if np.isfinite(arr_c).any() else 0.0)
+                ax.text(0.03, 0.965, _peak_fraction(peak_c, cvmax),
+                        transform=ax.transAxes, ha="left", va="top",
+                        fontsize=plt.rcParams["font.size"], color="0.10",
+                        bbox=dict(boxstyle="round,pad=0.12", fc="white",
+                                  ec="none", alpha=0.72))
             if ri == nrow - 1:
                 ax.set_xlabel(xlabel)
             else:
@@ -423,7 +515,10 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             else:
                 ax.tick_params(labelleft=False)
         axq = fig.add_axes([panel_x[3], y0, pw, rh])
-        panel(axq, sqitem, snorm, scmap, sqitem.get("title", ""))
+        sq_title = sqitem.get("title", "")
+        if kind == "field":
+            sq_title = sq_title + " (log)"
+        panel(axq, sqitem, snorm, scmap, sq_title)
         if ri == nrow - 1:
             axq.set_xlabel(xlabel)
         else:
@@ -447,7 +542,15 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     if suptitle:
         fig.text(0.5, 0.975, suptitle, ha="center", va="top",
                  fontsize=plt.rcParams["axes.titlesize"])
+    if any(r["kind"] == "error" for r in rows):
+        _masked_note(fig)
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
     man["layout"] = "component triad bar, squared panel with its own bar"
+    man["component_norm"] = "symlog, linthresh=1e-3*shared component maximum"
+    man["component_peak_annotation"] = "each panel states its peak as % of shared max"
+    man["squared_norm"] = "log, 1e-6*peak..peak (field rows)"
+    man["masked_color"] = MASKED_COLOR
+    man["error_floor"] = ERR_FLOOR
+    man["error_gate_tick"] = ERR_GATE
     return save(fig, outdir, name, man)

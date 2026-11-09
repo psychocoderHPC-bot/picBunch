@@ -28,33 +28,6 @@
         "notes": "Reduced copy of docs/measurements/matrix.csv (the 2026-11-08 H100 re-measurement behind tab:matrix) with the per-row gate classification appended: row_class, total_iqr_ms, the bimodal rows' mode totals with per-mode stage-cluster IQR and mode counts, and n_used. Original columns are unchanged; per-row provenance is matrix/provenance.jsonl."
       }
     },
-    "scaling-distance": {
-      "family": "SCHEM1",
-      "provenance": {
-        "command": "picBunchBench --d-sweep on jureca-h100 (3 repeats, median); matrix/raw/dsweep.csv",
-        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-        "gpu_model": "NVIDIA H100 PCIe 80 GB",
-        "cuda_version": "13.4.92",
-        "openpmd_version": "0.17.1",
-        "adios2_version": "2.12.1",
-        "io_backend": "adios2/BP5",
-        "axis_rule": "n/a",
-        "repeats": 3,
-        "statistic": "median",
-        "config": {
-          "sha256": "ded268c149ccdcccc322f98ecdbc7fa623c8362e2f3720d66323d85e5023ba0d"
-        },
-        "script": {
-          "sha256": "14a7366372e50e56e4cec13fee3e11a433d484873ba66bf97dca1738ffa8581c"
-        },
-        "binary": {
-          "sha256": "39fbc8acac50c0585402d6b42c3a4e3f525fe133d4ba0ba1314c6fa501ecbe3d"
-        },
-        "start_utc": null,
-        "end_utc": null,
-        "notes": "Ingested from matrix/dsweep.csv (3 repeats). Config digest is matrix/provenance.jsonl; driver digest is r9/scripts/more_sweeps.py."
-      }
-    },
     "h100-mpi-scaling": {
       "family": "F_mpi_rank_scaling_h100",
       "provenance": {
@@ -519,17 +492,6 @@
           "row_class",
           "total_iqr_ms"
         ]
-      }
-    },
-    {
-      "case_id": "scaling-distance",
-      "target": "scaling/dsweep.csv",
-      "source": {
-        "path": "matrix/dsweep.csv",
-        "sha256": "e3687a3df32333b249837c3163703882073f0a6e66791c1a514aeceb10042b70"
-      },
-      "transform": {
-        "kind": "csv_copy"
       }
     },
     {

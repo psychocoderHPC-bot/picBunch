@@ -15,6 +15,7 @@ sys.path.insert(0, HERE)
 import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
+import ingest_measurements as ingest  # noqa: E402
 
 US = 1e6
 COMP = {"E": ["Ex", "Ey", "Ez"], "B": ["Bx", "By", "Bz"]}
@@ -76,11 +77,13 @@ def panels(plane_data, part, field_mode):
     comps = COMP[part]
     items = []
     fields = []
+    refs = [plane_data[c]["ref"] for c in comps]
+    valid = ingest.part_valid(refs)
     for c in comps:
         rec = plane_data[c]
         f = rec["ref"] if field_mode == "ref" else rec["pic"]
         fields.append(f)
-        items.append({"arr": f, "err": rec["err"], "valid": rec["valid"],
+        items.append({"arr": f, "err": rec["err"], "valid": valid,
                       "title": rf"${c[0]}_{{{c[1]}}}$",
                       "symbol": f"{c[0]}_{{{c[1]}}}"})
     f2 = sum(f * f for f in fields)
@@ -89,10 +92,8 @@ def panels(plane_data, part, field_mode):
     peak = float(np.max(r2)) if np.max(r2) > 0 else 0.0
     if peak > 0:
         err = np.abs(f2 - r2) / peak
-        valid = r2 >= 1e-3 * peak
     else:
         err = np.full_like(arr, np.nan)
-        valid = np.zeros_like(arr, dtype=bool)
     items.append({"arr": arr, "err": err, "valid": valid,
                   "title": rf"${part}^2$"})
     return items

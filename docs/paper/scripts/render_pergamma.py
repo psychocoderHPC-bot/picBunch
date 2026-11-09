@@ -30,6 +30,32 @@ import matplotlib.ticker as mticker  # noqa: E402
 COMP = ["Ex", "Ey", "Ez", "Bx", "By", "Bz"]
 CI = {c: i for i, c in enumerate(COMP)}
 
+# Masked/undefined pixels get their own light grey, never a colour that the
+# finite ramp also produces.  The magma ramp is truncated at 0.90 so its pale
+# yellow tail (which reads as white in print) is not part of the finite range.
+MASKED_COLOUR = "#cccccc"
+ERR_CMAP_TOP = 0.90
+SQ_FLOOR_RATIO = 1e-6  # log floor for E^2/B^2: 1e-6 of the panel peak
+
+
+def _cmap(name, top=1.0):
+    """Copy a colormap, optionally truncating its top, and set the bad colour."""
+    base = plt.get_cmap(name)
+    if top < 1.0:
+        cmap = mcolors.ListedColormap(base(np.linspace(0.0, top, 256)),
+                                      name=f"{name}_t{int(top * 100)}")
+    else:
+        cmap = base.copy()
+    cmap.set_bad(MASKED_COLOUR)
+    return cmap
+
+
+def _finite_min_distance(cmap, colour=MASKED_COLOUR):
+    """Smallest RGB distance between the finite ramp and the masked colour."""
+    masked = np.asarray(mcolors.to_rgba(colour))[:3]
+    lut = np.asarray(cmap(np.linspace(0.0, 1.0, 256)))[:, :3]
+    return float(np.min(np.sqrt(np.sum((lut - masked) ** 2, axis=1))))
+
 
 def _gamma_of(path):
     with np.load(path, allow_pickle=False) as d:
@@ -148,6 +174,10 @@ def draw_case(case, outdir):
     H = 7.85
     fig = plt.figure(figsize=(W, H))
     fig.patch.set_facecolor("white")
+    fig.text(0.5, 0.985,
+             "Error rows: grey = masked / no finite error; "
+             "the colour ramp spans finite errors only",
+             ha="center", va="center", fontsize=9)
 
     # horizontal geometry (figure fractions)
     left = 0.125
@@ -190,12 +220,13 @@ def draw_case(case, outdir):
     xticks = [0, 2, 4, 6]
     yticks = [0, 2, 4, 6]
 
-    cmap_comp = plt.get_cmap("RdBu_r").copy()
-    cmap_comp.set_bad("white")
-    cmap_sq = plt.get_cmap("viridis").copy()
-    cmap_sq.set_bad("white")
-    cmap_err = plt.get_cmap("magma").copy()
-    cmap_err.set_bad("white")
+    cmap_comp = _cmap("RdBu_r")
+    cmap_sq = _cmap("viridis")
+    cmap_err = _cmap("magma", ERR_CMAP_TOP)
+    masked_min_distance = _finite_min_distance(cmap_err)
+    assert masked_min_distance > 0.10, (
+        f"finite error ramp reaches the masked colour "
+        f"(min distance {masked_min_distance:.3f})")
 
     info = {"case": case["case"], "gamma": case["gamma"], "beta": case["beta"],
             "n": case["n"], "cell_m": case["cell_m"], "rows": {}}
@@ -214,15 +245,23 @@ def draw_case(case, outdir):
             cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * 1e-3, 1e-30),
                                        vmin=-cvmax, vmax=cvmax, base=10)
             svmax = float(np.nanmax(case["field"][sq]))
-            if not np.isfinite(svmax) or svmax <= 0:
-                svmax = 1.0
-            snorm = mcolors.Normalize(vmin=0.0, vmax=svmax)
+            if np.isfinite(svmax) and svmax > 0:
+                svmin = max(svmax * SQ_FLOOR_RATIO, np.finfo(float).tiny)
+                snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
+                sticks = [svmin, np.sqrt(svmin * svmax), svmax]
+                slabels = [fmt(t) for t in sticks]
+                sq_scale = "log"
+                sl = (f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'}"
+                      ", log)")
+            else:
+                snorm = mcolors.Normalize(vmin=0.0, vmax=1.0)
+                sticks = [0.0, 0.5, 1.0]
+                slabels = ["0", fmt(0.5), fmt(1.0)]
+                sq_scale = "linear"
+                sl = f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'})"
             cticks = [-cvmax, 0.0, cvmax]
             clabels = [fmt(-cvmax), "0", fmt(cvmax)]
-            sticks = [0.0, svmax * 0.5, svmax]
-            slabels = ["0", fmt(svmax * 0.5), fmt(svmax)]
-            cl, sl = f"{part} ({'V/m' if part == 'E' else 'T'})", \
-                     f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'})"
+            cl = f"{part} ({'V/m' if part == 'E' else 'T'})"
         else:
             ce = [case["err"][c] for c in comps]
             parts = [a[np.isfinite(a) & (a > 0)] for a in ce]
@@ -232,7 +271,7 @@ def draw_case(case, outdir):
                 cvmax = max(float(good.max()), cvmin * 10)
             else:
                 cvmin, cvmax = 1e-12, 1.0
-            cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax)
+            cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax, clip=True)
             se = case["err"][sq]
             good = se[np.isfinite(se) & (se > 0)]
             if good.size:
@@ -240,7 +279,8 @@ def draw_case(case, outdir):
                 svmax = max(float(good.max()), svmin * 10)
             else:
                 svmin, svmax = 1e-12, 1.0
-            snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax)
+            snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
+            sq_scale = "log"
             cticks = log_ticks(cvmin, cvmax)
             sticks = log_ticks(svmin, svmax)
             clabels = [fmt(t) for t in cticks]
@@ -334,7 +374,9 @@ def draw_case(case, outdir):
             axq.set_xticklabels([])
         axq.set_yticklabels([])
         if rowkey.endswith("field"):
-            axq.set_title(f"${part}^2$", fontsize=9, pad=2)
+            sq_title = (f"${part}^2$ (log)" if sq_scale == "log"
+                        else f"${part}^2$")
+            axq.set_title(sq_title, fontsize=9, pad=2)
         else:
             axq.set_title("", pad=0)
 
@@ -369,7 +411,11 @@ def draw_case(case, outdir):
                      "linthresh": float(getattr(cnorm, "linthresh", 0.0))},
             "sq": {"vmin": float(snorm.vmin), "vmax": float(snorm.vmax),
                    "ticks": [float(t) for t in sticks],
-                   "norm": "linear" if not log else "log"},
+                   "norm": sq_scale,
+                   "floor_ratio": (SQ_FLOOR_RATIO if sq_scale == "log"
+                                   and not log else None)},
+            "masked_colour": MASKED_COLOUR,
+            "finite_min_masked_distance": masked_min_distance,
             "shared_components": True,
             "bar_labels": [cl, sl],
             "no_valid_pixels": bool(no_valid),
@@ -429,6 +475,9 @@ def draw_case(case, outdir):
         len([t for t in cb.ax.get_yticklabels() if t.get_text().strip()])
         for cb in cbars)
     checks["bar_gap_fraction"] = 0.008
+    checks["masked_colour"] = MASKED_COLOUR
+    checks["masked_colour_distinct_from_finite_errors"] = True
+    checks["finite_min_masked_distance"] = masked_min_distance
     info["checks"] = checks
 
     g = float(case["gamma"])

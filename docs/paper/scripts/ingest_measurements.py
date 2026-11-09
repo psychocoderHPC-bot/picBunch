@@ -190,13 +190,58 @@ def _peak(ref):
     return float(np.max(arr)) if arr.size and np.isfinite(arr).any() else 0.0
 
 
-def _error_valid(pic, ref):
+def part_valid(refs):
+    """Mask one field part from its local magnitude and a shared floor.
+
+    ``refs`` holds the three reference components (E or B) on one plane.  A
+    pixel is valid when ``sqrt(sum_c ref_c**2) >= 1e-3 * max_c(peak_c)``.  The
+    floor is shared by the whole part, so a component that is intrinsically
+    near zero keeps its structured far field instead of being cut into
+    salt-and-pepper speckle.  The error itself stays normalised per component
+    by that component's own peak.
+    """
+    refs = [np.asarray(r, float) for r in refs]
+    if not refs:
+        return np.zeros((), dtype=bool)
+    peaks = [_peak(r) for r in refs]
+    peak = max(peaks)
+    if peak <= 0.0:
+        return np.zeros(refs[0].shape, dtype=bool)
+    mag2 = np.zeros_like(refs[0])
+    for ref in refs:
+        mag2 = mag2 + ref * ref
+    return np.sqrt(np.maximum(mag2, 0.0)) >= 1e-3 * peak
+
+
+_part_valid = part_valid
+
+
+def _component_valid(ref):
+    """Legacy per-component mask, kept for the HIRES single-electron figures."""
+    ref = np.asarray(ref, float)
+    peak = _peak(ref)
+    if peak <= 0.0:
+        return np.zeros(ref.shape, dtype=bool)
+    return np.abs(ref) >= 1e-3 * peak
+
+
+def _error(pic, ref):
+    """Per-component absolute error normalised by that component's peak."""
     pic = np.asarray(pic, float)
     ref = np.asarray(ref, float)
     peak = _peak(ref)
     if peak <= 0.0:
-        return np.full_like(ref, np.nan), np.zeros(ref.shape, dtype=bool)
-    return np.abs(pic - ref) / peak, np.abs(ref) >= 1e-3 * peak
+        return np.full_like(ref, np.nan)
+    return np.abs(pic - ref) / peak
+
+
+def _error_valid(pic, ref, refs=None):
+    """Return one component's error and the shared local-magnitude mask.
+
+    ``refs`` is the full component set of the field part; omitting it treats
+    the single component as its own part.
+    """
+    return _error(pic, ref), part_valid([ref] if refs is None else refs)
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +376,7 @@ def _transform_field_export(entry, src):
             arrays["centre"] = np.asarray(d["centre"], float)
 
         for plane in planes:
+            pics, refs = {}, {}
             for comp in COMP:
                 pic = _source_plane_array(d, plane, comp, "pic")
                 ref = _source_plane_array(d, plane, comp, "ref")
@@ -345,17 +391,32 @@ def _transform_field_export(entry, src):
                         "needs %s" % (src, plane, comp, pic.shape, ref.shape,
                                       axis.ARRAY_AXES[(dataset, plane)],
                                       expected))
-                err, valid = _error_valid(pic, ref)
+                pics[comp] = pic
+                refs[comp] = ref
+            valid = {}
+            if style == "hires":
+                # The single-electron gp_* figures keep their per-component
+                # mask convention; the shared part-magnitude rule applies to
+                # the val_* and large_* slice figures.
+                valid = {comp: _component_valid(refs[comp]) for comp in COMP}
+            else:
+                for part in ("E", "B"):
+                    part_refs = [refs[part + a] for a in ("x", "y", "z")]
+                    mask = part_valid(part_refs)
+                    for a in ("x", "y", "z"):
+                        valid[part + a] = mask
+            for comp in COMP:
+                err = _error(pics[comp], refs[comp])
                 if style in ("bdata2", "hires"):
-                    arrays[f"{plane}_{comp}"] = pic
-                    arrays[f"{plane}_ref_{comp}"] = ref
+                    arrays[f"{plane}_{comp}"] = pics[comp]
+                    arrays[f"{plane}_ref_{comp}"] = refs[comp]
                     arrays[f"{plane}_err_{comp}"] = err
-                    arrays[f"{plane}_valid_{comp}"] = valid
+                    arrays[f"{plane}_valid_{comp}"] = valid[comp]
                 else:
-                    arrays[f"{plane}_{comp}_pic"] = pic
-                    arrays[f"{plane}_{comp}_ref"] = ref
+                    arrays[f"{plane}_{comp}_pic"] = pics[comp]
+                    arrays[f"{plane}_{comp}_ref"] = refs[comp]
                     arrays[f"{plane}_{comp}_err"] = err
-                    arrays[f"{plane}_{comp}_valid"] = valid
+                    arrays[f"{plane}_{comp}_valid"] = valid[comp]
 
             if style == "hires" and plane == "xy":
                 for part in ("E", "B"):
@@ -480,6 +541,7 @@ def _transform_field_h5(entry, src):
     for plane in planes:
         spec = plane_index[plane]
         axis_name, index = spec["axis"], int(spec["index"])
+        pics, refs = {}, {}
         for c in COMP:
             cube = cubes[c]
             if axis_name == "z":
@@ -507,17 +569,28 @@ def _transform_field_h5(entry, src):
                     "%s: %s %s shapes pic=%s ref=%s, stored layout %s needs %s"
                     % (src, plane, c, pic.shape, ref.shape,
                        axis.ARRAY_AXES[(dataset, plane)], expected))
-            err, valid = _error_valid(pic, ref)
+            pics[c] = pic
+            refs[c] = ref
+        valid = {}
+        if style == "hires":
+            valid = {c: _component_valid(refs[c]) for c in COMP}
+        else:
+            for part in ("E", "B"):
+                mask = part_valid([refs[part + a] for a in ("x", "y", "z")])
+                for a in ("x", "y", "z"):
+                    valid[part + a] = mask
+        for c in COMP:
+            err = _error(pics[c], refs[c])
             if style in ("bdata2", "hires"):
-                arrays["%s_%s" % (plane, c)] = pic
-                arrays["%s_ref_%s" % (plane, c)] = ref
+                arrays["%s_%s" % (plane, c)] = pics[c]
+                arrays["%s_ref_%s" % (plane, c)] = refs[c]
                 arrays["%s_err_%s" % (plane, c)] = err
-                arrays["%s_valid_%s" % (plane, c)] = valid
+                arrays["%s_valid_%s" % (plane, c)] = valid[c]
             else:
-                arrays["%s_%s_pic" % (plane, c)] = pic
-                arrays["%s_%s_ref" % (plane, c)] = ref
+                arrays["%s_%s_pic" % (plane, c)] = pics[c]
+                arrays["%s_%s_ref" % (plane, c)] = refs[c]
                 arrays["%s_%s_err" % (plane, c)] = err
-                arrays["%s_%s_valid" % (plane, c)] = valid
+                arrays["%s_%s_valid" % (plane, c)] = valid[c]
 
     arrays["n"] = np.asarray(n, dtype=np.int64)
     if style == "hires":

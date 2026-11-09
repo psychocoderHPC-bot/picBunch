@@ -54,6 +54,45 @@ The paper captions must keep the wording "earlier axial-x data set (not the
 +y beam-axis set)" and "Bx = 0" for LARGE1. A future +y large-domain run is an
 optional cross-orientation validation, not a relabel of these figures.
 
+## Error-panel mask
+
+The error rows of the slice figures (`val_*`, `large_*`) mask a pixel when the
+local field magnitude of the plotted part is below a shared floor:
+`sqrt(sum_c ref_c**2) >= 1e-3 * max_c(peak_c)` for E or B, where `peak_c` is
+the largest `|ref_c|` on that plane. The three components share the floor, so
+a component that is intrinsically near zero keeps its structured far field
+instead of being cut into salt-and-pepper speckle. The error itself stays
+normalised per component by that component's own peak. The reduced npz files
+store this mask in their `*_valid_*` arrays; `ingest_measurements.py` writes
+the same rule and `render_slices.py`/`render_large.py` recompute it from the
+reference arrays. The HIRES single-electron `gp_*` figures keep their
+per-component mask convention in `render_pergamma.py`.
+
+Masked pixels are light grey (`#dddddd`), never white. The finite error
+colormap (`magma`) is truncated at 0.90 of its range so the worst finite error
+is orange and cannot be read as the mask. `render_split_field_rows` asserts
+that no finite error value maps to the masked colour and that the colormap top
+is neither white nor grey. Each figure carries a grey "masked" legend patch.
+
+## Colour norms
+
+All signed field triads in `val_*` and `large_*` use one shared symmetric-log
+bar per row (`SymLogNorm`, `linthresh = 1e-3 * shared maximum`), the same
+convention as `gp_*`. A shared linear bar maps a real but suppressed component
+(for example the gamma=10 longitudinal `E_x` at about 0.5% of the dominant
+component) onto the near-white zero centre and hides its structure. Each
+component panel therefore also prints its own peak as a percentage of the
+shared-row maximum. The triad keeps one shared bar; the annotation makes the
+per-panel scale explicit without changing the layout.
+
+The `E^2`/`B^2` panel in a field row uses `LogNorm` from `1e-6` of that
+panel's peak to its peak, with decade ticks plus the peak and a `(log)` bar
+label. Zero magnitude is the physical floor and is drawn with the colormap's
+lowest colour, not the masked grey. Error rows use `LogNorm` from the fixed
+`1e-6` floor to a decade ceiling, with a marked `1e-3` gate tick and the bar
+label "relative error (dimensionless)". The TSC-support contour is dark grey
+and solid so it stays visible on both the grey mask and the finite colours.
+
 ## Scripts
 
 | file | role | inputs | outputs |
@@ -64,9 +103,7 @@ optional cross-orientation validation, not a relabel of these figures.
 | `render_slices.py` | `val_*` BDATA2 forward/fluctuation and VAR1b 1 mrad slices | `data/bdata2/*.npz`, `data/var1b/*.npz` | 10 PDF/PNG |
 | `render_large.py` | `large_*` LARGE1 128x128x64 slices | `data/large1/slices_g{1,10}.npz` | 6 PDF/PNG |
 | `render_pergamma.py` | `gp_*` HIRES 128^3 single-electron slices | `data/hires/hi_*.npz` | 7 PDF/PNG |
-| `render_scaling.py` | `F_a`, `F_b`, `F_w4b_rel_error`, `F_gamma_err_dist`, `F_multivel_dist`, and `F_mpi_rank_scaling_h100` when its reduced table exists; the V100 `F_mpi_rank_scaling` stays callable but is not in the default set | `data/scaling/matrix.csv`, `data/line/*.csv`, `data/line/multivel_*.npz`, `data/line/h100_mpi_scaling.csv` | 5 PDF/PNG by default, plus the H100 figure once data lands |
-| `render_schematic.py` | `SCHEM1_field_evaluation_schematic` | `data/scaling/dsweep.csv` | 1 PDF/PNG |
-| `schematic.py` | schematic panels used by `render_schematic.py` | none | none |
+ | `render_scaling.py` | `F_a`, `F_b`, `F_w4b_rel_error`, `F_gamma_err_dist`, `F_multivel_dist`, and `F_mpi_rank_scaling_h100` when its reduced table exists; the V100 `F_mpi_rank_scaling` stays callable but is not in the default set | `data/scaling/matrix.csv`, `data/line/*.csv`, `data/line/multivel_*.npz`, `data/line/h100_mpi_scaling.csv` | 5 PDF/PNG by default, plus the H100 figure once data lands |
 | `run_all.py` | render every included figure and write the assertion log; `--strict` fails when a figure's reduced data is pending | all of the above | 28 PDF/PNG by default, 29 once the H100 table lands, 30 with `--include-unreferenced`, `axis-assertions.txt`, `render-summary.json` |
 | `check_provenance.py` | validate provenance records, verify SHA-256 digests, require every figure to be covered or declared not-reproduced; `--strict` requires fresh-h100 or a reference-only fresh-reference record for data figures | `provenance/records/*.json`, `provenance/provenance.schema.json`, `provenance/not_reproduced.json`, `provenance/non_data_figures.json`, `figs/*.pdf` | report; exit code |
 | `make_provenance.py` | emit a schema-valid record for a case from hashed paths and host metadata | `data/cases.json` | `provenance/records/<case>.json` |
@@ -88,16 +125,17 @@ Rendering is deterministic: Agg backend, fixed PDF and PNG metadata, no RNG.
 Two consecutive runs produce byte-identical files.
 
 `run_all.py` renders only figures the manuscript includes. The defaults drop
-two previously generated orphans: the V100 `F_mpi_rank_scaling` and
-`SCHEM1_field_evaluation_schematic` (renderer stays in `render_schematic.py`,
-declared non-data in the provenance). The V100 MPI-scaling figure is
-intentionally not part of the paper: the manuscript includes only the H100
-figure `F_mpi_rank_scaling_h100`, so there is no shipped V100 PDF and no
-provenance record claiming one. Its renderer stays callable in
-`render_scaling.py::mpi` and its reduced measurement data stays in
+one previously generated orphan: the V100 `F_mpi_rank_scaling`. The V100
+MPI-scaling figure is intentionally not part of the paper: the manuscript
+includes only the H100 figure `F_mpi_rank_scaling_h100`, so there is no
+shipped V100 PDF and no provenance record claiming one. Its renderer stays
+callable in `render_scaling.py::mpi` and its reduced measurement data stays in
 `data/line/mpi_scaling.csv` (source `docs/measurements/mpi_writer_scaling.csv`)
 so the earlier run remains reproducible. Pass `--include-unreferenced` to
-render both orphans in a staging directory. No measurement data is deleted.
+render the V100 orphan in a staging directory. No measurement data is deleted.
+The field-evaluation pipeline figure is a TikZ drawing in
+`docs/paper/sec_method.tex` (`\label{fig:pipeline}`), compiled inline, and is
+therefore not rendered by this pipeline.
 
 ## H100 MPI scaling
 
@@ -197,8 +235,8 @@ the source file and fields, and the transform:
 | `F_w4b` | `line/w4b_rel_error.csv` | `w4b/w4b_paper_metric.csv`; column copy with the corrected paper metric |
 | `F_gamma` | `line/gamma_err_dist.csv` | `reduced/line/gamma_err_dist.csv`; column copy |
 | `F_multivel` | `line/multivel_{energy,angular}.npz`, `line/multivel_binning.csv`, `line/multivel_peaks.csv`, `line/multivel_fields_*.npz` | `reduced/multivel/*`; particle/column copy, peak scalars and field arrays |
-| `F_mpi_rank_scaling_h100` | `line/h100_mpi_scaling.csv` | `r9/raw/newstack/mpi_medians.json`; median/spread reduction |
-| `SCHEM1` (non-data) | `scaling/dsweep.csv` | `matrix/dsweep.csv`; column copy |
+ | `F_mpi_rank_scaling_h100` | `line/h100_mpi_scaling.csv` | `r9/raw/newstack/mpi_medians.json`; median/spread reduction |
+
 
 The `field_h5` transform reads an openPMD HDF5 field output directly
 (`data/0/meshes/{E,B}/{x,y,z}`, shape `(nz,ny,nx)`) plus either a raw

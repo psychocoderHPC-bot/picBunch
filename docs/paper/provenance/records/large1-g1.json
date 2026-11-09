@@ -13,7 +13,7 @@
   "data_sha256": [
     {
       "path": "docs/paper/data/large1/slices_g1.npz",
-      "sha256": "f47d5ace2592956c26c95cb59c59369e13854cba69728d09e9523abdba42ed96"
+      "sha256": "935f598cfb6c9465091f76f349d16ec0c58e53e4ae850d3538057ef4586410c8"
     }
   ],
   "end_utc": null,
@@ -26,7 +26,7 @@
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
   "io_backend": "adios2/BP5",
   "measurement_kind": "fresh-h100",
-  "notes": "Fresh large_g1 field from valid3 out/large_g1.h5; reference is the raw exact-driver large_g1_128.bin scaled to SI at cell 2e-7 (manifest sha 64b7ebc8e8312bc7782b10d9c05b064139db0e9b8c01c1feae146970ee9c59ea). Config digest is waveB1.sh; harness digest is run_case.sh. The stationary gamma=1 analytic B is identically zero; reference values below 1e-12 T (double round-off ~2e-19 T after scaling) are set to zero, as recorded in the transform. ",
+  "notes": "Fresh large_g1 field from valid3 out/large_g1.h5; reference is the raw exact-driver large_g1_128.bin scaled to SI at cell 2e-7 (manifest sha 64b7ebc8e8312bc7782b10d9c05b064139db0e9b8c01c1feae146970ee9c59ea). Config digest is waveB1.sh; harness digest is run_case.sh. The stationary gamma=1 analytic B is identically zero; reference values below 1e-12 T (double round-off ~2e-19 T after scaling) are set to zero, as recorded in the transform. The stored per-component validity masks were regenerated with the local field magnitude (sqrt(sum_c ref_c^2) for E or B) against a shared 1e-3*max_c(peak_c) floor; the error arrays and all reported error values are unchanged.",
   "openpmd_version": "0.17.1",
   "repeats": 1,
   "script_sha256": {

@@ -13,7 +13,7 @@
   "data_sha256": [
     {
       "path": "docs/paper/data/var1b/slices_var1b.npz",
-      "sha256": "962f60713ffab839c48df1a0a171f88b9787c37d80224f2010d92ac47b72a8a9"
+      "sha256": "d59ec32e524163f14cd0188552153cb734d86a879c351d5231556dc07ca2b08b"
     }
   ],
   "end_utc": null,
@@ -26,7 +26,7 @@
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
   "io_backend": "adios2/BP5",
   "measurement_kind": "fresh-h100",
-  "notes": "Fresh 1mrad field from valid3 out/1mrad_fig.h5 (sha c8b95867..., manifest-recorded). The rendered val_1mrad panels use the fresh pic field; the order-12 reference arrays are the committed arbiter extracted to valid3/refs/slices_var1b_ref.npz (sha 04a468a1...). Config digest is waveBCDE.sh; harness digest is run_case.sh.",
+  "notes": "Fresh 1mrad field from valid3 out/1mrad_fig.h5 (sha c8b95867..., manifest-recorded). The rendered val_1mrad panels use the fresh pic field; the order-12 reference arrays are the committed arbiter extracted to valid3/refs/slices_var1b_ref.npz (sha 04a468a1...). Config digest is waveBCDE.sh; harness digest is run_case.sh. The stored per-component validity masks were regenerated with the local field magnitude (sqrt(sum_c ref_c^2) for E or B) against a shared 1e-3*max_c(peak_c) floor; the error arrays and all reported error values are unchanged.",
   "openpmd_version": "0.17.1",
   "repeats": 1,
   "script_sha256": {

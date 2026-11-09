@@ -18,15 +18,18 @@ mid-plane (Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal and increa
 left to right, so the bunch moves rightwards and $y$ is the beam axis; the
 vertical axis is $x$ in the x-y cut and $z$ in the z-y cut. Each figure has
 a field row with four columns ($E_x,E_y,E_z,E^2$) and an error row
-underneath. The three components share one linear colour scale and bar;
-$E^2$ (or $B^2$) has its own scale and bar with its own unit label. The
-error row is logarithmic and masked where the reference is below $10^{-3}$
-of its own peak. The forward case compares the mesh plus fast shell
-against an order-4 adaptive Gauss--Legendre driver. The Lorentz-contracted
+underneath. The three components share one symmetric-logarithmic colour scale
+and bar, and each component panel states its peak as a percentage of the
+shared maximum. $E^2$ (or $B^2$) has its own logarithmic scale from $10^{-6}$
+of the panel peak to the peak, with its own unit label. The error row is
+logarithmic, floored at $10^{-6}$ and marked at the $10^{-3}$ gate. Pixels are
+masked in light grey where the local field magnitude is below $10^{-3}$ of
+the largest component peak on the plane. The forward case compares the mesh
+plus fast shell against an order-4 adaptive Gauss--Legendre driver. The Lorentz-contracted
 in-support quadrature of Section~\ref{sec:fastacc} is the present
 reference; it differs from that driver at the few-percent level at the
 closest node, so the in-support error pixels in these panels bound the
-in-support error from above. The solid white outline marks the TSC support.
+in-support error from above. The dark outline marks the TSC support.
 The quantitative in-support statement is the fast-versus-arbiter $1.6\%$
 at the worst node (Section~\ref{sec:fastacc}). The fluctuation panels show
 the complete reference field; the binned momentum-spread case is carried
@@ -51,9 +54,13 @@ $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m; x-y plane
 at $z=3.2\,\si{\micro\metre}$ (upper) and z-y plane at
 $x=3.2\,\si{\micro\metre}$ (lower), with $y$ horizontal, the beam axis.
 Each image shows four columns $E_x,E_y,E_z,E^2$: the three components share
-one linear scale and bar, while $E^2$ has its own scale and unit label; the
-lower row is logarithmic error, masked below $10^{-3}$ of the peak, and the
-white outline marks the TSC support. The in-support fast-versus-arbiter
+one symmetric-logarithmic scale and bar with each panel's peak stated as a
+percentage of the shared maximum, while $E^2$ has its own logarithmic scale
+from $10^{-6}$ of the panel peak to the peak and its own unit label. The lower
+row is logarithmic error, floored at $10^{-6}$ and marked at the $10^{-3}$
+gate, with light-grey pixels where the local field magnitude is below
+$10^{-3}$ of the largest component peak on the plane; the dark outline marks
+the TSC support. The in-support fast-versus-arbiter
 error against the order-12 independent continuum reference is $1.6\%$ at
 the worst node.}
 \label{fig:valforwardE}
@@ -65,8 +72,9 @@ the worst node.}
 \includegraphics[width=0.92\linewidth]{figs/val_forward_zy_B.pdf}
 \caption{Magnetic companion to Fig.~\ref{fig:valforwardE} with the same
 planes and layout, showing four columns $B_x,B_y,B_z,B^2$: the three
-components share one linear bar and $B^2$ has its own scale and unit label;
-$B_y\equiv0$ for motion along $+y$ is marked in its panel. $y$ is
+components share one symmetric-logarithmic bar and $B^2$ has its own
+logarithmic scale and unit label;
+$B_y$ is identically zero and its panel is blank. $y$ is
 horizontal and is the beam axis, and the same TSC-support outline is drawn
 as in the electric figure. The magnetic field is about
 $3.3\!\times\!10^{-9}$ of the $E$-dominated local field at $\gamma=10$
@@ -81,9 +89,10 @@ $3.3\!\times\!10^{-9}$ of the $E$-dominated local field at $\gamma=10$
 \caption{Fluctuation-case electric reference with the same geometry and
 bunch as Fig.~\ref{fig:valforwardE} but a $1.046$\,mrad rms $x$-divergence,
 showing four columns $E_x,E_y,E_z,E^2$ from the order-12 independent
-continuum reference: the three components share one linear scale and bar,
-while $E^2$ has its own scale and unit label. $y$ is horizontal and is the
-beam axis. The panels show the reference field; the corresponding binned
+continuum reference: the three components share one symmetric-logarithmic
+scale and bar with each panel's peak stated as a percentage of the shared
+maximum, while $E^2$ has its own logarithmic scale and unit label. $y$ is
+horizontal and is the beam axis. The panels show the reference field; the corresponding binned
 picBunch output is reported in Appendix~\ref{app:multivel}.}
 \label{fig:valfluctE}
 \end{figure}
@@ -93,8 +102,9 @@ picBunch output is reported in Appendix~\ref{app:multivel}.}
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_xy_B.pdf}\\[2pt]
 \includegraphics[width=0.92\linewidth]{figs/val_fluct_zy_B.pdf}
 \caption{Magnetic reference for the fluctuation case, with the same planes,
-four columns $B_x,B_y,B_z,B^2$: the three components share one linear bar
-and $B^2$ has its own scale and unit label, as in Fig.~\ref{fig:valfluctE};
+four columns $B_x,B_y,B_z,B^2$: the three components share one
+symmetric-logarithmic bar and $B^2$ has its own logarithmic scale and unit
+label, as in Fig.~\ref{fig:valfluctE};
 $y$ is horizontal and is the beam axis. The $x$-divergence lifts $B_y$ off
 zero, although it remains about $3\times10^{-4}$ of the dominant component.
 Only reference fields from the order-12 independent continuum reference are
@@ -114,10 +124,11 @@ cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against
 the
 order-12 independent continuum reference. The upper image is electric and
 the lower magnetic, each with four columns: three components on one shared
-scale and bar, and $E^2$ or $B^2$ on its own scale and bar; $y$ is
-horizontal and is the beam axis, and error rows are logarithmic and masked
-below $10^{-3}$ of the reference peak. The solid white outline marks the
-TSC support.}
+scale and bar, and $E^2$ or $B^2$ on its own logarithmic scale and bar; $y$
+is horizontal and is the beam axis. Error rows are logarithmic, floored at
+$10^{-6}$ and marked at the $10^{-3}$ gate, and masked in light grey where
+the local field magnitude is below $10^{-3}$ of the largest component peak on
+the plane. The dark outline marks the TSC support.}
 \label{fig:val1mrad}
 \end{figure}
 
@@ -125,7 +136,9 @@ TSC support.}
 \centering
 \small
 \caption{Mid-bunch slice statistics, mesh-only. Worst relative error per
-component and fraction of unmasked plane pixels above $10^{-3}$, x-y plane
+component and fraction of unmasked plane pixels above $10^{-3}$ (unmasked
+means the local field magnitude is at least $10^{-3}$ of the largest
+component peak on the plane), x-y plane
 at $z=1.60\,\si{\micro\metre}$ and z-y plane at $x=3.20\,\si{\micro\metre}$,
 $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m, mesh against the
 independent exact TSC driver (FP64 quadrature, order $4$, max level $5$,
@@ -223,7 +236,7 @@ Fig.~\ref{fig:largeg1} is the stationary-bunch electric case. The boundary
 field is about $10.3\%$ of the peak (worst per-component, $\gamma=10$ z-y
 $E_z$), so the colour scale is set by the bunch and the far decay is
 visible inside the frame. The core error is the method error of the mesh
-where the planes cut the bunch, far above the $10^{-3}$ reference floor.
+where the planes cut the bunch, far above the $10^{-3}$ gate.
 
 \begin{figure}[H]
 \centering
@@ -235,9 +248,10 @@ $128\times128\times64$, cell $2\times10^{-7}$\,m, $N=100$,
 beam-axis set); $x$ is horizontal in the x-y cut and is the beam axis
 there, while $z$ is horizontal in the z-y cut. Upper and lower images are
 x-y and z-y planes, each showing four columns $E_x,E_y,E_z,E^2$: the three
-components share one linear scale and bar, and $E^2$ has its own scale and
-unit label, above a logarithmic error row against the order-4 driver
-reference. The boundary field is $10.3\%$ of the peak (worst component,
+components share one symmetric-logarithmic scale and bar with each panel's
+peak stated as a percentage of the shared maximum, and $E^2$ has its own
+logarithmic scale and unit label, above a logarithmic error row against the
+order-4 driver reference. The boundary field is $10.3\%$ of the peak (worst component,
 z-y $E_z$), so the colour scale is set by the bunch.}
 \label{fig:large}
 \end{figure}
@@ -249,10 +263,10 @@ z-y $E_z$), so the colour scale is set by the bunch.}
 \caption{Magnetic companion to Fig.~\ref{fig:large} at $\gamma=10$, same
 planes and earlier axial-$x$ geometry; $x$ is horizontal in the x-y cut and
 is the beam axis there, while $z$ is horizontal in the z-y cut, and
-$B_x\equiv0$ is marked in its panel. Each image shows four columns
-$B_x,B_y,B_z,B^2$: the three components share one linear bar and $B^2$ has
-its own scale and unit label, with the same logarithmic error convention as
-the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
+$B_x$ is identically zero and its panels are blank. Each image shows four
+columns $B_x,B_y,B_z,B^2$: the three components share one symmetric-logarithmic bar
+and $B^2$ has its own logarithmic scale and unit label, with the same
+logarithmic error convention as the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
 \label{fig:largeB}
 \end{figure}
 
@@ -264,9 +278,9 @@ the electric figure. The plane peak is $6.2\times10^{-4}$\,T.}
 ($\gamma=1$), same domain and layout as Fig.~\ref{fig:large}; $x$ is
 horizontal in the x-y cut and $z$ is horizontal in the z-y cut (the bunch
 is stationary, so there is no beam axis). Each image shows four columns
-$E_x,E_y,E_z,E^2$: the three components share one linear bar and $E^2$ has
-its own scale and unit label, above a logarithmic error row. The core error
-reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ reference
-floor.}
+$E_x,E_y,E_z,E^2$: the three components share one symmetric-logarithmic bar
+and $E^2$ has its own logarithmic scale and unit label, above a logarithmic
+error row. The core error
+reaches $7.6\times10^{-1}$ (z-y $E_x$), far above the $10^{-3}$ gate.}
 \label{fig:largeg1}
 \end{figure}

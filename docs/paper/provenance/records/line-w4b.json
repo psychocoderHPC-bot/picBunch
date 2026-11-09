@@ -28,7 +28,7 @@
   "repeats": 1,
   "script_sha256": {
     "path": "docs/paper/scripts/ingest_measurements.py",
-    "sha256": "f62ce766a61cba8e1a0afd8b8ecbdae9922a743392d46d99fe541cf3058a4f78"
+    "sha256": "def79048bef0f3e166a52b73079d640f0bfeeda71fdf4db9675dfc6e3f7eb7d2"
   },
   "seed": null,
   "start_utc": "2026-11-09T07:00:18Z",

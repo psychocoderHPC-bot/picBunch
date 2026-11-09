@@ -381,9 +381,10 @@ def multivel(outdir):
                  fontsize=fs.plt.rcParams["axes.labelsize"])
     cb.ax.tick_params(labelsize=fs.plt.rcParams["xtick.labelsize"])
     xline = np.linspace(Apar.min(), Apar.max(), 50)
-    axb.plot(xline, np.tan(sig_rad) * xline, color="w", lw=1.1, ls="--")
+    axb.plot(xline, np.tan(sig_rad) * xline, color=fs.REF_COLOR, lw=1.1,
+             ls="--")
     axb.plot(xline, np.tan(np.deg2rad(theta_med / 1e3)) * xline,
-             color="w", lw=1.1, ls=":")
+             color=fs.REF_COLOR, lw=1.1, ls=":")
     axb.set_xlabel(r"$u_\parallel$ ($m_ec$)")
     axb.set_ylabel(r"$u_\perp$ ($m_ec$)")
     axb.set_title(r"(b) angular spread 5$^\circ$, seed 103")
@@ -419,7 +420,8 @@ def multivel(outdir):
           {"figure_id": "multivel",
            "source_data": [os.path.relpath(p, cases.REPO_ROOT)
                            for p in (epath, apath, bpath)],
-           "axis_limits": "panel c x 0.8..90, y 1.5e-4..3 (log-log)"})
+           "axis_limits": "panel c x 0.8..90, y 1.5e-4..3 (log-log)",
+           "reference_lines": "dark grey, dashed sigma / dotted median"})
 
 
 # -------------------------------------------------------------- H100 MPI

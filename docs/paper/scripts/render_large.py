@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
+import ingest_measurements as ingest  # noqa: E402
 
 US = 1e6
 DATASET = "large1"
@@ -28,6 +29,9 @@ COMP = {"E": ["Ex", "Ey", "Ez"], "B": ["Bx", "By", "Bz"]}
 def _items(d, plane, part, source, magnitude=True):
     comps = COMP[part]
     items = []
+    refs = [axis.to_display(d[f"{plane}_{c}_ref"], DATASET, plane, source)
+            for c in comps]
+    valid = ingest.part_valid(refs)
     for c in comps:
         axis.check_stored_shape(DATASET, plane, d[f"{plane}_{c}_pic"], d["n"],
                                 source=source)
@@ -35,8 +39,7 @@ def _items(d, plane, part, source, magnitude=True):
             "arr": axis.to_display(d[f"{plane}_{c}_pic"], DATASET, plane, source),
             "err": np.abs(axis.to_display(d[f"{plane}_{c}_err"], DATASET, plane,
                                           source)),
-            "valid": axis.to_display(d[f"{plane}_{c}_valid"], DATASET, plane,
-                                     source).astype(bool),
+            "valid": valid,
             "title": rf"${c[0]}_{{{c[-1]}}}$",
             "symbol": f"{c[0]}_{{{c[-1]}}}",
         })
@@ -49,10 +52,8 @@ def _items(d, plane, part, source, magnitude=True):
         peak = float(np.max(ref2)) if np.max(ref2) > 0 else 0.0
         if peak > 0:
             err = np.abs(pic2 - ref2) / peak
-            valid = ref2 >= 1e-3 * peak
         else:
             err = np.full_like(arr, np.nan)
-            valid = np.zeros_like(arr, dtype=bool)
         items.append({"arr": arr, "err": err, "valid": valid,
                       "title": rf"${part}^2$"})
     return items

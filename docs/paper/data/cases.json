@@ -27,9 +27,9 @@
    "seed": 42,
    "source_data": [
     {
-     "bytes": 941421,
+     "bytes": 940531,
      "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
-     "sha256": "5257bd1897ae21dbedd59e4151cd078b14497a395d582ff0617ded704f7328db"
+     "sha256": "6899c9cd5248fd9b30f6788777879a23d6a2b8470a339bb048541c13659beb05"
     },
     {
      "bytes": 4830,
@@ -68,9 +68,9 @@
    "seed": 42,
    "source_data": [
     {
-     "bytes": 959924,
+     "bytes": 958334,
      "path": "docs/paper/data/bdata2/forward_slice.npz",
-     "sha256": "0e9d304e7562ff2a97feaf95d1204b94293390b51b825443e5f2f526ac6941a5"
+     "sha256": "44313e5d0730ec71afc4177ff691d06f776554c4d6b49032699f76b936f405df"
     },
     {
      "bytes": 4830,
@@ -389,9 +389,9 @@
    "seed": null,
    "source_data": [
     {
-     "bytes": 2070106,
+     "bytes": 2068252,
      "path": "docs/paper/data/large1/slices_g1.npz",
-     "sha256": "f47d5ace2592956c26c95cb59c59369e13854cba69728d09e9523abdba42ed96"
+     "sha256": "935f598cfb6c9465091f76f349d16ec0c58e53e4ae850d3538057ef4586410c8"
     }
    ],
    "measurement_kind": "fresh-h100",
@@ -424,9 +424,9 @@
    "seed": null,
    "source_data": [
     {
-     "bytes": 2829302,
+     "bytes": 2828305,
      "path": "docs/paper/data/large1/slices_g10.npz",
-     "sha256": "d8739599a039084992520c6fc3c0b37b4124f028cc5a61c1b0ce6b913c4e0f56"
+     "sha256": "397ec7ae4ef7fb9d2a7513c809a53367c9d1973687b5ba2e1badd2880abeb976"
     }
    ],
    "measurement_kind": "fresh-h100",
@@ -637,33 +637,6 @@
    "gpu_model": "NVIDIA H100 PCIe 80 GB",
    "io_backend": "adios2/BP5"
   },
-  "scaling-distance": {
-   "config": {
-    "gamma": [
-     1,
-     10
-    ],
-    "source": "SB1 distance sweep"
-   },
-   "figures": [
-    "SCHEM1_field_evaluation_schematic"
-   ],
-   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-   "picbunch_version": "picBunch dc69c16a21f1dc330746365e3409560cb2399ed9",
-   "propagation_axis": "n/a",
-   "provenance": "fresh-h100",
-   "seed": null,
-   "source_data": [
-    {
-     "bytes": 4259,
-     "path": "docs/paper/data/scaling/dsweep.csv",
-     "sha256": "e3687a3df32333b249837c3163703882073f0a6e66791c1a514aeceb10042b70"
-    }
-   ],
-   "measurement_kind": "fresh-h100",
-   "gpu_model": "NVIDIA H100 PCIe 80 GB",
-   "io_backend": "adios2/BP5"
-  },
   "var1b-1mrad": {
    "config": {
     "cell_m": 2e-07,
@@ -690,9 +663,9 @@
    "seed": 43,
    "source_data": [
     {
-     "bytes": 153765,
+     "bytes": 153057,
      "path": "docs/paper/data/var1b/slices_var1b.npz",
-     "sha256": "962f60713ffab839c48df1a0a171f88b9787c37d80224f2010d92ac47b72a8a9"
+     "sha256": "d59ec32e524163f14cd0188552153cb734d86a879c351d5231556dc07ca2b08b"
     }
    ],
    "measurement_kind": "fresh-h100",

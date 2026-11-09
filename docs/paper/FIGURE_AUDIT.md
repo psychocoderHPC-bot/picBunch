@@ -24,8 +24,8 @@ fig | file | pdf_in | target_in | scale | min_pt | bars/row | overlaps | cbar la
 16 | val_1mrad_xy_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -7.9e-4; 0; 7.9e-4; B | PASS
 17 | large_sxy_g10_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.2e6; 0; 1.2e6; E | PASS
 17 | large_szy_g10_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.3e6; 0; 1.3e6; E | PASS
-18 | large_sxy_g10_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -3.7e-4; 0; 3.7e-4; B | PASS
-18 | large_szy_g10_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -3.8e-4; 0; 3.8e-4; B | PASS
+18 | large_sxy_g10_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.5e-4; 0; 1.5e-4; B | PASS
+18 | large_szy_g10_B.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.4e-4; 0; 1.4e-4; B | PASS
 19 | large_sxy_g1_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.9e5; 0; 1.9e5; E | PASS
 19 | large_szy_g1_E.pdf | 5.767 | 5.767 | 1.0 | 10.68 | [2, 2] | 0 | -1.8e5; 0; 1.8e5; E | PASS
 20 | F_multivel_dist.pdf | 6.577 | 6.143 | 0.934 | 9.97 | [1] | 0 | 10; 0; 10; 1 | PASS

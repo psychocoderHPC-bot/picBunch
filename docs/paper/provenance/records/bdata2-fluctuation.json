@@ -11,7 +11,7 @@
   "data_sha256": [
     {
       "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
-      "sha256": "5257bd1897ae21dbedd59e4151cd078b14497a395d582ff0617ded704f7328db"
+      "sha256": "6899c9cd5248fd9b30f6788777879a23d6a2b8470a339bb048541c13659beb05"
     },
     {
       "path": "docs/paper/data/bdata2/forward_sources.npz",
@@ -44,7 +44,7 @@
   "host": "fwk394-local-cpu (local CPU container alpaka-bot-cli-y6h5m)",
   "io_backend": null,
   "measurement_kind": "fresh-reference",
-  "notes": "Reference-only figure: the four val_fluct panels plot the order-12 exact_field_driver reference, recomputed on the CPU (fwk394-local-cpu), not a GPU measurement. Reference parameters: TSC shape, order 12, max_level 5, tol 1e-4, grid 64^3, cell 1e-7 m, planes xy iz=32 and zy ix=32. Driver ran twice with byte-identical output (sha 9b2449dd...); the order-4 control is byte-identical to the committed fluctuation_ref.bin, validating the input/sources/points mapping. Input is BDATA2 fluctuation.bunch.h5 (sha f348a0a7...); the literal mvpaper_fluc1mrad.h5 filename is absent on this host and the byte-identical BDATA2 copy was used. build_fluct_npz.py replaced only xy_ref_*/zy_ref_* (and the derived *_err_* arrays) in the 63-key renderer layout; all other keys, shapes and dtypes are unchanged and the pic field is still the legacy forward-case proxy. Exact driver CLI was not captured by the generator, so command is null; the fixed parameters are recorded here. No GPU/CUDA/openPMD/ADIOS2 versions exist for this CPU reference run, so those fields are null.",
+  "notes": "Reference-only figure: the four val_fluct panels plot the order-12 exact_field_driver reference, recomputed on the CPU (fwk394-local-cpu), not a GPU measurement. Reference parameters: TSC shape, order 12, max_level 5, tol 1e-4, grid 64^3, cell 1e-7 m, planes xy iz=32 and zy ix=32. Driver ran twice with byte-identical output (sha 9b2449dd...); the order-4 control is byte-identical to the committed fluctuation_ref.bin, validating the input/sources/points mapping. Input is BDATA2 fluctuation.bunch.h5 (sha f348a0a7...); the literal mvpaper_fluc1mrad.h5 filename is absent on this host and the byte-identical BDATA2 copy was used. build_fluct_npz.py replaced only xy_ref_*/zy_ref_* (and the derived *_err_* arrays) in the 63-key renderer layout; all other keys, shapes and dtypes are unchanged and the pic field is still the legacy forward-case proxy. Exact driver CLI was not captured by the generator, so command is null; the fixed parameters are recorded here. No GPU/CUDA/openPMD/ADIOS2 versions exist for this CPU reference run, so those fields are null. The stored per-component validity masks were regenerated with the local field magnitude (sqrt(sum_c ref_c^2) for E or B) against a shared 1e-3*max_c(peak_c) floor; the error arrays and all reported error values are unchanged.",
   "openpmd_version": null,
   "reference_only": true,
   "repeats": 2,

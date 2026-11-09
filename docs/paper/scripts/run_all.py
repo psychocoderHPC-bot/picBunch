@@ -20,7 +20,6 @@ import check_provenance  # noqa: E402
 import render_large  # noqa: E402
 import render_pergamma  # noqa: E402
 import render_scaling  # noqa: E402
-import render_schematic  # noqa: E402
 import render_slices  # noqa: E402
 
 
@@ -76,7 +75,7 @@ def main(argv=None):
                     help="fail if a rendered figure's reduced data is still pending")
     ap.add_argument("--include-unreferenced", action="store_true",
                     help="also render figures the manuscript no longer includes "
-                         "(the V100 F_mpi_rank_scaling and SCHEM1)")
+                         "(the V100 F_mpi_rank_scaling)")
     a = ap.parse_args(argv)
     out = os.path.abspath(a.out_dir)
     os.makedirs(out, exist_ok=True)
@@ -87,8 +86,6 @@ def main(argv=None):
     results += render_large.run(out)
     results += render_pergamma.main(out)
     pending = render_scaling.run(out, include_unreferenced=a.include_unreferenced)
-    if a.include_unreferenced:
-        render_schematic.run(out)
 
     log = a.assertions or os.path.join(out, "axis-assertions.txt")
     _write_assertions(log, results, self_test)

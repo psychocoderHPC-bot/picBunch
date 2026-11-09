@@ -8,6 +8,136 @@ per axis, $h$ the node spacing in cell units (node $i$ sits at
 $i h\,\mathbf{cell}$), and $\mathbf{cell}=(dx,dy,dz)$. All precision-critical
 work is in double precision.
 
+\subsection{Field evaluation: mesh plus near correction}
+\label{sec:pipeline}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    font=\footnotesize, x=1mm, y=1mm,
+    box/.style={draw, rounded corners=2pt, align=center, minimum height=8mm,
+                minimum width=33mm, fill=white, line width=0.6pt},
+    sw/.style={draw, align=center, minimum height=8mm, minimum width=29mm,
+               fill=teal!8, line width=0.7pt, diamond, aspect=2.6},
+    flow/.style={-{Stealth[length=2.6mm]}, line width=0.9pt},
+    lbl/.style={font=\footnotesize, align=center, fill=white, inner sep=1pt}]
+  % ---- (a) pipeline: vertical flow, left half ----
+  \node[box] (bunch) at (-22,0)   {bunch: sources $\mathbf x_p,q_p,\mathbf u$};
+  \node[box] (dep)   at (-22,-13) {TSC deposit $\to\rho$ on padded $M^3$};
+  \node[box] (fft)   at (-22,-26) {FFT convolution, $\times6$ components};
+  \node[box] (mesh)  at (-22,-39) {mesh field $F_{\rm mesh}$ (far field)};
+  \node[sw]  (sw)    at (-22,-53) {within $R$ (per axis) of a source?};
+  \node[box] (near)  at (-22,-68) {near region: closed form $F_{\rm near}$};
+  \node[font=\footnotesize, below=1mm of near, align=center, text=black!60]
+        (intra) {$\mathrm{asinh}$ box $+$ remainder; ray integral (oblique)};
+  \node[box, minimum width=41mm] (asm) at (-22,-84)
+        {assemble: $F=F_{\rm mesh}-F_{\rm mesh}({\rm near})+F_{\rm near}({\rm near})$};
+  \node[font=\footnotesize, below=1mm of asm, align=center, text=black!60]
+        (sub) {$-F_{\rm mesh}({\rm near})$ from a per-tile padded FFT (pad 2)};
+  \node[box] (out)   at (-22,-100) {$F_{\rm out}$: exact near, mesh far};
+  \draw[flow] (bunch) -- (dep);
+  \draw[flow] (dep)   -- (fft);
+  \draw[flow] (fft)   -- (mesh);
+  \draw[flow] (mesh)  -- (sw);
+  \draw[flow] (sw.south) -- node[lbl,right, xshift=1mm]{yes (near)} (near.north);
+  \draw[flow] (sw.west) -- (-44,-53) -- (-44,-84)
+        node[lbl, left, pos=0.5]{no (far):\\$F=F_{\rm mesh}$} -- (asm.west);
+  \draw[flow] (near.south) -- (asm.north);
+  \draw[flow] (asm.south) -- (out.north);
+  % ---- (b) region switch, right half ----
+  \begin{scope}[shift={(24,-52)}]
+    \node[font=\small, anchor=north] at (0,15mm) {(b) region switch};
+    \node[draw, rounded corners=1pt, minimum width=33mm, minimum height=26mm,
+          fill=white, line width=0.6pt] (rbox) at (0,0) {};
+    \fill[orange!22] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
+    \draw[very thick, color=orange!55!black] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
+    \draw[thick, dashed, color=teal!55!black] (0,0) circle (5.5mm);
+    \fill[purple!75] (0,0) circle (2.1mm);
+    \draw[thick, color=teal!55!black, -{Stealth}] (10.5mm,-5mm) -- (14.5mm,-8mm);
+    \node[font=\footnotesize, anchor=west] at (15mm,-8mm) {$R$ (per axis)};
+    \node[font=\footnotesize, align=center, fill=white, inner sep=1pt]
+          at (0,-9.5mm) {$\mathrm{asinh}$ box};
+    \node[font=\footnotesize, fill=white, inner sep=1pt, anchor=east] at (-8mm,9mm) {mesh (FFT)};
+    \node[font=\footnotesize, fill=white, inner sep=1pt, anchor=west] at (8mm,4mm) {near shell};
+  \end{scope}
+\end{tikzpicture}
+\caption{How the field is computed. \textbf{(a)} The pipeline: a TSC deposit and a
+free-space FFT convolution produce the mesh field $F_{\rm mesh}$, accurate in the
+far field. The switch asks, per (source, node) pair, whether the pair is within the
+near-shell radius $R$ \emph{on every axis}; the far pair keeps $F_{\rm mesh}$, the
+near pair is replaced by the closed-form pair integral (an $\mathrm{asinh}$ box plus
+a smooth remainder, a ray integral for oblique motion). Assembly subtracts the mesh
+value of the near pairs (a per-tile zero-padded FFT, padding 2) and adds the
+closed form, so the output is exact in the near region and mesh-accurate in the far
+region. \textbf{(b)} The region switch in real space: the mesh (orange) holds
+everywhere except a per-axis box of half-width $R$ about each source (teal ring), and
+the $\mathrm{asinh}$ box acts where the observer is inside the TSC support (purple
+core, $1.5$ cells).}
+\label{fig:pipeline}
+\end{figure}
+
+The field of Section~\ref{sec:fielddef} is assembled as a smooth part plus a
+near-field correction (Fig.~\ref{fig:pipeline}). The smooth part,
+$F_{\mathrm{mesh}}$, is the zero-padded free-space FFT convolution of the TSC
+deposit with the sampled TSC-convolved kernel
+(Sections~\ref{sec:method}--\ref{sec:readout}); it is the far field and is what
+is written when no correction is requested. A near correction removes the
+mesh's near-field error, where the kernel is singular. The total is
+\begin{equation}
+  \label{eq:assembly}
+  F = F_{\mathrm{mesh}}(\mathrm{all})
+      - F_{\mathrm{mesh}}(\mathrm{near})
+      + F_{\mathrm{near}}(\mathrm{near}),
+\end{equation}
+where $F_{\mathrm{near}}$ is the closed-form TSC-convolved pair integral
+(Section~\ref{sec:nearsheet}) and the mesh-only path is recovered by omitting
+the correction (the default).
+
+\emph{Switching rule.}
+The correction is applied per (source, node) pair, and a pair is \emph{near}
+when the source and node lie within $R$ mesh nodes of each other \emph{on every
+axis} (a per-axis box, not a Euclidean sphere;
+Fig.~\ref{fig:pipeline}b). The output is tiled for parallelism and the near set
+of a tile is every source within $R$ of the tile box on every axis, so the
+effective reach is $R$ plus at most half a tile at a tile boundary. $R$
+defaults to $3$ nodes and grows with the requested tolerance,
+$R=\mathrm{clamp}\!\big(3+\lceil\log_{10}(10^{-3}/\mathrm{tol})\rceil,\,3,\,6\big)$,
+and is user-overridable; it must cover the TSC support of $1.5$ nodes.
+
+\emph{Seam.}
+The subtraction $F_{\mathrm{mesh}}(\mathrm{near})$ is a per-tile local
+zero-padded FFT (padding 2) of exactly those near sources
+(Section~\ref{sec:nearsheet}); because the convolution is linear and uses the
+same kernel as the global mesh, it equals the mesh value those pairs would
+otherwise receive, so the switch is exact at the seam.
+
+\emph{Singular pairs.}
+Where the observer falls inside a source's TSC support, the pair integral is
+split into an exact $\mathrm{O}(1)$ box term and a smooth remainder
+(Section~\ref{sec:nearsheet}). The box is the divergence-theorem field of the
+unit-density support box, an eight-term sum of the $\mathrm{asinh}$ primitive
+per component; the remainder is a tensor Gauss--Legendre integral of the
+subtracted integrand over the TSC knot panels (default order $5$). For a moving
+source the box is $\gamma$-stretched along the motion for axial $\boldsymbol\beta$;
+an oblique $\boldsymbol\beta$ is integrated directly in the Lorentz-contracted
+frame by a ray integral aligned with $\boldsymbol\beta$.
+
+\emph{Accuracy and cost.}
+The mesh alone reaches $3\times10^{-4}$ only at $8$ cells ($\gamma=1$) and
+$48$ cells perpendicular ($\gamma=10$) (Section~\ref{sec:farfield}), so the
+shell must extend past the $1.5$-node support to where the mesh degrades;
+inside it the field is exact to roundoff and the evaluator's own error is
+$6.8\times10^{-4}$ (stationary), $1.4\times10^{-4}$ (axial),
+$1.9\times10^{-3}$ (oblique, measured limit) (Section~\ref{sec:fastacc}). The
+mesh costs $\mathrm{O}(M^{3})$ in the padded grid and is independent of the
+particle count $N$; the correction costs one closed-form evaluation per near
+pair, of which a sparse bunch has $\sim N(2R)^{3}$, so $R$ and the quadrature
+order are the cost levers ($R=1.5\!\to\!4$ multiplies the wall by
+$\approx3.9$ at fixed $N$ and grid, Section~\ref{sec:cost}). A second switch
+occurs at the compute-box boundary: where the global output domain extends
+beyond the box, the margin is filled with an asymptotic moving multipole rather
+than the FFT (Section~\ref{sec:margin}).
+
 \subsection{Deposit}
 
 Each source charge is deposited onto the zero-padded $M^3$ grid with the TSC
@@ -96,7 +226,9 @@ by the cone, not by the mesh (Section~\ref{sec:gamma-landscape}).
 \label{sec:nearsheet}
 
 The default output is the whole mesh. An opt-in near shell replaces the mesh
-inside a radius $R$ (in mesh nodes of the compute grid) around each source:
+where the source and node are within $R$ mesh nodes of each other on every
+axis (a per-axis box, not a Euclidean sphere;
+Section~\ref{sec:pipeline}, Fig.~\ref{fig:pipeline}b):
 \begin{equation}
 \label{eq:nearshell}
 F = F_{\mathrm{mesh}}(\mathrm{all}) - F_{\mathrm{mesh}}(\mathrm{near})
@@ -106,9 +238,10 @@ where the subtraction uses a per-tile local zero-padded FFT of the near
 sources (padding 2) and the near term is evaluated per (source, node,
 component) by one of two backends. \texttt{exact} is an adaptive FP64
 TSC-convolution quadrature shared with the independent reference driver;
-\texttt{fast} is the closed-form evaluator below. The default is
-\texttt{none}; the envelope the radius must cover depends on $h$
-(Appendix~\ref{app:slices}).
+\texttt{fast} is the closed-form evaluator below. $R$ is in mesh nodes and
+defaults to $R=\mathrm{clamp}(3+\lceil\log_{10}(10^{-3}/\mathrm{tol})
+\rceil,\,3,\,6)$ when the user leaves it unset; the default mode is
+\texttt{none}.
 
 The fast evaluator splits the in-support integral of Eq.~\eqref{eq:Fc} into
 a singular part and a smooth remainder. The singular part is the eight-term
@@ -136,10 +269,11 @@ tensor Gauss--Legendre quadrature on the subtracted integrand
 $(S-W^\ast)K$ over the TSC knot panels, each axis split at the TSC knots and
 at the anchor point $s^\ast$; the default order is $5$ ($8000$ nodes per
 in-support pair). For a moving bunch the box is $\gamma$-stretched for the
-axial direction, and the oblique direction uses a rest-frame octant
-quadrature of the singular box at order $8$ ($4096$ nodes) plus the same
-remainder. Host and device use the same algebra; the full derivation is in
-Appendix~\ref{app:deriv}.
+axial direction; the oblique direction instead uses a direct
+Lorentz-contracted ($d$-space) ray integral of $16\times32\times4$ nodes
+(angular rule polar-aligned with $\boldsymbol\beta$, four radial Gauss nodes
+per knot interval), with no remainder on that branch. Host and device use the
+same algebra; the full derivation is in Appendix~\ref{app:deriv}.
 
 \paragraph{Assembly.}
 Single-source tests at a tile centre and a tile boundary give an assembly

@@ -13,7 +13,7 @@
   "data_sha256": [
     {
       "path": "docs/paper/data/large1/slices_g10.npz",
-      "sha256": "d8739599a039084992520c6fc3c0b37b4124f028cc5a61c1b0ce6b913c4e0f56"
+      "sha256": "397ec7ae4ef7fb9d2a7513c809a53367c9d1973687b5ba2e1badd2880abeb976"
     }
   ],
   "end_utc": null,
@@ -28,7 +28,7 @@
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
   "io_backend": "adios2/BP5",
   "measurement_kind": "fresh-h100",
-  "notes": "Fresh large_g10 field from valid3 out/large_g10.h5; reference is the raw exact-driver large_g10_128.bin scaled to SI at cell 2e-7 (manifest sha 9e2430791195408fd3f259fc0be842ffe341015b7d23e2f6c0f23703c9a66f6a). Config digest is waveB1.sh; harness digest is run_case.sh.",
+  "notes": "Fresh large_g10 field from valid3 out/large_g10.h5; reference is the raw exact-driver large_g10_128.bin scaled to SI at cell 2e-7 (manifest sha 9e2430791195408fd3f259fc0be842ffe341015b7d23e2f6c0f23703c9a66f6a). Config digest is waveB1.sh; harness digest is run_case.sh. The stored per-component validity masks were regenerated with the local field magnitude (sqrt(sum_c ref_c^2) for E or B) against a shared 1e-3*max_c(peak_c) floor; the error arrays and all reported error values are unchanged.",
   "openpmd_version": "0.17.1",
   "repeats": 1,
   "script_sha256": {
