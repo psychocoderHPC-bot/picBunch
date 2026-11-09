@@ -111,7 +111,7 @@ $M\!-\!P$: mesh vs point field; $T\!-\!P$: TSC smoothing, mesh-independent.
 At $\gamma=10$, aspect 1 the $M\!-\!P$ vs $M\!-\!T$ gap is the smoothing
 (L2 ratio $58\times$), not the mesh. Measured on \texttt{rosi\_v100}
 (V100; the $d\le32$ sweeps of Section~\ref{sec:farfield} were re-measured on
-\texttt{jrc0880}, so this $d=48$ table and those sweeps are on different
+JURECA H100, so this $d=48$ table and those sweeps are on different
 hosts).}
 \label{tab:d48}
 \begin{tabular}{lrrrr}
@@ -215,7 +215,7 @@ measured window). $T$: TSC-convolved continuum; $P$: point field. Oblique
 directions are $\sim1.5\times$ larger. Measured on \texttt{rosi\_v100}
 (V100); like Table~\ref{tab:d48} this comes from the original W4 campaign,
 while the $d\le32$ sweeps of Section~\ref{sec:farfield} are the
-\texttt{jrc0880} re-measurement, so the two are on different hosts.}
+JURECA H100 re-measurement, so the two are on different hosts.}
 \label{tab:crossover}
 \begin{tabular}{lcc|cc|cc}
 \toprule
@@ -384,7 +384,7 @@ with a warning when no device is present.
 \small
 \caption{Measured CLI wall at $2\times10^{6}$ particles, $20$-cell bunch,
 $66\times68\times66$, cell $2.5\times10^{-7}$\,m, tile $4$, one H100
-(\texttt{jrc0880.jureca}, \texttt{sm\_90}, ADIOS2-BP5, CUDA 13.4). ``near-shell
+(JURECA H100, \texttt{sm\_90}, ADIOS2-BP5, CUDA 13.4). ``near-shell
 wall'' excludes the mesh, ``end-to-end wall'' includes it. The mesh-only
 wall is the mesh stage of the $R=1.5$ row: $0.500$\,s of its $500.95$\,s
 end-to-end wall, of which the compute is $0.083$\,s.}

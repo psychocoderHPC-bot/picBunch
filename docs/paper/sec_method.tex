@@ -15,28 +15,30 @@ work is in double precision.
 \centering
 \begin{tikzpicture}[
     font=\small, x=1mm, y=1mm,
-    box/.style={draw, rounded corners=2pt, align=center, minimum height=8mm,
+    box/.style={draw, rounded corners=2pt, align=center, minimum height=9mm,
                 minimum width=33mm, fill=white, line width=0.6pt},
-    sw/.style={draw, align=center, minimum height=8mm, minimum width=29mm,
+    sw/.style={draw, align=center, minimum height=9mm, minimum width=29mm,
                fill=teal!8, line width=0.7pt, diamond, aspect=2.0, inner sep=0.5mm},
     flow/.style={-{Stealth[length=2mm]}, line width=0.9pt},
     lbl/.style={font=\small, align=center, fill=white, inner sep=1pt}]
-  % ---- (a) pipeline: vertical flow, left half ----
-  \node[box] (bunch) at (-22,0)    {bunch: sources $\mathbf x_p,q_p,\mathbf u$};
-  \node[box] (dep)   at (-22,-14.2) {TSC deposit $\to\rho$ on padded $M^3$};
-  \node[box] (fft)   at (-22,-28.5) {FFT convolution, $\times6$ components};
-  \node[box] (mesh)  at (-22,-42.7) {mesh field $F_{\rm mesh}$ (far field)};
-  \node[sw]  (sw)    at (-22,-67) {source within $R$ cells in $x$, $y$, $z$?};
-  \node[box] (near)  at (-22,-92.1) {near region: closed form $F_{\rm near}$};
-  \node[font=\small, below=1mm of near, align=center, text=black!60,
-         fill=white, inner sep=0.6pt]
-         (intra) {$\mathrm{asinh}$ box $+$ remainder; ray integral (oblique)};
-  \node[box, minimum width=41mm] (asm) at (-22,-114.2)
-         {assemble: $F=F_{\rm mesh}-F_{\rm mesh}({\rm near})+F_{\rm near}({\rm near})$};
-  \node[font=\small, below=1mm of asm, align=center, text=black!60,
-         fill=white, inner sep=0.6pt]
-         (sub) {$-F_{\rm mesh}({\rm near})$ from a per-tile padded FFT (pad 2)};
-  \node[box] (out)   at (-22,-128.4) {$F_{\rm out}$: exact near, mesh far};
+   % ---- (a) pipeline: vertical flow, left half ----
+   % Node heights are 9mm (text is one 9pt line, ~3.3mm), and the vertical pitch
+   % keeps every border-to-border arrow gap >= 7mm (head 2mm + 4mm clearance).
+   \node[box] (bunch) at (-22,0)    {bunch: sources $\mathbf x_p,q_p,\mathbf u$};
+   \node[box] (dep)   at (-22,-16.5) {TSC deposit $\to\rho$ on padded $M^3$};
+   \node[box] (fft)   at (-22,-33)   {FFT convolution, $\times6$ components};
+   \node[box] (mesh)  at (-22,-49.5) {mesh field $F_{\rm mesh}$ (far field)};
+   \node[sw]  (sw)    at (-22,-70.5) {source within $R$ cells in $x$, $y$, $z$?};
+   \node[box] (near)  at (-22,-97.5) {near region: closed form $F_{\rm near}$};
+   \node[font=\small, below=1mm of near, align=center, text=black!60,
+          fill=white, inner sep=0.6pt]
+          (intra) {$\mathrm{asinh}$ box $+$ remainder; ray integral (oblique)};
+   \node[box, minimum width=41mm] (asm) at (-22,-124.5)
+          {assemble: $F=F_{\rm mesh}-F_{\rm mesh}({\rm near})+F_{\rm near}({\rm near})$};
+   \node[font=\small, below=1mm of asm, align=center, text=black!60,
+          fill=white, inner sep=0.6pt]
+          (sub) {$-F_{\rm mesh}({\rm near})$ from a per-tile padded FFT (pad 2)};
+   \node[box] (out)   at (-22,-141) {$F_{\rm out}$: exact near, mesh far};
   \draw[flow] (bunch) -- (dep);
   \draw[flow] (dep)   -- (fft);
   \draw[flow] (fft)   -- (mesh);
@@ -44,44 +46,48 @@ work is in double precision.
   \draw[flow] (sw.south) -- node[lbl,right, xshift=1mm]{yes (near)} (near.north);
   % far branch: leave the diamond to the right, run a lane strictly clear of the
   % boxes' right edges, then enter the assemble box from the right.
-  \draw[flow] (sw.east) -- (16,-67) -- (16,-114.2)
+  \draw[flow] (sw.east) -- (16,-70.5) -- (16,-124.5)
         node[lbl, right, pos=0.5]{no (far)} -- (asm.east);
   \draw[flow] (near.south) -- (asm.north);
   \draw[flow] (asm.south) -- (out.north);
-  % ---- (b) region switch, right half ----
-  \begin{scope}[shift={(38,-64)}]
-    \node[font=\small, anchor=north] at (0,15mm) {(b) region switch};
-    \node[draw, rounded corners=1pt, minimum width=33mm, minimum height=26mm,
-          fill=white, line width=0.6pt] (rbox) at (0,0) {};
-    \fill[orange!22] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
-    \draw[very thick, color=orange!55!black] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
-    \draw[thick, dashed, color=teal!55!black] (0,0) circle (5.5mm);
-    \fill[purple!75] (0,0) circle (2.1mm);
-    % R is a per-axis box (half-width R) about the source: dimension arrow from the
-    % source (centre) to the near-shell boundary, double-headed, labelled.
-    \draw[thick, color=teal!55!black, <->] (0,0) -- (15.5mm,0);
-    \node[font=\small, fill=white, inner sep=1pt, anchor=south]
-          at (7.75mm,0.5mm) {$R$ cells \,(per axis)};
-    \node[font=\small, align=center, fill=white, inner sep=1pt]
-          at (0,-9.5mm) {$\mathrm{asinh}$ box};
-    \node[font=\small, fill=white, inner sep=1pt, anchor=east] at (-8mm,9mm) {mesh (FFT)};
-    \node[font=\small, fill=white, inner sep=1pt, anchor=west] at (8mm,4mm) {near shell};
-    % short note: what R does
-    \node[font=\small, align=left, text=black!70, anchor=north west,
-          inner sep=0pt] at (-16.5mm,-15mm)
-          {R sets the closed-form (near)\\ region; outside it the\\ mesh/FFT result is used.};
-  \end{scope}
+   % ---- (b) region switch, right half ----
+   % The box sits above the legend; the R dimension arrow, its note, and all the
+   % in-box labels are laid out so no text touches any other text or a box edge.
+   \begin{scope}[shift={(38,-41)}]
+     \node[font=\small, anchor=north] at (0,15mm) {(b) region switch};
+     \node[draw, rounded corners=1pt, minimum width=33mm, minimum height=26mm,
+           fill=white, line width=0.6pt] (rbox) at (0,0) {};
+     \fill[orange!22] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
+     \draw[very thick, color=orange!55!black] (-15.5mm,-11.5mm) rectangle (15.5mm,11.5mm);
+     \draw[thick, dashed, color=teal!55!black] (0,0) circle (5.5mm);
+     \fill[purple!75] (0,0) circle (2.1mm);
+     % R is a per-axis box (half-width R) about the source: dimension arrow from the
+     % source (centre) to the near-shell boundary, double-headed, labelled.
+      \draw[thick, color=teal!55!black, <->] (0,0) -- (15.5mm,0);
+      \node[font=\small, fill=white, inner sep=1pt, anchor=south]
+            at (0.5mm,0.5mm) {$R$\,cells};
+      \node[font=\small, align=center, fill=white, inner sep=1pt]
+            at (0,-9.5mm) {$\mathrm{asinh}$ box};
+      \node[font=\small, fill=white, inner sep=1pt, anchor=east] at (-6.5mm,7.5mm) {mesh (FFT)};
+      \node[font=\small, fill=white, inner sep=1pt, anchor=west] at (6.5mm,3.8mm) {near shell};
+     % short note: what R does (kept clear of the no (far) lane at x=16mm)
+     \node[font=\small, align=left, text=black!70, anchor=north west,
+           inner sep=0pt] at (-16.5mm,-13.5mm)
+           {R sets the closed-form (near)\\ region; outside it the\\ mesh/FFT result is used.};
+   \end{scope}
   % ---- legend: explains the colours/shading actually used in (a) and (b) ----
-  \begin{scope}[shift={(2,-140)}]
+  % Rows are 8mm apart (3.4mm swatches leave 4.6mm between rows), which keeps the
+  % 9pt labels clear of each other and of their swatches.
+  \begin{scope}[shift={(2,-160)}]
     \node[font=\small, anchor=west, text=black!80] at (0,0) {(c) legend};
     \node[fill=orange!22, draw=orange!55!black, line width=0.7pt, inner sep=0pt,
           minimum width=6mm, minimum height=3.4mm] at (11mm,0) {};
     \node[font=\small, anchor=west] at (15mm,0) {mesh / far field (FFT)};
-    \node[draw=teal!55!black, line width=0.9pt, inner sep=0pt,
-          minimum width=6mm, minimum height=3.4mm, dashed] at (11mm,-6mm) {};
-    \node[font=\small, anchor=west] at (15mm,-6mm) {near shell (closed form)};
-    \node[fill=purple!75, inner sep=0pt, circle, minimum size=3.4mm] at (11mm,-12mm) {};
-    \node[font=\small, anchor=west] at (15mm,-12mm) {$\mathrm{asinh}$ box (singular pair)};
+     \node[draw=teal!55!black, line width=0.9pt, inner sep=0pt,
+           minimum width=6mm, minimum height=3.4mm, dashed] at (11mm,-8mm) {};
+     \node[font=\small, anchor=west] at (15mm,-8mm) {near shell (closed form)};
+     \node[fill=purple!75, inner sep=0pt, circle, minimum size=3.4mm] at (11mm,-16mm) {};
+     \node[font=\small, anchor=west] at (15mm,-16mm) {$\mathrm{asinh}$ box (singular pair)};
   \end{scope}
  \end{tikzpicture}
 \caption{How the field is computed. \textbf{(a)} The pipeline: a TSC deposit and a

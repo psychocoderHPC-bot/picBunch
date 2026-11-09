@@ -1,8 +1,8 @@
 \section{Performance and scaling}
 \label{sec:scaling}
 
-All compute timings in Table~\ref{tab:matrix} are on \texttt{jrc0880.jureca}
-(\texttt{jrc0880}, jureca-h100), four H100 PCIe 80\,GB (\texttt{sm\_90}),
+All compute timings in Table~\ref{tab:matrix} are on JURECA H100
+(jureca-h100), four H100 PCIe 80\,GB (\texttt{sm\_90}),
 exclusive allocation, one GPU job at a time, GPU 0. Build: CUDA 13.4,
 ADIOS2 2.12.1 + openPMD 0.17.1, padding 2, double. Each configuration ran
 nine timed repeats after two untimed warm-ups; the SM clock was 1755\,MHz
@@ -50,7 +50,7 @@ Coulomb field to roundoff (Section~\ref{sec:consistency}).
 \includegraphics[width=0.62\linewidth]{figs/F_b_scaling_vs_box.pdf}
 \caption{Pipeline time versus particle count (top, log-log) and source-box
 size (bottom, semi-log), $\gamma=10$, $h=1$, double precision,
-\texttt{jrc0880}/CUDA 13.4. Blue is the total: the median over the kept
+JURECA H100, CUDA 13.4. Blue is the total: the median over the kept
 repeats of Table~\ref{tab:matrix} with an IQR bar; at $N=2\times10^6$,
 box 20 the four independent repeats are all shown. The two bimodal rows
 plot both mode totals (low/high) instead of a single median. Markers are
@@ -92,7 +92,7 @@ particles, 20-cell box).
 \centering
 \small
 \caption{Per-stage medians (ms) and device allocation (MiB), padding 2,
-double, \texttt{jrc0880} (jureca-h100) GPU 0, CUDA 13.4. ``box'' is the
+double, JURECA H100 (jureca-h100) GPU 0, CUDA 13.4. ``box'' is the
 source-box size in cells; $M$ is the padded FFT array per axis. Stage
 columns and the total are medians over nine timed repeats (two untimed
 warm-ups); the plan (\texttt{plan\_ms}) is reported separately in
@@ -136,7 +136,7 @@ openPMD reader, medians over 3 repeats, \texttt{rosi\_v100} GPU 0 (V100),
 20-cell box, $\gamma=10$, CLI \texttt{--tolerance} $10^{-3}$. Historical
 rosi\_v100 run: the raw per-repeat CSV is not in this repository and the
 rows are not re-measured in the current campaigns (the compute-only
-Table~\ref{tab:matrix} is the H100 \texttt{jrc0880} re-measurement). A
+Table~\ref{tab:matrix} is the H100 JURECA re-measurement). A
 different measurement path from the compute-only
 Table~\ref{tab:matrix}: the totals include the writer (the dominant added
 term); the per-stage split is deposit/kernel/FFT/readout/writer.}
@@ -184,7 +184,7 @@ is required before the near shell is a many-rank feature.
 \begin{table}[t]
 \centering
 \small
-\caption{Distributed-mode strong scaling on \texttt{jrc0880} (4$\times$ H100
+\caption{Distributed-mode strong scaling on JURECA H100 (4$\times$ H100
 PCIe 80\,GB) with the ADIOS2/BP5 checkpoint, medians of three serialized runs
 (one warm-up discarded).  $N=2\times10^{6}$, $256^3$, one bin, tolerance
 $10^{-3}$.  The distributed path is forced at one rank and is the automatic
@@ -209,14 +209,14 @@ $21.6/12.3/13.0$\,s with a collective writer of $4.19/2.88/6.46$\,s: the
 writer peaked at two ranks and regressed at four under collective-HDF5
 contention on the shared series. The raw per-rank CSV for this pre-fix
 campaign is not re-committed here; the values are the original
-\texttt{jrc0880} pre-fix measurement. The BP5 rows above replace it as the
+JURECA H100 pre-fix measurement. The BP5 rows above replace it as the
 plotted result.
 \end{table}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling_h100.pdf}
-\caption{Distributed-mode strong scaling on \texttt{jrc0880} (4$\times$ H100
+\caption{Distributed-mode strong scaling on JURECA H100 (4$\times$ H100
 PCIe 80\,GB) for $1$--$4$ ranks, medians of three serialized runs: total,
 distributed FFT and distributed ADIOS2/BP5 writer at $256^3$,
 $N=2\times10^{6}$.  The FFT reaches $3.73\times$ and the total

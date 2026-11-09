@@ -487,7 +487,17 @@ def mpi_h100(outdir, data_path=None):
 
     host = rows[0].get("host") or "H100 host not recorded"
     gpu = rows[0].get("gpu_model")
-    host_line = host if host.startswith("jureca") else "%s (%s)" % (host, gpu)
+    # JURECA hosts record the node name inside the partition token
+    # (e.g. "<partition> (<node>), 4x H100 PCIe 80 GB"); the figure shows
+    # only the partition and the GPU count, never the node name.
+    if host.startswith("jureca"):
+        part, _, gpu_count = host.partition(",")
+        part = part.split("(")[0].strip()
+        host_line = "JURECA %s, %s" % (part.split("-")[-1].upper(),
+                                       gpu_count.strip()) if gpu_count.strip() \
+            else "JURECA %s" % part.split("-")[-1].upper()
+    else:
+        host_line = "%s (%s)" % (host, gpu)
     ax.text(0.03, 0.97, host_line, transform=ax.transAxes, va="top",
             ha="left", fontsize=fs.plt.rcParams["font.size"],
             color=fs.OKABE["grey"])

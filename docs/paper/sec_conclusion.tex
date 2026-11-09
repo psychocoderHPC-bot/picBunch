@@ -16,7 +16,7 @@ $\gamma=10$, aspect 1, the measured values are $6.3\times10^{-3}$ at
 $d=32$ and $2.6\times10^{-4}$ at $d=48$ (Table~\ref{tab:d48}, L2). At
 $2\times10^{6}$ particles the mesh-only wall is $0.500$\,s (the mesh stage
 of the $R=1.5$ cost row, compute $0.083$\,s) on one H100 of
-\texttt{jrc0880.jureca},
+JURECA H100,
 deterministic (md5 \texttt{d3641d64\ldots}), and the cost grows with the
 particle count for the deposit (sub-linear below $\sim10^6$) and is cubic in
 the padded grid for the FFT.
@@ -24,7 +24,7 @@ The opt-in near shell assembles exactly to roundoff and its fast backend
 meets $10^{-3}$ stationary and moving axial, with the moving oblique
 interior at $1.94\times10^{-3}$, the measured limit. The MPI compute is a
 component-parallel mesh and a tile-parallel near shell, bitwise identical
-at $1/2/4$ ranks on \texttt{jrc0880.jureca} (four H100 PCIe), with the
+at $1/2/4$ ranks on JURECA H100 (four H100 PCIe), with the
 distributed FFT reaching a $3.73\times$ speedup and the total (mesh stage
 plus writer) a $2.52\times$ speedup at four ranks; the BP5 writer scales
 sub-linearly, to $1.30\times$ from one to four ranks. The measured sub-cell

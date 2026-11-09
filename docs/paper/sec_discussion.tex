@@ -21,7 +21,7 @@ discretization. The cost is two regimes with a crossover set by the box,
 not the particle count: the deposit grows with $N$ (sub-linear below
 $\sim10^6$, approaching linear at the top of the sweep) and dominates at
 large $N$ ($33$--$38$\,ms on the $2\times10^{6}$ rows, one H100 of
-\texttt{jrc0880.jureca}), while the FFT and
+JURECA H100), while the FFT and
 read-out scale with $M^3$ and dominate at large boxes ($51.9$ to
 $85.7$\,ms from $M=60$ to $120$, and to the $100$-cell row, which is bimodal
 with low/high modes $115.99/241.89$\,ms at $M=220$). Repeated runs are
