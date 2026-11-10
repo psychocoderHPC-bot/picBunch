@@ -213,25 +213,22 @@ endif()
 # ---------------------------------------------------------------------------
 # Library
 #
-# Host sources stay C++20.  Most device code is written as inline
-# ALPAKA_FN_ACC functors in those sources and compiled by nvcc/hipcc through
-# alpaka.  The only separate device translation unit is the CUDA near-shell
-# kernel in src/cuda/*.cu; there is no src/hip tree.  alpaka_finalize()
-# propagates the backend flags and the language switch.
+# Host sources stay C++20.  Device code is written as ALPAKA_FN_ACC functors
+# and alpaka/C++ in these .cpp sources and compiled by the backend compiler
+# (host, nvcc or hipcc) through alpaka; no .cu/.hip translation unit exists.
+# src/FastNearDevice.cpp is part of every backend target, so the near-shell
+# kernel is built from the same C++ source for CPU, CUDA and HIP.
+# alpaka_finalize() propagates the backend flags and the language switch.
 # ---------------------------------------------------------------------------
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
     src/Compute.cpp
     src/FarTail.cpp
+    src/FastNearDevice.cpp
     src/NearShell.cpp
     src/VelocityBinning.cpp
     src/VelocityMoments.cpp
 )
-
-if(PICBUNCH_ENABLE_CUDA)
-    file(GLOB PICBUNCH_CUDA_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/cuda/*.cu")
-    list(APPEND PICBUNCH_SOURCES ${PICBUNCH_CUDA_SOURCES})
-endif()
 
 add_library(picBunch ${PICBUNCH_SOURCES})
 add_library(picBunch::picBunch ALIAS picBunch)
@@ -358,13 +355,17 @@ alpaka_finalize(picBunchFftSizeCheck)
 
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
+alpaka_finalize(picBunchNearShellMeasure)
 
 # Pointwise fast-near evaluator for the tab:fast 52-point validation set
 # (tools/verify/pb_fast_near_52pt.cpp).  CPU-only and header-only: it calls
 # picBunch::pbfast::shape_field directly, so it links no library symbols and
-# needs no alpaka, CUDA or FFTW.
+# needs no CUDA or FFTW.  The near-field headers include alpaka's macro header
+# unconditionally, so the tool needs the header-only alpaka target.
 add_executable(picBunchFastNear52pt tools/verify/pb_fast_near_52pt.cpp)
 target_include_directories(picBunchFastNear52pt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(picBunchFastNear52pt PRIVATE alpaka::alpaka)
+alpaka_finalize(picBunchFastNear52pt)
 
 # Standalone direct d-space ray-quadrature reference for the gamma-100 oblique
 # in-support rows in tests/data/near_distance_golden.csv.  CPU only and
@@ -378,6 +379,7 @@ add_executable(picBunchNearShellRayReference tools/near-shell/ray_reference.cpp)
 # comparison (tools/velocity-bins/compare_velocity_bins.py).
 add_executable(picBunchVelocityBinsMeasure tools/velocity-bins/measure_velocity_bins.cpp)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
+alpaka_finalize(picBunchVelocityBinsMeasure)
 
 # ---------------------------------------------------------------------------
 # Synthetic scaling benchmark (additive, opt-in)

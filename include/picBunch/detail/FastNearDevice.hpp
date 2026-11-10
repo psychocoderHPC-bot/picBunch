@@ -10,8 +10,8 @@
 // (exact radial Gauss per knot interval, beta-aligned angular rule) in the
 // device kernel.  One thread owns one output node and a strided chunk of the near
 // sources, accumulates the six components, and atomically adds its partial
-// sum.  Only alpaka/CUDA builds compile the kernel; other backends keep the
-// host evaluator.
+// sum.  The source is plain alpaka C++ and is compiled per backend (host,
+// CUDA, HIP) from src/FastNearDevice.cpp; no native accelerator code is used.
 #pragma once
 
 #include "picBunch/Types.hpp"
@@ -19,10 +19,6 @@
 
 #include <cstddef>
 #include <vector>
-
-#if defined(PICBUNCH_BACKEND_CUDA)
-#    include <alpaka/alpaka.hpp>
-#endif
 
 namespace picBunch::pbfast
 {
@@ -51,8 +47,7 @@ namespace picBunch::pbfast
         kQuadratureOrderCap <= DeviceParams::kMaxOrder,
         "near-field command order exceeds the device xi/wi table capacity");
 
-#if defined(PICBUNCH_BACKEND_CUDA)
-    //! True when a CUDA device is present and the kernel can run.
+    //! True when a device for the compiled backend is present and the kernel can run.
     bool fastNearDeviceAvailable();
 
     /*! Near-shell correction for one output tile on the device.
@@ -84,5 +79,4 @@ namespace picBunch::pbfast
         double cy,
         double cz,
         DeviceParams const& params);
-#endif
 } // namespace picBunch::pbfast

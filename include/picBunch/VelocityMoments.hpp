@@ -32,18 +32,17 @@
 #include <cmath>
 #include <cstddef>
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#    define VMM_HD __host__ __device__ inline
-#else
-#    define VMM_HD inline
-#endif
+// Use alpaka's host/device annotation from the single alpaka macro header.
+// Include it unconditionally so ALPAKA_FN_ACC is defined for host and device
+// translation units alike.
+#include <alpaka/core/common.hpp>
 
 namespace picBunch
 {
     namespace detail
     {
         //! Number of multi-indices ``(a1,a2,a3)`` with ``a1+a2+a3 <= Order``.
-        VMM_HD constexpr std::size_t velocityMomentTerms(std::size_t order)
+        ALPAKA_FN_ACC inline constexpr std::size_t velocityMomentTerms(std::size_t order)
         {
             return (order + 1u) * (order + 2u) * (order + 3u) / 6u;
         }
@@ -68,7 +67,7 @@ namespace picBunch
             double c[T]{};
 
             //! Compact (lexicographic in a3,a2,a1) index of a simplex multi-index.
-            VMM_HD static constexpr std::size_t compactIndex(std::size_t a1, std::size_t a2, std::size_t a3)
+            ALPAKA_FN_ACC inline static constexpr std::size_t compactIndex(std::size_t a1, std::size_t a2, std::size_t a3)
             {
                 // The caller iterates the Order-simplex only; the result is valid
                 // for ``a1+a2+a3 <= Order``.
@@ -99,14 +98,14 @@ namespace picBunch
         };
 
         template<std::size_t Order>
-        VMM_HD void tpClear(TaylorPoly<Order>& t)
+        ALPAKA_FN_ACC inline void tpClear(TaylorPoly<Order>& t)
         {
             for(std::size_t i = 0u; i < TaylorPoly<Order>::T; ++i)
                 t.c[i] = 0.0;
         }
 
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpScalar(double v)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpScalar(double v)
         {
             TaylorPoly<Order> t;
             t.c[0] = v;
@@ -114,7 +113,7 @@ namespace picBunch
         }
 
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpAdd(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpAdd(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
         {
             TaylorPoly<Order> r;
             for(std::size_t i = 0u; i < TaylorPoly<Order>::T; ++i)
@@ -123,7 +122,7 @@ namespace picBunch
         }
 
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpSub(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpSub(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
         {
             TaylorPoly<Order> r;
             for(std::size_t i = 0u; i < TaylorPoly<Order>::T; ++i)
@@ -133,7 +132,7 @@ namespace picBunch
 
         //! Truncated product: ``c[a] = sum_{i+j=a} A[i] B[j]`` over the simplex.
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpMul(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpMul(TaylorPoly<Order> const& a, TaylorPoly<Order> const& b)
         {
             using TP = TaylorPoly<Order>;
             TP r;
@@ -160,7 +159,7 @@ namespace picBunch
 
         //! Truncated reciprocal ``1/b`` (requires ``b[0] != 0``).
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpInv(TaylorPoly<Order> const& b)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpInv(TaylorPoly<Order> const& b)
         {
             using TP = TaylorPoly<Order>;
             double const b0 = b.c[0];
@@ -185,7 +184,7 @@ namespace picBunch
 
         //! Truncated square root ``sqrt(b)`` (requires ``b[0] > 0``).
         template<std::size_t Order>
-        VMM_HD TaylorPoly<Order> tpSqrt(TaylorPoly<Order> const& b)
+        ALPAKA_FN_ACC inline TaylorPoly<Order> tpSqrt(TaylorPoly<Order> const& b)
         {
             using TP = TaylorPoly<Order>;
             double const b0 = b.c[0];
@@ -226,7 +225,7 @@ namespace picBunch
          * ``a = 0`` the coefficient is exactly the field value at ``u0``.
          */
         template<std::size_t Order>
-        VMM_HD void pointFieldTaylor(
+        ALPAKA_FN_ACC inline void pointFieldTaylor(
             double Rx,
             double Ry,
             double Rz,
@@ -292,7 +291,7 @@ namespace picBunch
         //! Reconstruct the field component ``c`` from a power-form Taylor:
         //! ``sum_a coeffs[c*T + a] * du1^a1 du2^a2 du3^a3``.  (Test helper.)
         template<std::size_t Order>
-        VMM_HD double pointFieldTaylorValue(
+        ALPAKA_FN_ACC inline double pointFieldTaylorValue(
             double const* coeffs,
             int component,
             double du1,

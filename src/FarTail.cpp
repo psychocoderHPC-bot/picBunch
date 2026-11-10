@@ -8,12 +8,122 @@
 
 #include "picBunch/FarTail.hpp"
 
+#include "picBunch/detail/HostReduction.hpp"
+
+#include <alpaka/alpaka.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 namespace picBunch
 {
+    namespace
+    {
+        //! Dedicated CPU-side alpaka queue for the particle bookkeeping kernels.
+        //!
+        //! The Bunch lives in host ``std::vector`` storage.  Running the kernels on
+        //! the host API keeps the data where it is, independent of whether the
+        //! field solver was built for CUDA/HIP.
+        inline auto& hostReductionQueue()
+        {
+            static auto selector = alpaka::onHost::makeDeviceSelector(alpaka::api::host, alpaka::deviceKind::cpu);
+            static auto device = selector.makeDevice(0);
+            static auto queue = device.makeQueue();
+            return queue;
+        }
+
+        template<typename TKernel, typename... TArgs>
+        void runHostKernel(std::size_t count, TKernel const& kernel, TArgs... args)
+        {
+            if(count == 0u)
+                return;
+            std::uint32_t const frame = 64u;
+            auto const blocks = static_cast<std::uint32_t>((count + frame - 1u) / frame);
+            auto& queue = hostReductionQueue();
+            switch(detail::hostReductionExecutorOverride())
+            {
+            case detail::HostReductionExecutor::Serial:
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{blocks, frame, alpaka::exec::cpuSerial}, kernel, args...);
+                break;
+            case detail::HostReductionExecutor::Parallel:
+            case detail::HostReductionExecutor::Default:
+            default:
+                queue.enqueue(alpaka::onHost::FrameSpec{blocks, frame}, kernel, args...);
+                break;
+            }
+            alpaka::onHost::wait(queue);
+        }
+
+        //! First far-tail pass: support distance and gamma.
+        //!
+        //! Only the transcendental per-particle work is offloaded.  The charge,
+        //! the absolute charge and the velocity are recomputed in the ordered
+        //! host accumulation with the same expressions as the reference loop, so
+        //! the sums stay bit-identical and need less scratch memory.
+        struct FarTailPassKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                std::size_t count,
+                double const* x,
+                double const* y,
+                double const* z,
+                double const* ux,
+                double const* uy,
+                double const* uz,
+                std::array<double, 3> const centre,
+                double* supportDistance,
+                double* gamma) const
+            {
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    double const rel[3] = {x[p] - centre[0], y[p] - centre[1], z[p] - centre[2]};
+                    double const r2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2];
+                    supportDistance[p] = alpaka::math::sqrt(r2);
+                    double const u2 = ux[p] * ux[p] + uy[p] * uy[p] + uz[p] * uz[p];
+                    gamma[p] = alpaka::math::sqrt(1.0 + u2);
+                }
+            }
+        };
+
+        //! Second far-tail pass: rest-frame separation vector.
+        struct RestFrameKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                std::size_t count,
+                double const* x,
+                double const* y,
+                double const* z,
+                std::array<double, 3> const centre,
+                std::array<double, 3> const nhat,
+                double meanGamma,
+                double* rest) const
+            {
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    double const rel[3] = {x[p] - centre[0], y[p] - centre[1], z[p] - centre[2]};
+                    double const rn = rel[0] * nhat[0] + rel[1] * nhat[1] + rel[2] * nhat[2];
+                    for(int a = 0; a < 3; ++a)
+                        rest[3u * p + static_cast<std::size_t>(a)]
+                            = rel[a] + (meanGamma - 1.0) * rn * nhat[a];
+                }
+            }
+        };
+    } // namespace
 
     FarTail deriveFarTail(
         Bunch const& bunch,
@@ -42,29 +152,43 @@ namespace picBunch
         // of a nearly neutral bunch effectively noise.
         std::array<double, 3> velocitySumCharge{0.0, 0.0, 0.0};
         std::array<double, 3> velocitySumAbs{0.0, 0.0, 0.0};
-        for(std::size_t p = 0; p < bunch.size(); ++p)
+        std::size_t const count = bunch.size();
+        // Reused scratch; the function is not called concurrently on one thread.
+        thread_local std::vector<double> supportDistance;
+        thread_local std::vector<double> gammaOf;
+        supportDistance.resize(count);
+        gammaOf.resize(count);
+        runHostKernel(
+            count,
+            FarTailPassKernel{},
+            count,
+            bunch.x.data(),
+            bunch.y.data(),
+            bunch.z.data(),
+            bunch.ux.data(),
+            bunch.uy.data(),
+            bunch.uz.data(),
+            centre,
+            supportDistance.data(),
+            gammaOf.data());
+        // The running sums keep the historical particle order.  Reordering a
+        // floating-point sum would make the mean velocity depend on the thread
+        // count, so the reduction itself stays serial.
+        for(std::size_t p = 0; p < count; ++p)
         {
             double const q = bunch.weight[p] * bunch.charge[p];
-            std::array<double, 3> const rel{
-                bunch.x[p] - centre[0],
-                bunch.y[p] - centre[1],
-                bunch.z[p] - centre[2]};
             tail.charge += q;
-            absoluteCharge += std::abs(q);
-            double const r2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2];
-            tail.supportRadius = std::max(tail.supportRadius, std::sqrt(r2));
-
-            double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
-                + bunch.uz[p] * bunch.uz[p];
-            double const gamma = std::sqrt(1.0 + u2);
-            tail.gammaMax = std::max(tail.gammaMax, gamma);
-            double const invGamma = 1.0 / gamma;
+            double const absQ = std::abs(q);
+            absoluteCharge += absQ;
+            tail.supportRadius = std::max(tail.supportRadius, supportDistance[p]);
+            tail.gammaMax = std::max(tail.gammaMax, gammaOf[p]);
+            double const invGamma = 1.0 / gammaOf[p];
             for(int a = 0; a < 3; ++a)
             {
                 double const u = (a == 0) ? bunch.ux[p] : (a == 1) ? bunch.uy[p] : bunch.uz[p];
                 double const v = kSpeedOfLight * u * invGamma; // particle velocity
                 velocitySumCharge[a] += q * v;
-                velocitySumAbs[a] += std::abs(q) * v;
+                velocitySumAbs[a] += absQ * v;
             }
         }
         // The weighting choice depends on the TOTAL charge only.  A bunch whose
@@ -97,17 +221,26 @@ namespace picBunch
             (meanSpeed > 0.0) ? tail.meanVelocity[0] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[1] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[2] / meanSpeed : 0.0};
-        for(std::size_t p = 0; p < bunch.size(); ++p)
+        thread_local std::vector<double> restFrame;
+        restFrame.resize(3u * count);
+        runHostKernel(
+            count,
+            RestFrameKernel{},
+            count,
+            bunch.x.data(),
+            bunch.y.data(),
+            bunch.z.data(),
+            centre,
+            nhat,
+            meanGamma,
+            restFrame.data());
+        // Ordered accumulation: the multipoles are sums and their rounding must
+        // not follow the executor's thread count.
+        for(std::size_t p = 0; p < count; ++p)
         {
             double const q = bunch.weight[p] * bunch.charge[p];
-            std::array<double, 3> const rel{
-                bunch.x[p] - centre[0],
-                bunch.y[p] - centre[1],
-                bunch.z[p] - centre[2]};
-            double const rn = rel[0] * nhat[0] + rel[1] * nhat[1] + rel[2] * nhat[2];
-            std::array<double, 3> rest{};
-            for(int a = 0; a < 3; ++a)
-                rest[a] = rel[a] + (meanGamma - 1.0) * rn * nhat[a];
+            double const rest[3]
+                = {restFrame[3u * p], restFrame[3u * p + 1u], restFrame[3u * p + 2u]};
             double const r2 = rest[0] * rest[0] + rest[1] * rest[1] + rest[2] * rest[2];
             for(int a = 0; a < 3; ++a)
                 tail.dipole[a] += q * rest[a];

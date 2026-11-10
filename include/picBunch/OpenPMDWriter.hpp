@@ -12,6 +12,17 @@
 
 namespace picBunch
 {
+    /*! Queue and host-memory contract shared by every writer entry point.
+     *
+     * All inputs are host ``std::vector`` values.  A caller that produced them
+     * on an alpaka device must call ``alpaka::onHost::wait(queue)`` before it
+     * invokes a writer function.  The writer owns no queue and cannot wait for
+     * a producer it does not own.  The compute stage in ``Compute.cpp`` follows
+     * this order: it waits on its queue, then copies the device results into the
+     * host vectors handed to this layer.  openPMD's deferred I/O is flushed
+     * inside the writer before a loaded pointer is read or the series closes.
+     */
+
     /** Metadata of one written field iteration.
      *
      * The electrical field is written in V/m and the magnetic field in T, both

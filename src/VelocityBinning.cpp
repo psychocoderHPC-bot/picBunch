@@ -6,10 +6,15 @@
 
 #include "picBunch/VelocityBinning.hpp"
 
+#include "picBunch/detail/HostReduction.hpp"
+
+#include <alpaka/alpaka.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -20,6 +25,222 @@ namespace picBunch
     namespace
     {
         using Vec3 = std::array<double, 3>;
+
+        //! Dedicated CPU-side alpaka queue for the particle bookkeeping kernels.
+        //!
+        //! The Bunch lives in host ``std::vector`` storage.  Running the kernels on
+        //! the host API keeps the data where it is, independent of whether the
+        //! field solver was built for CUDA/HIP.
+        inline auto& hostReductionQueue()
+        {
+            static auto selector = alpaka::onHost::makeDeviceSelector(alpaka::api::host, alpaka::deviceKind::cpu);
+            static auto device = selector.makeDevice(0);
+            static auto queue = device.makeQueue();
+            return queue;
+        }
+
+        template<typename TKernel, typename... TArgs>
+        void runHostKernel(std::size_t count, TKernel const& kernel, TArgs... args)
+        {
+            if(count == 0u)
+                return;
+            std::uint32_t const frame = 64u;
+            auto const blocks = static_cast<std::uint32_t>((count + frame - 1u) / frame);
+            auto& queue = hostReductionQueue();
+            // Measured on the 64-thread host: one OpenMP launch costs about
+            // 7 ms, which exceeds the work of these binning kernels.  A serial
+            // alpaka kernel keeps the conversion and avoids that fixed cost.
+            switch(detail::hostReductionExecutorOverride())
+            {
+            case detail::HostReductionExecutor::Parallel:
+                queue.enqueue(alpaka::onHost::FrameSpec{blocks, frame}, kernel, args...);
+                break;
+            case detail::HostReductionExecutor::Serial:
+            case detail::HostReductionExecutor::Default:
+            default:
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{blocks, frame, alpaka::exec::cpuSerial}, kernel, args...);
+                break;
+            }
+            alpaka::onHost::wait(queue);
+        }
+
+        //! Launch a kernel that reduces scalar extrema/invalid indices.  The
+        //! serial executor can update the outputs directly; only the parallel
+        //! executor needs atomics.  Both paths use the same per-particle
+        //! arithmetic, and min/max are order independent.
+        template<typename TKernelSerial, typename TKernelAtomic, typename... TArgs>
+        void runHostReductionKernel(std::size_t count, TArgs... args)
+        {
+            if(count == 0u)
+                return;
+            std::uint32_t const frame = 64u;
+            auto const blocks = static_cast<std::uint32_t>((count + frame - 1u) / frame);
+            auto& queue = hostReductionQueue();
+            switch(detail::hostReductionExecutorOverride())
+            {
+            case detail::HostReductionExecutor::Parallel:
+                queue.enqueue(alpaka::onHost::FrameSpec{blocks, frame}, TKernelAtomic{}, args...);
+                break;
+            case detail::HostReductionExecutor::Serial:
+            case detail::HostReductionExecutor::Default:
+            default:
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{blocks, frame, alpaka::exec::cpuSerial},
+                    TKernelSerial{},
+                    args...);
+                break;
+            }
+            alpaka::onHost::wait(queue);
+        }
+
+        //! Per-particle lab-frame bookkeeping: absolute charge, gamma, and the
+        //! scalar reductions the binning model needs.  The serial executor
+        //! updates them directly; the parallel executor uses alpaka atomics.
+        //! Min/max are exact and order independent.
+        template<bool TAtomic>
+        struct LabMomentumKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                std::size_t count,
+                double const* ux,
+                double const* uy,
+                double const* uz,
+                double const* weight,
+                double const* charge,
+                double* absoluteCharge,
+                double* gamma,
+                double* scaleU,
+                std::size_t* firstBadMomentum,
+                std::size_t* firstBadCharge) const
+            {
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    bool const badMomentum = !(alpaka::math::isfinite(ux[p])
+                                               && alpaka::math::isfinite(uy[p])
+                                               && alpaka::math::isfinite(uz[p]));
+                    bool const badCharge = !alpaka::math::isfinite(weight[p] * charge[p]);
+                    if constexpr(TAtomic)
+                    {
+                        if(badMomentum)
+                            alpaka::onAcc::atomicMin(acc, firstBadMomentum, p);
+                        if(badCharge)
+                            alpaka::onAcc::atomicMin(acc, firstBadCharge, p);
+                        if(!badMomentum)
+                        {
+                            double const absMax = alpaka::math::max(
+                                alpaka::math::abs(ux[p]),
+                                alpaka::math::max(alpaka::math::abs(uy[p]), alpaka::math::abs(uz[p])));
+                            alpaka::onAcc::atomicMax(acc, scaleU, absMax);
+                        }
+                    }
+                    else
+                    {
+                        std::size_t const index = static_cast<std::size_t>(p);
+                        if(badMomentum)
+                            *firstBadMomentum = std::min(*firstBadMomentum, index);
+                        if(badCharge)
+                            *firstBadCharge = std::min(*firstBadCharge, index);
+                        if(!badMomentum)
+                        {
+                            double const absMax = alpaka::math::max(
+                                alpaka::math::abs(ux[p]),
+                                alpaka::math::max(alpaka::math::abs(uy[p]), alpaka::math::abs(uz[p])));
+                            *scaleU = std::max(*scaleU, absMax);
+                        }
+                    }
+                    absoluteCharge[p] = alpaka::math::abs(weight[p] * charge[p]);
+                    double const u2 = ux[p] * ux[p] + uy[p] * uy[p] + uz[p] * uz[p];
+                    gamma[p] = alpaka::math::sqrt(1.0 + u2);
+                }
+            }
+        };
+
+        //! Beam-frame momentum of every particle plus the per-axis extrema.
+        template<bool TAtomic>
+        struct BeamFrameKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                std::size_t count,
+                double const* ux,
+                double const* uy,
+                double const* uz,
+                std::array<double, 3> const e1,
+                std::array<double, 3> const e2,
+                std::array<double, 3> const e3,
+                double* beam,
+                double* uMin,
+                double* uMax) const
+            {
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    double const u[3] = {ux[p], uy[p], uz[p]};
+                    double const b[3] = {
+                        u[0] * e1[0] + u[1] * e1[1] + u[2] * e1[2],
+                        u[0] * e2[0] + u[1] * e2[1] + u[2] * e2[2],
+                        u[0] * e3[0] + u[1] * e3[1] + u[2] * e3[2]};
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        beam[3u * p + static_cast<std::size_t>(a)] = b[a];
+                        if constexpr(TAtomic)
+                        {
+                            alpaka::onAcc::atomicMin(acc, uMin + a, b[a]);
+                            alpaka::onAcc::atomicMax(acc, uMax + a, b[a]);
+                        }
+                        else
+                        {
+                            uMin[a] = std::min(uMin[a], b[a]);
+                            uMax[a] = std::max(uMax[a], b[a]);
+                        }
+                    }
+                }
+            }
+        };
+
+        //! Assign every particle to its box for an existing split.
+        struct BoxAssignmentKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                std::size_t count,
+                double const* beam,
+                std::array<std::size_t, 3> const N,
+                std::array<double, 3> const uMin,
+                std::array<double, 3> const range,
+                double const* width,
+                std::size_t* boxOf) const
+            {
+                for(auto [p] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    std::size_t idx[3] = {0u, 0u, 0u};
+                    for(int a = 0; a < 3; ++a)
+                    {
+                        if(range[a] <= 0.0)
+                            continue;
+                        long t = static_cast<long>(
+                            alpaka::math::floor((beam[3u * p + static_cast<std::size_t>(a)] - uMin[a]) / width[a]));
+                        idx[a] = (t < 0) ? 0u
+                                         : (static_cast<std::size_t>(t) >= N[a] ? N[a] - 1u
+                                                                                : static_cast<std::size_t>(t));
+                    }
+                    boxOf[p] = idx[0] + N[0] * (idx[1] + N[1] * idx[2]);
+                }
+            }
+        };
 
         double dot(Vec3 const& a, Vec3 const& b)
         {
@@ -56,24 +277,28 @@ namespace picBunch
         };
 
         BeamFrame makeBeamFrame(
-            std::size_t count,
-            std::vector<Vec3> const& uLab,
+            Bunch const& bunch,
             std::vector<double> const& absCharge,
             double scaleU)
         {
+            std::size_t const count = bunch.size();
             BeamFrame frame;
             // Charge-weighted mean of the unit momentum directions sets the
-            // beam axis; energy spread must not tilt it.
+            // beam axis; energy spread must not tilt it.  The accumulation is
+            // order sensitive, so it stays a serial host reduction rather than
+            // a parallel kernel.
             Vec3 meanDir{0.0, 0.0, 0.0};
             double dirWeight = 0.0;
             for(std::size_t p = 0; p < count; ++p)
             {
-                double const um = norm(uLab[p]);
+                double const um
+                    = std::sqrt(bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
+                                + bunch.uz[p] * bunch.uz[p]);
                 if(um > 0.0)
                 {
-                    meanDir[0] += absCharge[p] * uLab[p][0] / um;
-                    meanDir[1] += absCharge[p] * uLab[p][1] / um;
-                    meanDir[2] += absCharge[p] * uLab[p][2] / um;
+                    meanDir[0] += absCharge[p] * bunch.ux[p] / um;
+                    meanDir[1] += absCharge[p] * bunch.uy[p] / um;
+                    meanDir[2] += absCharge[p] * bunch.uz[p] / um;
                     dirWeight += absCharge[p];
                 }
             }
@@ -93,16 +318,21 @@ namespace picBunch
                 frame.uMin[i] = std::numeric_limits<double>::infinity();
                 frame.uMax[i] = -std::numeric_limits<double>::infinity();
             }
-            for(std::size_t p = 0; p < count; ++p)
-            {
-                Vec3 const& u = uLab[p];
-                frame.uBeam[p] = {dot(u, e1), dot(u, e2), dot(u, e3)};
-                for(int i = 0; i < 3; ++i)
-                {
-                    frame.uMin[i] = std::min(frame.uMin[i], frame.uBeam[p][i]);
-                    frame.uMax[i] = std::max(frame.uMax[i], frame.uBeam[p][i]);
-                }
-            }
+            // Vec3 is a contiguous std::array<double, 3>, so the kernel writes
+            // the beam-frame components in place.  The extrema are reduced in
+            // the same pass.
+            runHostReductionKernel<BeamFrameKernel<false>, BeamFrameKernel<true>>(
+                count,
+                count,
+                bunch.ux.data(),
+                bunch.uy.data(),
+                bunch.uz.data(),
+                e1,
+                e2,
+                e3,
+                &frame.uBeam[0][0],
+                frame.uMin.data(),
+                frame.uMax.data());
             for(int i = 0; i < 3; ++i)
             {
                 frame.range[i] = frame.uMax[i] - frame.uMin[i];
@@ -201,6 +431,7 @@ namespace picBunch
             BeamFrame const& frame,
             std::array<std::size_t, 3> const& N,
             std::vector<double> const& absCharge,
+            std::vector<double> const& particleGamma,
             double totalAbsoluteCharge,
             double modelConstant,
             VelocityBinning& out)
@@ -234,6 +465,9 @@ namespace picBunch
             }
             else
             {
+                // Only one box per axis is cheap; the nested loop is control
+                // geometry over the box grid, not a particle loop, so it stays
+                // serial rather than paying a kernel launch for O(boxes) work.
                 for(std::size_t i3 = 0; i3 < N[2]; ++i3)
                     for(std::size_t i2 = 0; i2 < N[1]; ++i2)
                         for(std::size_t i1 = 0; i1 < N[0]; ++i1)
@@ -260,63 +494,39 @@ namespace picBunch
                     (frame.range[0] > 0.0) ? frame.range[0] / static_cast<double>(N[0]) : 1.0,
                     (frame.range[1] > 0.0) ? frame.range[1] / static_cast<double>(N[1]) : 1.0,
                     (frame.range[2] > 0.0) ? frame.range[2] / static_cast<double>(N[2]) : 1.0};
-                for(std::size_t p = 0; p < count; ++p)
-                {
-                    std::size_t idx[3] = {};
-                    for(int a = 0; a < 3; ++a)
-                    {
-                        if(frame.range[a] <= 0.0)
-                            continue;
-                        long t = static_cast<long>(std::floor((frame.uBeam[p][a] - frame.uMin[a]) / width[a]));
-                        idx[a] = (t < 0) ? 0u
-                                         : (static_cast<std::size_t>(t) >= N[a] ? N[a] - 1u
-                                                                                : static_cast<std::size_t>(t));
-                    }
-                    boxOf[p] = idx[0] + N[0] * (idx[1] + N[1] * idx[2]);
-                }
+                runHostKernel(
+                    count,
+                    BoxAssignmentKernel{},
+                    count,
+                    &frame.uBeam[0][0],
+                    N,
+                    frame.uMin,
+                    frame.range,
+                    width,
+                    boxOf.data());
             }
             out.boxOf = boxOf;
 
             // Replace the geometric box centre by the absolute-charge-weighted
-            // mean momentum of the box members.  The mean minimises the angular
-            // and gamma deviations the model charges for, so it is the correct
+            // mean momentum of the box members and collect the per-box content
+            // statistics in the same pass.  The mean minimises the angular and
+            // gamma deviations the model charges for, so it is the correct
             // kernel representative at zero extra kernel cost.  Empty boxes
             // keep the centre (they contribute nothing to the field).
-            if(boxes > 1u)
-            {
-                std::vector<Vec3> sumU(boxes);
-                std::vector<double> sumW(boxes, 0.0);
-                for(std::size_t p = 0; p < count; ++p)
-                {
-                    std::size_t const b = boxOf[p];
-                    double const w = absCharge[p];
-                    sumU[b][0] += w * bunch.ux[p];
-                    sumU[b][1] += w * bunch.uy[p];
-                    sumU[b][2] += w * bunch.uz[p];
-                    sumW[b] += w;
-                }
-                for(std::size_t b = 0; b < boxes; ++b)
-                    if(sumW[b] > 0.0)
-                        for(int a = 0; a < 3; ++a)
-                            out.representativeU[b][a] = sumU[b][a] / sumW[b];
-            }
-
-            // Content model: per box, absolute-charge fraction, gamma range, the
-            // largest member angle against the representative, and the largest
-            // member-vs-representative gamma deviation.  The boxes are weighted
-            // by their absolute-charge content (never the signed sum) so that
-            // opposite charges cannot erase a local error.
+            std::vector<Vec3> sumU(boxes);
+            std::vector<double> sumW(boxes, 0.0);
             std::vector<double> boxAbsCharge(boxes, 0.0);
             std::vector<double> boxGammaMin(boxes, 0.0), boxGammaMax(boxes, 0.0);
             std::vector<bool> boxUsed(boxes, false);
-            std::vector<double> particleGamma(count);
             for(std::size_t p = 0; p < count; ++p)
             {
-                double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
-                    + bunch.uz[p] * bunch.uz[p];
-                particleGamma[p] = std::sqrt(1.0 + u2);
                 std::size_t const b = boxOf[p];
-                boxAbsCharge[b] += absCharge[p];
+                double const w = absCharge[p];
+                sumU[b][0] += w * bunch.ux[p];
+                sumU[b][1] += w * bunch.uy[p];
+                sumU[b][2] += w * bunch.uz[p];
+                sumW[b] += w;
+                boxAbsCharge[b] += w;
                 if(boxUsed[b])
                 {
                     boxGammaMin[b] = std::min(boxGammaMin[b], particleGamma[p]);
@@ -329,44 +539,56 @@ namespace picBunch
                     boxUsed[b] = true;
                 }
             }
+            if(boxes > 1u)
+                for(std::size_t b = 0; b < boxes; ++b)
+                    if(sumW[b] > 0.0)
+                        for(int a = 0; a < 3; ++a)
+                            out.representativeU[b][a] = sumU[b][a] / sumW[b];
+
+            // Largest member angle against the representative.  The maximum is
+            // order independent, so one pass over the particles is equivalent
+            // to the former per-box scan over all particles and stays O(count).
+            std::vector<double> repNorm(boxes, 0.0);
+            std::vector<double> maxAngle(boxes, 0.0);
+            std::vector<bool> anyMoving(boxes, false);
+            for(std::size_t b = 0; b < boxes; ++b)
+                if(boxUsed[b])
+                    repNorm[b] = norm(out.representativeU[b]);
+            for(std::size_t p = 0; p < count; ++p)
+            {
+                std::size_t const b = boxOf[p];
+                double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
+                    + bunch.uz[p] * bunch.uz[p];
+                double const uMag = std::sqrt(u2);
+                if(uMag > 0.0)
+                {
+                    anyMoving[b] = true;
+                    // The angle against the representative is only defined
+                    // when the representative is itself moving.
+                    if(repNorm[b] > 0.0)
+                    {
+                        Vec3 const& uRep = out.representativeU[b];
+                        double const cosA
+                            = std::max(
+                                  -1.0,
+                                  std::min(
+                                      1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
+                                             + bunch.uz[p] * uRep[2])
+                                            / (uMag * repNorm[b])));
+                        maxAngle[b] = std::max(maxAngle[b], std::acos(cosA));
+                    }
+                }
+            }
+
             double modelSum = 0.0;
             for(std::size_t b = 0; b < boxes; ++b)
             {
                 if(!boxUsed[b])
                     continue;
-                Vec3 const& uRep = out.representativeU[b];
-                double const repNorm = norm(uRep);
-                double maxAngle = 0.0;
-                bool anyMoving = false;
-                for(std::size_t p = 0; p < count; ++p)
-                {
-                    if(boxOf[p] != b)
-                        continue;
-                    double const u2 = bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
-                        + bunch.uz[p] * bunch.uz[p];
-                    double const uMag = std::sqrt(u2);
-                    if(uMag > 0.0)
-                    {
-                        anyMoving = true;
-                        // The angle against the representative is only defined
-                        // when the representative is itself moving.
-                        if(repNorm > 0.0)
-                        {
-                            double const cosA
-                                = std::max(
-                                      -1.0,
-                                      std::min(
-                                          1.0, (bunch.ux[p] * uRep[0] + bunch.uy[p] * uRep[1]
-                                                 + bunch.uz[p] * uRep[2])
-                                                / (uMag * repNorm)));
-                            maxAngle = std::max(maxAngle, std::acos(cosA));
-                        }
-                    }
-                }
                 // A stationary representative for a moving member is a full
                 // angular mismatch: the representative kernel is a static one.
-                if(repNorm == 0.0 && anyMoving)
-                    maxAngle = std::acos(-1.0);
+                double const angle
+                    = (repNorm[b] == 0.0 && anyMoving[b]) ? std::acos(-1.0) : maxAngle[b];
                 double const gamma = boxGammaMax[b];
                 // Energy term: a relative gamma shift changes the boosted
                 // pattern by at most 2*Delta_gamma/gamma at a node.  The former
@@ -377,7 +599,7 @@ namespace picBunch
                 // node-bounded term is used instead.
                 double const deltaGamma = (boxGammaMax[b] - boxGammaMin[b]) / gamma;
                 modelSum += (boxAbsCharge[b] / totalAbsoluteCharge)
-                    * (gamma * maxAngle + 2.0 * deltaGamma / gamma);
+                    * (gamma * angle + 2.0 * deltaGamma / gamma);
             }
             out.modelSum = modelSum;
             out.modelConstant = modelConstant;
@@ -423,30 +645,47 @@ namespace picBunch
         if(policy.mode == VelocityBinningOptions::Mode::Explicit && policy.explicitBins < 1u)
             throw std::invalid_argument("deriveVelocityBinning: explicitBins must be >= 1");
 
-        std::vector<Vec3> uLab(count);
         std::vector<double> absCharge(count);
-        double totalAbsoluteCharge = 0.0;
+        std::vector<double> particleGamma(count);
         double scaleU = 1.0;
+        // The earliest offending particle is tracked so the exception still
+        // names the first failure in particle order.
+        std::size_t firstBadMomentum = count;
+        std::size_t firstBadCharge = count;
+        runHostReductionKernel<LabMomentumKernel<false>, LabMomentumKernel<true>>(
+            count,
+            count,
+            bunch.ux.data(),
+            bunch.uy.data(),
+            bunch.uz.data(),
+            bunch.weight.data(),
+            bunch.charge.data(),
+            absCharge.data(),
+            particleGamma.data(),
+            &scaleU,
+            &firstBadMomentum,
+            &firstBadCharge);
+        if(firstBadMomentum < count || firstBadCharge < count)
+        {
+            if(firstBadMomentum <= firstBadCharge)
+                throw std::invalid_argument("deriveVelocityBinning: a momentum is not finite");
+            throw std::invalid_argument("deriveVelocityBinning: a particle charge is not finite");
+        }
+
+        double totalAbsoluteCharge = 0.0;
+        double gammaWeighted = 0.0;
         for(std::size_t p = 0; p < count; ++p)
         {
-            uLab[p] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
-            for(double const v : uLab[p])
-            {
-                if(!std::isfinite(v))
-                    throw std::invalid_argument("deriveVelocityBinning: a momentum is not finite");
-                scaleU = std::max(scaleU, std::abs(v));
-            }
-            double const q = bunch.weight[p] * bunch.charge[p];
-            if(!std::isfinite(q))
-                throw std::invalid_argument("deriveVelocityBinning: a particle charge is not finite");
-            absCharge[p] = std::abs(q);
-            totalAbsoluteCharge += std::abs(q);
+            totalAbsoluteCharge += absCharge[p];
+            gammaWeighted += absCharge[p] * particleGamma[p];
         }
         if(totalAbsoluteCharge == 0.0)
             throw std::runtime_error("deriveVelocityBinning: the bunch carries no charge");
+        gammaWeighted /= totalAbsoluteCharge;
 
         // Historical single-velocity check, unchanged: within 1e-12 relative the
-        // bunch is one velocity class and the kernel is exact.
+        // bunch is one velocity class and the kernel is exact.  This is
+        // early-exit control logic with no arithmetic, so it stays serial.
         bool sharedVelocity = true;
         for(std::size_t p = 1; p < count && sharedVelocity; ++p)
             if(std::abs(bunch.ux[p] - bunch.ux[0]) > 1.0e-12 * scaleU
@@ -463,7 +702,7 @@ namespace picBunch
             out.multiVelocity = false;
             out.count = 1u;
             out.perAxis = {1u, 1u, 1u};
-            out.representativeU = {uLab[0]};
+            out.representativeU = {Vec3{bunch.ux[0], bunch.uy[0], bunch.uz[0]}};
             out.boxOf.assign(count, 0u);
             out.modelSum = 0.0;
             out.modelError = 0.0;
@@ -471,24 +710,14 @@ namespace picBunch
         }
         out.multiVelocity = true;
 
-        BeamFrame const frame = makeBeamFrame(count, uLab, absCharge, scaleU);
-        double gammaWeighted = 0.0;
-        {
-            double w = 0.0;
-            for(std::size_t p = 0; p < count; ++p)
-            {
-                gammaWeighted += absCharge[p] * std::sqrt(1.0 + dot(uLab[p], uLab[p]));
-                w += absCharge[p];
-            }
-            gammaWeighted /= w;
-        }
+        BeamFrame const frame = makeBeamFrame(bunch, absCharge, scaleU);
 
         auto splitsFor = [&](std::size_t B) {
             return chooseSplit(B, frame.range, frame.active, gammaWeighted);
         };
         auto modelSumFor = [&](std::size_t B, VelocityBinning& probe) {
             return evaluateSplit(
-                bunch, frame, splitsFor(B), absCharge, totalAbsoluteCharge,
+                bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
                 policy.modelConstant, probe);
         };
 
@@ -544,7 +773,7 @@ namespace picBunch
         }
 
         evaluateSplit(
-            bunch, frame, splitsFor(targetBins), absCharge, totalAbsoluteCharge,
+            bunch, frame, splitsFor(targetBins), absCharge, particleGamma, totalAbsoluteCharge,
             policy.modelConstant, out);
         return out;
     }

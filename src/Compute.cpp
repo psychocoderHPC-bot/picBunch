@@ -16,6 +16,7 @@
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
 #include "picBunch/Readout.hpp"
+#include "picBunch/detail/SpectrumNorm.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
 #include <alpaka/alpaka.hpp>
@@ -32,6 +33,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -428,6 +430,58 @@ namespace picBunch
                     double const ori = out[off + 1u];
                     out[off] = orr + ar * br - ai * bi;
                     out[off + 1u] = ori + ar * bi + ai * br;
+                }
+            }
+        };
+
+        //! Scalar ``acc + in * factor`` used by the read-out ``onHost::transform``.
+        //! Wrapped in ``ScalarFunc`` so the double operations stay element-wise and
+        //! bit-identical to the former ``field[i] += staged[i] * factor`` loop.
+        struct ReadoutScaleAdd
+        {
+            double factor;
+
+            ALPAKA_FN_ACC double operator()(double acc, double in) const
+            {
+                return acc + in * factor;
+            }
+        };
+
+        //! Scale one local read-out slab in place: ``v = {Re(v) * factor, 0}``.
+        //! The complex layout needs the index mapping, so this stays a small kernel
+        //! with ``makeIdxMap`` rather than an ``onHost::transform`` over Complex.
+        //! Each element is independent, so the result is order-independent and
+        //! bit-identical to the former nested host loop.
+        struct SlabScaleKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                Complex* work,
+                std::uint32_t nx,
+                std::uint32_t ny,
+                std::uint32_t nz,
+                std::uint32_t mx,
+                std::uint32_t my,
+                double factor) const
+            {
+                std::size_t const count
+                    = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)
+                    * static_cast<std::size_t>(nz);
+                for(auto [l] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{count}))
+                {
+                    std::size_t const i = l % nx;
+                    std::size_t const rem = l / nx;
+                    std::size_t const j = rem % ny;
+                    std::size_t const k = rem / ny;
+                    std::size_t const idx = i
+                        + static_cast<std::size_t>(mx)
+                            * (j + static_cast<std::size_t>(my) * k);
+                    Complex& value = work[idx];
+                    value = Complex{value.real() * factor, 0.0};
                 }
             }
         };
@@ -1272,18 +1326,37 @@ namespace picBunch
 
         // ---------------------------------------------------------------- FFT
 #if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
-        // rocFFT keeps a process-global pool of HIP streams and destroys it from
-        // a static destructor at library unload.  On ROCm 7.2.0 that destructor
-        // calls hipStreamDestroy after the HIP runtime has already finalised and
-        // segfaults.  Tear the pool down here, after the plans below are destroyed
-        // but while the queue and HIP runtime are still alive.
+        // Deviation from the pure-alpaka rule, kept on purpose.  This is the only
+        // native vendor API call in the tree: the HIP-only rocfft_cleanup() from
+        // <rocfft/rocfft.h>, compiled only when the ROCm/HIP backend is built.
+        // It is required because ROCm 7.2 has a static-destruction-order bug in
+        // librocfft's process-global HIP-stream pool.  rocFFT destroys that pool
+        // from a library static destructor at unload, and on ROCm 7.2 that
+        // destructor calls hipStreamDestroy after the HIP runtime has finalised
+        // and segfaults at exit.  Without this teardown the picBunch.Io test
+        // regresses on ROCm 7.2 (it was fixed by commit 833b627).
+        // The teardown is a process-global operation: it must run once per
+        // process, after all FFT plans have been destroyed and while the queue
+        // and HIP device are still alive.  The guard is therefore declared
+        // before the plans below and destroyed after them, so the pool is torn
+        // down after this scope's plans are gone but before the queue and
+        // device are released.  Repeated computeField calls must not destroy
+        // the process-global pool again, so the native cleanup is wrapped in a
+        // thread-safe std::once_flag.  Every call still waits for its queue so
+        // the ordering with the plans in this scope is preserved.
+        // alpakaVendor's PlanImpl destructor owns the plan lifetime correctly
+        // but cannot fix the process-global teardown, and the pin has no public
+        // alpaka::fft::onHost::finalize().  The clean fix is to add that
+        // finalize() (idempotent, once-guarded) to alpakaVendor; then replace
+        // this guard with that call and drop the rocfft/rocfft.h include above.
+        static std::once_flag rocfftCleanupOnce;
         struct RocfftTeardownGuard
         {
             decltype(queue)& queue;
             ~RocfftTeardownGuard()
             {
                 alpaka::onHost::wait(queue);
-                static_cast<void>(rocfft_cleanup());
+                std::call_once(rocfftCleanupOnce, [] { static_cast<void>(rocfft_cleanup()); });
             }
         } rocfftTeardownGuard{queue};
 #endif
@@ -1512,8 +1585,16 @@ namespace picBunch
                     vf.grid = grid;
                     for(auto& comp : vf.data)
                         comp.assign(grid.size(), 0.0);
-                    double localFullNorm2 = 0.0;
-                    double localO3Norm2 = 0.0;
+                    // Read-out accumulator on the queue's device: the field is
+                    // filled by an alpaka onHost::transform and copied to the
+                    // host vector once per component.  The two-double probe
+                    // accumulator persists across components so the running sum
+                    // keeps the original addition order.
+                    auto readoutAcc = alpaka::onHost::allocUnified<double>(
+                        device,
+                        static_cast<std::size_t>(outNodes));
+                    auto probeAcc = alpaka::onHost::allocUnified<double>(device, std::size_t{2u});
+                    alpaka::onHost::memset(queue, probeAcc, std::uint8_t{0});
                     auto const fldStart = Clock::now();
                     for(int c = 0; c < 6; ++c)
                     {
@@ -1591,15 +1672,13 @@ namespace picBunch
                                 = reinterpret_cast<double const*>(rhoSpec.data());
                             double const* const o
                                 = reinterpret_cast<double const*>(o3Spec.data());
-                            for(std::uint32_t i = 0; i < spectrumCount; ++i)
-                            {
-                                double const fr = f[2u * i];
-                                double const fi = f[2u * i + 1u];
-                                double const orr = o[2u * i];
-                                double const oi = o[2u * i + 1u];
-                                localFullNorm2 += fr * fr + fi * fi;
-                                localO3Norm2 += orr * orr + oi * oi;
-                            }
+                            queue.enqueue(
+                                alpaka::onHost::FrameSpec{1u, 1u},
+                                detail::SpectrumNormKernel{},
+                                f,
+                                o,
+                                spectrumCount,
+                                probeAcc.data());
                         }
                         alpaka::fft::onHost::executeBackward(queue, c2rPlan, rhoSpec, outReal);
                         alpaka::onHost::wait(queue);
@@ -1610,21 +1689,37 @@ namespace picBunch
                         std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
                         std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
                         std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
-#pragma omp parallel for collapse(2)
-                        for(std::uint32_t k = 0; k < outNz; ++k)
-                            for(std::uint32_t j = 0; j < outNy; ++j)
-                                for(std::uint32_t i = 0; i < outNx; ++i)
-                                {
-                                    auto const in = static_cast<std::size_t>(i)
-                                        + static_cast<std::size_t>(Mx)
-                                            * (static_cast<std::size_t>(j)
-                                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
-                                    auto const out = static_cast<std::size_t>(i)
-                                        + static_cast<std::size_t>(outNx)
-                                            * (static_cast<std::size_t>(j)
-                                               + static_cast<std::size_t>(outNy) * static_cast<std::size_t>(k));
-                                    vf.data[c][out] += outReal.data()[in] * factor;
-                                }
+                        // Element-wise read-out as an alpaka host algorithm.  The
+                        // compact view of the padded c2r output uses the padded
+                        // x/y pitches, so the transform visits exactly the
+                        // (k, j, i) subregion the former loop did.  Each output
+                        // element sees the same two doubles and the same
+                        // ``acc + in * factor`` as before, hence bit-identical.
+                        auto const readoutExtents
+                            = alpaka::Vec<std::uint32_t, 3u>{outNz, outNy, outNx};
+                        auto const outPitches = alpaka::Vec<std::size_t, 3u>{
+                            static_cast<std::size_t>(outNx) * outNy * sizeof(double),
+                            static_cast<std::size_t>(outNx) * sizeof(double),
+                            sizeof(double)};
+                        auto const inPitches = alpaka::Vec<std::size_t, 3u>{
+                            static_cast<std::size_t>(Mx) * My * sizeof(double),
+                            static_cast<std::size_t>(Mx) * sizeof(double),
+                            sizeof(double)};
+                        auto outView = alpaka::makeMdSpan(
+                            readoutAcc.data(),
+                            readoutExtents,
+                            outPitches);
+                        auto inView = alpaka::makeMdSpan(outReal.data(), readoutExtents, inPitches);
+                        alpaka::onHost::memset(queue, readoutAcc, std::uint8_t{0});
+                        alpaka::onHost::transform(
+                            queue,
+                            outView,
+                            alpaka::ScalarFunc{ReadoutScaleAdd{factor}},
+                            outView,
+                            inView);
+                        alpaka::onHost::wait(queue);
+                        alpaka::onHost::memcpy(queue, vf.data[c], readoutAcc);
+                        alpaka::onHost::wait(queue);
                         times.readoutMs += elapsedMs(readoutStart);
                     }
 
@@ -1632,9 +1727,10 @@ namespace picBunch
                     // order 2 it estimates the next term; for order 3 it is the
                     // existing order-2-vs-3 k-space probe.  Auto and explicit
                     // share it.
+                    alpaka::onHost::wait(queue);
                     double probe = 0.0;
                     {
-                        double normSum[2] = {localFullNorm2, localO3Norm2};
+                        double normSum[2] = {probeAcc.data()[0], probeAcc.data()[1]};
                         if(parSize > 1)
                             par->allreduceSum(normSum, 2);
                         double const fullN = std::sqrt(normSum[0]);
@@ -1926,22 +2022,29 @@ namespace picBunch
                     double const factor = scale * (c < 3 ? eFactor : bFactor);
                     // Scale the slab read-out in place, then hand each output
                     // z plane to the rank that owns it in the writer layout.
-                    for(long long k = localLo; k < localHi; ++k)
+                    // The complex in-place scale runs as a small indexed kernel
+                    // on the queue; the follow-up wait keeps the host-side
+                    // redistribution from reading the slab before it is done.
+                    std::uint32_t const localCount
+                        = static_cast<std::uint32_t>(localHi - localLo);
+                    if(localCount > 0u)
                     {
-                        long long const localZ = k - static_cast<long long>(zOffset);
-                        for(std::uint32_t j = 0; j < outNy; ++j)
-                        {
-                            std::size_t const inRow = static_cast<std::size_t>(Mx)
-                                * (static_cast<std::size_t>(j)
-                                   + static_cast<std::size_t>(My)
-                                       * static_cast<std::size_t>(localZ));
-                            for(std::uint32_t i = 0; i < outNx; ++i)
-                            {
-                                auto& value = dfft.work()[inRow + i];
-                                value = Complex{value.real() * factor, 0.0};
-                            }
-                        }
+                        std::size_t const scaleCount
+                            = static_cast<std::size_t>(outNx) * outNy * localCount;
+                        queue.enqueue(
+                            alpaka::onHost::FrameSpec{
+                                static_cast<std::uint32_t>((scaleCount + 63u) / 64u),
+                                64u},
+                            SlabScaleKernel{},
+                            dfft.work(),
+                            outNx,
+                            outNy,
+                            localCount,
+                            Mx,
+                            My,
+                            factor);
                     }
+                    alpaka::onHost::wait(queue);
                     bool const first = !componentWritten[static_cast<std::size_t>(c)];
                     if(!first && recvBuffer.size() != field.data[c].size())
                         recvBuffer.assign(field.data[c].size(), 0.0);
@@ -1962,7 +2065,17 @@ namespace picBunch
         // Read-out staging exists only on this path; the distributed branch above
         // returns before reaching it, so a rank that never gathers allocates nothing.
         auto outStagingDev = alpaka::onHost::alloc<double>(device, outNodes);
-        auto outStagingHost = alpaka::onHost::allocMapped<double>(device, outNodes);
+        // One device accumulation target per component.  The element-wise
+        // read-out runs as an alpaka onHost::transform on the queue; the host
+        // vectors are filled by a single copy after the bin loop.
+        using FieldAccBuffer = decltype(alpaka::onHost::alloc<double>(device, outNodes));
+        std::vector<FieldAccBuffer> fieldAccs;
+        fieldAccs.reserve(6u);
+        for(int c = 0; c < 6; ++c)
+        {
+            fieldAccs.push_back(alpaka::onHost::alloc<double>(device, outNodes));
+            alpaka::onHost::memset(queue, fieldAccs.back(), std::uint8_t{0});
+        }
 
         // Replicated path: one whole FFT per rank, component-parallel across ranks.
         for(std::size_t b = 0; b < binCount; ++b)
@@ -2057,12 +2170,13 @@ namespace picBunch
                 // ---------------------------------------------------------- read-out
                 auto const readoutStart = Clock::now();
                 double const factor = scale * (c < 3 ? eFactor : bFactor);
-                // Every (k,j,i) owns one output node, so the parallel loop keeps
-                // exactly one deterministic write per node.  The padded c2r
-                // output is gathered on the device into a compact n^3 buffer
-                // (pure copy, no arithmetic) and moved to pinned host memory
-                // with a single D2H copy.  The host loop then reads only the
-                // pinned staging buffer, so no managed page migration happens.
+                // Every (k,j,i) owns one output node, so the gather keeps exactly
+                // one deterministic write per node.  The padded c2r output is
+                // gathered on the device into a compact n^3 buffer (pure copy,
+                // no arithmetic); the accumulate is an alpaka onHost::transform
+                // on the same compact device buffer.  Per node it performs the
+                // same ``acc + staged * factor`` as the former host loop, hence
+                // bit-identical, independent of the executor's thread count.
                 std::uint32_t const outCount = static_cast<std::uint32_t>(outNodes);
                 queue.enqueue(
                     alpaka::onHost::FrameSpec{(outCount + 63u) / 64u, 64u},
@@ -2074,19 +2188,28 @@ namespace picBunch
                     outNz,
                     Mx,
                     My);
-                alpaka::onHost::memcpy(queue, outStagingHost, outStagingDev);
+                auto const compactExtents = alpaka::Vec<std::uint32_t, 1u>{outCount};
+                auto accView = alpaka::makeMdSpan(
+                    fieldAccs[static_cast<std::size_t>(c)].data(),
+                    compactExtents);
+                auto stagedView = alpaka::makeMdSpan(outStagingDev.data(), compactExtents);
+                alpaka::onHost::transform(
+                    queue,
+                    accView,
+                    alpaka::ScalarFunc{ReadoutScaleAdd{factor}},
+                    accView,
+                    stagedView);
                 alpaka::onHost::wait(queue);
-                double const* staged = outStagingHost.data();
-                double* fout = field.data[c].data();
-#pragma omp parallel for
-                for(std::uint32_t l = 0; l < outCount; ++l)
-                    // Accumulate: the field of the mixed bunch is the sum over
-                    // the velocity classes.  Same value, factor and order as the
-                    // former direct read of outReal, hence bit-identical.
-                    fout[l] += staged[l] * factor;
                 times.readoutMs += elapsedMs(readoutStart);
             }
         }
+
+        // Materialise the device accumulators into the host field, once.  The
+        // wait below is the queue/host boundary: after it no in-flight device
+        // work can still be writing the read-out result.
+        for(int c = 0; c < 6; ++c)
+            alpaka::onHost::memcpy(queue, field.data[c], fieldAccs[static_cast<std::size_t>(c)]);
+        alpaka::onHost::wait(queue);
 
         if(parSize > 1)
             for(int c = 0; c < 6; ++c)

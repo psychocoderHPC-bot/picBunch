@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
 //
-// CUDA instantiation of the fast near-field device backend.  The kernel is a
-// direct port of include/picBunch/detail/FastNear.hpp and of the validated
-// tools/closed-form/gpu_extract.cu extract kernel (picongpu branch
-// experimental/closed-form, b3699dff).  All precision-critical work is double.
-
-#include "picBunch/detail/FastNearDevice.hpp"
+// Generic alpaka instantiation of the fast near-field device backend.  The
+// kernel is a direct port of include/picBunch/detail/FastNear.hpp and of the
+// validated tools/closed-form/gpu_extract.cu extract kernel (picongpu branch
+// experimental/closed-form, b3699dff).  It is written as backend-agnostic C++
+// and compiled by alpaka for the CPU, CUDA or HIP backend selected at build
+// time.  All precision-critical work is double.
 
 #include <alpaka/alpaka.hpp>
+
+#include "picBunch/detail/FastNearDevice.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -37,11 +39,11 @@ namespace picBunch::pbfast
 
         ALPAKA_FN_ACC inline double dTfun(double A, double B, double u)
         {
-            if(std::abs(u) < 1e-300)
-                return A * std::asinh(B / A) + B * std::asinh(A / B);
-            return A * std::asinh(B / std::sqrt(u * u + A * A))
-                + B * std::asinh(A / std::sqrt(u * u + B * B))
-                - u * std::atan(A * B / (u * std::sqrt(A * A + u * u + B * B)));
+            if(alpaka::math::abs(u) < 1e-300)
+                return A * alpaka::math::asinh(B / A) + B * alpaka::math::asinh(A / B);
+            return A * alpaka::math::asinh(B / alpaka::math::sqrt(u * u + A * A))
+                + B * alpaka::math::asinh(A / alpaka::math::sqrt(u * u + B * B))
+                - u * alpaka::math::atan(A * B / (u * alpaka::math::sqrt(A * A + u * u + B * B)));
         }
 
         ALPAKA_FN_ACC inline double dboxField8T(double const p[3], double const lo[3], double const hi[3], int c)
@@ -89,14 +91,14 @@ namespace picBunch::pbfast
         ALPAKA_FN_ACC inline double dboxEdgePrimitive(double l, double hh, double d)
         {
             constexpr double kPi = 3.141592653589793238462643383279502884;
-            double const a = std::sqrt(hh * hh + d * d);
-            double const r = std::sqrt(a * a + l * l);
-            double const asinhTerm = d * std::asinh(l / a);
+            double const a = alpaka::math::sqrt(hh * hh + d * d);
+            double const r = alpaka::math::sqrt(a * a + l * l);
+            double const asinhTerm = d * alpaka::math::asinh(l / a);
             double atanTerm;
             if(d == 0.0)
                 atanTerm = (l > 0.0 ? 0.5 * kPi : (l < 0.0 ? -0.5 * kPi : 0.0)) * hh;
             else
-                atanTerm = hh * std::atan(hh * l / (d * r));
+                atanTerm = hh * alpaka::math::atan(hh * l / (d * r));
             return asinhTerm + atanTerm;
         }
 
@@ -111,7 +113,7 @@ namespace picBunch::pbfast
                 int const j = (i + 1) % 4;
                 double const e[3]
                     = {q[j][0] - q[i][0], q[j][1] - q[i][1], q[j][2] - q[i][2]};
-                double const L = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+                double const L = alpaka::math::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
                 double const m[3] = {e[0] / L, e[1] / L, e[2] / L};
                 double const n2[3] = {
                     m[1] * n[2] - m[2] * n[1],
@@ -124,7 +126,7 @@ namespace picBunch::pbfast
             }
             double const foot[3] = {h * n[0], h * n[1], h * n[2]};
             double u[3] = {q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]};
-            double const ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+            double const ul = alpaka::math::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
             u[0] /= ul;
             u[1] /= ul;
             u[2] /= ul;
@@ -161,8 +163,8 @@ namespace picBunch::pbfast
             double Eraw[3])
         {
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const gam = std::sqrt(1.0 + uu2);
-            double const un = std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            double const un = alpaka::math::sqrt(uu2);
             double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
             double const invg = 1.0 / gam;
             double c0[3];
@@ -202,7 +204,7 @@ namespace picBunch::pbfast
                         - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
                     (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
                         - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
-                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                double const nl = alpaka::math::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
                 nn[0] /= nl;
                 nn[1] /= nl;
                 nn[2] /= nl;
@@ -232,7 +234,7 @@ namespace picBunch::pbfast
                         - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]);
                     nn[2] = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
                         - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
-                    double const l2 = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                    double const l2 = alpaka::math::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
                     nn[0] /= l2;
                     nn[1] /= l2;
                     nn[2] /= l2;
@@ -281,9 +283,9 @@ namespace picBunch::pbfast
             X.uhx = -(X.Hyy * gab - X.Hxy * gac) / X.detH;
             X.uhy = -(-X.Hxy * gab + X.Hxx * gac) / X.detH;
             X.qc = G[a][a] + gab * X.uhx + gac * X.uhy;
-            X.L11 = std::sqrt(X.Hxx);
+            X.L11 = alpaka::math::sqrt(X.Hxx);
             X.L21 = X.Hxy / X.L11;
-            X.L22 = std::sqrt(X.Hyy - X.L21 * X.L21);
+            X.L22 = alpaka::math::sqrt(X.Hyy - X.L21 * X.L21);
             X.detL = X.L11 * X.L22;
             X.ax = 1.0 / X.L11;
             X.bx = -X.L21 / (X.L11 * X.L22);
@@ -313,14 +315,14 @@ namespace picBunch::pbfast
             double const u1 = 1.0 - t0;
             double const xi1 = xi0 + dxi;
             double const eta1 = eta0 + deta;
-            double const rho0 = std::sqrt(C);
-            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double const rho0 = alpaka::math::sqrt(C);
+            double const rho1 = alpaka::math::sqrt(Q + xi1 * xi1 + eta1 * eta1);
             double I0;
             if(s2 > 0.0)
             {
-                double const ss = std::sqrt(s2);
+                double const ss = alpaka::math::sqrt(s2);
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0)
-                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+                    + 0.5 * s2 * sqA * (alpaka::math::asinh(u1 / ss) - alpaka::math::asinh(u0 / ss));
             }
             else
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0);
@@ -345,7 +347,7 @@ namespace picBunch::pbfast
             double const Q = h * h;
             double const foot[3] = {0.0, 0.0, h};
             double u[3] = {q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]};
-            double const ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+            double const ul = alpaka::math::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
             u[0] /= ul;
             u[1] /= ul;
             u[2] /= ul;
@@ -367,18 +369,18 @@ namespace picBunch::pbfast
                 invA[l] = 1.0 / A[l];
             }
             double sqA[4];
-            sqA[0] = std::sqrt(A[0]);
-            sqA[1] = std::sqrt(A[1]);
+            sqA[0] = alpaka::math::sqrt(A[0]);
+            sqA[1] = alpaka::math::sqrt(A[1]);
             sqA[2] = sqA[0];
             sqA[3] = sqA[1];
             {
-                double const hh = std::abs(h);
+                double const hh = alpaka::math::abs(h);
                 double Ibase = 0.0;
                 for(int l = 0; l < 4; ++l)
                 {
                     int const m = (l + 1) % 4;
                     double const ex = xi[m] - xi[l], ey = eta[m] - eta[l];
-                    double const invL = 1.0 / std::sqrt(ex * ex + ey * ey);
+                    double const invL = 1.0 / alpaka::math::sqrt(ex * ex + ey * ey);
                     double const mx = ex * invL, my = ey * invL;
                     double const d = xi[l] * my - eta[l] * mx;
                     double const la = xi[l] * mx + eta[l] * my;
@@ -462,7 +464,7 @@ namespace picBunch::pbfast
             double M[3][3])
         {
             double const qmin = h * h * X.qc;
-            double const hh = std::sqrt(qmin > 0.0 ? qmin : 0.0);
+            double const hh = alpaka::math::sqrt(qmin > 0.0 ? qmin : 0.0);
             double const u0x = h * X.uhx, u0y = h * X.uhy;
             int const b = X.b, c = X.c;
             double const xlo = Rc[b] - 0.5 * C[b], xhi = Rc[b] + 0.5 * C[b];
@@ -521,7 +523,7 @@ namespace picBunch::pbfast
         {
             constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
             for(int k = 0; k < 4; ++k)
-                if(std::abs(s - knots[k]) < dkKnotDetect)
+                if(alpaka::math::abs(s - knots[k]) < dkKnotDetect)
                     return knots[k] + (knots[k] > 0.0 ? -snap : snap);
             return s;
         }
@@ -543,11 +545,11 @@ namespace picBunch::pbfast
             double E[3])
         {
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const gam = std::sqrt(1.0 + uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
             double n[3] = {0.0, 0.0, 0.0};
             if(uu2 > 0.0)
             {
-                double const un = std::sqrt(uu2);
+                double const un = alpaka::math::sqrt(uu2);
                 n[0] = u[0] / un;
                 n[1] = u[1] / un;
                 n[2] = u[2] / un;
@@ -654,7 +656,7 @@ namespace picBunch::pbfast
             double const u[3])
         {
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            if(!(uu2 > 1e-24) || !std::isfinite(uu2))
+            if(!(uu2 > 1e-24) || !alpaka::math::isfinite(uu2))
                 return false;
             double const s[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
             constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
@@ -664,13 +666,13 @@ namespace picBunch::pbfast
                 if(!(s[a] > -1.5 && s[a] < 1.5))
                     return false;
                 int const k = s[a] < -0.5 ? 0 : (s[a] < 0.5 ? 1 : 2);
-                double const m = std::min(s[a] - knots[k], knots[k + 1] - s[a]);
+                double const m = alpaka::math::min(s[a] - knots[k], knots[k + 1] - s[a]);
                 if(!(m > 1.0e-6))
                     return false;
                 sc[a] = static_cast<double>(k - 1);
             }
-            double const gam = std::sqrt(1.0 + uu2);
-            double const un = std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            double const un = alpaka::math::sqrt(uu2);
             double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
             double diff[3] = {
                 R0[0] - sc[0] * cells[0],
@@ -687,13 +689,13 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 dapplyContract(ev[a], n, 1.0 / gam, e[a]);
-                double const l = std::sqrt(e[a][0] * e[a][0] + e[a][1] * e[a][1]
+                double const l = alpaka::math::sqrt(e[a][0] * e[a][0] + e[a][1] * e[a][1]
                                            + e[a][2] * e[a][2]);
-                if(!(l > 0.0) || !std::isfinite(l))
+                if(!(l > 0.0) || !alpaka::math::isfinite(l))
                     return false;
-                emax = std::max(emax, l);
+                emax = alpaka::math::max(emax, l);
             }
-            if(!(std::isfinite(dc[0]) && std::isfinite(dc[1]) && std::isfinite(dc[2])))
+            if(!(alpaka::math::isfinite(dc[0]) && alpaka::math::isfinite(dc[1]) && alpaka::math::isfinite(dc[2])))
                 return false;
             double V[2][2][2][3];
             for(int a = 0; a < 2; ++a)
@@ -724,16 +726,16 @@ namespace picBunch::pbfast
                         - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
                     (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
                         - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
-                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
-                if(!(nl > 0.0) || !std::isfinite(nl))
+                double const nl = alpaka::math::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                if(!(nl > 0.0) || !alpaka::math::isfinite(nl))
                     return false;
                 nn[0] /= nl;
                 nn[1] /= nl;
                 nn[2] /= nl;
                 double const h = q[0][0] * nn[0] + q[0][1] * nn[1] + q[0][2] * nn[2];
-                if(!std::isfinite(h))
+                if(!alpaka::math::isfinite(h))
                     return false;
-                hmin = std::min(hmin, std::abs(h));
+                hmin = alpaka::math::min(hmin, alpaka::math::abs(h));
             }
             return hmin > 1.0e-8 * emax;
         }
@@ -745,11 +747,11 @@ namespace picBunch::pbfast
             double const u[3])
         {
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            if(!(uu2 >= 0.0) || !std::isfinite(uu2))
+            if(!(uu2 >= 0.0) || !alpaka::math::isfinite(uu2))
                 return false;
             for(int a = 0; a < 3; ++a)
             {
-                if(!(cells[a] > 0.0) || !std::isfinite(cells[a]) || !std::isfinite(R0[a]))
+                if(!(cells[a] > 0.0) || !alpaka::math::isfinite(cells[a]) || !alpaka::math::isfinite(R0[a]))
                     return false;
             }
             double Rg[3];
@@ -758,9 +760,9 @@ namespace picBunch::pbfast
             bool inside = true;
             for(int a = 0; a < 3; ++a)
             {
-                if(!std::isfinite(s[a]))
+                if(!alpaka::math::isfinite(s[a]))
                     return false;
-                inside = inside && std::abs(s[a]) < 1.5;
+                inside = inside && alpaka::math::abs(s[a]) < 1.5;
             }
             if(inside && uu2 > 0.0)
                 return dPolyBoxUsable(Rg, cells, u);
@@ -774,7 +776,7 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 double const s = R0[a] / cells[a];
-                int m = (std::abs(s) <= 0.5 + dkKnotDetect)
+                int m = (alpaka::math::abs(s) <= 0.5 + dkKnotDetect)
                     ? 0
                     : (s > 0.0 ? 1 : -1);
                 if(m != 0)
@@ -795,9 +797,9 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 double const s = R0[a] / cells[a];
-                if(!std::isfinite(s))
+                if(!alpaka::math::isfinite(s))
                     return false;
-                inside = inside && std::abs(s) < 1.5;
+                inside = inside && alpaka::math::abs(s) < 1.5;
             }
             if(inside)
             {
@@ -811,7 +813,7 @@ namespace picBunch::pbfast
                     return false;
                 return dsSpaceExactUsable(R0, cells, u);
             }
-            double const gam = std::sqrt(1.0 + uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
             int const need = quadratureOrderFor(gam, prm.tolerance, prm.order);
             if(!(isExactGamma(gam) || need > kQuadratureOrderCap))
                 return false;
@@ -826,8 +828,8 @@ namespace picBunch::pbfast
             double planesH[6])
         {
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const gam = std::sqrt(1.0 + uu2);
-            double const un = std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            double const un = alpaka::math::sqrt(uu2);
             double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
             double const invg = 1.0 / gam;
             double c0[3];
@@ -866,7 +868,7 @@ namespace picBunch::pbfast
                         - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
                     (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
                         - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
-                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                double const nl = alpaka::math::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
                 nn[0] /= nl;
                 nn[1] /= nl;
                 nn[2] /= nl;
@@ -896,7 +898,7 @@ namespace picBunch::pbfast
                         - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]);
                     nn[2] = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
                         - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
-                    double const l2 = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                    double const l2 = alpaka::math::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
                     nn[0] /= l2;
                     nn[1] /= l2;
                     nn[2] /= l2;
@@ -928,8 +930,8 @@ namespace picBunch::pbfast
             constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
 
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const gam = std::sqrt(1.0 + uu2);
-            double const un = std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            double const un = alpaka::math::sqrt(uu2);
             double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
             double const sstar[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
             double planesN[6][3];
@@ -937,7 +939,7 @@ namespace picBunch::pbfast
             dsupportPlanes(R0, cells, u, planesN, planesH);
 
             double helper[3] = {1.0, 0.0, 0.0};
-            if(std::abs(n[0]) >= 0.9)
+            if(alpaka::math::abs(n[0]) >= 0.9)
             {
                 helper[0] = 0.0;
                 helper[1] = 1.0;
@@ -946,7 +948,7 @@ namespace picBunch::pbfast
                 n[1] * helper[2] - n[2] * helper[1],
                 n[2] * helper[0] - n[0] * helper[2],
                 n[0] * helper[1] - n[1] * helper[0]};
-            double const l1 = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+            double const l1 = alpaka::math::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
             for(int k = 0; k < 3; ++k)
                 e1[k] /= l1;
             double const e2[3] = {
@@ -958,14 +960,14 @@ namespace picBunch::pbfast
             for(int im = 0; im < 16; ++im)
             {
                 double const mu = kMuX[im];
-                double const st = std::sqrt(mu * mu < 1.0 ? 1.0 - mu * mu : 0.0);
+                double const st = alpaka::math::sqrt(mu * mu < 1.0 ? 1.0 - mu * mu : 0.0);
                 double const wmu = kMuW[im];
                 for(int ip = 0; ip < 32; ++ip)
                 {
                     double const phi = kPi * (kPhX[ip] + 1.0);
                     double const wphi = kPi * kPhW[ip];
-                    double const cph = std::cos(phi);
-                    double const sph = std::sin(phi);
+                    double const cph = alpaka::math::cos(phi);
+                    double const sph = alpaka::math::sin(phi);
                     double Om[3];
                     for(int k = 0; k < 3; ++k)
                         Om[k] = mu * n[k] + st * (cph * e1[k] + sph * e2[k]);
@@ -994,7 +996,7 @@ namespace picBunch::pbfast
                     bp[nb++] = rmax;
                     for(int a = 0; a < 3; ++a)
                     {
-                        if(std::abs(BO[a]) < 1e-300)
+                        if(alpaka::math::abs(BO[a]) < 1e-300)
                             continue;
                         for(int k = 0; k < 4; ++k)
                         {
@@ -1003,7 +1005,7 @@ namespace picBunch::pbfast
                             {
                                 bool dup = false;
                                 for(int q = 0; q < nb; ++q)
-                                    if(std::abs(bp[q] - r) < 1e-12 * rmax)
+                                    if(alpaka::math::abs(bp[q] - r) < 1e-12 * rmax)
                                         dup = true;
                                 if(!dup)
                                     bp[nb++] = r;
@@ -1075,15 +1077,15 @@ namespace picBunch::pbfast
             }
             else
             {
-                double const gam = std::sqrt(1.0 + uu2);
+                double const gam = alpaka::math::sqrt(1.0 + uu2);
                 double const beta[3] = {u[0] / gam, u[1] / gam, u[2] / gam};
                 double const betaH[3] = {
-                    u[0] / std::sqrt(uu2),
-                    u[1] / std::sqrt(uu2),
-                    u[2] / std::sqrt(uu2)};
+                    u[0] / alpaka::math::sqrt(uu2),
+                    u[1] / alpaka::math::sqrt(uu2),
+                    u[2] / alpaka::math::sqrt(uu2)};
                 int stretchAxis = -1;
                 for(int a = 0; a < 3; ++a)
-                    if(std::abs(std::abs(betaH[a]) - 1.0) < 1e-12)
+                    if(alpaka::math::abs(alpaka::math::abs(betaH[a]) - 1.0) < 1e-12)
                         stretchAxis = a;
                 if(stretchAxis >= 0)
                 {
@@ -1142,7 +1144,7 @@ namespace picBunch::pbfast
             bool const singular = Wstar > 0.0;
 
             double const uu2all = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const gamAll = std::sqrt(1.0 + uu2all);
+            double const gamAll = alpaka::math::sqrt(1.0 + uu2all);
 
             // Exact s-space evaluator for the selected support cell classes
             // and out-of-support pairs the remainder cannot resolve.
@@ -1159,15 +1161,15 @@ namespace picBunch::pbfast
 
             if(singular && uu2all > 0.0)
             {
-                double const un = std::sqrt(uu2all);
+                double const un = alpaka::math::sqrt(uu2all);
                 bool axial = false;
                 for(int a = 0; a < 3; ++a)
-                    if(std::abs(std::abs(u[a] / un) - 1.0) < 1e-12)
+                    if(alpaka::math::abs(alpaka::math::abs(u[a] / un) - 1.0) < 1e-12)
                         axial = true;
                 if(!axial)
                 {
                     dobliObliqueRayField(R0, cells, u, E);
-                    double const gam = std::sqrt(1.0 + uu2all);
+                    double const gam = alpaka::math::sqrt(1.0 + uu2all);
                     double const beta[3] = {u[0] / gam, u[1] / gam, u[2] / gam};
                     B[0] = beta[1] * E[2] - beta[2] * E[1];
                     B[1] = beta[2] * E[0] - beta[0] * E[2];
@@ -1182,8 +1184,8 @@ namespace picBunch::pbfast
                 dboxTerm(R0, cells, u, prm, Ebox, Bbox);
 
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
-            double const beta[3] = {u[0] / std::sqrt(1.0 + uu2), u[1] / std::sqrt(1.0 + uu2),
-                                    u[2] / std::sqrt(1.0 + uu2)};
+            double const beta[3] = {u[0] / alpaka::math::sqrt(1.0 + uu2), u[1] / alpaka::math::sqrt(1.0 + uu2),
+                                    u[2] / alpaka::math::sqrt(1.0 + uu2)};
             double const invg2 = 1.0 / (1.0 + uu2);
 
             constexpr double kKnots[3][2] = {{-1.5, -0.5}, {-0.5, 0.5}, {0.5, 1.5}};
@@ -1259,7 +1261,7 @@ namespace picBunch::pbfast
                                     if(uu2 == 0.0)
                                     {
                                         r2 = r2 < 1e-300 ? 1e-300 : r2;
-                                        double const f = 1.0 / (r2 * std::sqrt(r2));
+                                        double const f = 1.0 / (r2 * alpaka::math::sqrt(r2));
                                         Erem[0] += w * f * Rx;
                                         Erem[1] += w * f * Ry;
                                         Erem[2] += w * f * Rz;
@@ -1269,7 +1271,7 @@ namespace picBunch::pbfast
                                         double const rb = Rx * beta[0] + Ry * beta[1] + Rz * beta[2];
                                         double D = r2 * invg2 + rb * rb;
                                         D = D < 1e-300 ? 1e-300 : D;
-                                        double const f = invg2 / (D * std::sqrt(D));
+                                        double const f = invg2 / (D * alpaka::math::sqrt(D));
                                         Erem[0] += w * f * Rx;
                                         Erem[1] += w * f * Ry;
                                         Erem[2] += w * f * Rz;
@@ -1301,7 +1303,7 @@ namespace picBunch::pbfast
             if(uu2 == 0.0)
             {
                 double const r2 = Rx * Rx + Ry * Ry + Rz * Rz;
-                double const r3 = r2 * std::sqrt(r2);
+                double const r3 = r2 * alpaka::math::sqrt(r2);
                 double const f = r3 > 0.0 ? 1.0 / r3 : 0.0;
                 Ex = f * Rx;
                 Ey = f * Ry;
@@ -1310,10 +1312,10 @@ namespace picBunch::pbfast
             else
             {
                 double const r2 = Rx * Rx + Ry * Ry + Rz * Rz;
-                double const gamma = std::sqrt(1.0 + uu2);
+                double const gamma = alpaka::math::sqrt(1.0 + uu2);
                 double const rb = (Rx * u[0] + Ry * u[1] + Rz * u[2]) / gamma;
                 double const D = r2 * invG2 + rb * rb;
-                double const f = D > 0.0 ? invG2 / (D * std::sqrt(D)) : 0.0;
+                double const f = D > 0.0 ? invG2 / (D * alpaka::math::sqrt(D)) : 0.0;
                 Ex = f * Rx;
                 Ey = f * Ry;
                 Ez = f * Rz;
@@ -1324,7 +1326,7 @@ namespace picBunch::pbfast
                 return Ey;
             if(c == 2)
                 return Ez;
-            double const gamma = std::sqrt(1.0 + uu2);
+            double const gamma = alpaka::math::sqrt(1.0 + uu2);
             double const bx = u[0] / gamma;
             double const by = u[1] / gamma;
             double const bz = u[2] / gamma;
@@ -1353,8 +1355,8 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 tau[a] = (xs[a] - nodeBase[a]) / sp[a];
-                lo[a] = static_cast<long>(::ceil(tau[a] - 1.5));
-                hi[a] = static_cast<long>(::floor(tau[a] + 1.5));
+                lo[a] = static_cast<long>(alpaka::math::ceil(tau[a] - 1.5));
+                hi[a] = static_cast<long>(alpaka::math::floor(tau[a] + 1.5));
             }
             double sum = 0.0;
             for(long ia = lo[0]; ia <= hi[0]; ++ia)
@@ -1387,6 +1389,15 @@ namespace picBunch::pbfast
 
         // ---- kernel --------------------------------------------------------
 
+        //! Fast near-field accumulation kernel.
+        //!
+        //! The per-bin contributions are combined with ``alpaka::onAcc::
+        //! atomicAdd``; the order in which concurrent work-items add their
+        //! partial sums is not fixed, so the last bits of the result are
+        //! schedule dependent.  This is pre-existing behaviour moved unchanged
+        //! from the former CUDA ``.cu`` extract kernel.  The CPU backend now
+        //! runs the same kernel too, so the CPU result is subject to the same
+        //! non-deterministic last-bit combining order.
         struct FastNearKernel
         {
             template<typename TAcc>
@@ -1473,11 +1484,26 @@ namespace picBunch::pbfast
 
         // ---- device context -------------------------------------------------
 
+        // Backend tag selected at build time; mirrors src/Compute.cpp so the
+        // same C++ source targets host, CUDA and HIP without native API code.
+#if defined(PICBUNCH_BACKEND_CUDA)
+        inline constexpr auto kFastNearApi = alpaka::api::cuda;
+        inline constexpr auto kFastNearDeviceKind = alpaka::deviceKind::nvidiaGpu;
+        inline constexpr char const* kFastNearNoDevice = "fast near-shell: no CUDA device available";
+#elif defined(PICBUNCH_BACKEND_HIP)
+        inline constexpr auto kFastNearApi = alpaka::api::hip;
+        inline constexpr auto kFastNearDeviceKind = alpaka::deviceKind::amdGpu;
+        inline constexpr char const* kFastNearNoDevice = "fast near-shell: no HIP device available";
+#else
+        inline constexpr auto kFastNearApi = alpaka::api::host;
+        inline constexpr auto kFastNearDeviceKind = alpaka::deviceKind::cpu;
+        inline constexpr char const* kFastNearNoDevice = "fast near-shell: no host device available";
+#endif
+
         struct Context
         {
-            using Selector = decltype(alpaka::onHost::makeDeviceSelector(
-                alpaka::api::cuda,
-                alpaka::deviceKind::nvidiaGpu));
+            using Selector
+                = decltype(alpaka::onHost::makeDeviceSelector(kFastNearApi, kFastNearDeviceKind));
             using Device = decltype(std::declval<Selector&>().makeDevice(0));
             using Queue = decltype(std::declval<Device&>().makeQueue());
 
@@ -1488,11 +1514,10 @@ namespace picBunch::pbfast
 
             static Device makeDevice()
             {
-                auto selector = alpaka::onHost::makeDeviceSelector(
-                    alpaka::api::cuda,
-                    alpaka::deviceKind::nvidiaGpu);
+                auto selector
+                    = alpaka::onHost::makeDeviceSelector(kFastNearApi, kFastNearDeviceKind);
                 if(!selector.isAvailable())
-                    throw std::runtime_error("fast near-shell: no CUDA device available");
+                    throw std::runtime_error(kFastNearNoDevice);
                 return selector.makeDevice(0);
             }
         };
@@ -1512,9 +1537,7 @@ namespace picBunch::pbfast
 
     bool fastNearDeviceAvailable()
     {
-        auto selector = alpaka::onHost::makeDeviceSelector(
-            alpaka::api::cuda,
-            alpaka::deviceKind::nvidiaGpu);
+        auto selector = alpaka::onHost::makeDeviceSelector(kFastNearApi, kFastNearDeviceKind);
         return selector.isAvailable();
     }
 

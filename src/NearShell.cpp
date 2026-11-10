@@ -17,13 +17,14 @@
 #include "picBunch/Compute.hpp"
 #include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/FastNear.hpp"
-#if defined(PICBUNCH_BACKEND_CUDA)
-#    include "picBunch/detail/FastNearDevice.hpp"
-#endif
+#include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/NearReference.hpp"
+
+#include <alpaka/alpaka.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <array>
 #include <cmath>
@@ -72,6 +73,144 @@ namespace picBunch
             }
             return out;
         }
+
+        /*! Host queue for the per-tile exact near-field kernel.
+         *
+         * The near shell works on host ``std::vector`` field storage even when
+         * the library targets CUDA or HIP, so the kernel runs on the host API
+         * and the data never leaves the host.  A dedicated blocking queue keeps
+         * the launches independent of the field solver's device.
+         */
+        inline auto& nearShellHostQueue()
+        {
+            static auto selector
+                = alpaka::onHost::makeDeviceSelector(alpaka::api::host, alpaka::deviceKind::cpu);
+            static auto device = selector.makeDevice(0);
+            static auto queue = device.makeQueue();
+            return queue;
+        }
+
+        template<typename TKernel, typename... TArgs>
+        void runNearShellHostKernel(std::size_t count, TKernel const& kernel, TArgs... args)
+        {
+            if(count == 0u)
+                return;
+            std::uint32_t const frame = 64u;
+            auto const blocks = static_cast<std::uint32_t>((count + frame - 1u) / frame);
+            auto& queue = nearShellHostQueue();
+            queue.enqueue(alpaka::onHost::FrameSpec{blocks, frame}, kernel, args...);
+            alpaka::onHost::wait(queue);
+        }
+
+        //! POD arguments of the exact per-tile host kernel.
+        struct ExactNearHostArgs
+        {
+            double* correction[6]{};
+            double const* local[6]{};
+            double const* x{};
+            double const* y{};
+            double const* z{};
+            double const* ux{};
+            double const* uy{};
+            double const* uz{};
+            double const* weight{};
+            double const* charge{};
+            std::size_t nsrc{};
+            std::size_t nx{};
+            std::size_t ny{};
+            std::size_t nz{};
+            std::size_t i0{};
+            std::size_t j0{};
+            std::size_t k0{};
+            std::size_t n0{};
+            std::size_t n1{};
+            long localLo[3]{};
+            std::size_t nLocalX{};
+            std::size_t nLocalY{};
+            double origin[3]{};
+            double spacing[3]{};
+            double cells[3]{};
+            bool useFast{};
+            pbfast::Settings fastSettings{};
+            nbref::Settings settings{};
+        };
+
+        /*! Exact per-pair near-field evaluation for one output tile.
+         *
+         * One work item owns one (component, node) slot and accumulates the
+         * sources in their stored order.  The summation order is therefore the
+         * historical one and independent of the executor's thread count, so the
+         * result stays bit-identical to the former hand-written OpenMP loop.
+         * The reference evaluators are host-only, hence ALPAKA_FN_HOST.
+         */
+        struct ExactNearHostKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_HOST void operator()(TAcc const& acc, ExactNearHostArgs const args) const
+            {
+                std::size_t const nodes = args.nx * args.ny * args.nz;
+                for(auto [idx] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{6u * nodes}))
+                {
+                    int const c = static_cast<int>(idx / nodes);
+                    std::size_t const node = idx - static_cast<std::size_t>(c) * nodes;
+                    std::size_t const ii = node % args.nx;
+                    std::size_t const jj = (node / args.nx) % args.ny;
+                    std::size_t const kk = node / (args.nx * args.ny);
+
+                    std::size_t const i = args.i0 + ii;
+                    std::size_t const j = args.j0 + jj;
+                    std::size_t const k = args.k0 + kk;
+                    std::size_t const gidx = i + args.n0 * (j + args.n1 * k);
+                    std::size_t const li = i - static_cast<std::size_t>(args.localLo[0]);
+                    std::size_t const lj = j - static_cast<std::size_t>(args.localLo[1]);
+                    std::size_t const lk = k - static_cast<std::size_t>(args.localLo[2]);
+                    std::size_t const lidx
+                        = li + args.nLocalX * (lj + args.nLocalY * lk);
+                    double value = -args.local[c][lidx];
+
+                    double const x_obs = args.origin[0] + static_cast<double>(i) * args.spacing[0]
+                        + kYeeOffset[c][0] * args.cells[0];
+                    double const y_obs = args.origin[1] + static_cast<double>(j) * args.spacing[1]
+                        + kYeeOffset[c][1] * args.cells[1];
+                    double const z_obs = args.origin[2] + static_cast<double>(k) * args.spacing[2]
+                        + kYeeOffset[c][2] * args.cells[2];
+                    double const unit = (c < 3) ? kCoulombConstant
+                                                : kCoulombConstant / kSpeedOfLight;
+                    for(std::size_t q = 0; q < args.nsrc; ++q)
+                    {
+                        nbref::Vec3 E, B;
+                        if(args.useFast)
+                            pbfast::shape_field(
+                                {x_obs, y_obs, z_obs},
+                                {args.x[q], args.y[q], args.z[q]},
+                                {args.ux[q], args.uy[q], args.uz[q]},
+                                args.cells[0],
+                                args.cells[1],
+                                args.cells[2],
+                                args.fastSettings,
+                                E,
+                                B);
+                        else
+                            nbref::shape_field(
+                                {x_obs, y_obs, z_obs},
+                                {args.x[q], args.y[q], args.z[q]},
+                                {args.ux[q], args.uy[q], args.uz[q]},
+                                args.cells[0],
+                                args.cells[1],
+                                args.cells[2],
+                                args.settings,
+                                E,
+                                B);
+                        double const component = (c < 3) ? E[c] : B[c - 3];
+                        value += unit * (args.weight[q] * args.charge[q]) * component;
+                    }
+                    args.correction[c][gidx] = value;
+                }
+            }
+        };
     } // namespace
 
     double resolveNearShellRadius(ComputeOptions const& options, NearShellOptions const& nearShell)
@@ -231,12 +370,11 @@ namespace picBunch
         pbfast::Settings fastSettings{requestedFastOrder, explicitObliqueOrder, 5};
         fastSettings.tolerance = options.tolerance;
         bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
-        bool useFastGpu = false;
-#if defined(PICBUNCH_BACKEND_CUDA)
-        useFastGpu = nearShell.mode == NearShellOptions::Mode::FastGpu;
-        // The fast evaluator is the same algebra on host and device.  When a
-        // CUDA device is compiled in and available, `fast` uses it; `fast-gpu`
-        // remains an explicit request and falls back to the host otherwise.
+        bool useFastGpu = nearShell.mode == NearShellOptions::Mode::FastGpu;
+        // The fast evaluator is the same alpaka functor for every compiled
+        // backend (host, CUDA, HIP); only the device and the FrameSpec differ.
+        // `fast` uses the compiled backend's device, while `fast-gpu` is an
+        // explicit request that falls back to the host evaluator.
         if(nearShell.mode == NearShellOptions::Mode::Fast
            && pbfast::fastNearDeviceAvailable())
         {
@@ -247,22 +385,11 @@ namespace picBunch
         {
             std::fprintf(
                 stderr,
-                "near shell: fast-gpu requested but no CUDA device is available; "
+                "near shell: no device for the fast evaluator is available; "
                 "falling back to the host fast evaluator\n");
             useFastGpu = false;
             useFast = true;
         }
-#else
-        if(nearShell.mode == NearShellOptions::Mode::FastGpu)
-        {
-            std::fprintf(
-                stderr,
-                "near shell: fast-gpu is not compiled in; "
-                "falling back to the host fast evaluator\n");
-            useFast = true;
-        }
-#endif
-#if defined(PICBUNCH_BACKEND_CUDA)
         pbfast::DeviceParams deviceParams;
         deviceParams.order = fastSettings.order;
         deviceParams.obliqueOrder = explicitObliqueOrder;
@@ -296,7 +423,6 @@ namespace picBunch
             deviceParams.unitE = kCoulombConstant;
             deviceParams.unitB = kCoulombConstant / kSpeedOfLight;
         }
-#endif
 
         auto const n = grid.n;
         auto const& origin = grid.origin;
@@ -474,11 +600,8 @@ namespace picBunch
                         }
                         tileObliqueOrder = pbfast::autoObliqueOrder(maxObliqueGamma);
                     }
-#if defined(PICBUNCH_BACKEND_CUDA)
-                    // Only the CUDA device evaluator consumes DeviceParams; the
-                    // host fast path reads tileFastSettings below.  Keep the
-                    // assignment behind the same guard as the declaration so a
-                    // CPU-only build compiles.
+                    // The generic fast evaluator reads DeviceParams on every
+                    // backend; the host fast fallback reads tileFastSettings.
                     deviceParams.obliqueOrder = tileObliqueOrder;
                     // Explicitly clamp to the 32-slot table.  tileRemainderOrder
                     // is already bounded by kQuadratureOrderCap, and the
@@ -498,7 +621,6 @@ namespace picBunch
                             deviceParams.wi[i] = tw[static_cast<std::size_t>(i)];
                         }
                     }
-#endif
                     // Shipped policy: the observer-containing cell is exact,
                     // the rest stays on the base order-5 remainder.  A tight
                     // global tolerance (<= 1e-4) selects the full-support exact
@@ -618,7 +740,8 @@ namespace picBunch
 
                     if(useFastGpu)
                     {
-#if defined(PICBUNCH_BACKEND_CUDA)
+                        // Same generic alpaka functor as CUDA/HIP; on a CPU build
+                        // the host device runs it with the host FrameSpec.
                         Bunch meshB = near;
                         if(deviceStencil)
                         {
@@ -659,9 +782,11 @@ namespace picBunch
                             cells[1],
                             cells[2],
                             deviceParams);
+                        // Element-wise gather from the six device result arrays.
+                        // Each output slot has a single writer, so a plain loop
+                        // keeps the result deterministic; the expensive
+                        // per-(source, node) work is in the alpaka functor.
                         for(int c = 0; c < 6; ++c)
-                        {
-#pragma omp parallel for collapse(3)
                             for(std::size_t kk = 0; kk < nz; ++kk)
                                 for(std::size_t jj = 0; jj < ny; ++jj)
                                     for(std::size_t ii = 0; ii < nx; ++ii)
@@ -681,74 +806,54 @@ namespace picBunch
                                             : -local.data[c][lidx]
                                                 + dev[static_cast<std::size_t>(c) * nx * ny * nz + didx];
                                     }
-                        }
-#endif
                         pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
                     }
                     else
                     {
+                        // The host reference loop is an alpaka host kernel now.
+                        // One work item owns one (component, node) slot and
+                        // keeps the source order, so the field is bit-identical
+                        // to the former hand-written loop for every thread count.
+                        ExactNearHostArgs exactArgs;
                         for(int c = 0; c < 6; ++c)
                         {
-                            double const unit = (c < 3) ? kCoulombConstant
-                                                        : kCoulombConstant / kSpeedOfLight;
-#pragma omp parallel for collapse(3)
-                            for(std::size_t kk = 0; kk < nz; ++kk)
-                                for(std::size_t jj = 0; jj < ny; ++jj)
-                                    for(std::size_t ii = 0; ii < nx; ++ii)
-                                    {
-                                        std::size_t const i = i0 + ii;
-                                        std::size_t const j = j0 + jj;
-                                        std::size_t const k = k0 + kk;
-                                        std::size_t const gidx = i
-                                            + n[0] * (j + n[1] * k);
-                                        std::size_t const li = i - static_cast<std::size_t>(localLo[0]);
-                                        std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
-                                        std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
-                                        std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
-                                        double value = -local.data[c][lidx];
-
-                                        double const x_obs = origin[0] + static_cast<double>(i) * spacing[0]
-                                            + kYeeOffset[c][0] * cells[0];
-                                        double const y_obs = origin[1] + static_cast<double>(j) * spacing[1]
-                                            + kYeeOffset[c][1] * cells[1];
-                                        double const z_obs = origin[2] + static_cast<double>(k) * spacing[2]
-                                            + kYeeOffset[c][2] * cells[2];
-                                        for(std::size_t q = 0; q < near.size(); ++q)
-                                        {
-                                            nbref::Vec3 E, B;
-                                            if(useFast)
-                                            {
-                                                pbfast::shape_field(
-                                                    {x_obs, y_obs, z_obs},
-                                                    {near.x[q], near.y[q], near.z[q]},
-                                                    {near.ux[q], near.uy[q], near.uz[q]},
-                                                    cells[0],
-                                                    cells[1],
-                                                    cells[2],
-                                                    tileFastSettings,
-                                                    E,
-                                                    B);
-                                            }
-                                            else
-                                            {
-                                                nbref::shape_field(
-                                                    {x_obs, y_obs, z_obs},
-                                                    {near.x[q], near.y[q], near.z[q]},
-                                                    {near.ux[q], near.uy[q], near.uz[q]},
-                                                    cells[0],
-                                                    cells[1],
-                                                    cells[2],
-                                                    settings,
-                                                    E,
-                                                    B);
-                                            }
-                                            double const component = (c < 3) ? E[c] : B[c - 3];
-                                            value += unit * (near.weight[q] * near.charge[q]) * component;
-                                        }
-                                        correction.data[c][gidx] = value;
-                                    }
-                            pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
+                            exactArgs.correction[c] = correction.data[c].data();
+                            exactArgs.local[c] = local.data[c].data();
                         }
+                        exactArgs.x = near.x.data();
+                        exactArgs.y = near.y.data();
+                        exactArgs.z = near.z.data();
+                        exactArgs.ux = near.ux.data();
+                        exactArgs.uy = near.uy.data();
+                        exactArgs.uz = near.uz.data();
+                        exactArgs.weight = near.weight.data();
+                        exactArgs.charge = near.charge.data();
+                        exactArgs.nsrc = near.size();
+                        exactArgs.nx = nx;
+                        exactArgs.ny = ny;
+                        exactArgs.nz = nz;
+                        exactArgs.i0 = i0;
+                        exactArgs.j0 = j0;
+                        exactArgs.k0 = k0;
+                        exactArgs.n0 = n[0];
+                        exactArgs.n1 = n[1];
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            exactArgs.localLo[a] = localLo[a];
+                            exactArgs.origin[a] = origin[a];
+                            exactArgs.spacing[a] = spacing[a];
+                            exactArgs.cells[a] = cells[a];
+                        }
+                        exactArgs.nLocalX = nLocalX;
+                        exactArgs.nLocalY = nLocalY;
+                        exactArgs.useFast = useFast;
+                        exactArgs.fastSettings = tileFastSettings;
+                        exactArgs.settings = settings;
+                        runNearShellHostKernel(
+                            6u * nx * ny * nz,
+                            ExactNearHostKernel{},
+                            exactArgs);
+                        pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
                     }
                 }
             }
