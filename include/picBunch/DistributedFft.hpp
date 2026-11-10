@@ -16,6 +16,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -195,8 +196,32 @@ namespace picBunch
                 auto const count = static_cast<std::uint32_t>(m_nx * m_My * m_Mz);
                 // Multiply the kernel spectrum in place so the source spectrum
                 // survives for the remaining components.
-                auto* a = reinterpret_cast<double*>(m_kernel->data());
-                auto const* b = reinterpret_cast<double const*>(m_spectrum->data());
+                // Packed two-double layout: {complex index, re/im}. The pitches
+                // keep the byte strides (x-fastest, re/im interleaved).
+                using PackedIndex2 = alpaka::Vec<std::uint32_t, 2u>;
+                auto const extents = PackedIndex2{count, 2u};
+                auto const pitches = alpaka::Vec<std::uint32_t, 2u>{
+                    static_cast<std::uint32_t>(2u * sizeof(double)),
+                    static_cast<std::uint32_t>(sizeof(double))};
+                auto a = alpaka::makeMdSpan(
+                    reinterpret_cast<double*>(m_kernel->data()),
+                    extents,
+                    pitches);
+                auto b = alpaka::makeMdSpan(
+                    reinterpret_cast<double const*>(m_spectrum->data()),
+                    extents,
+                    pitches);
+                static_assert(std::is_same_v<
+                              std::remove_cvref_t<decltype(extents)>::value_type,
+                              PackedIndex2::value_type>);
+                static_assert(std::is_same_v<
+                              typename std::remove_cvref_t<
+                                  decltype(std::declval<decltype(a) const&>().getExtents())>::value_type,
+                              PackedIndex2::value_type>);
+                static_assert(std::is_same_v<
+                              typename std::remove_cvref_t<
+                                  decltype(std::declval<decltype(b) const&>().getExtents())>::value_type,
+                              PackedIndex2::value_type>);
                 m_queue.enqueue(
                     alpaka::onHost::FrameSpec{(count + 63u) / 64u, 64u},
                     MultiplyKernel{},
@@ -250,8 +275,8 @@ namespace picBunch
                 template<typename TAcc>
                 ALPAKA_FN_ACC void operator()(
                     TAcc const& acc,
-                    double* a,
-                    double const* b,
+                    alpaka::concepts::IMdSpan auto a,
+                    alpaka::concepts::IMdSpan auto const& b,
                     std::uint32_t count) const
                 {
                     for(auto [l] : alpaka::onAcc::makeIdxMap(
@@ -259,13 +284,18 @@ namespace picBunch
                             alpaka::onAcc::worker::threadsInGrid,
                             alpaka::IdxRange{count}))
                     {
-                        std::size_t const off = 2u * static_cast<std::size_t>(l);
-                        double const ar = a[off];
-                        double const ai = a[off + 1u];
-                        double const br = b[off];
-                        double const bi = b[off + 1u];
-                        a[off] = ar * br - ai * bi;
-                        a[off + 1u] = ar * bi + ai * br;
+                        auto const re = alpaka::Vec{
+                            static_cast<std::uint32_t>(l),
+                            std::uint32_t{0u}};
+                        auto const im = alpaka::Vec{
+                            static_cast<std::uint32_t>(l),
+                            std::uint32_t{1u}};
+                        double const ar = a[re];
+                        double const ai = a[im];
+                        double const br = b[re];
+                        double const bi = b[im];
+                        a[re] = ar * br - ai * bi;
+                        a[im] = ar * bi + ai * br;
                     }
                 }
             };
@@ -279,6 +309,9 @@ namespace picBunch
             void executeYPlanes(bool forward)
             {
                 using SubExtents = alpaka::Vec<std::size_t, 1u>;
+                static_assert(std::is_same_v<
+                              typename SubExtents::value_type,
+                              std::size_t>);
                 std::size_t const planeSize = static_cast<std::size_t>(m_Mx) * m_My;
                 for(std::uint32_t zl = 0; zl < m_nz; ++zl)
                 {

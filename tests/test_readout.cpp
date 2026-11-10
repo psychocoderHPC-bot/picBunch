@@ -98,25 +98,23 @@ TEST(Readout, CompactGatherMatchesHostBitwiseAllComponents)
                     for(std::size_t l = 0; l < paddedCount; ++l)
                         src.data()[l] = sourceSnapshot[l];
 
+                    auto const paddedExtents = alpaka::Vec<std::uint32_t, 3u>{s.mz, s.my, s.mx};
+                    auto const compactExtents = alpaka::Vec<std::uint32_t, 1u>{compactCount};
                     picBunch::detail::gatherCompactHost(
-                        sourceSnapshot.data(),
-                        hostReference.data(),
+                        alpaka::makeMdSpan(sourceSnapshot.data(), paddedExtents),
+                        alpaka::makeMdSpan(hostReference.data(), compactExtents),
                         s.nx,
                         s.ny,
-                        s.nz,
-                        s.mx,
-                        s.my);
+                        s.nz);
 
                     queue.enqueue(
                         alpaka::onHost::FrameSpec{(compactCount + 63u) / 64u, 64u},
                         picBunch::detail::CompactGatherKernel{},
-                        src.data(),
-                        gatheredDev.data(),
+                        alpaka::makeMdSpan(src.data(), paddedExtents),
+                        alpaka::makeMdSpan(gatheredDev.data(), compactExtents),
                         s.nx,
                         s.ny,
-                        s.nz,
-                        s.mx,
-                        s.my);
+                        s.nz);
                     alpaka::onHost::memcpy(queue, gathered, gatheredDev);
                     alpaka::onHost::wait(queue);
 

@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #if defined(_OPENMP)
@@ -287,4 +288,109 @@ TEST(NearShellAlpaka, ExactHostLoopMatchesGolden)
         EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-12)
             << "component " << p.component << " node " << p.index;
     }
+}
+
+namespace
+{
+    struct OriginCase
+    {
+        std::array<double, 3> origin;
+        std::array<double, 3> source;
+    };
+
+    struct OriginProbe
+    {
+        int component;
+        std::size_t index;
+        double value;
+    };
+
+    picBunch::Field runOriginCase(OriginCase const& c)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x[0] = c.source[0];
+        bunch.y[0] = c.source[1];
+        bunch.z[0] = c.source[2];
+        bunch.ux[0] = 0.0;
+        bunch.uy[0] = 0.0;
+        bunch.uz[0] = 0.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = -1.602176634e-19;
+
+        picBunch::ComputeOptions options;
+        options.tolerance = 1.0e-3;
+        options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
+        options.gridSize = std::array<std::size_t, 3>{4u, 4u, 4u};
+        options.gridOrigin = c.origin;
+        options.deterministicDeposit = true;
+        options.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+        options.velocityBinning.explicitBins = 1;
+
+        picBunch::NearShellOptions shell;
+        shell.mode = picBunch::NearShellOptions::Mode::Exact;
+        shell.tileNodes = 4;
+        // Large enough that the source enters every tile's near set.
+        shell.radiusCells = 4.0;
+        return picBunch::computeFieldNearExact(bunch, options, shell);
+    }
+
+    void expectOriginGolden(
+        OriginCase const& c,
+        std::vector<OriginProbe> const& probes,
+        std::string const& label)
+    {
+        picBunch::Field const field = runOriginCase(c);
+        ASSERT_EQ(field.data[0].size(), 4u * 4u * 4u) << label;
+        for(OriginProbe const& p : probes)
+        {
+            double const scale = std::max(std::abs(p.value), 1.0e-300);
+            // Golden values recorded with the signed local subtraction box.
+            // The relative tolerance is compiler/FFT round-off; the absolute
+            // floor covers near-zero components where a relative bound is
+            // meaningless.  The former clamp of the negative bound to zero
+            // moves the significant nodes by ~3e-3 relative, far above this.
+            EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-12 + 1.0e-10)
+                << label << " component " << p.component << " node " << p.index;
+        }
+    }
+} // namespace
+
+//! Regression for the near-shell local-box clamp.  The source sits inside the
+//! validated output grid but its TSC stencil reaches more than 2.5 cells below
+//! the grid origin, so the signed local box must start at a negative index.
+//! The former clamp of that bound to zero dropped the stencil from the local
+//! mesh subtraction and moved the shell field away from the serial reference.
+TEST(NearShellAlpaka, SourceStencilBelowGridOriginMatchesSerialReference)
+{
+    OriginCase const c{{0.0, 0.0, 0.0}, {0.5e-6, 0.5e-6, 0.25e-6}};
+    std::vector<OriginProbe> const probes{
+        {0, 0u, 1.9129109569731398e-12},
+        {0, 5u, -818.18902489911227},
+        {0, 21u, -564.52951323866819},
+        {0, 63u, -39.660157928514337},
+        {1, 40u, -145.91277865812367},
+        {2, 21u, -598.80178361484786},
+        {2, 45u, -82.431016421134373},
+        {2, 63u, -39.900483382599354},
+    };
+    expectOriginGolden(c, probes, "stencil below origin");
+}
+
+//! Same guard with a non-zero grid origin: the signed local box is relative to
+//! the explicit origin, not to absolute zero.
+TEST(NearShellAlpaka, SourceStencilBelowNonZeroGridOriginMatchesSerialReference)
+{
+    OriginCase const c{{1.5e-6, -0.5e-6, 2.0e-6}, {2.0e-6, 0.5e-6, 2.25e-6}};
+    std::vector<OriginProbe> const probes{
+        {0, 0u, -4.2024585781324472e-12},
+        {0, 5u, -1000.3399417908696},
+        {0, 21u, -672.86292117309142},
+        {0, 63u, -46.347611081700222},
+        {1, 0u, 773.15718538240071},
+        {1, 45u, -121.86059905226703},
+        {2, 21u, -705.70804100146654},
+        {2, 63u, -46.630060602704589},
+    };
+    expectOriginGolden(c, probes, "stencil below non-zero origin");
 }

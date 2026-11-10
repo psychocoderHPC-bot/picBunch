@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -44,14 +45,34 @@ namespace nbref
     {
         double x = 0.0, y = 0.0, z = 0.0;
 
+        //! Defined component access.  Indexing the first member via (&x)[i]
+        //! walks outside the member subobject; Clang 22 -O3 exploits that.
         double& operator[](int i)
         {
-            return (&x)[i];
+            assert(i >= 0 && i < 3);
+            switch(i)
+            {
+            case 1:
+                return y;
+            case 2:
+                return z;
+            default:
+                return x;
+            }
         }
 
         double const& operator[](int i) const
         {
-            return (&x)[i];
+            assert(i >= 0 && i < 3);
+            switch(i)
+            {
+            case 1:
+                return y;
+            case 2:
+                return z;
+            default:
+                return x;
+            }
         }
     };
 

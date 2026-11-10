@@ -38,6 +38,9 @@
 #include "picBunch/detail/FastNearConstants.hpp"
 #include "picBunch/detail/ObliqueOrder.hpp"
 
+#include <alpaka/Vec.hpp>
+#include <alpaka/math.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -92,6 +95,11 @@ namespace picBunch::pbfast
 
     namespace detail
     {
+        //! Packed 3-vector for parameter bundles at function boundaries.  The
+        //! per-pair scalar API keeps nbref::Vec3 so existing callers and the
+        //! frozen device-facing types are unchanged.
+        using AVec = alpaka::Vec<double, 3u>;
+
         inline double tsc(double x)
         {
             return nbref::tsc_shape(x);
@@ -100,16 +108,16 @@ namespace picBunch::pbfast
         //! int_0^A int_0^B 1/sqrt(u^2 + X^2 + Y^2) dX dY.  A, B > 0.
         inline double Tfun(double A, double B, double u)
         {
-            if(std::abs(u) < 1e-300)
-                return A * std::asinh(B / A) + B * std::asinh(A / B);
-            return A * std::asinh(B / std::sqrt(u * u + A * A))
-                + B * std::asinh(A / std::sqrt(u * u + B * B))
-                - u * std::atan(A * B / (u * std::sqrt(A * A + u * u + B * B)));
+            if(alpaka::math::abs(u) < 1e-300)
+                return A * alpaka::math::asinh(B / A) + B * alpaka::math::asinh(A / B);
+            return A * alpaka::math::asinh(B / alpaka::math::sqrt(u * u + A * A))
+                + B * alpaka::math::asinh(A / alpaka::math::sqrt(u * u + B * B))
+                - u * alpaka::math::atan(A * B / (u * alpaka::math::sqrt(A * A + u * u + B * B)));
         }
 
         //! Coulomb field component c at p of the unit-density box [lo,hi]^3.
         //! Only called for p inside the box, so every edge length is positive.
-        inline double boxField8T(double const p[3], double const lo[3], double const hi[3], int c)
+        inline double boxField8T(AVec const& p, AVec const& lo, AVec const& hi, int c)
         {
             double E = 0.0;
             if(c == 0)
@@ -146,13 +154,16 @@ namespace picBunch::pbfast
 
         inline Rule makeRule(int n)
         {
+            // Host-only Gauss table construction: this runs once per rule at
+            // static-init time, never in the device evaluator path.  On the
+            // host backend alpaka::math resolves to the same libm calls.
             Rule r;
             r.x.assign(static_cast<std::size_t>(n), 0.0);
             r.w.assign(static_cast<std::size_t>(n), 0.0);
             int const m = (n + 1) / 2;
             for(int i = 0; i < m; ++i)
             {
-                double z = std::cos(3.141592653589793238462643383279502884 * (i + 0.75) / (n + 0.5));
+                double z = alpaka::math::cos(3.141592653589793238462643383279502884 * (i + 0.75) / (n + 0.5));
                 double pp = 0.0;
                 for(int it = 0; it < 100; ++it)
                 {
@@ -167,7 +178,7 @@ namespace picBunch::pbfast
                     pp = n * (z * p1 - p2) / (z * z - 1.0);
                     double const z1 = z;
                     z = z1 - p1 / pp;
-                    if(std::abs(z - z1) <= 1e-15)
+                    if(alpaka::math::abs(z - z1) <= 1e-15)
                         break;
                 }
                 r.x[static_cast<std::size_t>(i)] = -z;
@@ -229,7 +240,7 @@ namespace picBunch::pbfast
             if(nbref::dot(u, u) == 0.0)
                 return false;
             for(int a = 0; a < 3; ++a)
-                if(std::abs(std::abs(betaH[a]) - 1.0) < 1e-12)
+                if(alpaka::math::abs(alpaka::math::abs(betaH[a]) - 1.0) < 1e-12)
                     return true;
             return false;
         }
@@ -265,13 +276,13 @@ namespace picBunch::pbfast
                 B = Vec3{};
                 return;
             }
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const betaH = u / std::sqrt(uu2);
-            double const Lp[3] = {
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const betaH = u / alpaka::math::sqrt(uu2);
+            AVec const Lp{
                 1.5 * cells.x - R0.x,
                 1.5 * cells.y - R0.y,
                 1.5 * cells.z - R0.z};
-            double const Ln[3] = {
+            AVec const Ln{
                 1.5 * cells.x + R0.x,
                 1.5 * cells.y + R0.y,
                 1.5 * cells.z + R0.z};
@@ -282,7 +293,7 @@ namespace picBunch::pbfast
                 for(int sy = -1; sy <= 1; sy += 2)
                     for(int sz = -1; sz <= 1; sz += 2)
                     {
-                        double const L[3] = {
+                        AVec const L{
                             sx > 0 ? Lp[0] : Ln[0],
                             sy > 0 ? Lp[1] : Ln[1],
                             sz > 0 ? Lp[2] : Ln[2]};
@@ -315,11 +326,11 @@ namespace picBunch::pbfast
                                         Vec3 const Qw = -(1.0 - tv) * A - tv * Bv + C;
                                         double const det = nbref::dot(Q, nbref::cross(Qv, Qw));
                                         Vec3 const dp = tu * Q;
-                                        double const rho = std::sqrt(nbref::dot(dp, dp));
+                                        double const rho = alpaka::math::sqrt(nbref::dot(dp, dp));
                                         if(rho < 1e-300)
                                             continue;
                                         Vec3 const R = applyMplus(dp, betaH, gam);
-                                        double const jac = tu * tu * std::abs(det) * wu * wv * ww;
+                                        double const jac = tu * tu * alpaka::math::abs(det) * wu * wv * ww;
                                         acc = acc - (jac / (rho * rho * rho)) * R;
                                     }
                                 }
@@ -333,7 +344,7 @@ namespace picBunch::pbfast
 
         inline double norm3(Vec3 const& v)
         {
-            return std::sqrt(nbref::dot(v, v));
+            return alpaka::math::sqrt(nbref::dot(v, v));
         }
 
         constexpr double kBoxPi = 3.141592653589793238462643383279502884;
@@ -352,14 +363,14 @@ namespace picBunch::pbfast
         //! branch continuous for d < 0.
         inline double boxEdgePrimitive(double l, double hh, double d)
         {
-            double const a = std::sqrt(hh * hh + d * d);
-            double const r = std::sqrt(a * a + l * l);
-            double const asinhTerm = d * std::asinh(l / a);
+            double const a = alpaka::math::sqrt(hh * hh + d * d);
+            double const r = alpaka::math::sqrt(a * a + l * l);
+            double const asinhTerm = d * alpaka::math::asinh(l / a);
             double atanTerm;
             if(d == 0.0)
                 atanTerm = (l > 0.0 ? 0.5 * kBoxPi : (l < 0.0 ? -0.5 * kBoxPi : 0.0)) * hh;
             else
-                atanTerm = hh * std::atan(hh * l / (d * r));
+                atanTerm = hh * alpaka::math::atan(hh * l / (d * r));
             return asinhTerm + atanTerm;
         }
 
@@ -369,7 +380,7 @@ namespace picBunch::pbfast
         inline double boxFaceIntegral(Vec3 const q[4], Vec3 const& n)
         {
             double const h = nbref::dot(q[0], n);
-            double const hh = std::abs(h);
+            double const hh = alpaka::math::abs(h);
             double I = 0.0;
             for(int i = 0; i < 4; ++i)
             {
@@ -568,19 +579,19 @@ namespace picBunch::pbfast
             double s2 = (A * Q + D * D) / (A * A);
             if(s2 < 0.0)
                 s2 = 0.0;
-            double const sqA = std::sqrt(A);
+            double const sqA = alpaka::math::sqrt(A);
             double const u0 = -t0;
             double const u1 = 1.0 - t0;
             double const xi1 = xi0 + dxi;
             double const eta1 = eta0 + deta;
-            double const rho0 = std::sqrt(C);
-            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double const rho0 = alpaka::math::sqrt(C);
+            double const rho1 = alpaka::math::sqrt(Q + xi1 * xi1 + eta1 * eta1);
             double I0;
             if(s2 > 0.0)
             {
-                double const ss = std::sqrt(s2);
+                double const ss = alpaka::math::sqrt(s2);
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0)
-                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+                    + 0.5 * s2 * sqA * (alpaka::math::asinh(u1 / ss) - alpaka::math::asinh(u0 / ss));
             }
             else
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0);
@@ -610,7 +621,7 @@ namespace picBunch::pbfast
         inline double boxFaceIntegralSafe(Vec3 const q[4], Vec3 const& n)
         {
             double const h = nbref::dot(q[0], n);
-            double const hh = std::abs(h);
+            double const hh = alpaka::math::abs(h);
             double I = 0.0;
             for(int i = 0; i < 4; ++i)
             {
@@ -1052,8 +1063,8 @@ namespace picBunch::pbfast
             }
             else
             {
-                double const gam = std::sqrt(1.0 + uu2);
-                Vec3 const n = u / std::sqrt(uu2);
+                double const gam = alpaka::math::sqrt(1.0 + uu2);
+                Vec3 const n = u / alpaka::math::sqrt(uu2);
                 auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
                 dc = M(R0 - scCells);
                 e[0] = M(Vec3{2.0 * halfwidth.x * cells.x, 0.0, 0.0});
@@ -1157,14 +1168,14 @@ namespace picBunch::pbfast
             double const u1 = 1.0 - t0;
             double const xi1 = xi0 + dxi;
             double const eta1 = eta0 + deta;
-            double const rho0 = std::sqrt(C);
-            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double const rho0 = alpaka::math::sqrt(C);
+            double const rho1 = alpaka::math::sqrt(Q + xi1 * xi1 + eta1 * eta1);
             double I0;
             if(s2 > 0.0)
             {
-                double const ss = std::sqrt(s2);
+                double const ss = alpaka::math::sqrt(s2);
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0)
-                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+                    + 0.5 * s2 * sqA * (alpaka::math::asinh(u1 / ss) - alpaka::math::asinh(u0 / ss));
             }
             else
                 I0 = 0.5 * (u1 * rho1 - u0 * rho0);
@@ -1192,7 +1203,7 @@ namespace picBunch::pbfast
             double const Q = h * h;
             Vec3 const foot = h * n;
             Vec3 u = q[1] - q[0];
-            u = u / std::sqrt(nbref::dot(u, u));
+            u = u / alpaka::math::sqrt(nbref::dot(u, u));
             Vec3 const v = nbref::cross(n, u);
             double xi[4], eta[4];
             for(int l = 0; l < 4; ++l)
@@ -1210,18 +1221,18 @@ namespace picBunch::pbfast
                 invA[l] = 1.0 / A[l];
             }
             double sqA[4];
-            sqA[0] = std::sqrt(A[0]);
-            sqA[1] = std::sqrt(A[1]);
+            sqA[0] = alpaka::math::sqrt(A[0]);
+            sqA[1] = alpaka::math::sqrt(A[1]);
             sqA[2] = sqA[0];
             sqA[3] = sqA[1];
             {
-                double const hh = std::abs(h);
+                double const hh = alpaka::math::abs(h);
                 double Ibase = 0.0;
                 for(int l = 0; l < 4; ++l)
                 {
                     int const m = (l + 1) % 4;
                     double const ex = xi[m] - xi[l], ey = eta[m] - eta[l];
-                    double const invL = 1.0 / std::sqrt(ex * ex + ey * ey);
+                    double const invL = 1.0 / alpaka::math::sqrt(ex * ex + ey * ey);
                     double const mx = ex * invL, my = ey * invL;
                     double const d = xi[l] * my - eta[l] * mx;
                     double const la = xi[l] * mx + eta[l] * my;
@@ -1326,9 +1337,9 @@ namespace picBunch::pbfast
             X.uhx = -(X.Hyy * gab - X.Hxy * gac) / X.detH;
             X.uhy = -(-X.Hxy * gab + X.Hxx * gac) / X.detH;
             X.qc = G[a][a] + gab * X.uhx + gac * X.uhy;
-            X.L11 = std::sqrt(X.Hxx);
+            X.L11 = alpaka::math::sqrt(X.Hxx);
             X.L21 = X.Hxy / X.L11;
-            X.L22 = std::sqrt(X.Hyy - X.L21 * X.L21);
+            X.L22 = alpaka::math::sqrt(X.Hyy - X.L21 * X.L21);
             X.detL = X.L11 * X.L22;
             X.ax = 1.0 / X.L11;
             X.bx = -X.L21 / (X.L11 * X.L22);
@@ -1345,7 +1356,7 @@ namespace picBunch::pbfast
             double M[3][3])
         {
             double const qmin = h * h * X.qc;
-            double const hh = std::sqrt(qmin > 0.0 ? qmin : 0.0);
+            double const hh = alpaka::math::sqrt(qmin > 0.0 ? qmin : 0.0);
             double const u0x = h * X.uhx, u0y = h * X.uhy;
             int const b = X.b, c = X.c;
             double const xlo = Rc[b] - 0.5 * C[b], xhi = Rc[b] + 0.5 * C[b];
@@ -1412,7 +1423,7 @@ namespace picBunch::pbfast
         {
             constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
             for(int k = 0; k < 4; ++k)
-                if(std::abs(s - knots[k]) < kKnotDetect)
+                if(alpaka::math::abs(s - knots[k]) < kKnotDetect)
                     return knots[k] + (knots[k] > 0.0 ? -snap : snap);
             return s;
         }
@@ -1431,8 +1442,8 @@ namespace picBunch::pbfast
         inline Vec3 polyBoxFieldS(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / alpaka::math::sqrt(uu2);
             double const s = gam * gam - 1.0;
             SAxis AX[3];
             for(int a = 0; a < 3; ++a)
@@ -1441,8 +1452,8 @@ namespace picBunch::pbfast
             static double const qB[3] = {1.5, 0.0, -1.5};
             static double const qC[3] = {1.125, 0.75, 1.125};
             Vec3 const Ra = snapKnotOrigin(R0, cells, knotEvalSnap(gam));
-            double const rr[3] = {Ra.x, Ra.y, Ra.z};
-            double const cc[3] = {cells.x, cells.y, cells.z};
+            AVec const rr{Ra.x, Ra.y, Ra.z};
+            AVec const cc{cells.x, cells.y, cells.z};
             // Shared face moments: [axis][plane 0..3][sb+1][sc+1][p][q].
             double Mf[3][4][3][3][3][3];
             double hf[3][4];
@@ -1458,8 +1469,8 @@ namespace picBunch::pbfast
                         for(int sc = -1; sc <= 1; ++sc)
                         {
                             Vec3 Rc{};
-                            (&Rc.x)[b] = rr[b] - cc[b] * static_cast<double>(sb);
-                            (&Rc.x)[c] = rr[c] - cc[c] * static_cast<double>(sc);
+                            Rc[b] = rr[b] - cc[b] * static_cast<double>(sb);
+                            Rc[c] = rr[c] - cc[c] * static_cast<double>(sc);
                             sFaceM(AX[a], h, Rc, cells, gam, Mf[a][pl][sb + 1][sc + 1]);
                         }
                 }
@@ -1523,7 +1534,7 @@ namespace picBunch::pbfast
                                             = Wt[g[0] * 9 + g[1] * 3 + g[2]] / (dg + 2.0);
                                         acc += be[a] * pv * W;
                                     }
-                            (&Iv.x)[a] += acc;
+                            Iv[a] += acc;
                         }
                     }
             Vec3 const vn = nbref::dot(Iv, n) * n;
@@ -1536,8 +1547,8 @@ namespace picBunch::pbfast
         inline Vec3 polyBoxFieldD(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = uu2 == 0.0 ? Vec3{} : u / alpaka::math::sqrt(uu2);
             auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
             static double const qA[3] = {0.5, -1.0, 0.5};
             static double const qB[3] = {1.5, 0.0, -1.5};
@@ -1599,13 +1610,13 @@ namespace picBunch::pbfast
         inline bool polyBoxUsable(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            if(!(uu2 > 1e-24) || !std::isfinite(uu2))
+            if(!(uu2 > 1e-24) || !alpaka::math::isfinite(uu2))
                 return false;
             if(!(cells.x > 0.0 && cells.y > 0.0 && cells.z > 0.0))
                 return false;
-            if(!(std::isfinite(cells.x) && std::isfinite(cells.y) && std::isfinite(cells.z)))
+            if(!(alpaka::math::isfinite(cells.x) && alpaka::math::isfinite(cells.y) && alpaka::math::isfinite(cells.z)))
                 return false;
-            if(!(std::isfinite(R0.x) && std::isfinite(R0.y) && std::isfinite(R0.z)))
+            if(!(alpaka::math::isfinite(R0.x) && alpaka::math::isfinite(R0.y) && alpaka::math::isfinite(R0.z)))
                 return false;
             double const s[3] = {R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
             for(int a = 0; a < 3; ++a)
@@ -1620,13 +1631,13 @@ namespace picBunch::pbfast
                 int k = s[a] < -0.5 ? 0 : (s[a] < 0.5 ? 1 : 2);
                 double const lo = knots[k];
                 double const hi = knots[k + 1];
-                double const m = std::min(s[a] - lo, hi - s[a]);
+                double const m = alpaka::math::min(s[a] - lo, hi - s[a]);
                 if(!(m > 1.0e-6))
                     return false;
                 sc[a] = static_cast<double>(k - 1);
             }
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = u / alpaka::math::sqrt(uu2);
             auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
             Vec3 const dc = M(Vec3{R0.x - sc[0] * cells.x, R0.y - sc[1] * cells.y,
                                    R0.z - sc[2] * cells.z});
@@ -1634,15 +1645,15 @@ namespace picBunch::pbfast
                 M(Vec3{cells.x, 0.0, 0.0}),
                 M(Vec3{0.0, cells.y, 0.0}),
                 M(Vec3{0.0, 0.0, cells.z})};
-            if(!(std::isfinite(dc.x) && std::isfinite(dc.y) && std::isfinite(dc.z)))
+            if(!(alpaka::math::isfinite(dc.x) && alpaka::math::isfinite(dc.y) && alpaka::math::isfinite(dc.z)))
                 return false;
             double emax = 0.0;
             for(int a = 0; a < 3; ++a)
             {
                 double const l = norm3(e[a]);
-                if(!(l > 0.0) || !std::isfinite(l))
+                if(!(l > 0.0) || !alpaka::math::isfinite(l))
                     return false;
-                emax = std::max(emax, l);
+                emax = alpaka::math::max(emax, l);
             }
             Vec3 q[6][4];
             Vec3 nrm[6];
@@ -1651,9 +1662,9 @@ namespace picBunch::pbfast
             double hmin = 1e300;
             for(int f = 0; f < 6; ++f)
             {
-                if(!std::isfinite(h[f]))
+                if(!alpaka::math::isfinite(h[f]))
                     return false;
-                hmin = std::min(hmin, std::abs(h[f]));
+                hmin = alpaka::math::min(hmin, alpaka::math::abs(h[f]));
             }
             if(!(hmin > 1.0e-8 * emax))
                 return false;
@@ -1673,22 +1684,22 @@ namespace picBunch::pbfast
         inline bool sSpaceExactUsable(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            if(!(uu2 >= 0.0) || !std::isfinite(uu2))
+            if(!(uu2 >= 0.0) || !alpaka::math::isfinite(uu2))
                 return false;
             if(!(cells.x > 0.0 && cells.y > 0.0 && cells.z > 0.0))
                 return false;
-            if(!(std::isfinite(cells.x) && std::isfinite(cells.y) && std::isfinite(cells.z)))
+            if(!(alpaka::math::isfinite(cells.x) && alpaka::math::isfinite(cells.y) && alpaka::math::isfinite(cells.z)))
                 return false;
-            if(!(std::isfinite(R0.x) && std::isfinite(R0.y) && std::isfinite(R0.z)))
+            if(!(alpaka::math::isfinite(R0.x) && alpaka::math::isfinite(R0.y) && alpaka::math::isfinite(R0.z)))
                 return false;
             Vec3 const Rg = snapKnotOrigin(R0, cells, kKnotGateSnap);
             double const s[3] = {Rg.x / cells.x, Rg.y / cells.y, Rg.z / cells.z};
             bool inside = true;
             for(int a = 0; a < 3; ++a)
             {
-                if(!std::isfinite(s[a]))
+                if(!alpaka::math::isfinite(s[a]))
                     return false;
-                inside = inside && std::abs(s[a]) < 1.5;
+                inside = inside && alpaka::math::abs(s[a]) < 1.5;
             }
             if(inside && uu2 > 0.0)
                 return polyBoxUsable(Rg, cells, u);
@@ -1706,7 +1717,7 @@ namespace picBunch::pbfast
                 double const s = R0[a] / cells[a];
                 // The shared knot plane belongs to the source-containing cell,
                 // so the closest node on either side of the source is central.
-                int m = (std::abs(s) <= 0.5 + kKnotDetect)
+                int m = (alpaka::math::abs(s) <= 0.5 + kKnotDetect)
                     ? 0
                     : (s > 0.0 ? 1 : -1);
                 if(m != 0)
@@ -1733,9 +1744,9 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 double const s = R0[a] / cells[a];
-                if(!std::isfinite(s))
+                if(!alpaka::math::isfinite(s))
                     return false;
-                inside = inside && std::abs(s) < 1.5;
+                inside = inside && alpaka::math::abs(s) < 1.5;
             }
             if(inside)
             {
@@ -1749,7 +1760,7 @@ namespace picBunch::pbfast
                     return false;
                 return sSpaceExactUsable(R0, cells, u);
             }
-            double const gamma = std::sqrt(1.0 + nbref::dot(u, u));
+            double const gamma = alpaka::math::sqrt(1.0 + nbref::dot(u, u));
             int const need = pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order);
             if(!(pbfast::isExactGamma(gamma) || need > pbfast::kQuadratureOrderCap))
                 return false;
@@ -1774,8 +1785,8 @@ namespace picBunch::pbfast
         inline Vec3 exactObliqueBox(Vec3 const& R0, Vec3 const& cells, Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = u / alpaka::math::sqrt(uu2);
             double const invg = 1.0 / gam;
             auto const M = [&](Vec3 const& v) { return applyContract(v, n, invg); };
             Vec3 const c0 = M(R0);
@@ -1840,8 +1851,8 @@ namespace picBunch::pbfast
             BoxPlane planes[6])
         {
             double const uu2 = nbref::dot(u, u);
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = u / alpaka::math::sqrt(uu2);
             auto const M = [&](Vec3 const& v) { return applyContract(v, n, 1.0 / gam); };
             Vec3 const c0 = M(R0);
             Vec3 const e[3] = {
@@ -1906,13 +1917,13 @@ namespace picBunch::pbfast
             Vec3 const& u)
         {
             double const uu2 = nbref::dot(u, u);
-            double const gam = std::sqrt(1.0 + uu2);
-            Vec3 const n = u / std::sqrt(uu2);
+            double const gam = alpaka::math::sqrt(1.0 + uu2);
+            Vec3 const n = u / alpaka::math::sqrt(uu2);
             Vec3 const sstar{R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
             BoxPlane planes[6];
             supportPlanes(R0, cells, u, planes);
 
-            Vec3 const helper = std::abs(n.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
+            Vec3 const helper = alpaka::math::abs(n.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
             Vec3 e1 = nbref::cross(n, helper);
             e1 = e1 / norm3(e1);
             Vec3 const e2 = nbref::cross(n, e1);
@@ -1929,19 +1940,19 @@ namespace picBunch::pbfast
             for(int im = 0; im < 16; ++im)
             {
                 double const mu = muR.x[static_cast<std::size_t>(im)];
-                double const st = std::sqrt(std::max(0.0, 1.0 - mu * mu));
+                double const st = alpaka::math::sqrt(alpaka::math::max(0.0, 1.0 - mu * mu));
                 double const wmu = muR.w[static_cast<std::size_t>(im)];
                 for(int ip = 0; ip < 32; ++ip)
                 {
                     double const phi = pi * (phR.x[static_cast<std::size_t>(ip)] + 1.0);
                     double const wphi = pi * phR.w[static_cast<std::size_t>(ip)];
-                    Vec3 const Om = mu * n + st * (std::cos(phi) * e1 + std::sin(phi) * e2);
+                    Vec3 const Om = mu * n + st * (alpaka::math::cos(phi) * e1 + alpaka::math::sin(phi) * e2);
                     double rmax = 1e300;
                     for(int f = 0; f < 6; ++f)
                     {
                         double const dn = nbref::dot(planes[f].n, Om);
                         if(dn > 1e-15)
-                            rmax = std::min(rmax, planes[f].h / dn);
+                            rmax = alpaka::math::min(rmax, planes[f].h / dn);
                     }
                     if(!(rmax > 1e-14))
                         continue;
@@ -1957,7 +1968,7 @@ namespace picBunch::pbfast
                     bp[nb++] = rmax;
                     for(int a = 0; a < 3; ++a)
                     {
-                        if(std::abs(BOa[a]) < 1e-300)
+                        if(alpaka::math::abs(BOa[a]) < 1e-300)
                             continue;
                         for(int k = 0; k < 4; ++k)
                         {
@@ -1966,7 +1977,7 @@ namespace picBunch::pbfast
                             {
                                 bool dup = false;
                                 for(int q = 0; q < nb; ++q)
-                                    if(std::abs(bp[q] - r) < 1e-12 * rmax)
+                                    if(alpaka::math::abs(bp[q] - r) < 1e-12 * rmax)
                                         dup = true;
                                 if(!dup)
                                     bp[nb++] = r;
@@ -2072,25 +2083,25 @@ namespace picBunch::pbfast
             Vec3 Bbox{};
             if(uu2 == 0.0)
             {
-                double const p[3] = {R0.x, R0.y, R0.z};
-                double const lo[3] = {-1.5 * cells.x, -1.5 * cells.y, -1.5 * cells.z};
-                double const hi[3] = {1.5 * cells.x, 1.5 * cells.y, 1.5 * cells.z};
+                AVec const p{R0.x, R0.y, R0.z};
+                AVec const lo{-1.5 * cells.x, -1.5 * cells.y, -1.5 * cells.z};
+                AVec const hi{1.5 * cells.x, 1.5 * cells.y, 1.5 * cells.z};
                 for(int c = 0; c < 3; ++c)
                     Ebox[c] = boxField8T(p, lo, hi, c);
             }
             else
             {
-                double const gam = std::sqrt(1.0 + uu2);
+                double const gam = alpaka::math::sqrt(1.0 + uu2);
                 Vec3 const beta = u / gam;
-                Vec3 const betaH = u / std::sqrt(uu2);
+                Vec3 const betaH = u / alpaka::math::sqrt(uu2);
                 int stretchAxis = -1;
                 for(int a = 0; a < 3; ++a)
-                    if(std::abs(std::abs(betaH[a]) - 1.0) < 1e-12)
+                    if(alpaka::math::abs(alpaka::math::abs(betaH[a]) - 1.0) < 1e-12)
                         stretchAxis = a;
                 if(stretchAxis >= 0)
                 {
-                    double const p[3] = {R0[0], R0[1], R0[2]};
-                    double lo[3], hi[3];
+                    AVec const p{R0[0], R0[1], R0[2]};
+                    AVec lo, hi;
                     for(int a = 0; a < 3; ++a)
                     {
                         lo[a] = p[a] - 1.5 * cells[a];
@@ -2098,9 +2109,9 @@ namespace picBunch::pbfast
                     }
                     lo[stretchAxis] *= gam;
                     hi[stretchAxis] *= gam;
-                    double const tlo[3] = {-hi[0], -hi[1], -hi[2]};
-                    double const thi[3] = {-lo[0], -lo[1], -lo[2]};
-                    double const zero[3] = {0.0, 0.0, 0.0};
+                    AVec const tlo{-hi[0], -hi[1], -hi[2]};
+                    AVec const thi{-lo[0], -lo[1], -lo[2]};
+                    AVec const zero{0.0, 0.0, 0.0};
                     for(int c = 0; c < 3; ++c)
                         Ebox[c] = boxField8T(zero, tlo, thi, c);
                     Ebox[stretchAxis] /= gam;
@@ -2141,9 +2152,9 @@ namespace picBunch::pbfast
         bool const singular = Wstar > 0.0;
 
         double const uu2 = nbref::dot(u, u);
-        Vec3 const beta = uu2 == 0.0 ? Vec3{} : u / std::sqrt(1.0 + uu2);
+        Vec3 const beta = uu2 == 0.0 ? Vec3{} : u / alpaka::math::sqrt(1.0 + uu2);
         double const invg2 = 1.0 / (1.0 + uu2);
-        double const gamma = std::sqrt(1.0 + uu2);
+        double const gamma = alpaka::math::sqrt(1.0 + uu2);
 
         // Exact s-space evaluator for the selected support cell classes.
         // Out-of-support high-gamma pairs still route exact through the shared
@@ -2161,7 +2172,7 @@ namespace picBunch::pbfast
         // gamma-stretched box, both plus the subtracted remainder below.
         if(singular)
         {
-            Vec3 const betaH = uu2 == 0.0 ? Vec3{} : u / std::sqrt(uu2);
+            Vec3 const betaH = uu2 == 0.0 ? Vec3{} : u / alpaka::math::sqrt(uu2);
             if(uu2 > 0.0 && !detail::isAxialBeta(u, betaH))
             {
                 E = detail::obliqueRayField(R0, cells, u);
@@ -2177,9 +2188,9 @@ namespace picBunch::pbfast
         // Remaining quadrature uses a tolerance- and gamma-derived order with
         // a hard convergence cap.  Pairs above the cap are routed to the
         // exact evaluator above, so this rule always exists.
-        int const quadOrder = std::min(
+        int const quadOrder = alpaka::math::min(
             pbfast::kQuadratureOrderCap,
-            std::max(2, pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order)));
+            alpaka::math::max(2, pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order)));
         detail::Rule const& gl = detail::rule(quadOrder);
         int const n = quadOrder;
         detail::Panels const px = detail::axisPanels(sstar.x);
@@ -2218,8 +2229,8 @@ namespace picBunch::pbfast
                                 if(uu2 == 0.0)
                                 {
                                     double r2 = Rx * Rx + Ry * Ry + Rz * Rz;
-                                    r2 = std::max(r2, 1e-300);
-                                    double const f = 1.0 / (r2 * std::sqrt(r2));
+                                    r2 = alpaka::math::max(r2, 1e-300);
+                                    double const f = 1.0 / (r2 * alpaka::math::sqrt(r2));
                                     Erem = Erem + (w * f) * Vec3{Rx, Ry, Rz};
                                 }
                                 else
@@ -2227,8 +2238,8 @@ namespace picBunch::pbfast
                                     double const r2 = Rx * Rx + Ry * Ry + Rz * Rz;
                                     double const rb = Rx * beta.x + Ry * beta.y + Rz * beta.z;
                                     double D = r2 * invg2 + rb * rb;
-                                    D = std::max(D, 1e-300);
-                                    double const f = invg2 / (D * std::sqrt(D));
+                                    D = alpaka::math::max(D, 1e-300);
+                                    double const f = invg2 / (D * alpaka::math::sqrt(D));
                                     Erem = Erem + (w * f) * Vec3{Rx, Ry, Rz};
                                 }
                             }

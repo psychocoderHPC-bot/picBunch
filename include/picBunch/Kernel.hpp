@@ -6,10 +6,12 @@
 
 #include <cmath>
 
-// Use alpaka's host/device annotation from the single alpaka macro header.
-// Include it unconditionally so ALPAKA_FN_ACC is defined for host and device
-// translation units alike.
+// Use alpaka's host/device annotation and the SIMD-aware math functors from
+// the single alpaka math header.  Include it unconditionally so ALPAKA_FN_ACC
+// is defined for host and device translation units alike and no device-callable
+// function reaches for std:: math.
 #include <alpaka/core/common.hpp>
+#include <alpaka/math.hpp>
 
 namespace picBunch
 {
@@ -29,7 +31,7 @@ namespace picBunch
     template<Shape S>
     ALPAKA_FN_ACC inline double shapeWeight(double x)
     {
-        double const ax = std::abs(x);
+        double const ax = alpaka::math::abs(x);
         if constexpr(S == Shape::CIC)
         {
             return ax < 1.0 ? 1.0 - ax : 0.0;
@@ -71,7 +73,7 @@ namespace picBunch
     /** TSC assignment function, argument in cell units. */
     ALPAKA_FN_ACC inline double tscShape(double x)
     {
-        double const ax = fabs(x);
+        double const ax = alpaka::math::abs(x);
         if(ax < 0.5)
             return 0.75 - ax * ax;
         if(ax < 1.5)
@@ -102,7 +104,7 @@ namespace picBunch
     {
         double const uu2 = ux * ux + uy * uy + uz * uz;
         double const invG2 = 1.0 / (1.0 + uu2);
-        double const gamma = sqrt(1.0 + uu2);
+        double const gamma = alpaka::math::sqrt(1.0 + uu2);
         double const bx = ux / gamma;
         double const by = uy / gamma;
         double const bz = uz / gamma;
@@ -116,7 +118,7 @@ namespace picBunch
         if(uu2 == 0.0)
         {
             // stationary limit: exact Coulomb field
-            double const r3 = r2 * sqrt(r2);
+            double const r3 = r2 * alpaka::math::sqrt(r2);
             double const f = (r3 > 0.0) ? 1.0 / r3 : 0.0;
             Ex = f * Rx;
             Ey = f * Ry;
@@ -124,7 +126,7 @@ namespace picBunch
         }
         else
         {
-            double const f = (D > 0.0) ? invG2 / (D * sqrt(D)) : 0.0;
+            double const f = (D > 0.0) ? invG2 / (D * alpaka::math::sqrt(D)) : 0.0;
             Ex = f * Rx;
             Ey = f * Ry;
             Ez = f * Rz;

@@ -32,6 +32,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -71,24 +72,19 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double const* px,
-                double const* py,
-                double const* pz,
-                double const* pq,
+                alpaka::concepts::IMdSpan auto const& px,
+                alpaka::concepts::IMdSpan auto const& py,
+                alpaka::concepts::IMdSpan auto const& pz,
+                alpaka::concepts::IMdSpan auto const& pq,
                 std::uint32_t numParticles,
-                double* rho,
-                std::uint32_t rhoStride,
+                alpaka::concepts::IMdSpan auto rho,
                 std::uint32_t zOffset,
                 std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t Mz,
-                double ox,
-                double oy,
-                double oz,
-                double sx,
-                double sy,
-                double sz) const
+                alpaka::Vec<double, 3u> origin,
+                alpaka::Vec<double, 3u> spacing) const
             {
                 double const support = shapeSupport<S>();
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
@@ -96,17 +92,13 @@ namespace picBunch
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{numParticles}))
                 {
-                    double const pos[3] = {px[p], py[p], pz[p]};
-                    double const org[3] = {ox, oy, oz};
-                    double const sp[3] = {sx, sy, sz};
-                    double t[3];
-                    long lo[3];
-                    long hi[3];
+                    auto const t = (alpaka::Vec{px[p], py[p], pz[p]} - origin) / spacing;
+                    alpaka::Vec<long, 3u> lo;
+                    alpaka::Vec<long, 3u> hi;
                     for(int a = 0; a < 3; ++a)
                     {
-                        t[a] = (pos[a] - org[a]) / sp[a];
-                        lo[a] = static_cast<long>(::ceil(t[a] - support));
-                        hi[a] = static_cast<long>(::floor(t[a] + support));
+                        lo[a] = static_cast<long>(alpaka::math::ceil(t[a] - support));
+                        hi[a] = static_cast<long>(alpaka::math::floor(t[a] + support));
                     }
                     double const q = pq[p];
                     for(long ia = lo[0]; ia <= hi[0]; ++ia)
@@ -130,12 +122,17 @@ namespace picBunch
                                 if(mc < static_cast<long>(zOffset)
                                    || mc >= static_cast<long>(zOffset + zExtent))
                                     continue;
-                                auto const idx = static_cast<std::size_t>(ma)
-                                    + static_cast<std::size_t>(Mx)
-                                        * (static_cast<std::size_t>(mb)
-                                           + static_cast<std::size_t>(My)
-                                               * static_cast<std::size_t>(mc - zOffset));
-                                alpaka::onAcc::atomicAdd(acc, &rho[idx * rhoStride], wc * q);
+                                auto const idx = alpaka::Vec{
+                                    static_cast<std::uint32_t>(mc - static_cast<long>(zOffset)),
+                                    static_cast<std::uint32_t>(mb),
+                                    static_cast<std::uint32_t>(ma)};
+                                // rho is a double box in the replicated path and a
+                                // Complex slab in the distributed path; the real
+                                // part is always the first double of the element.
+                                alpaka::onAcc::atomicAdd(
+                                    acc,
+                                    reinterpret_cast<double*>(&rho[idx]),
+                                    wc * q);
                             }
                         }
                     }
@@ -149,24 +146,17 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double* kernel,
-                std::uint32_t kernelStride,
+                alpaka::concepts::IMdSpan auto kernel,
                 std::uint32_t zOffset,
                 std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t Mz,
                 int component,
-                double dx,
-                double dy,
-                double dz,
-                double cellx,
-                double celly,
-                double cellz,
+                alpaka::Vec<double, 3u> cell,
+                alpaka::Vec<double, 3u> cellOrigin,
                 double refinement,
-                double ux,
-                double uy,
-                double uz) const
+                alpaka::Vec<double, 3u> uRep) const
             {
                 for(auto const& idx : alpaka::onAcc::makeIdxMap(
                         acc,
@@ -186,21 +176,21 @@ namespace picBunch
                     int const dj = (j <= (My - 1u) / 2u) ? static_cast<int>(j) : static_cast<int>(j) - static_cast<int>(My);
                     int const dk = (k <= (Mz - 1u) / 2u) ? static_cast<int>(k) : static_cast<int>(k) - static_cast<int>(Mz);
                     // R = (d*h + yee_delta) * cell
-                    double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
-                    double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
-                    double const Rz = (static_cast<double>(dk) * refinement + dz) * cellz;
+                    auto const d = alpaka::Vec{
+                        static_cast<double>(di),
+                        static_cast<double>(dj),
+                        static_cast<double>(dk)};
+                    auto const R = (d * refinement + cell) * cellOrigin;
                     double field[6];
-                    pointFieldNormalized(Rx, Ry, Rz, ux, uy, uz, field);
+                    pointFieldNormalized(R[0], R[1], R[2], uRep[0], uRep[1], uRep[2], field);
                     double value = field[component];
-                    if(!std::isfinite(value))
+                    if(!alpaka::math::isfinite(value))
                         value = 0.0;
-                    auto const flat = static_cast<std::size_t>(i)
-                        + static_cast<std::size_t>(Mx)
-                            * (static_cast<std::size_t>(j)
-                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(kLocal));
-                    kernel[flat * kernelStride] = value;
-                    if(kernelStride > 1u)
-                        kernel[flat * kernelStride + 1u] = 0.0;
+                    auto const nodeIdx = alpaka::Vec{
+                        static_cast<std::uint32_t>(kLocal),
+                        static_cast<std::uint32_t>(j),
+                        static_cast<std::uint32_t>(i)};
+                    kernel[nodeIdx] = value;
                 }
             }
         };
@@ -217,8 +207,8 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double* a,
-                double const* b,
+                alpaka::concepts::IMdSpan auto a,
+                alpaka::concepts::IMdSpan auto const& b,
                 std::uint32_t count) const
             {
                 for(auto [l] : alpaka::onAcc::makeIdxMap(
@@ -226,15 +216,15 @@ namespace picBunch
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    std::size_t const off = 2u * static_cast<std::size_t>(l);
-                    double const ar = a[off];
-                    double const ai = a[off + 1u];
-                    double const br = b[off];
-                    double const bi = b[off + 1u];
-                    double re = ar * br - ai * bi;
-                    double im = ar * bi + ai * br;
-                    a[off] = re;
-                    a[off + 1u] = im;
+                    // Packed half-spectrum: re at [l,0], im at [l,1].
+                    double const ar = a[alpaka::Vec{l, 0u}];
+                    double const ai = a[alpaka::Vec{l, 1u}];
+                    double const br = b[alpaka::Vec{l, 0u}];
+                    double const bi = b[alpaka::Vec{l, 1u}];
+                    double const re = ar * br - ai * bi;
+                    double const im = ar * bi + ai * br;
+                    a[alpaka::Vec{l, 0u}] = re;
+                    a[alpaka::Vec{l, 1u}] = im;
                 }
             }
         };
@@ -248,30 +238,23 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double const* px,
-                double const* py,
-                double const* pz,
-                double const* pux,
-                double const* puy,
-                double const* puz,
-                double const* pq,
+                alpaka::concepts::IMdSpan auto const& px,
+                alpaka::concepts::IMdSpan auto const& py,
+                alpaka::concepts::IMdSpan auto const& pz,
+                alpaka::concepts::IMdSpan auto const& pux,
+                alpaka::concepts::IMdSpan auto const& puy,
+                alpaka::concepts::IMdSpan auto const& puz,
+                alpaka::concepts::IMdSpan auto const& pq,
                 std::uint32_t numParticles,
-                double* rho,
-                std::uint32_t rhoStride,
+                alpaka::concepts::IMdSpan auto rho,
                 std::uint32_t zOffset,
                 std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t Mz,
-                double ox,
-                double oy,
-                double oz,
-                double sx,
-                double sy,
-                double sz,
-                double u0x,
-                double u0y,
-                double u0z,
+                alpaka::Vec<double, 3u> origin,
+                alpaka::Vec<double, 3u> spacing,
+                alpaka::Vec<double, 3u> u0,
                 int a1,
                 int a2,
                 int a3) const
@@ -288,21 +271,16 @@ namespace picBunch
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{numParticles}))
                 {
-                    double const pos[3] = {px[p], py[p], pz[p]};
-                    double const org[3] = {ox, oy, oz};
-                    double const sp[3] = {sx, sy, sz};
-                    double t[3];
-                    long lo[3];
-                    long hi[3];
+                    auto const t = (alpaka::Vec{px[p], py[p], pz[p]} - origin) / spacing;
+                    alpaka::Vec<long, 3u> lo;
+                    alpaka::Vec<long, 3u> hi;
                     for(int a = 0; a < 3; ++a)
                     {
-                        t[a] = (pos[a] - org[a]) / sp[a];
-                        lo[a] = static_cast<long>(::ceil(t[a] - support));
-                        hi[a] = static_cast<long>(::floor(t[a] + support));
+                        lo[a] = static_cast<long>(alpaka::math::ceil(t[a] - support));
+                        hi[a] = static_cast<long>(alpaka::math::floor(t[a] + support));
                     }
-                    double const coeff
-                        = pq[p] * powSmall(pux[p] - u0x, a1) * powSmall(puy[p] - u0y, a2)
-                            * powSmall(puz[p] - u0z, a3);
+                    double const coeff = pq[p] * powSmall(pux[p] - u0[0], a1)
+                        * powSmall(puy[p] - u0[1], a2) * powSmall(puz[p] - u0[2], a3);
                     if(coeff == 0.0)
                         continue;
                     for(long ia = lo[0]; ia <= hi[0]; ++ia)
@@ -326,12 +304,11 @@ namespace picBunch
                                 if(mc < static_cast<long>(zOffset)
                                    || mc >= static_cast<long>(zOffset + zExtent))
                                     continue;
-                                auto const idx = static_cast<std::size_t>(ma)
-                                    + static_cast<std::size_t>(Mx)
-                                        * (static_cast<std::size_t>(mb)
-                                           + static_cast<std::size_t>(My)
-                                               * static_cast<std::size_t>(mc - zOffset));
-                                alpaka::onAcc::atomicAdd(acc, &rho[idx * rhoStride], wc * coeff);
+                                auto const idx = alpaka::Vec{
+                                    static_cast<std::uint32_t>(mc - static_cast<long>(zOffset)),
+                                    static_cast<std::uint32_t>(mb),
+                                    static_cast<std::uint32_t>(ma)};
+                                alpaka::onAcc::atomicAdd(acc, &rho[idx], wc * coeff);
                             }
                         }
                     }
@@ -350,23 +327,17 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double* const* kernelPlanes,
+                alpaka::concepts::IMdSpan auto kernelPlanes,
                 std::uint32_t zOffset,
                 std::uint32_t zExtent,
                 std::uint32_t Mx,
                 std::uint32_t My,
                 std::uint32_t Mz,
                 int component,
-                double dx,
-                double dy,
-                double dz,
-                double cellx,
-                double celly,
-                double cellz,
+                alpaka::Vec<double, 3u> cell,
+                alpaka::Vec<double, 3u> cellOrigin,
                 double refinement,
-                double u0x,
-                double u0y,
-                double u0z) const
+                alpaka::Vec<double, 3u> u0) const
             {
                 using TP = detail::TaylorPoly<Order>;
                 constexpr std::size_t T = TP::T;
@@ -385,20 +356,23 @@ namespace picBunch
                                                          : static_cast<int>(j) - static_cast<int>(My);
                     int const dk = (k <= (Mz - 1u) / 2u) ? static_cast<int>(k)
                                                          : static_cast<int>(k) - static_cast<int>(Mz);
-                    double const Rx = (static_cast<double>(di) * refinement + dx) * cellx;
-                    double const Ry = (static_cast<double>(dj) * refinement + dy) * celly;
-                    double const Rz = (static_cast<double>(dk) * refinement + dz) * cellz;
+                    auto const d = alpaka::Vec{
+                        static_cast<double>(di),
+                        static_cast<double>(dj),
+                        static_cast<double>(dk)};
+                    auto const R = (d * refinement + cell) * cellOrigin;
                     double coeffs[6 * T];
-                    detail::pointFieldTaylor<Order>(Rx, Ry, Rz, u0x, u0y, u0z, coeffs);
+                    detail::pointFieldTaylor<Order>(R[0], R[1], R[2], u0[0], u0[1], u0[2], coeffs);
                     double const* comp = coeffs + static_cast<std::size_t>(component) * T;
-                    auto const flat = static_cast<std::size_t>(i)
-                        + static_cast<std::size_t>(Mx)
-                            * (static_cast<std::size_t>(j)
-                               + static_cast<std::size_t>(My) * static_cast<std::size_t>(kLocal));
                     for(std::size_t a = 0; a < T; ++a)
                     {
                         double const v = comp[a];
-                        kernelPlanes[a][flat] = std::isfinite(v) ? v : 0.0;
+                        auto const nodeIdx = alpaka::Vec{
+                            static_cast<std::uint32_t>(a),
+                            static_cast<std::uint32_t>(kLocal),
+                            static_cast<std::uint32_t>(j),
+                            static_cast<std::uint32_t>(i)};
+                        kernelPlanes[nodeIdx] = alpaka::math::isfinite(v) ? v : 0.0;
                     }
                 }
             }
@@ -411,9 +385,9 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double* out,
-                double const* a,
-                double const* b,
+                alpaka::concepts::IMdSpan auto out,
+                alpaka::concepts::IMdSpan auto a,
+                alpaka::concepts::IMdSpan auto const& b,
                 std::uint32_t count) const
             {
                 for(auto [l] : alpaka::onAcc::makeIdxMap(
@@ -421,35 +395,36 @@ namespace picBunch
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    std::size_t const off = 2u * static_cast<std::size_t>(l);
-                    double const ar = a[off];
-                    double const ai = a[off + 1u];
-                    double const br = b[off];
-                    double const bi = b[off + 1u];
-                    double const orr = out[off];
-                    double const ori = out[off + 1u];
-                    out[off] = orr + ar * br - ai * bi;
-                    out[off + 1u] = ori + ar * bi + ai * br;
+                    // Packed half-spectrum: re at [l,0], im at [l,1].
+                    double const ar = a[alpaka::Vec{l, 0u}];
+                    double const ai = a[alpaka::Vec{l, 1u}];
+                    double const br = b[alpaka::Vec{l, 0u}];
+                    double const bi = b[alpaka::Vec{l, 1u}];
+                    double const orr = out[alpaka::Vec{l, 0u}];
+                    double const ori = out[alpaka::Vec{l, 1u}];
+                    out[alpaka::Vec{l, 0u}] = orr + ar * br - ai * bi;
+                    out[alpaka::Vec{l, 1u}] = ori + ar * bi + ai * br;
                 }
             }
         };
 
         //! Scalar ``acc + in * factor`` used by the read-out ``onHost::transform``.
-        //! Wrapped in ``ScalarFunc`` so the double operations stay element-wise and
-        //! bit-identical to the former ``field[i] += staged[i] * factor`` loop.
+        //! The operator is generic so alpaka can lower it onto SIMD packs (the
+        //! scalar-functor wrapper is intentionally dropped).  It still evaluates
+        //! ``acc + in * factor`` per lane; the read-out tests pin the resulting
+        //! <= 1 ulp / <= 2e-15 difference against the double reference.
         struct ReadoutScaleAdd
         {
             double factor;
 
-            ALPAKA_FN_ACC double operator()(double acc, double in) const
+            ALPAKA_FN_ACC auto operator()(auto const& acc, auto const& in) const
             {
                 return acc + in * factor;
             }
         };
 
         //! Gather one local read-out slab into a compact double buffer and scale
-        //! it: ``dst[l] = Re(work[idx]) * factor`` with x-fastest ``l`` and the
-        //! padded ``mx*my`` stride in ``idx``.
+        //! it: ``dst[l] = Re(work[Vec{k,j,i}]) * factor`` with x-fastest ``l``.
         //! The complex layout needs the index mapping, so this stays a small kernel
         //! with ``makeIdxMap`` rather than an ``onHost::transform`` over Complex.
         //! Each element is independent, so the result is order-independent and
@@ -459,13 +434,11 @@ namespace picBunch
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                Complex const* work,
-                double* dst,
+                alpaka::concepts::IMdSpan auto const& work,
+                alpaka::concepts::IMdSpan auto dst,
                 std::uint32_t nx,
                 std::uint32_t ny,
                 std::uint32_t nz,
-                std::uint32_t mx,
-                std::uint32_t my,
                 double factor) const
             {
                 std::size_t const count
@@ -480,9 +453,11 @@ namespace picBunch
                     std::size_t const rem = l / nx;
                     std::size_t const j = rem % ny;
                     std::size_t const k = rem / ny;
-                    std::size_t const idx = i
-                        + static_cast<std::size_t>(mx)
-                            * (j + static_cast<std::size_t>(my) * k);
+                    auto const idx = alpaka::Vec{
+                        static_cast<std::uint32_t>(k),
+                        static_cast<std::uint32_t>(j),
+                        static_cast<std::uint32_t>(i)};
+                    // size_t linear index into 32-bit extents; count <= kMaxPaddedNodes (2^28).
                     dst[l] = work[idx].real() * factor;
                 }
             }
@@ -1141,6 +1116,19 @@ namespace picBunch
 
         std::uint64_t const paddedNodes = static_cast<std::uint64_t>(Mx) * My * Mz;
         std::uint32_t const spectrumCount = Mz * My * CP;
+        // Packed half-spectrum view: Complex is two adjacent doubles.  The last
+        // MdSpan dimension is the fastest one, so the {count, 2} view with index
+        // {l, 0} / {l, 1} lands on element 2*l / 2*l+1 (re / im).
+        using PackedSpectrumIndex = alpaka::Vec<std::uint32_t, 2u>;
+        auto const packedSpectrumExtents = PackedSpectrumIndex{spectrumCount, 2u};
+        static_assert(std::is_same_v<
+                      std::remove_cvref_t<decltype(packedSpectrumExtents)>::value_type,
+                      PackedSpectrumIndex::value_type>);
+        auto const packedSpectrumPitches
+            = alpaka::Vec<std::size_t, 2u>{2u * sizeof(double), sizeof(double)};
+        auto packedSpectrum = [&](double* data) {
+            return alpaka::makeMdSpan(data, packedSpectrumExtents, packedSpectrumPitches);
+        };
         // The replicated path keeps its FFT buffers as flat 1-D allocations.
         // Every access in this path (deposit, kernel build, spectrum
         // multiply, read-out) and the vendor plans (contiguous layout,
@@ -1270,10 +1258,11 @@ namespace picBunch
         };
 
         // Device TSC deposit of a particle list into the (already zeroed) rho.
+        // ``rhoView`` is a 3-D span over the target slab: a double box in the
+        // replicated path and a Complex slab in the distributed path.
         auto depositDevice = [&](
                                  std::vector<std::size_t> const& list,
-                                 double* rho,
-                                 std::uint32_t rhoStride,
+                                 auto rhoView,
                                  std::uint32_t zOffset,
                                  std::uint32_t zExtent) {
             auto const numParticles = static_cast<std::uint32_t>(list.size());
@@ -1292,27 +1281,26 @@ namespace picBunch
             std::uint32_t const frame = 64u;
             auto launch = [&](auto tag) {
                 constexpr Shape S = decltype(tag)::value;
+                auto const particleExtents = alpaka::Vec<std::uint32_t, 1u>{numParticles};
+                static_assert(std::is_same_v<
+                              std::remove_cvref_t<decltype(particleExtents)>::value_type,
+                              std::uint32_t>);
                 queue.enqueue(
                     alpaka::onHost::FrameSpec{(numParticles + frame - 1u) / frame, frame},
                     TscDepositKernel<S>{},
-                    posX.data(),
-                    posY.data(),
-                    posZ.data(),
-                    charge.data(),
+                    alpaka::makeMdSpan(posX.data(), particleExtents),
+                    alpaka::makeMdSpan(posY.data(), particleExtents),
+                    alpaka::makeMdSpan(posZ.data(), particleExtents),
+                    alpaka::makeMdSpan(charge.data(), particleExtents),
                     numParticles,
-                    rho,
-                    rhoStride,
+                    rhoView,
                     zOffset,
                     zExtent,
                     Mx,
                     My,
                     Mz,
-                    grid.origin[0],
-                    grid.origin[1],
-                    grid.origin[2],
-                    grid.spacing[0],
-                    grid.spacing[1],
-                    grid.spacing[2]);
+                    alpaka::Vec{grid.origin[0], grid.origin[1], grid.origin[2]},
+                    alpaka::Vec{grid.spacing[0], grid.spacing[1], grid.spacing[2]});
             };
             if(grid.shape == Shape::CIC)
                 launch(std::integral_constant<Shape, Shape::CIC>{});
@@ -1327,6 +1315,10 @@ namespace picBunch
         };
 
         // ---------------------------------------------------------------- FFT
+        auto r2cPlan
+            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
+        auto c2rPlan
+            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device);
 #if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
         // Deviation from the pure-alpaka rule, kept on purpose.  This is the only
         // native vendor API call in the tree: the HIP-only rocfft_cleanup() from
@@ -1337,36 +1329,37 @@ namespace picBunch
         // destructor calls hipStreamDestroy after the HIP runtime has finalised
         // and segfaults at exit.  Without this teardown the picBunch.Io test
         // regresses on ROCm 7.2 (it was fixed by commit 833b627).
+        //
+        // Do not call cleanup inline.  The pool is process-global, so an inline
+        // call at the end of the first computeField destroys it while later
+        // computeField calls may still create plans; those then fail with
+        // rocfft_plan_create error 1.  Register a process-exit handler instead.
+        //
+        // Ordering: C++ runs atexit handlers in reverse order of registration.
+        // alpakaVendor registers its own rocfft_cleanup atexit hook when the
+        // first plan is created, and the HIP runtime registers its static
+        // destructors before that.  Registering this handler after both plans
+        // are built therefore makes it run before the HIP static destructors,
+        // while the plans (function locals, already destroyed on return from
+        // computeField) are gone and the HIP runtime is still alive.
+        //
+        // Idempotency: std::call_once registers the handler exactly once per
+        // process.  After this handler runs, alpakaVendor's later (earlier
+        // registered) atexit hook calls rocfft_cleanup() again; that second
+        // call is assumed to be a no-op by librocfft.  This idempotency is the
+        // documented contract of rocfft_cleanup() and is relied on here.
+        //
         // Temporary ROCm 7.2 workaround. See docs/rocm-fft-teardown.md.
-        // The teardown is a process-global operation: it must run once per
-        // process, after all FFT plans have been destroyed and while the queue
-        // and HIP device are still alive.  The guard is therefore declared
-        // before the plans below and destroyed after them, so the pool is torn
-        // down after this scope's plans are gone but before the queue and
-        // device are released.  Repeated computeField calls must not destroy
-        // the process-global pool again, so the native cleanup is wrapped in a
-        // thread-safe std::once_flag.  Every call still waits for its queue so
-        // the ordering with the plans in this scope is preserved.
         // alpakaVendor's PlanImpl destructor owns the plan lifetime correctly
         // but cannot fix the process-global teardown, and the pin has no public
         // alpaka::fft::onHost::finalize().  The clean fix is to add that
         // finalize() (idempotent, once-guarded) to alpakaVendor; then replace
-        // this guard with that call and drop the rocfft/rocfft.h include above.
-        static std::once_flag rocfftCleanupOnce;
-        struct RocfftTeardownGuard
-        {
-            decltype(queue)& queue;
-            ~RocfftTeardownGuard()
-            {
-                alpaka::onHost::wait(queue);
-                std::call_once(rocfftCleanupOnce, [] { static_cast<void>(rocfft_cleanup()); });
-            }
-        } rocfftTeardownGuard{queue};
+        // this handler with that call and drop the rocfft/rocfft.h include.
+        static std::once_flag rocfftAtexitOnce;
+        std::call_once(
+            rocfftAtexitOnce,
+            [] { std::atexit([] { static_cast<void>(rocfft_cleanup()); }); });
 #endif
-        auto r2cPlan
-            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
-        auto c2rPlan
-            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device);
 
         double const scale = (kRefinement * kRefinement * kRefinement)
             / (static_cast<double>(Mx) * static_cast<double>(My) * static_cast<double>(Mz));
@@ -1489,10 +1482,12 @@ namespace picBunch
                     }
 
                     auto const moments = velocityMomentMultiIndices(3u);
-                    // One FFT I/O buffer per coefficient plane (``executeForward``
-                    // takes alpaka buffers, not sub-buffer pointers).  The 20 moment
-                    // spectra are reused across all six components; the 20 kernel
-                    // planes are rebuilt per component and reused.
+                    // One contiguous coefficient-plane buffer replaces the former
+                    // device-side double* array.  The build kernel addresses it as
+                    // a 4-D IMdSpan [plane][z][y][x]; each plane is also handed to
+                    // the FFT as a dense MdSpan view.  Round the per-plane pitch
+                    // up to a 128-byte (16 double) boundary so a plane view keeps
+                    // the alignment a separate allocation used to have.
                     auto firstMom = alpaka::onHost::allocUnified<Complex>(
                         device,
                         static_cast<std::size_t>(spectrumCount));
@@ -1505,18 +1500,30 @@ namespace picBunch
                             alpaka::onHost::allocUnified<Complex>(
                                 device,
                                 static_cast<std::size_t>(spectrumCount)));
-                    auto firstKern = alpaka::onHost::allocUnified<double>(device, paddedNodes);
-                    using KernBuf = decltype(firstKern);
-                    std::vector<KernBuf> kernelBufs;
-                    kernelBufs.reserve(nTerms3);
-                    kernelBufs.push_back(std::move(firstKern));
-                    for(std::size_t a = 1u; a < nTerms3; ++a)
-                        kernelBufs.push_back(
-                            alpaka::onHost::allocUnified<double>(device, paddedNodes));
-                    // Device-side array of the 20 plane pointers for the build kernel.
-                    auto kernelPlanes = alpaka::onHost::allocUnified<double*>(device, nTerms3);
-                    for(std::size_t a = 0u; a < nTerms3; ++a)
-                        kernelPlanes.data()[a] = kernelBufs[a].data();
+                    std::size_t const planeStride
+                        = ((static_cast<std::size_t>(paddedNodes) + 15u) / 16u) * 16u;
+                    auto kernelPlaneData = alpaka::onHost::allocUnified<double>(
+                        device,
+                        nTerms3 * planeStride);
+                    auto planeView = [&](std::size_t a) {
+                        return alpaka::makeMdSpan(
+                            kernelPlaneData.data() + a * planeStride,
+                            realExt);
+                    };
+                    auto const kernelPlaneExtents = alpaka::Vec<std::uint32_t, 4u>{
+                        static_cast<std::uint32_t>(nTerms3),
+                        Mz,
+                        My,
+                        Mx};
+                    auto const kernelPlanePitches = alpaka::Vec<std::size_t, 4u>{
+                        planeStride * sizeof(double),
+                        static_cast<std::size_t>(Mx) * My * sizeof(double),
+                        static_cast<std::size_t>(Mx) * sizeof(double),
+                        sizeof(double)};
+                    auto kernelPlanesView = alpaka::makeMdSpan(
+                        kernelPlaneData.data(),
+                        kernelPlaneExtents,
+                        kernelPlanePitches);
                     alpaka::onHost::wait(queue);
                     // The order-3 remainder is needed for the convergence probe
                     // in explicit mode as well; both orders validate against it.
@@ -1527,33 +1534,34 @@ namespace picBunch
                     auto launchMomentDeposit = [&](int a1, int a2, int a3) {
                         auto launch = [&](auto tag) {
                             constexpr Shape S = decltype(tag)::value;
+                            auto const particleExtents = alpaka::Vec<std::uint32_t, 1u>{N};
+                            auto const rhoExtents = alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx};
+                            static_assert(std::is_same_v<
+                                          std::remove_cvref_t<decltype(particleExtents)>::value_type,
+                                          std::uint32_t>);
+                            static_assert(std::is_same_v<
+                                          std::remove_cvref_t<decltype(rhoExtents)>::value_type,
+                                          std::uint32_t>);
                             queue.enqueue(
                                 alpaka::onHost::FrameSpec{(N + 63u) / 64u, 64u},
                                 MomentDepositKernel<S>{},
-                                px.data(),
-                                py.data(),
-                                pz.data(),
-                                pux.data(),
-                                puy.data(),
-                                puz.data(),
-                                pq.data(),
+                                alpaka::makeMdSpan(px.data(), particleExtents),
+                                alpaka::makeMdSpan(py.data(), particleExtents),
+                                alpaka::makeMdSpan(pz.data(), particleExtents),
+                                alpaka::makeMdSpan(pux.data(), particleExtents),
+                                alpaka::makeMdSpan(puy.data(), particleExtents),
+                                alpaka::makeMdSpan(puz.data(), particleExtents),
+                                alpaka::makeMdSpan(pq.data(), particleExtents),
                                 N,
-                                rhoReal.data(),
-                                1u,
+                                alpaka::makeMdSpan(rhoReal.data(), rhoExtents),
                                 0u,
                                 Mz,
                                 Mx,
                                 My,
                                 Mz,
-                                grid.origin[0],
-                                grid.origin[1],
-                                grid.origin[2],
-                                grid.spacing[0],
-                                grid.spacing[1],
-                                grid.spacing[2],
-                                u0[0],
-                                u0[1],
-                                u0[2],
+                                alpaka::Vec{grid.origin[0], grid.origin[1], grid.origin[2]},
+                                alpaka::Vec{grid.spacing[0], grid.spacing[1], grid.spacing[2]},
+                                alpaka::Vec{u0[0], u0[1], u0[2]},
                                 a1,
                                 a2,
                                 a3);
@@ -1609,23 +1617,20 @@ namespace picBunch
                                 ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
                                 Extents3::fill(4u)},
                             MomentKernelBuildKernel<3u>{},
-                            kernelPlanes.data(),
+                            kernelPlanesView,
                             0u,
                             Mz,
                             Mx,
                             My,
                             Mz,
                             c,
-                            kYeeOffset[c][0],
-                            kYeeOffset[c][1],
-                            kYeeOffset[c][2],
-                            cell[0],
-                            cell[1],
-                            cell[2],
+                            alpaka::Vec{
+                                kYeeOffset[c][0],
+                                kYeeOffset[c][1],
+                                kYeeOffset[c][2]},
+                            alpaka::Vec{cell[0], cell[1], cell[2]},
                             kRefinement,
-                            u0[0],
-                            u0[1],
-                            u0[2]);
+                            alpaka::Vec{u0[0], u0[1], u0[2]});
                         alpaka::onHost::wait(queue);
                         times.kernelMs += elapsedMs(kernelStart);
 
@@ -1642,15 +1647,16 @@ namespace picBunch
                             alpaka::fft::onHost::executeForward(
                                 queue,
                                 r2cPlan,
-                                kernelBufs[static_cast<std::size_t>(mi.idx)],
+                                planeView(static_cast<std::size_t>(mi.idx)),
                                 kernelSpec);
                             if(inFull)
                                 queue.enqueue(
                                     alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
                                     SpectrumAccumulateKernel{},
-                                    reinterpret_cast<double*>(rhoSpec.data()),
-                                    reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
-                                    reinterpret_cast<double const*>(kernelSpec.data()),
+                                    packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
+                                    packedSpectrum(reinterpret_cast<double*>(
+                                        momentBufs[static_cast<std::size_t>(mi.idx)].data())),
+                                    packedSpectrum(reinterpret_cast<double*>(kernelSpec.data())),
                                     spectrumCount);
                             // The order-3 remainder is needed for the probe even
                             // when the delivered order is 2.
@@ -1658,11 +1664,12 @@ namespace picBunch
                             {
                                 queue.enqueue(
                                     alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
-                                     SpectrumAccumulateKernel{},
-                                     reinterpret_cast<double*>(o3Spec.data()),
-                                     reinterpret_cast<double const*>(momentBufs[static_cast<std::size_t>(mi.idx)].data()),
-                                     reinterpret_cast<double const*>(kernelSpec.data()),
-                                     spectrumCount);
+                                    SpectrumAccumulateKernel{},
+                                    packedSpectrum(reinterpret_cast<double*>(o3Spec.data())),
+                                    packedSpectrum(reinterpret_cast<double*>(
+                                        momentBufs[static_cast<std::size_t>(mi.idx)].data())),
+                                    packedSpectrum(reinterpret_cast<double*>(kernelSpec.data())),
+                                    spectrumCount);
                             }
                         }
                         alpaka::onHost::wait(queue);
@@ -1697,7 +1704,9 @@ namespace picBunch
                         // x/y pitches, so the transform visits exactly the
                         // (k, j, i) subregion the former loop did.  Each output
                         // element sees the same two doubles and the same
-                        // ``acc + in * factor`` as before, hence bit-identical.
+                        // ``acc + in * factor`` as before; the functor is
+                        // deliberately SIMD-safe, so the tests pin a <= 1 ulp /
+                        // <= 2e-15 tolerance instead of bit-exactness.
                         auto const readoutExtents
                             = alpaka::Vec<std::uint32_t, 3u>{outNz, outNy, outNx};
                         auto const outPitches = alpaka::Vec<std::size_t, 3u>{
@@ -1717,7 +1726,7 @@ namespace picBunch
                         alpaka::onHost::transform(
                             queue,
                             outView,
-                            alpaka::ScalarFunc{ReadoutScaleAdd{factor}},
+                            ReadoutScaleAdd{factor},
                             outView,
                             inView);
                         alpaka::onHost::wait(queue);
@@ -1815,6 +1824,21 @@ namespace picBunch
             auto* workReal = reinterpret_cast<double*>(dfft.work());
             Extents3 const slabExt{Mx, My, nz};
             Extents3 const slabFrame = Extents3::fill(4u);
+            // The work buffer is a x-fastest Complex z-slab; both the kernel
+            // build (real part) and the gather (real part) index it as a 3-D span.
+            auto const slabWorkExtents = alpaka::Vec<std::uint32_t, 3u>{nz, My, Mx};
+            auto const slabWorkPitches = alpaka::Vec<std::size_t, 3u>{
+                static_cast<std::size_t>(Mx) * My * sizeof(Complex),
+                static_cast<std::size_t>(Mx) * sizeof(Complex),
+                sizeof(Complex)};
+            auto slabWorkView = alpaka::makeMdSpan(
+                dfft.work(),
+                slabWorkExtents,
+                slabWorkPitches);
+            static_assert(std::is_same_v<
+                          typename std::remove_cvref_t<
+                              decltype(std::declval<decltype(slabWorkView) const&>().getExtents())>::value_type,
+                          std::uint32_t>);
 
             // The inverse transform leaves a z-slab of the *padded* grid.  Only
             // the output planes [0, grid.n[2]) are written, and those padded
@@ -1987,7 +2011,13 @@ namespace picBunch
                 if(options.deterministicDeposit)
                     depositHost(members[b], workReal, 2u, zOffset, nz);
                 else
-                    depositDevice(members[b], workReal, 2u, zOffset, nz);
+                    depositDevice(
+                        members[b],
+                        alpaka::makeMdSpan(
+                            dfft.work(),
+                            alpaka::Vec<std::uint32_t, 3u>{nz, My, Mx}),
+                        zOffset,
+                        nz);
                 times.depositMs += elapsedMs(depositStart);
 
                 // ------------------------------------------- rho forward transform
@@ -2007,24 +2037,20 @@ namespace picBunch
                             ceilDivVec(slabExt, slabFrame),
                             slabFrame},
                         KernelBuildKernel{},
-                        workReal,
-                        2u,
+                        slabWorkView,
                         zOffset,
                         nz,
                         Mx,
                         My,
                         Mz,
                         c,
-                        kYeeOffset[c][0],
-                        kYeeOffset[c][1],
-                        kYeeOffset[c][2],
-                        cell[0],
-                        cell[1],
-                        cell[2],
+                        alpaka::Vec{
+                            kYeeOffset[c][0],
+                            kYeeOffset[c][1],
+                            kYeeOffset[c][2]},
+                        alpaka::Vec{cell[0], cell[1], cell[2]},
                         kRefinement,
-                        uRep[0],
-                        uRep[1],
-                        uRep[2]);
+                        alpaka::Vec{uRep[0], uRep[1], uRep[2]});
                     alpaka::onHost::wait(queue);
                     times.kernelMs += elapsedMs(kernelStart);
 
@@ -2048,13 +2074,14 @@ namespace picBunch
                                 static_cast<std::uint32_t>((stagedCount + 63u) / 64u),
                                 64u},
                             SlabGatherScaleKernel{},
-                            dfft.work(),
-                            slabStagingDev.data(),
+                            slabWorkView,
+                            alpaka::makeMdSpan(
+                                slabStagingDev.data(),
+                                alpaka::Vec<std::uint32_t, 1u>{
+                                    static_cast<std::uint32_t>(stagedCapacity)}),
                             outNx,
                             outNy,
                             localCount,
-                            Mx,
-                            My,
                             factor);
                         alpaka::onHost::wait(queue);
                         alpaka::onHost::memcpy(queue, slabStagingHost, slabStagingDev);
@@ -2118,7 +2145,13 @@ namespace picBunch
             else
             {
                 alpaka::onHost::wait(queue);
-                depositDevice(members[b], rhoReal.data(), 1u, 0u, Mz);
+                depositDevice(
+                    members[b],
+                    alpaka::makeMdSpan(
+                        rhoReal.data(),
+                        alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx}),
+                    0u,
+                    Mz);
             }
             times.depositMs += elapsedMs(depositStart);
 
@@ -2127,6 +2160,17 @@ namespace picBunch
             alpaka::fft::onHost::executeForward(queue, r2cPlan, rhoReal, rhoSpec);
             alpaka::onHost::wait(queue);
             times.fftMs += elapsedMs(fftStart);
+
+            auto kernelRealView = alpaka::makeMdSpan(
+                kernelReal.data(),
+                alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx});
+            auto outRealView = alpaka::makeMdSpan(
+                outReal.data(),
+                alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx});
+            static_assert(std::is_same_v<
+                          typename std::remove_cvref_t<
+                              decltype(std::declval<decltype(outRealView) const&>().getExtents())>::value_type,
+                          std::uint32_t>);
 
             std::array<double, 3> const uRep{
                 binning.representativeU[b][0],
@@ -2144,24 +2188,20 @@ namespace picBunch
                         ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
                         Extents3::fill(4u)},
                     KernelBuildKernel{},
-                    kernelReal.data(),
-                    1u,
+                    kernelRealView,
                     0u,
                     Mz,
                     Mx,
                     My,
                     Mz,
                     c,
-                    kYeeOffset[c][0],
-                    kYeeOffset[c][1],
-                    kYeeOffset[c][2],
-                    cell[0],
-                    cell[1],
-                    cell[2],
+                    alpaka::Vec{
+                        kYeeOffset[c][0],
+                        kYeeOffset[c][1],
+                        kYeeOffset[c][2]},
+                    alpaka::Vec{cell[0], cell[1], cell[2]},
                     kRefinement,
-                    uRep[0],
-                    uRep[1],
-                    uRep[2]);
+                    alpaka::Vec{uRep[0], uRep[1], uRep[2]});
                 alpaka::onHost::wait(queue);
                 times.kernelMs += elapsedMs(kernelStart);
 
@@ -2174,8 +2214,8 @@ namespace picBunch
                 queue.enqueue(
                     alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
                     MultiplySpectrumKernel{},
-                    reinterpret_cast<double*>(kernelSpec.data()),
-                    reinterpret_cast<double const*>(rhoSpec.data()),
+                    packedSpectrum(reinterpret_cast<double*>(kernelSpec.data())),
+                    packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
                     spectrumCount);
                 alpaka::onHost::wait(queue);
                 alpaka::fft::onHost::executeBackward(queue, c2rPlan, kernelSpec, outReal);
@@ -2190,20 +2230,22 @@ namespace picBunch
                 // gathered on the device into a compact n^3 buffer (pure copy,
                 // no arithmetic); the accumulate is an alpaka onHost::transform
                 // on the same compact device buffer.  Per node it performs the
-                // same ``acc + staged * factor`` as the former host loop, hence
-                // bit-identical, independent of the executor's thread count.
+                // same ``acc + staged * factor`` as the former host loop; the
+                // functor is deliberately SIMD-safe, so the tests pin a
+                // <= 1 ulp / <= 2e-15 tolerance, independent of executor threads.
                 std::uint32_t const outCount = static_cast<std::uint32_t>(outNodes);
+                auto const compactExtents = alpaka::Vec<std::uint32_t, 1u>{outCount};
+                static_assert(std::is_same_v<
+                              std::remove_cvref_t<decltype(compactExtents)>::value_type,
+                              std::uint32_t>);
                 queue.enqueue(
                     alpaka::onHost::FrameSpec{(outCount + 63u) / 64u, 64u},
                     detail::CompactGatherKernel{},
-                    outReal.data(),
-                    outStagingDev.data(),
+                    outRealView,
+                    alpaka::makeMdSpan(outStagingDev.data(), compactExtents),
                     outNx,
                     outNy,
-                    outNz,
-                    Mx,
-                    My);
-                auto const compactExtents = alpaka::Vec<std::uint32_t, 1u>{outCount};
+                    outNz);
                 auto accView = alpaka::makeMdSpan(
                     fieldAccs[static_cast<std::size_t>(c)].data(),
                     compactExtents);
@@ -2211,7 +2253,7 @@ namespace picBunch
                 alpaka::onHost::transform(
                     queue,
                     accView,
-                    alpaka::ScalarFunc{ReadoutScaleAdd{factor}},
+                    ReadoutScaleAdd{factor},
                     accView,
                     stagedView);
                 alpaka::onHost::wait(queue);
@@ -2232,5 +2274,4 @@ namespace picBunch
 
         return field;
     }
-
 } // namespace picBunch

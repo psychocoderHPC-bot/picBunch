@@ -181,3 +181,27 @@ Adding CI needs a decision on hosted versus self-hosted capacity.
 run, plus a documentation link check. Add optional self-hosted CUDA and ROCm jobs
 for the validated presets. Require the CPU job on every change. If the project
 does not want hosted CI, record the manual release checklist instead.
+
+## 8. Scalar min/max extrema in the ported loops
+
+**Symptom.** Eight scalar `std::min`/`std::max` accumulator sites in the ported
+host loops still reduce one element at a time on the serial side instead of
+going through an alpaka reduction.
+
+**Evidence.** The sites are the moment scans in `src/Compute.cpp`
+(`deriveFieldTailMargin`: `maxGamma`, `sourceRadius`), the far-tail pass in
+`src/FarTail.cpp` (`deriveFarTail`: `supportRadius`, `gammaMax`), and the
+velocity-binning scans in `src/VelocityBinning.cpp` (`firstBadMomentum`,
+`firstBadCharge`, `scaleU`, `uMin`/`uMax`). Each is a running extremum over a
+loop that already has a documented deterministic summation order.
+
+**Why it is not fixed here.** The conversion to `alpaka::onHost::reduce` is
+numerically exact for min/max, but it changes the loop structure around the
+ordered floating-point accumulations these scans share. Doing it in the same
+change as the clamp and span-type fixes would widen the bit-identity surface
+without a dedicated validation run, so it is deferred.
+
+**Plan.** Convert the eight sites to `alpaka::onHost::reduce` in a separate
+change, then rerun the bit-stability pin, the read-out bitwise test and the
+near-field golden/consistency suite on CPU and CUDA, and record the exact
+extrema list in the commit message.
