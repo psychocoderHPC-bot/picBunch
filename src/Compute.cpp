@@ -48,6 +48,18 @@ namespace picBunch
         using Extents3 = alpaka::Vec<std::uint32_t, 3u>;
         using Complex = alpaka::math::Complex<double>;
 
+        //! Extents type stored in an alpaka MdSpan.  Extracting it through a
+        //! class-template specialization avoids decltype of getExtents() in an
+        //! unevaluated nested context, which nvcc 13.4 cannot parse.
+        template<typename T>
+        struct MdSpanExtents;
+
+        template<typename T_Value, typename T_Extents, typename T_Pitches, typename T_Align>
+        struct MdSpanExtents<alpaka::MdSpan<T_Value, T_Extents, T_Pitches, T_Align>>
+        {
+            using type = T_Extents;
+        };
+
         template<typename T_Vec>
         T_Vec ceilDivVec(T_Vec const& a, T_Vec const& b)
         {
@@ -1835,10 +1847,9 @@ namespace picBunch
                 dfft.work(),
                 slabWorkExtents,
                 slabWorkPitches);
-            static_assert(std::is_same_v<
-                          typename std::remove_cvref_t<
-                              decltype(std::declval<decltype(slabWorkView) const&>().getExtents())>::value_type,
-                          std::uint32_t>);
+            using SlabWorkView = std::remove_cvref_t<decltype(slabWorkView)>;
+            using SlabWorkViewExtents = typename MdSpanExtents<SlabWorkView>::type;
+            static_assert(std::is_same_v<typename SlabWorkViewExtents::value_type, std::uint32_t>);
 
             // The inverse transform leaves a z-slab of the *padded* grid.  Only
             // the output planes [0, grid.n[2]) are written, and those padded
@@ -2167,10 +2178,9 @@ namespace picBunch
             auto outRealView = alpaka::makeMdSpan(
                 outReal.data(),
                 alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx});
-            static_assert(std::is_same_v<
-                          typename std::remove_cvref_t<
-                              decltype(std::declval<decltype(outRealView) const&>().getExtents())>::value_type,
-                          std::uint32_t>);
+            using OutRealView = std::remove_cvref_t<decltype(outRealView)>;
+            using OutRealViewExtents = typename MdSpanExtents<OutRealView>::type;
+            static_assert(std::is_same_v<typename OutRealViewExtents::value_type, std::uint32_t>);
 
             std::array<double, 3> const uRep{
                 binning.representativeU[b][0],
