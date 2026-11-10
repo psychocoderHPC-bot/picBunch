@@ -447,17 +447,20 @@ namespace picBunch
             }
         };
 
-        //! Scale one local read-out slab in place: ``v = {Re(v) * factor, 0}``.
+        //! Gather one local read-out slab into a compact double buffer and scale
+        //! it: ``dst[l] = Re(work[idx]) * factor`` with x-fastest ``l`` and the
+        //! padded ``mx*my`` stride in ``idx``.
         //! The complex layout needs the index mapping, so this stays a small kernel
         //! with ``makeIdxMap`` rather than an ``onHost::transform`` over Complex.
         //! Each element is independent, so the result is order-independent and
-        //! bit-identical to the former nested host loop.
-        struct SlabScaleKernel
+        //! bit-identical to the former in-place scale followed by a host read.
+        struct SlabGatherScaleKernel
         {
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                Complex* work,
+                Complex const* work,
+                double* dst,
                 std::uint32_t nx,
                 std::uint32_t ny,
                 std::uint32_t nz,
@@ -480,8 +483,7 @@ namespace picBunch
                     std::size_t const idx = i
                         + static_cast<std::size_t>(mx)
                             * (j + static_cast<std::size_t>(my) * k);
-                    Complex& value = work[idx];
-                    value = Complex{value.real() * factor, 0.0};
+                    dst[l] = work[idx].real() * factor;
                 }
             }
         };
@@ -1873,6 +1875,21 @@ namespace picBunch
             long long const localHi = std::min(
                 static_cast<long long>(zOffset) + static_cast<long long>(nz),
                 static_cast<long long>(outNz));
+            // Read-out staging for this rank's local slab.  The gather-scale
+            // kernel writes a compact x-fastest device buffer; one D2H copy
+            // moves it into pinned host memory and the redistribution below
+            // then touches only that pinned buffer.  Before this, the host
+            // redistribution dereferenced the unified ``dfft.work()`` slab and
+            // paid a managed-page migration on every first touch.  Allocate at
+            // least one element so a rank without output planes still owns a
+            // valid (never copied) buffer.
+            std::uint32_t const localCount = (localHi > localLo)
+                ? static_cast<std::uint32_t>(localHi - localLo)
+                : 0u;
+            std::size_t const stagedCount = planeOut * static_cast<std::size_t>(localCount);
+            std::size_t const stagedCapacity = std::max<std::size_t>(stagedCount, 1u);
+            auto slabStagingDev = alpaka::onHost::alloc<double>(device, stagedCapacity);
+            auto slabStagingHost = alpaka::onHost::allocMapped<double>(device, stagedCapacity);
 
             std::vector<int> sendCounts(static_cast<std::size_t>(parSize), 0);
             std::vector<int> sendDispls(static_cast<std::size_t>(parSize), 0);
@@ -1928,15 +1945,13 @@ namespace picBunch
                     int const dest = writerOwner(base2 + k);
                     long long const localZ = k - static_cast<long long>(zOffset);
                     double* dst = sendBuffer.data() + cursor[static_cast<std::size_t>(dest)];
-                    for(std::uint32_t j = 0; j < outNy; ++j)
-                    {
-                        std::size_t const inRow = static_cast<std::size_t>(Mx)
-                                * (static_cast<std::size_t>(j)
-                                   + static_cast<std::size_t>(My) * static_cast<std::size_t>(localZ));
-                        std::size_t const outRow = static_cast<std::size_t>(j) * outNx;
-                        for(std::uint32_t i = 0; i < outNx; ++i)
-                            dst[outRow + i] = dfft.work()[inRow + i].real();
-                    }
+                    // The pinned staging buffer is already compact and x-fastest,
+                    // so a plane is one contiguous block.  This copies the exact
+                    // values the former host loop read from the scaled slab.
+                    double const* staged = slabStagingHost.data()
+                        + static_cast<std::size_t>(localZ) * planeOut;
+                    for(std::size_t l = 0; l < planeOut; ++l)
+                        dst[l] = staged[l];
                     cursor[static_cast<std::size_t>(dest)] += static_cast<int>(planeOut);
                 }
                 double* recv = first && !field.data[c].empty()
@@ -2021,31 +2036,30 @@ namespace picBunch
                     // ---------------------------------------------------------- read-out
                     auto const readoutStart = Clock::now();
                     double const factor = scale * (c < 3 ? eFactor : bFactor);
-                    // Scale the slab read-out in place, then hand each output
-                    // z plane to the rank that owns it in the writer layout.
-                    // The complex in-place scale runs as a small indexed kernel
-                    // on the queue; the follow-up wait keeps the host-side
-                    // redistribution from reading the slab before it is done.
-                    std::uint32_t const localCount
-                        = static_cast<std::uint32_t>(localHi - localLo);
+                    // Gather and scale the slab on the device into the compact
+                    // staging buffer, then hand each output z plane to the rank
+                    // that owns it in the writer layout.  A single D2H copy into
+                    // pinned host memory precedes the host redistribution, which
+                    // therefore never dereferences the unified FFT slab.
                     if(localCount > 0u)
                     {
-                        std::size_t const scaleCount
-                            = static_cast<std::size_t>(outNx) * outNy * localCount;
                         queue.enqueue(
                             alpaka::onHost::FrameSpec{
-                                static_cast<std::uint32_t>((scaleCount + 63u) / 64u),
+                                static_cast<std::uint32_t>((stagedCount + 63u) / 64u),
                                 64u},
-                            SlabScaleKernel{},
+                            SlabGatherScaleKernel{},
                             dfft.work(),
+                            slabStagingDev.data(),
                             outNx,
                             outNy,
                             localCount,
                             Mx,
                             My,
                             factor);
+                        alpaka::onHost::wait(queue);
+                        alpaka::onHost::memcpy(queue, slabStagingHost, slabStagingDev);
+                        alpaka::onHost::wait(queue);
                     }
-                    alpaka::onHost::wait(queue);
                     bool const first = !componentWritten[static_cast<std::size_t>(c)];
                     if(!first && recvBuffer.size() != field.data[c].size())
                         recvBuffer.assign(field.data[c].size(), 0.0);
