@@ -20,6 +20,9 @@ gates, the near-source limitation and their provenance are recorded in
 - **Paper:** [docs/paper/paper.pdf](docs/paper/paper.pdf) covers the method,
   measured cost and accuracy, and PIConGPU checkpoint cross-validation at
   v0.1.3.
+- **Known limitations:** [docs/known-limitations.md](docs/known-limitations.md)
+  records the open engineering items, their measured symptoms and the planned
+  fixes.
 
 ## Layout
 

@@ -213,7 +213,8 @@ destroy the global pool more than once while every call still waits for its
 queue before leaving the scope. This is a documented constraint deviation, not a
 hidden one: pending an alpakaVendor `finalize()` API, the guard stays. Once
 `alpaka::fft::onHost::finalize()` (idempotent, once-guarded) exists in
-alpakaVendor, it replaces the guard.
+alpakaVendor, it replaces the guard. The open engineering items, including this
+teardown, are tracked in [known-limitations.md](known-limitations.md).
 
 The crash history, the proposed API and the validation steps are in
 [rocm-fft-teardown.md](rocm-fft-teardown.md).
