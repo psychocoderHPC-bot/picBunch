@@ -114,10 +114,12 @@ namespace
             "                        per tile from the source gamma, N in [4,12] forces it\n"
             "                        (4 is the fast path)\n"
             "  --near-shell-exact-cells <n>\n"
-            "                        fast-path exact routing: -1 = legacy quadrature only\n"
-            "                        (default; exact auto-enables at tolerance <= 1e-4 or\n"
-            "                        gamma >= 100), 0 = observer cell only, 1 = add face\n"
-            "                        neighbours, 2 = all in-support cells\n"
+            "                        fast-path exact routing: -2 = automatic (default:\n"
+            "                        observer cell at tolerance 1e-3, all in-support\n"
+            "                        cells at tolerance <= 1e-4; gamma >= 100 always\n"
+            "                        exact), -1 = legacy quadrature only, 0 = observer\n"
+            "                        cell only, 1 = add face neighbours, 2 = all\n"
+            "                        in-support cells\n"
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0)\n"
@@ -179,7 +181,7 @@ namespace
         std::size_t nearShellTile = 4;
         int nearShellFastOrder = 5;
         std::string nearShellObliqueOrder = "auto";
-        int nearShellExactCells = -1;
+        int nearShellExactCells = -2;
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
@@ -395,9 +397,9 @@ namespace
                 {
                     used = 0;
                 }
-                if(used != text.size() || cells < -1 || cells > 2)
+                if(used != text.size() || cells < -2 || cells > 2)
                     throw std::invalid_argument(
-                        "--near-shell-exact-cells must be an integer in [-1, 2]");
+                        "--near-shell-exact-cells must be an integer in [-2, 2]");
                 args.nearShellExactCells = cells;
             }
             else if(option == "--velocity-bins")
@@ -497,8 +499,8 @@ namespace
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         if(args.nearShellTile == 0u)
             throw std::invalid_argument("--near-shell-tile must be positive");
-        if(args.nearShellExactCells < -1 || args.nearShellExactCells > 2)
-            throw std::invalid_argument("--near-shell-exact-cells must be in [-1, 2]");
+        if(args.nearShellExactCells < -2 || args.nearShellExactCells > 2)
+            throw std::invalid_argument("--near-shell-exact-cells must be in [-2, 2]");
         if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
             throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
         if(args.nearShellObliqueOrder != "auto")

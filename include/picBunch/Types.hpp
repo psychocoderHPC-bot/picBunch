@@ -177,10 +177,12 @@ namespace picBunch
         std::size_t* exactPairs = nullptr;
         //! Which TSC support cell classes use the exact evaluator (fast path):
         //! 0 = observer-containing cell only (hybrid), 1 = plus the six
-        //! face-adjacent cells, 2 = all in-support cells, -1 = legacy only.
-        //! Default -1 keeps the shipped fast path regression-free; a tight
-        //! tolerance (<= 1e-4) or gamma >= 100 enables the exact near field.
-        int exactCellReach = -1;
+        //! face-adjacent cells, 2 = all in-support cells, -1 = legacy only,
+        //! -2 = automatic (default).  Automatic selects the observer cell at
+        //! the default 1e-3 tolerance and all in-support cells at a tolerance
+        //! <= 1e-4.  A tile with gamma >= 100 is always all-exact, because the
+        //! legacy quadrature cannot resolve that contracted tube.
+        int exactCellReach = -2;
         //! Diagnostic counter: exact evaluations among the total pair count.
         std::size_t* exactPairCount = nullptr;
     };

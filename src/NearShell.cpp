@@ -430,11 +430,8 @@ namespace picBunch
                             tileMaxGamma
                                 = std::max(tileMaxGamma, std::sqrt(1.0 + uq2));
                     }
-                    int exactReach = nearShell.exactCellReach;
-                    if(exactReach < 0 && options.tolerance <= 1.0e-4)
-                        exactReach = 0;
-                    if(exactReach < 0 && tileMaxGamma >= pbfast::kOutOfSupportExactGamma)
-                        exactReach = 2;
+                    int const exactReach = pbfast::resolveExactCellReach(
+                        nearShell.exactCellReach, options.tolerance, tileMaxGamma);
                     int const tileRemainderOrder = std::min(
                         pbfast::kQuadratureOrderCap,
                         std::max(
@@ -502,10 +499,10 @@ namespace picBunch
                         }
                     }
 #endif
-                    // Fallback policy: legacy is the default.  The exact near
-                    // field turns on automatically for a tight global
-                    // tolerance (<= 1e-4) or when a tile's fastest source is
-                    // in the gamma-100 regime where the quadrature is unusable.
+                    // Shipped policy: the observer-containing cell is exact,
+                    // the rest stays on the base order-5 remainder.  A tight
+                    // global tolerance (<= 1e-4) selects the full-support exact
+                    // mode, and a gamma-100 tile is always exact.
                     pbfast::Settings tileFastSettings = fastSettings;
                     tileFastSettings.obliqueOrder = tileObliqueOrder;
                     tileFastSettings.order = tileRemainderOrder;

@@ -310,8 +310,8 @@ namespace picBunch
         if(auto const* node = accuracy.get("near_shell_exact_cells"))
         {
             auto const cells = asInteger(*node, "accuracy.near_shell_exact_cells");
-            if(cells < -1 || cells > 2)
-                fail("accuracy.near_shell_exact_cells", "must be between -1 and 2");
+            if(cells < -2 || cells > 2)
+                fail("accuracy.near_shell_exact_cells", "must be between -2 and 2");
             config.accuracy.nearShellExactCells = static_cast<int>(cells);
         }
 
@@ -431,7 +431,8 @@ namespace picBunch
              "accuracy.near_shell_radius",
              "accuracy.near_shell_tile",
              "accuracy.near_shell_fast_order",
-             "accuracy.near_shell_oblique_order"},
+             "accuracy.near_shell_oblique_order",
+             "accuracy.near_shell_exact_cells"},
             config.warnings);
         for(auto const& [key, node] : document)
         {

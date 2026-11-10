@@ -52,6 +52,9 @@ namespace
         picBunch::pbfast::Settings settings;
         settings.order = order;
         settings.obliqueOrder = order;
+        // These arbiter tests exercise the all-exact in-support evaluator, not
+        // the production default routing.
+        settings.exactCellReach = 2;
         Vec3 E, B;
         picBunch::pbfast::shape_field(obs, Vec3{}, u, 1.0, 1.0, 1.0, settings, E, B);
         return E;
@@ -245,6 +248,7 @@ TEST(NearShellAccuracy, NearDistanceMatchesIndfieldGolden)
         picBunch::pbfast::Settings settings;
         settings.order = 5;
         settings.obliqueOrder = 8;
+        settings.exactCellReach = 2;
         // The exact evaluator must not depend on this knob.
         settings.tolerance = 1.0e-6;
         Vec3 E, B;
@@ -295,6 +299,7 @@ TEST(NearShellAccuracy, Gamma100ObliqueRayReference)
         picBunch::pbfast::Settings settings;
         settings.order = 5;
         settings.obliqueOrder = 8;
+        settings.exactCellReach = 2;
         settings.tolerance = 1.0e-3;
         Vec3 E, B;
         picBunch::pbfast::shape_field(
@@ -412,6 +417,7 @@ namespace
         picBunch::pbfast::DeviceParams params;
         params.order = 5;
         params.obliqueOrder = obliqueOrder;
+        params.exactCellReach = 2;
         for(int i = 0; i < params.order; ++i)
         {
             auto const& r = picBunch::pbfast::detail::rule(params.order);
@@ -647,4 +653,119 @@ TEST(NearShellAccuracy, HybridKeepsHighGammaOutOfSupportExact)
     Vec3 const hybrid = hybridField(obs, u, 0);
     Vec3 const all = hybridField(obs, u, 2);
     EXPECT_LT(relativeErrorV(hybrid, all), 1.0e-12);
+}
+
+// ---- final default policy -------------------------------------------------
+//! The shipped default tolerance must reproduce the historical base remainder
+//! order exactly.  In particular the gamma term must not tip gamma=10 (whose
+//! floating-point value is a few ulp above 10) onto a larger rule.
+TEST(NearShellAccuracy, DefaultRemainderOrderMatchesBase)
+{
+    using picBunch::pbfast::quadratureOrderFor;
+    for(double const gamma : {1.0, 9.9498743710662, 10.0, 10.000000000000002,
+                              11.2, 50.0, 99.0})
+        EXPECT_EQ(quadratureOrderFor(gamma, 1.0e-3, 5), 5) << "gamma=" << gamma;
+    // Only an explicitly tighter tolerance raises the order, one per decade.
+    EXPECT_EQ(quadratureOrderFor(10.0, 1.0e-4, 5), 6);
+    EXPECT_EQ(quadratureOrderFor(10.0, 1.0e-6, 5), 8);
+}
+
+//! Outside the observer-containing cell the default routing and the explicit
+//! legacy routing take the same quadrature branch, so the field is bitwise
+//! equal to the base evaluator for that fixed geometry.
+TEST(NearShellAccuracy, DefaultMatchesLegacyOutsideObserverCell)
+{
+    Vec3 const u = oblique45(kGamma10Beta);
+    Vec3 const cases[] = {
+        {0.7, 0.2, -0.3},   // class 1
+        {0.7, 0.9, -0.3},   // class 2
+        {1.8, 0.4, 0.2},    // out of support
+    };
+    for(Vec3 const obs : cases)
+    {
+        Vec3 const legacy = hybridField(obs, u, -1);
+        Vec3 const shipped = hybridField(obs, u, 0);
+        EXPECT_EQ(legacy.x, shipped.x) << obs.x << "," << obs.y << "," << obs.z;
+        EXPECT_EQ(legacy.y, shipped.y) << obs.x << "," << obs.y << "," << obs.z;
+        EXPECT_EQ(legacy.z, shipped.z) << obs.x << "," << obs.y << "," << obs.z;
+    }
+}
+
+//! The observer-containing cell uses the exact evaluator by default, so it is
+//! both equal to the all-exact result and more accurate than legacy quadrature.
+TEST(NearShellAccuracy, DefaultObserverCellUsesExact)
+{
+    Vec3 const u = oblique45(kGamma10Beta);
+    Vec3 const obs{0.1, 0.2, -0.3};
+    Vec3 const legacy = hybridField(obs, u, -1);
+    Vec3 const shipped = hybridField(obs, u, 0);
+    Vec3 const allExact = hybridField(obs, u, 2);
+    EXPECT_LT(relativeErrorV(shipped, allExact), 1.0e-12);
+    EXPECT_GT(relativeErrorV(shipped, legacy), 1.0e-6);
+}
+
+//! The opt-in full-support exact mode improves the face-adjacent cells that the
+//! default leaves on quadrature; this is the accuracy users pay the extra cost
+//! for.  The arbiter is the independent indfield value used above.
+TEST(NearShellAccuracy, OptInFullSupportImprovesFaceAccuracy)
+{
+    Vec3 const u = oblique45(kGamma10Beta);
+    Vec3 const obs{-0.6, 0.4, -0.3};
+    std::array<double, 3> const arbiter{-0.210369983, 0.460777915, 0.157158018};
+    double const errDefault = relativeError(hybridField(obs, u, 0), arbiter);
+    double const errOptIn = relativeError(hybridField(obs, u, 2), arbiter);
+    EXPECT_LT(errOptIn, errDefault) << "default=" << errDefault << " opt-in=" << errOptIn;
+    EXPECT_LT(errOptIn, 1.0e-2);
+}
+
+//! Automatic routing resolves to the observer cell at 1e-3 and the full
+//! support at 1e-4; gamma >= 100 is always full exact regardless of the knob.
+TEST(NearShellAccuracy, AutomaticExactCellPolicy)
+{
+    using picBunch::pbfast::resolveExactCellReach;
+    EXPECT_EQ(resolveExactCellReach(-2, 1.0e-3, 10.0), 0);
+    EXPECT_EQ(resolveExactCellReach(-2, 1.0e-4, 10.0), 2);
+    EXPECT_EQ(resolveExactCellReach(-1, 1.0e-3, 10.0), -1);
+    EXPECT_EQ(resolveExactCellReach(-1, 1.0e-3, 100.0), 2);
+    EXPECT_EQ(resolveExactCellReach(0, 1.0e-4, 10.0), 0);
+    EXPECT_EQ(resolveExactCellReach(1, 1.0e-3, 100.0), 2);
+}
+
+//! Hard-coded fields from base 68b7554 (order 5, default tolerance) at three
+//! fixed legacy geometries.  The shipped default must reproduce them; the only
+//! intended default difference is the observer-containing cell, which these
+//! probe points deliberately avoid.
+TEST(NearShellAccuracy, DefaultMatchesBaseGolden)
+{
+    struct Case
+    {
+        Vec3 obs, u;
+        std::array<double, 6> base;
+    };
+    Vec3 const oblique{5.74456264653803, 5.74456264653803, 5.74456264653803};
+    Case const cases[] = {
+        {{-0.6, 0.4, -0.3}, oblique,
+         {-0.69049016426984478, 0.85748849371535063, -0.20940885280453644,
+          -0.61288586445086823, -0.27636017317911371, 0.889246037629982}},
+        {{0.7, 0.2, -0.3}, {0.0, 0.0, 9.9498743710662},
+         {1.0682208318983917, 0.29850101329701756, -0.022712932521512338,
+          -0.29700475819412858, 1.0628663077944822, 0.0}},
+        {{2.0, 0.5, 0.0}, oblique,
+         {0.027176547648135742, -0.0019343210749803491, -0.011336725219364104,
+          -0.0054012699635481269, 0.022124190871056618, -0.016722920907508491}},
+    };
+    for(Case const& c : cases)
+    {
+        picBunch::pbfast::Settings s;
+        s.order = 5;
+        s.obliqueOrder = 8;
+        s.exactCellReach = 0;
+        Vec3 E, B;
+        picBunch::pbfast::shape_field(c.obs, Vec3{}, c.u, 1.0, 1.0, 1.0, s, E, B);
+        std::array<double, 6> const got{E.x, E.y, E.z, B.x, B.y, B.z};
+        for(int i = 0; i < 6; ++i)
+            EXPECT_LT(std::abs(got[i] - c.base[i]),
+                      std::max(std::abs(c.base[i]), 1.0e-300) * 1.0e-14)
+                << "component " << i;
+    }
 }

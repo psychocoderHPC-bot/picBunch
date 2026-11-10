@@ -69,8 +69,25 @@ namespace picBunch::pbfast
         //!  - 0: only the observer-containing cell (production hybrid default),
         //!  - -1: never (legacy quadrature only).
         //! Out-of-support high-gamma pairs always use the exact evaluator.
-        int exactCellReach = 2;
+        int exactCellReach = 0;
     };
+
+    /*! Resolve the automatic exact-cell sentinel for one output tile.
+     *
+     * -2 selects the observer cell at the default 1e-3 tolerance and the full
+     * support at tolerance <= 1e-4.  A gamma-100 tile is always full exact,
+     * because its contracted tube is unresolvable on the legacy quadrature.
+     * An explicit reach (including -1 legacy) otherwise wins.
+     */
+    inline int resolveExactCellReach(int requested, double tolerance, double tileMaxGamma)
+    {
+        int reach = requested;
+        if(reach == -2)
+            reach = (tolerance <= 1.0e-4) ? 2 : 0;
+        if(isExactGamma(tileMaxGamma))
+            reach = 2;
+        return reach;
+    }
 
     namespace detail
     {
@@ -1731,7 +1748,7 @@ namespace picBunch::pbfast
             }
             double const gamma = std::sqrt(1.0 + nbref::dot(u, u));
             int const need = pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order);
-            if(!(gamma >= pbfast::kOutOfSupportExactGamma || need > pbfast::kQuadratureOrderCap))
+            if(!(pbfast::isExactGamma(gamma) || need > pbfast::kQuadratureOrderCap))
                 return false;
             return sSpaceExactUsable(R0, cells, u);
         }

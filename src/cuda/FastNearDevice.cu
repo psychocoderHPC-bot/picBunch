@@ -813,7 +813,7 @@ namespace picBunch::pbfast
             }
             double const gam = std::sqrt(1.0 + uu2);
             int const need = quadratureOrderFor(gam, prm.tolerance, prm.order);
-            if(!(gam >= kOutOfSupportExactGamma || need > kQuadratureOrderCap))
+            if(!(isExactGamma(gam) || need > kQuadratureOrderCap))
                 return false;
             return dsSpaceExactUsable(R0, cells, u);
         }

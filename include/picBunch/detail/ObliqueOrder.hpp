@@ -74,26 +74,30 @@ namespace picBunch::pbfast
      */
     constexpr double kOutOfSupportExactGamma = 100.0;
 
-    /*! Gauss order needed by the smooth remainder for one pair.
+    /*! Whether a pair is in the gamma regime where legacy quadrature is
+     * unusable.  The tiny slack absorbs the floating-point construction of
+     * gamma=100, whose sqrt(1+u^2) lands a few ulp below the integer.
+     */
+    constexpr bool isExactGamma(double gamma)
+    {
+        return gamma >= kOutOfSupportExactGamma - 1.0e-9;
+    }
+
+    /*! Gauss order of the smooth remainder for one pair.
      *
-     * The beamed kernel feature subtends about 1/gamma of the angular range,
-     * so resolving it needs on the order of gamma/2 nodes; the historical
-     * gamma-10 case stays on the requested order (5 oblique, 8 axial) and a
-     * fixed 32-node rule is exhausted near gamma 64.  The validated gamma-100
-     * design point therefore exceeds kQuadratureOrderCap and is routed to the
-     * exact evaluator.  Every decade below the default 1e-3 error budget
-     * raises the order by one.
+     * At or above the default 1e-3 budget this is exactly the caller's
+     * requested order, i.e. the historical base remainder rule.  It does not
+     * grow with gamma: the gamma-10 oblique control and every gamma below the
+     * exact-only threshold keep the base rule, and gamma >= 100 is routed to
+     * the exact evaluator instead of paying a larger rule.  Only a tolerance
+     * tighter than 1e-3 raises the order, one node per decade.  ``gamma`` is
+     * kept in the signature for host/device call-site compatibility.
      */
     inline PICBUNCH_ORDER_HOST_ACC int quadratureOrderFor(
         double gamma, double tolerance, int requested)
     {
-        int order = requested >= 5 ? requested : 5;
-        if(gamma > 1.0 && std::isfinite(gamma))
-        {
-            int const tube = static_cast<int>(std::ceil(gamma / 2.0));
-            if(tube > order)
-                order = tube;
-        }
+        (void)gamma;
+        int const order = requested >= 2 ? requested : 5;
         double tol = (tolerance > 0.0 && std::isfinite(tolerance)) ? tolerance : 1e-3;
         int extra = 0;
         while(tol < 1e-3 && extra < 16)
