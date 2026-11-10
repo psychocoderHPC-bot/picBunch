@@ -99,6 +99,11 @@ namespace picBunch
             int nearShellFastOrder = 5; //!< Gauss order of the fast remainder
             //! Oblique singular-box order: 0 = auto, else an allowed even order.
             int nearShellObliqueOrder = 0;
+            //! Exact routing cell reach for the fast path.  -2 selects the
+            //! shipped automatic policy (observer cell at the default 1e-3
+            //! tolerance, all in-support cells at tolerance <= 1e-4), -1 forces
+            //! legacy quadrature, 0/1/2 are the explicit reaches.
+            int nearShellExactCells = -2;
         } accuracy;
 
         //! Reject unknown keys instead of warning about them.

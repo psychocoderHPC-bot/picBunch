@@ -1,0 +1,51 @@
+{
+  "case_id": "cost-hybrid-final",
+  "description": "Near-shell fast-evaluator wall for the pre-fix base 68b7554 and the final hybrid default 69bfd77 at 64^3 output, R=3 cells, tile 4, 2000 sources at the grid centre (6,144,000 source-node pairs), on a rosi_v100 Tesla V100-SXM2-32GB device and the same node's 48-core CPU.",
+  "generated_utc": "2026-11-10T06:05:00Z",
+  "host": {
+    "device": "rosi_v100 (gv001), Tesla V100-SXM2-32GB, CUDA 12.6",
+    "cpu": "rosi_v100 (gv001), 48-core CPU, Release build, no CUDA link"
+  },
+  "code": {
+    "base": "68b7554ef16e0ee136f8a788f32844d5846b7ee9",
+    "default": "69bfd77d03493a10e0da4c8fdad25c6480c0582a"
+  },
+  "binaries": {
+    "cuda_base_sha256": "0b976608b5c486bed807b001838c4cea5d4fbe3b8e481bc5be9b492aa5fd0aa7",
+    "cuda_default_sha256": "03637013021dd0388ff0842a2d3c4cc80b8da3b4d0cfce97e73cc227be2e85cf",
+    "host_base_sha256": "eafb513464f3d32c464642decf350205318517b2097440d0d7d5ceaff32852b7",
+    "host_default_sha256": "a2f65c88361d53d598046ab075327e2585e5f005b26e30903a9ee71b6ab95d9c"
+  },
+  "geometry": {
+    "grid": [64, 64, 64],
+    "cell": [1.0, 1.0, 1.0],
+    "origin": [0.0, 0.0, 0.0],
+    "radius_cells": 3,
+    "tile": 4,
+    "fft_padding": 2,
+    "sources": 2000,
+    "source_position": [32.0, 32.0, 32.0],
+    "pairs": 6144000,
+    "cases": {
+      "stationary": [0.0, 0.0, 0.0],
+      "gamma10-axial": [0.0, 0.0, 9.9498743710662],
+      "gamma10-oblique": [5.74456264653803, 5.74456264653803, 5.74456264653803]
+    }
+  },
+  "command": "picBunchNearShellMeasure --grid 64,64,64 --radius 3 --tile 4 --sources 2000 --source 32,32,32 --cloud-cells {0,12} --u <u> --exact-cells 0",
+  "protocol": {
+    "device": "2 warm-up + 7 timed runs, median, serial, idle GPU",
+    "host": "interleaved base/default A/B, 2 warm-up pairs + 5 timed pairs, median",
+    "statistic": "median"
+  },
+  "results": {
+    "cpu_default_over_base": [0.963, 0.954, 0.954, 0.907, 0.929, 0.959],
+    "gpu_onnode_default_over_base": [1.009, 1.006, 1.009],
+    "gpu_cloud_default_over_base": [1.274, 1.296, 1.159],
+    "exact_pair_share": {"A": 0.00586, "B": 0.00137}
+  },
+  "values": {
+    "path": "docs/measurements/cost_hybrid_final_20261110.csv"
+  },
+  "notes": "The default rows select the observer-cell reach explicitly (--exact-cells 0); the automatic sentinel resolves to the same reach at tolerance 1e-3, and a gamma>=100 tile resolves to full support. CPU default/base is 0.91-0.96x, GPU on-node 1.006-1.009x, GPU 12-cell cloud 1.16-1.30x. The former all-exact intermediate cost penalty is retracted; the observer-cell default pays no such penalty."
+}

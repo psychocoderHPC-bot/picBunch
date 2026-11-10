@@ -41,6 +41,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_mpi_options.cpp
         test_mpi_failure.cpp
         test_near_shell_accuracy.cpp
+        test_fastnear_poly.cpp
         test_readout.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

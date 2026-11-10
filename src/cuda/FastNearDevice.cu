@@ -246,6 +246,578 @@ namespace picBunch::pbfast
             dapplyContract(F, n, gam, Eraw); // M^{-1}
         }
 
+
+        // ---- exact s-space evaluator, mirroring FastNear.hpp ----------------
+        // Exact in-support TSC field in the source frame.  The host shares the
+        // 108 unique face moments across neighbouring cells; here each of the
+        // 27 cells evaluates its two faces per axis inline so no per-thread
+        // 7.8 KB moment array is spilled to local memory.
+
+        struct dSAxis
+        {
+            int a, b, c;
+            double Hxx, Hxy, Hyy, detH;
+            double L11, L21, L22, detL;
+            double ax, bx, by;
+            double uhx, uhy, qc;
+        };
+
+        ALPAKA_FN_ACC inline void dsPrepAxis(dSAxis& X, int a, double const n[3], double s)
+        {
+            int const b = (a + 1) % 3;
+            int const c = (a + 2) % 3;
+            double G[3][3];
+            for(int i = 0; i < 3; ++i)
+                for(int j = 0; j < 3; ++j)
+                    G[i][j] = (i == j ? 1.0 : 0.0) + s * n[i] * n[j];
+            X.a = a;
+            X.b = b;
+            X.c = c;
+            X.Hxx = G[b][b];
+            X.Hxy = G[b][c];
+            X.Hyy = G[c][c];
+            X.detH = X.Hxx * X.Hyy - X.Hxy * X.Hxy;
+            double const gab = G[a][b], gac = G[a][c];
+            X.uhx = -(X.Hyy * gab - X.Hxy * gac) / X.detH;
+            X.uhy = -(-X.Hxy * gab + X.Hxx * gac) / X.detH;
+            X.qc = G[a][a] + gab * X.uhx + gac * X.uhy;
+            X.L11 = std::sqrt(X.Hxx);
+            X.L21 = X.Hxy / X.L11;
+            X.L22 = std::sqrt(X.Hyy - X.L21 * X.L21);
+            X.detL = X.L11 * X.L22;
+            X.ax = 1.0 / X.L11;
+            X.bx = -X.L21 / (X.L11 * X.L22);
+            X.by = 1.0 / X.L22;
+        }
+
+        ALPAKA_FN_ACC inline void dsEdgeW4(
+            double xi0,
+            double eta0,
+            double dxi,
+            double deta,
+            double Q,
+            double A,
+            double invA,
+            double sqA,
+            double W[4])
+        {
+            double const inv2A = 0.5 * invA;
+            double const B = 2.0 * (xi0 * dxi + eta0 * deta);
+            double const C = Q + xi0 * xi0 + eta0 * eta0;
+            double const t0 = -B * inv2A;
+            double const Dd = xi0 * deta - eta0 * dxi;
+            double s2 = (A * Q + Dd * Dd) / (A * A);
+            if(s2 < 0.0)
+                s2 = 0.0;
+            double const u0 = -t0;
+            double const u1 = 1.0 - t0;
+            double const xi1 = xi0 + dxi;
+            double const eta1 = eta0 + deta;
+            double const rho0 = std::sqrt(C);
+            double const rho1 = std::sqrt(Q + xi1 * xi1 + eta1 * eta1);
+            double I0;
+            if(s2 > 0.0)
+            {
+                double const ss = std::sqrt(s2);
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0)
+                    + 0.5 * s2 * sqA * (std::asinh(u1 / ss) - std::asinh(u0 / ss));
+            }
+            else
+                I0 = 0.5 * (u1 * rho1 - u0 * rho0);
+            double const r1c = rho1 * rho1 * rho1;
+            W[0] = I0;
+            W[1] = (r1c - rho0 * rho0 * rho0) * (invA / 3.0) - (B * inv2A) * W[0];
+            for(int k = 2; k <= 3; ++k)
+            {
+                double const ik = invA / (k + 2.0);
+                W[k] = r1c * ik
+                    - ((2.0 * k + 1.0) * B * inv2A / (k + 2.0)) * W[k - 1]
+                    - ((k - 1.0) * C) * ik * W[k - 2];
+            }
+        }
+
+        ALPAKA_FN_ACC inline void dsFaceFab4(double const q[4][3], double h, double Fab[3][5])
+        {
+            constexpr double kPi = 3.141592653589793238462643383279502884;
+            for(int a = 0; a <= 2; ++a)
+                for(int b = 0; b <= 4; ++b)
+                    Fab[a][b] = 0.0;
+            double const Q = h * h;
+            double const foot[3] = {0.0, 0.0, h};
+            double u[3] = {q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]};
+            double const ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+            u[0] /= ul;
+            u[1] /= ul;
+            u[2] /= ul;
+            // n x u with n = (0,0,1): (-u_y, u_x, 0)
+            double const vv[3] = {-u[1], u[0], 0.0};
+            double xi[4], eta[4];
+            for(int l = 0; l < 4; ++l)
+            {
+                double const w[3] = {q[l][0] - foot[0], q[l][1] - foot[1], q[l][2] - foot[2]};
+                xi[l] = w[0] * u[0] + w[1] * u[1] + w[2] * u[2];
+                eta[l] = w[0] * vv[0] + w[1] * vv[1] + w[2] * vv[2];
+            }
+            double A[4], invA[4];
+            for(int l = 0; l < 4; ++l)
+            {
+                int const m = (l + 1) % 4;
+                double const dx = xi[m] - xi[l], dy = eta[m] - eta[l];
+                A[l] = dx * dx + dy * dy;
+                invA[l] = 1.0 / A[l];
+            }
+            double sqA[4];
+            sqA[0] = std::sqrt(A[0]);
+            sqA[1] = std::sqrt(A[1]);
+            sqA[2] = sqA[0];
+            sqA[3] = sqA[1];
+            {
+                double const hh = std::abs(h);
+                double Ibase = 0.0;
+                for(int l = 0; l < 4; ++l)
+                {
+                    int const m = (l + 1) % 4;
+                    double const ex = xi[m] - xi[l], ey = eta[m] - eta[l];
+                    double const invL = 1.0 / std::sqrt(ex * ex + ey * ey);
+                    double const mx = ex * invL, my = ey * invL;
+                    double const d = xi[l] * my - eta[l] * mx;
+                    double const la = xi[l] * mx + eta[l] * my;
+                    double const lb = la + 1.0 / invL;
+                    Ibase += dboxEdgePrimitive(lb, hh, d) - dboxEdgePrimitive(la, hh, d);
+                }
+                bool inside = false;
+                int j = 3;
+                for(int i = 0; i < 4; ++i)
+                {
+                    double const xiI = xi[i], yi = eta[i];
+                    double const xj = xi[j], yj = eta[j];
+                    if(((yi > 0.0) != (yj > 0.0))
+                       && (0.0 < (xj - xiI) * (0.0 - yi) / (yj - yi) + xiI))
+                        inside = !inside;
+                    j = i;
+                }
+                if(inside)
+                    Ibase -= 2.0 * kPi * hh;
+                Fab[0][0] = Ibase;
+            }
+            double U1[4] = {0.0, 0.0, 0.0, 0.0};
+            double U2[3] = {0.0, 0.0, 0.0};
+            double V0[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+            for(int l = 0; l < 4; ++l)
+            {
+                int const m = (l + 1) % 4;
+                double const xa = xi[l], ya = eta[l];
+                double const dx = xi[m] - xi[l], dy = eta[m] - eta[l];
+                double W[4];
+                dsEdgeW4(xa, ya, dx, dy, Q, A[l], invA[l], sqA[l], W);
+                double PY[4][4] = {};
+                PY[0][0] = 1.0;
+                for(int nn = 1; nn <= 3; ++nn)
+                    for(int k = 0; k <= nn; ++k)
+                        PY[nn][k] = (k <= nn - 1 ? PY[nn - 1][k] * ya : 0.0)
+                            + (k >= 1 ? PY[nn - 1][k - 1] * dy : 0.0);
+                double MY[4], MW[3];
+                for(int nn = 0; nn <= 3; ++nn)
+                {
+                    double sum = 0.0;
+                    for(int j = 0; j <= nn; ++j)
+                        sum += PY[nn][j] * W[j];
+                    MY[nn] = sum;
+                }
+                for(int nn = 0; nn <= 2; ++nn)
+                {
+                    double sum = 0.0;
+                    for(int j = 0; j <= nn; ++j)
+                        sum += PY[nn][j] * W[j + 1];
+                    MW[nn] = sum;
+                }
+                for(int b = 0; b <= 3; ++b)
+                    U1[b] += dy * MY[b];
+                for(int b = 0; b <= 2; ++b)
+                    U2[b] += dy * (xa * MY[b] + dx * MW[b]);
+                for(int b = 1; b <= 4; ++b)
+                    V0[b] += -dx * MY[b - 1];
+            }
+            for(int deg = 1; deg <= 4; ++deg)
+            {
+                if(deg == 1)
+                    Fab[0][1] = V0[1];
+                else
+                    Fab[0][deg] = (2.0 * V0[deg]
+                                   - (deg - 1.0) * (Q * Fab[0][deg - 2] + U2[deg - 2]))
+                        / (deg + 1.0);
+                Fab[1][deg - 1] = U1[deg - 1];
+                if(deg >= 2)
+                    Fab[2][deg - 2]
+                        = (U2[deg - 2] - (Q * Fab[0][deg - 2] + Fab[0][deg])) / 2.0;
+            }
+        }
+
+        ALPAKA_FN_ACC inline void dsFaceM(
+            dSAxis const& X,
+            double h,
+            double const Rc[3],
+            double const C[3],
+            double gam,
+            double M[3][3])
+        {
+            double const qmin = h * h * X.qc;
+            double const hh = std::sqrt(qmin > 0.0 ? qmin : 0.0);
+            double const u0x = h * X.uhx, u0y = h * X.uhy;
+            int const b = X.b, c = X.c;
+            double const xlo = Rc[b] - 0.5 * C[b], xhi = Rc[b] + 0.5 * C[b];
+            double const ylo = Rc[c] - 0.5 * C[c], yhi = Rc[c] + 0.5 * C[c];
+            double const xy[4][2] = {{xlo, ylo}, {xhi, ylo}, {xhi, yhi}, {xlo, yhi}};
+            double qz[4][3];
+            for(int i = 0; i < 4; ++i)
+            {
+                double const dx = xy[i][0] - u0x, dy = xy[i][1] - u0y;
+                qz[i][0] = X.L11 * dx + X.L21 * dy;
+                qz[i][1] = X.L22 * dy;
+                qz[i][2] = hh;
+            }
+            double Fab[3][5];
+            dsFaceFab4(qz, hh, Fab);
+            double const ax = X.ax, bx = X.bx, by = X.by;
+            double const ux[3] = {1.0, u0x, u0x * u0x};
+            double const uy[3] = {1.0, u0y, u0y * u0y};
+            double const Ax[3] = {1.0, ax, ax * ax};
+            double const Bx[3] = {1.0, bx, bx * bx};
+            double const By[3] = {1.0, by, by * by};
+            static int const CB[3][3] = {{1, 0, 0}, {1, 1, 0}, {1, 2, 1}};
+            for(int p = 0; p <= 2; ++p)
+                for(int q = 0; q <= 2; ++q)
+                {
+                    double sum = 0.0;
+                    for(int i = 0; i <= p; ++i)
+                    {
+                        double const ci = CB[p][i] * ux[p - i];
+                        for(int k = 0; k <= i; ++k)
+                        {
+                            double const ck = CB[i][k] * Ax[i - k] * Bx[k];
+                            for(int j = 0; j <= q; ++j)
+                                sum += ci * ck * (CB[q][j] * uy[q - j] * By[j])
+                                    * Fab[i - k][k + j];
+                        }
+                    }
+                    M[p][q] = gam / X.detL * sum;
+                }
+        }
+
+        //! Knot-plane snap helpers; mirror FastNear.hpp.
+        inline constexpr double dkKnotDetect = 1.0e-6;
+        inline constexpr double dkKnotEvalSnapLowGamma = 1.0e-9;
+        inline constexpr double dkKnotEvalSnapHighGamma = 1.0e-7;
+        inline constexpr double dkKnotHighGammaThreshold = 20.0;
+        inline constexpr double dkKnotGateSnap = 1.0e-5;
+
+        ALPAKA_FN_ACC inline double dknotEvalSnap(double const gamma)
+        {
+            return gamma >= dkKnotHighGammaThreshold ? dkKnotEvalSnapHighGamma
+                                                     : dkKnotEvalSnapLowGamma;
+        }
+
+        ALPAKA_FN_ACC inline double dsnapKnotCoordinate(double const s, double const snap)
+        {
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            for(int k = 0; k < 4; ++k)
+                if(std::abs(s - knots[k]) < dkKnotDetect)
+                    return knots[k] + (knots[k] > 0.0 ? -snap : snap);
+            return s;
+        }
+
+        ALPAKA_FN_ACC inline void dsnapKnotOrigin(
+            double const R0[3],
+            double const cells[3],
+            double const snap,
+            double out[3])
+        {
+            for(int a = 0; a < 3; ++a)
+                out[a] = cells[a] * dsnapKnotCoordinate(R0[a] / cells[a], snap);
+        }
+
+        ALPAKA_FN_ACC inline void dpolyBoxFieldS(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            double E[3])
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const gam = std::sqrt(1.0 + uu2);
+            double n[3] = {0.0, 0.0, 0.0};
+            if(uu2 > 0.0)
+            {
+                double const un = std::sqrt(uu2);
+                n[0] = u[0] / un;
+                n[1] = u[1] / un;
+                n[2] = u[2] / un;
+            }
+            double const s = gam * gam - 1.0;
+            dSAxis AX[3];
+            for(int a = 0; a < 3; ++a)
+                dsPrepAxis(AX[a], a, n, s);
+            double const qA[3] = {0.5, -1.0, 0.5};
+            double const qB[3] = {1.5, 0.0, -1.5};
+            double const qC[3] = {1.125, 0.75, 1.125};
+            double rr[3];
+            dsnapKnotOrigin(R0, cells, dknotEvalSnap(gam), rr);
+            double Iv[3] = {0.0, 0.0, 0.0};
+            for(int sx = -1; sx <= 1; ++sx)
+                for(int sy = -1; sy <= 1; ++sy)
+                    for(int sz = -1; sz <= 1; ++sz)
+                    {
+                        int const sc[3] = {sx, sy, sz};
+                        double pc[3][3];
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            int const k = sc[a] + 1;
+                            double const ic = 1.0 / cells[a], t = rr[a] * ic;
+                            pc[a][0] = qA[k] * t * t + qB[k] * t + qC[k];
+                            pc[a][1] = -2.0 * qA[k] * t * ic - qB[k] * ic;
+                            pc[a][2] = qA[k] * ic * ic;
+                        }
+                        double pB[27];
+                        for(int i = 0; i < 3; ++i)
+                            for(int j = 0; j < 3; ++j)
+                                for(int k = 0; k < 3; ++k)
+                                    pB[i * 9 + j * 3 + k] = pc[0][i] * pc[1][j] * pc[2][k];
+                        // Per-cell face moments (both planes per axis), then
+                        // the same Wt accumulation as the host evaluator.
+                        double Mface[3][2][3][3];
+                        double hface[3][2];
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            int const b = (a + 1) % 3, c = (a + 2) % 3;
+                            double Rc[3] = {0.0, 0.0, 0.0};
+                            Rc[b] = rr[b] - cells[b] * static_cast<double>(sc[b]);
+                            Rc[c] = rr[c] - cells[c] * static_cast<double>(sc[c]);
+                            for(int sg = 0; sg < 2; ++sg)
+                            {
+                                int const pl = (sg == 0) ? (sc[a] + 2) : (sc[a] + 1);
+                                double const sp = -1.5 + static_cast<double>(pl);
+                                double const h = rr[a] - cells[a] * sp;
+                                hface[a][sg] = h;
+                                dsFaceM(AX[a], h, Rc, cells, gam, Mface[a][sg]);
+                            }
+                        }
+                        double Wt[27] = {};
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            int const b = (a + 1) % 3, c = (a + 2) % 3;
+                            for(int sg = 0; sg < 2; ++sg)
+                            {
+                                double const h = hface[a][sg];
+                                double const hp[3] = {h, h * h, h * h * h};
+                                double const sign = sg ? 1.0 : -1.0;
+                                for(int i = 0; i < 3; ++i)
+                                    for(int j = 0; j < 3; ++j)
+                                        for(int k = 0; k < 3; ++k)
+                                        {
+                                            int const be[3] = {i, j, k};
+                                            Wt[i * 9 + j * 3 + k]
+                                                += sign * hp[be[a]] * Mface[a][sg][be[b]][be[c]];
+                                        }
+                            }
+                        }
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            double acc = 0.0;
+                            for(int i = 0; i < 3; ++i)
+                                for(int j = 0; j < 3; ++j)
+                                    for(int k = 0; k < 3; ++k)
+                                    {
+                                        int const be[3] = {i, j, k};
+                                        double const pv = pB[i * 9 + j * 3 + k];
+                                        if(be[a] == 0 || pv == 0.0)
+                                            continue;
+                                        int g[3] = {i, j, k};
+                                        g[a]--;
+                                        int const dg = g[0] + g[1] + g[2];
+                                        double const W
+                                            = Wt[g[0] * 9 + g[1] * 3 + g[2]] / (dg + 2.0);
+                                        acc += be[a] * pv * W;
+                                    }
+                            Iv[a] += acc;
+                        }
+                    }
+            double const vn = Iv[0] * n[0] + Iv[1] * n[1] + Iv[2] * n[2];
+            double const invV = 1.0 / (cells[0] * cells[1] * cells[2]);
+            for(int a = 0; a < 3; ++a)
+                E[a] = ((Iv[a] - vn * n[a]) + vn * n[a] / (gam * gam)) * invV;
+        }
+
+
+        //! Port of detail::polyBoxUsable's d-space conditioning check.
+        ALPAKA_FN_ACC inline bool dPolyBoxUsable(
+            double const R0[3],
+            double const cells[3],
+            double const u[3])
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            if(!(uu2 > 1e-24) || !std::isfinite(uu2))
+                return false;
+            double const s[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            double sc[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                if(!(s[a] > -1.5 && s[a] < 1.5))
+                    return false;
+                int const k = s[a] < -0.5 ? 0 : (s[a] < 0.5 ? 1 : 2);
+                double const m = std::min(s[a] - knots[k], knots[k + 1] - s[a]);
+                if(!(m > 1.0e-6))
+                    return false;
+                sc[a] = static_cast<double>(k - 1);
+            }
+            double const gam = std::sqrt(1.0 + uu2);
+            double const un = std::sqrt(uu2);
+            double const n[3] = {u[0] / un, u[1] / un, u[2] / un};
+            double diff[3] = {
+                R0[0] - sc[0] * cells[0],
+                R0[1] - sc[1] * cells[1],
+                R0[2] - sc[2] * cells[2]};
+            double dc[3];
+            dapplyContract(diff, n, 1.0 / gam, dc);
+            double e[3][3];
+            double ev[3][3] = {
+                {cells[0], 0.0, 0.0},
+                {0.0, cells[1], 0.0},
+                {0.0, 0.0, cells[2]}};
+            double emax = 0.0;
+            for(int a = 0; a < 3; ++a)
+            {
+                dapplyContract(ev[a], n, 1.0 / gam, e[a]);
+                double const l = std::sqrt(e[a][0] * e[a][0] + e[a][1] * e[a][1]
+                                           + e[a][2] * e[a][2]);
+                if(!(l > 0.0) || !std::isfinite(l))
+                    return false;
+                emax = std::max(emax, l);
+            }
+            if(!(std::isfinite(dc[0]) && std::isfinite(dc[1]) && std::isfinite(dc[2])))
+                return false;
+            double V[2][2][2][3];
+            for(int a = 0; a < 2; ++a)
+                for(int b = 0; b < 2; ++b)
+                    for(int c = 0; c < 2; ++c)
+                        for(int k = 0; k < 3; ++k)
+                            V[a][b][c][k] = dc[k] + (a ? 0.5 : -0.5) * e[0][k]
+                                + (b ? 0.5 : -0.5) * e[1][k]
+                                + (c ? 0.5 : -0.5) * e[2][k];
+            int const FI[6][4][3] = {
+                {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}},
+                {{1, 0, 0}, {1, 0, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 0, 1}, {1, 0, 1}, {1, 0, 0}},
+                {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}},
+                {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}},
+                {{0, 0, 1}, {0, 1, 1}, {1, 1, 1}, {1, 0, 1}}};
+            double hmin = 1e300;
+            for(int f = 0; f < 6; ++f)
+            {
+                double q[4][3];
+                for(int v = 0; v < 4; ++v)
+                    for(int k = 0; k < 3; ++k)
+                        q[v][k] = V[FI[f][v][0]][FI[f][v][1]][FI[f][v][2]][k];
+                double nn[3] = {
+                    (q[1][1] - q[0][1]) * (q[2][2] - q[0][2])
+                        - (q[1][2] - q[0][2]) * (q[2][1] - q[0][1]),
+                    (q[1][2] - q[0][2]) * (q[2][0] - q[0][0])
+                        - (q[1][0] - q[0][0]) * (q[2][2] - q[0][2]),
+                    (q[1][0] - q[0][0]) * (q[2][1] - q[0][1])
+                        - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])};
+                double const nl = std::sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+                if(!(nl > 0.0) || !std::isfinite(nl))
+                    return false;
+                nn[0] /= nl;
+                nn[1] /= nl;
+                nn[2] /= nl;
+                double const h = q[0][0] * nn[0] + q[0][1] * nn[1] + q[0][2] * nn[2];
+                if(!std::isfinite(h))
+                    return false;
+                hmin = std::min(hmin, std::abs(h));
+            }
+            return hmin > 1.0e-8 * emax;
+        }
+
+        //! Production validity gate (mirrors FastNear.hpp::sSpaceExactUsable).
+        ALPAKA_FN_ACC inline bool dsSpaceExactUsable(
+            double const R0[3],
+            double const cells[3],
+            double const u[3])
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            if(!(uu2 >= 0.0) || !std::isfinite(uu2))
+                return false;
+            for(int a = 0; a < 3; ++a)
+            {
+                if(!(cells[a] > 0.0) || !std::isfinite(cells[a]) || !std::isfinite(R0[a]))
+                    return false;
+            }
+            double Rg[3];
+            dsnapKnotOrigin(R0, cells, dkKnotGateSnap, Rg);
+            double const s[3] = {Rg[0] / cells[0], Rg[1] / cells[1], Rg[2] / cells[2]};
+            bool inside = true;
+            for(int a = 0; a < 3; ++a)
+            {
+                if(!std::isfinite(s[a]))
+                    return false;
+                inside = inside && std::abs(s[a]) < 1.5;
+            }
+            if(inside && uu2 > 0.0)
+                return dPolyBoxUsable(Rg, cells, u);
+            return true;
+        }
+
+        //! Source-relative TSC cell class; mirrors supportCellClass.
+        ALPAKA_FN_ACC inline int dsupportCellClass(double const R0[3], double const cells[3])
+        {
+            int nonzero = 0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                int m = (std::abs(s) <= 0.5 + dkKnotDetect)
+                    ? 0
+                    : (s > 0.0 ? 1 : -1);
+                if(m != 0)
+                    ++nonzero;
+            }
+            return nonzero;
+        }
+
+        //! Exact-routing predicate; mirrors detail::routesExact.
+        ALPAKA_FN_ACC inline bool droutesExact(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            DeviceParams const& prm)
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            bool inside = true;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                if(!std::isfinite(s))
+                    return false;
+                inside = inside && std::abs(s) < 1.5;
+            }
+            if(inside)
+            {
+                if(prm.exactCellReach < 0)
+                    return false;
+                int const cls = dsupportCellClass(R0, cells);
+                bool const selected = prm.exactCellReach >= 2
+                    || (prm.exactCellReach == 1 && cls <= 1)
+                    || (prm.exactCellReach == 0 && cls == 0);
+                if(!selected)
+                    return false;
+                return dsSpaceExactUsable(R0, cells, u);
+            }
+            double const gam = std::sqrt(1.0 + uu2);
+            int const need = quadratureOrderFor(gam, prm.tolerance, prm.order);
+            if(!(isExactGamma(gam) || need > kQuadratureOrderCap))
+                return false;
+            return dsSpaceExactUsable(R0, cells, u);
+        }
+
         ALPAKA_FN_ACC inline void dsupportPlanes(
             double const R0[3],
             double const cells[3],
@@ -570,6 +1142,21 @@ namespace picBunch::pbfast
             bool const singular = Wstar > 0.0;
 
             double const uu2all = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            double const gamAll = std::sqrt(1.0 + uu2all);
+
+            // Exact s-space evaluator for the selected support cell classes
+            // and out-of-support pairs the remainder cannot resolve.
+            bool const useExact = droutesExact(R0, cells, u, prm);
+            if(useExact)
+            {
+                dpolyBoxFieldS(R0, cells, u, E);
+                double const beta[3] = {u[0] / gamAll, u[1] / gamAll, u[2] / gamAll};
+                B[0] = beta[1] * E[2] - beta[2] * E[1];
+                B[1] = beta[2] * E[0] - beta[0] * E[2];
+                B[2] = beta[0] * E[1] - beta[1] * E[0];
+                return;
+            }
+
             if(singular && uu2all > 0.0)
             {
                 double const un = std::sqrt(uu2all);

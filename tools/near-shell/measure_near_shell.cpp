@@ -68,6 +68,8 @@ int main(int argc, char** argv)
         std::size_t tile = 4;
         std::string shell = "exact";
         int fastOrder = 5;
+        int exactCells = 0;
+        bool countExact = false;
         std::string obliqueOrder = "auto";
         std::size_t sources = 1;
         double cloudCells = 0.0;
@@ -103,6 +105,10 @@ int main(int argc, char** argv)
                 shell = next();
             else if(a == "--order")
                 fastOrder = std::stoi(next());
+            else if(a == "--exact-cells")
+                exactCells = std::stoi(next());
+            else if(a == "--count-exact")
+                countExact = true;
             else if(a == "--oblique-order")
                 obliqueOrder = next();
             else if(a == "--sources")
@@ -175,7 +181,11 @@ int main(int argc, char** argv)
         ns.radiusCells = radius;
         ns.tileNodes = tile;
         std::size_t pairs = 0;
+        std::size_t exactCount = 0;
         ns.exactPairs = &pairs;
+        ns.exactCellReach = exactCells;
+        if(countExact)
+            ns.exactPairCount = &exactCount;
         picBunch::Field const total = picBunch::computeFieldNearExact(bunch, options, ns);
         auto t2 = std::chrono::steady_clock::now();
 
@@ -203,6 +213,9 @@ int main(int argc, char** argv)
         meta << "sources " << sources << "\n";
         meta << "cloud_cells " << cloudCells << "\n";
         meta << "pairs " << pairs << "\n";
+        if(countExact)
+            meta << "exact_pairs " << exactCount << "\n";
+        meta << "exact_cells " << exactCells << "\n";
         meta << "mesh_seconds " << meshS << "\n";
         meta << "near_shell_seconds " << totalS << "\n";
         std::printf("pairs=%zu mesh=%.6f s near=%.6f s\n", pairs, meshS, totalS);

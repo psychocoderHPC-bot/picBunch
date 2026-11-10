@@ -175,6 +175,16 @@ namespace picBunch
         int fastObliqueOrder = 0;
         //! Diagnostic counter: number of exact (source, node, component) evaluations.
         std::size_t* exactPairs = nullptr;
+        //! Which TSC support cell classes use the exact evaluator (fast path):
+        //! 0 = observer-containing cell only (hybrid), 1 = plus the six
+        //! face-adjacent cells, 2 = all in-support cells, -1 = legacy only,
+        //! -2 = automatic (default).  Automatic selects the observer cell at
+        //! the default 1e-3 tolerance and all in-support cells at a tolerance
+        //! <= 1e-4.  A tile with gamma >= 100 is always all-exact, because the
+        //! legacy quadrature cannot resolve that contracted tube.
+        int exactCellReach = -2;
+        //! Diagnostic counter: exact evaluations among the total pair count.
+        std::size_t* exactPairCount = nullptr;
     };
 
     /*! Assumed constant of the velocity-bin error model.
