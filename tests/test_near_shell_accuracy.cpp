@@ -10,6 +10,7 @@
 // it is not a gamma-100 truth.
 
 #include "picBunch/detail/FastNear.hpp"
+#include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/NearReference.hpp"
 
 #include <gtest/gtest.h>
@@ -171,12 +172,15 @@ namespace
     struct GoldenRow
     {
         double gamma = 0.0;
+        std::string config;
         double d = 0.0;
         std::array<double, 3> R0{};
         std::array<double, 3> u{};
         std::array<double, 3> E{};
         std::array<double, 3> B{};
         int converged = 0;
+        //! Reference convergence delta (relative), for the ray rows.
+        double error = 0.0;
     };
 
     std::vector<GoldenRow> loadNearDistanceGolden()
@@ -201,6 +205,7 @@ namespace
             GoldenRow r;
             // gamma,config,d,x,y,z,ux,uy,uz,Ex,Ey,Ez,Bx,By,Bz,converged,...
             r.gamma = std::stod(tok[0]);
+            r.config = tok[1];
             r.d = std::stod(tok[2]);
             for(int a = 0; a < 3; ++a)
             {
@@ -210,6 +215,8 @@ namespace
                 r.B[a] = std::stod(tok[12 + a]);
             }
             r.converged = std::stoi(tok[15]);
+            if(tok.size() > 16)
+                r.error = std::stod(tok[16]);
             rows.push_back(r);
         }
         return rows;
@@ -265,6 +272,68 @@ TEST(NearShellAccuracy, NearDistanceMatchesIndfieldGolden)
     }
     EXPECT_GT(inSupport, 0);
     EXPECT_GT(outSupport, 0);
+}
+
+//! gamma-100 oblique in-support truth from the direct d-space ray quadrature
+//! (tools/near-shell/ray_reference.cpp), independent of the s-space moment
+//! method under test.  The `oblique-ray` rows store the relative delta between
+//! the mandated 128x256x10 rule and a 256x512x10 convergence run.  A
+//! non-converged reference or a larger than 1e-3 agreement gap is a hard
+//! failure.
+TEST(NearShellAccuracy, Gamma100ObliqueRayReference)
+{
+    auto const rows = loadNearDistanceGolden();
+    int checked = 0;
+    for(GoldenRow const& r : rows)
+    {
+        if(r.config != "oblique-ray")
+            continue;
+        ASSERT_EQ(r.converged, 1) << "ray reference did not converge at d=" << r.d;
+        ASSERT_LE(r.error, 1.0e-3)
+            << "ray reference convergence delta too large at d=" << r.d
+            << " delta=" << r.error;
+        picBunch::pbfast::Settings settings;
+        settings.order = 5;
+        settings.obliqueOrder = 8;
+        settings.tolerance = 1.0e-3;
+        Vec3 E, B;
+        picBunch::pbfast::shape_field(
+            Vec3{r.R0[0], r.R0[1], r.R0[2]}, Vec3{}, Vec3{r.u[0], r.u[1], r.u[2]},
+            1.0, 1.0, 1.0, settings, E, B);
+        double const errE = relativeErrorA({E.x, E.y, E.z}, r.E);
+        double const errB = relativeErrorA({B.x, B.y, B.z}, r.B);
+        double const err = std::max(errE, errB);
+        EXPECT_LE(err, 1.0e-3) << "gamma=" << r.gamma << " d=" << r.d
+                               << " errE=" << errE << " errB=" << errB;
+        ++checked;
+    }
+    EXPECT_EQ(checked, 4) << "missing gamma-100 oblique-ray golden rows";
+}
+
+//! A direct ComputeOptions fastOrder above the 32-slot device table must not
+//! silently under-fill.  The host remainder caps at the table size, and an
+//! out-of-support pair above the cap routes to the exact evaluator, so the
+//! two requests stay within round-off instead of reading past the table.
+TEST(NearShellAccuracy, FastOrderAboveCapStaysBounded)
+{
+    static_assert(
+        picBunch::pbfast::kQuadratureOrderCap <= picBunch::pbfast::DeviceParams::kMaxOrder,
+        "host quadrature cap exceeds the device xi/wi table");
+    Vec3 const u = oblique45(kGamma10Beta);
+    picBunch::pbfast::Settings capped;
+    capped.order = 32;
+    capped.obliqueOrder = 8;
+    picBunch::pbfast::Settings oversized;
+    oversized.order = 64;
+    oversized.obliqueOrder = 8;
+    for(Vec3 const obs : {Vec3{2.0, 0.5, 0.0}, Vec3{0.0, 2.5, 0.0}})
+    {
+        Vec3 Ea, Ba, Eb, Bb;
+        picBunch::pbfast::shape_field(obs, Vec3{}, u, 1.0, 1.0, 1.0, capped, Ea, Ba);
+        picBunch::pbfast::shape_field(obs, Vec3{}, u, 1.0, 1.0, 1.0, oversized, Eb, Bb);
+        EXPECT_LT(relativeErrorV(Ea, Eb), 1.0e-9);
+        EXPECT_LT(relativeErrorV(Ba, Bb), 1.0e-9);
+    }
 }
 
 // ---- adaptive oblique order ------------------------------------------------

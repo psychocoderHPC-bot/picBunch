@@ -116,7 +116,7 @@ the input checkpoint. `patch_count = 1` is the previous layout.
 
 | key | required | meaning |
 | --- | --- | --- |
-| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. It sizes the FFT padding and velocity boxes, not the near-source, far-tail or checkpoint-precision error. |
+| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. It sizes the FFT padding and velocity boxes, and the near-field remainder order: each decade below `1e-3` raises the Gauss order, capped at 32 nodes per axis, and pairs whose requirement exceeds the cap (including every gamma >= 100 oblique source) are routed to the exact evaluator. The default `1e-3` keeps the order-5 remainder. It does not bound the far-tail error or the checkpoint precision. |
 | `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (Lorentz-contracted adaptive reference; about `1e-4` axial and `1e-3` oblique at gamma 10, about `2%` at the closest axial node). |
 | `near_shell_radius` | no | Shell radius in PIC cells; `0` (default) derives it from `tolerance`. |
 | `near_shell_tile` | no | Tile edge in nodes; default `4`. |

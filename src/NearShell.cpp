@@ -221,7 +221,14 @@ namespace picBunch
         int const explicitObliqueOrder = autoObliqueOrderPolicy
             ? pbfast::kObliqueOrderMin
             : pbfast::normalizeObliqueOrder(nearShell.fastObliqueOrder);
-        pbfast::Settings fastSettings{nearShell.fastOrder, explicitObliqueOrder, 5};
+        // The device xi/wi table holds kQuadratureOrderCap (32) nodes per
+        // axis.  Clamp a programmatically set fastOrder to the table capacity
+        // so host and device use the same rule and no slot is left
+        // uninitialised.  The CLI and TOML parsers already reject values
+        // outside [2, 32]; this guard covers direct ComputeOptions writes.
+        int const requestedFastOrder
+            = std::clamp(nearShell.fastOrder, 2, pbfast::kQuadratureOrderCap);
+        pbfast::Settings fastSettings{requestedFastOrder, explicitObliqueOrder, 5};
         fastSettings.tolerance = options.tolerance;
         bool useFast = nearShell.mode == NearShellOptions::Mode::Fast;
         bool useFastGpu = false;
@@ -424,9 +431,9 @@ namespace picBunch
                     int const tileRemainderOrder = std::min(
                         pbfast::kQuadratureOrderCap,
                         std::max(
-                            nearShell.fastOrder,
+                            requestedFastOrder,
                             pbfast::quadratureOrderFor(
-                                tileMaxGamma, options.tolerance, nearShell.fastOrder)));
+                                tileMaxGamma, options.tolerance, requestedFastOrder)));
 
                     int tileObliqueOrder = explicitObliqueOrder;
                     if(autoObliqueOrderPolicy)
@@ -469,11 +476,18 @@ namespace picBunch
                     // assignment behind the same guard as the declaration so a
                     // CPU-only build compiles.
                     deviceParams.obliqueOrder = tileObliqueOrder;
-                    deviceParams.order = tileRemainderOrder;
+                    // Explicitly clamp to the 32-slot table.  tileRemainderOrder
+                    // is already bounded by kQuadratureOrderCap, and the
+                    // static_assert in FastNearDevice.hpp keeps that cap equal
+                    // to the device table size; this makes the fill loop
+                    // self-evidently in range.
+                    int const deviceOrder
+                        = std::min(tileRemainderOrder, pbfast::DeviceParams::kMaxOrder);
+                    deviceParams.order = deviceOrder;
                     {
-                        auto const& tx = pbfast::detail::rule(tileRemainderOrder).x;
-                        auto const& tw = pbfast::detail::rule(tileRemainderOrder).w;
-                        for(int i = 0; i < tileRemainderOrder; ++i)
+                        auto const& tx = pbfast::detail::rule(deviceOrder).x;
+                        auto const& tw = pbfast::detail::rule(deviceOrder).w;
+                        for(int i = 0; i < deviceOrder; ++i)
                         {
                             deviceParams.xi[i] = tx[static_cast<std::size_t>(i)];
                             deviceParams.wi[i] = tw[static_cast<std::size_t>(i)];

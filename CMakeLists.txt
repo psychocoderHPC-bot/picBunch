@@ -366,6 +366,13 @@ target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 add_executable(picBunchFastNear52pt tools/verify/pb_fast_near_52pt.cpp)
 target_include_directories(picBunchFastNear52pt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Standalone direct d-space ray-quadrature reference for the gamma-100 oblique
+# in-support rows in tests/data/near_distance_golden.csv.  CPU only and
+# dependency-free: it reimplements the defining integral from first principles,
+# so it never links the evaluator under test.  Values are precomputed; the
+# accuracy test only reads the CSV.
+add_executable(picBunchNearShellRayReference tools/near-shell/ray_reference.cpp)
+
 # Measurement driver for velocity binning: synthetic mixed-velocity bunch,
 # binned fields for a list of box counts, for the continuum reference
 # comparison (tools/velocity-bins/compare_velocity_bins.py).

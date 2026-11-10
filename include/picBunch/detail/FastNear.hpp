@@ -61,8 +61,6 @@ namespace picBunch::pbfast
         //! controlled quadrature when the octant/Duffy order-pair residual
         //! exceeds a fraction of this value.
         double tolerance = 1e-3;
-        //! Force the legacy plain octant box (diagnostics / equivalence tests).
-        bool legacyOblique = false;
     };
 
     namespace detail

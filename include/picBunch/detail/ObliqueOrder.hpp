@@ -13,9 +13,12 @@
 
 #include <cmath>
 
-#if defined(__CUDACC__) || defined(__HIPCC__) || defined(PICBUNCH_BACKEND_CUDA)
-#    include <alpaka/alpaka.hpp>
-#    define PICBUNCH_ORDER_HOST_ACC ALPAKA_FN_HOST_ACC
+// Only the host/device annotation on quadratureOrderFor is accelerator
+// specific.  Pulling the full alpaka header into every CUDA translation unit
+// that includes this ordering knob is unnecessary; the compiler builtins keep
+// this header dependency-free.
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#    define PICBUNCH_ORDER_HOST_ACC __host__ __device__
 #else
 #    define PICBUNCH_ORDER_HOST_ACC
 #endif

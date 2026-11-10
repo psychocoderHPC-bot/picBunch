@@ -45,6 +45,10 @@ namespace picBunch::pbfast
         double tolerance = 1e-3;
     };
 
+    static_assert(
+        kQuadratureOrderCap <= DeviceParams::kMaxOrder,
+        "near-field command order exceeds the device xi/wi table capacity");
+
 #if defined(PICBUNCH_BACKEND_CUDA)
     //! True when a CUDA device is present and the kernel can run.
     bool fastNearDeviceAvailable();
