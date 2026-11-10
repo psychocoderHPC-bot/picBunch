@@ -11,8 +11,8 @@
 //     by comparing the default (parallel) executor with the serial executor.
 //
 // The functors mirror src/Compute.cpp: ReadoutScaleAdd is the ScalarFunc used
-// by the pitched 3D read-out and the compact accumulate; SlabScaleKernel is the
-// indexed complex scale of the distributed read-out.
+// by the pitched 3D read-out and the compact accumulate.  The distributed
+// read-out now uses the gather/scale kernel covered by the MpiReadout group.
 
 #include "TestDevice.hpp"
 
@@ -36,41 +36,6 @@ namespace
         ALPAKA_FN_ACC double operator()(double acc, double in) const
         {
             return acc + in * factor;
-        }
-    };
-
-    //! Same indexed complex scale as Compute.cpp's distributed read-out.
-    struct SlabScaleKernel
-    {
-        template<typename TAcc>
-        ALPAKA_FN_ACC void operator()(
-            TAcc const& acc,
-            alpaka::math::Complex<double>* work,
-            std::uint32_t nx,
-            std::uint32_t ny,
-            std::uint32_t nz,
-            std::uint32_t mx,
-            std::uint32_t my,
-            double factor) const
-        {
-            std::size_t const count
-                = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)
-                * static_cast<std::size_t>(nz);
-            for(auto [l] : alpaka::onAcc::makeIdxMap(
-                    acc,
-                    alpaka::onAcc::worker::threadsInGrid,
-                    alpaka::IdxRange{count}))
-            {
-                std::size_t const i = l % nx;
-                std::size_t const rem = l / nx;
-                std::size_t const j = rem % ny;
-                std::size_t const k = rem / ny;
-                std::size_t const idx = i
-                    + static_cast<std::size_t>(mx)
-                        * (j + static_cast<std::size_t>(my) * k);
-                auto& value = work[idx];
-                value = alpaka::math::Complex<double>{value.real() * factor, 0.0};
-            }
         }
     };
 
@@ -242,82 +207,6 @@ TEST(AlpakaReadout, CompactAccumulateMatchesSerialLoopBitwise)
             }
 
             ASSERT_EQ(0, std::memcmp(acc.data(), reference.data(), count * sizeof(double)));
-        });
-}
-
-TEST(AlpakaReadout, DistributedSlabScaleMatchesSerialLoopBitwise)
-{
-    std::array<PaddedShape, 3> const shapes{{
-        {5, 7, 3, 5, 7, 3},
-        {7, 5, 3, 14, 15, 9},
-        {4, 6, 5, 9, 11, 5},
-    }};
-
-    picBunchTest::runOnDevice(
-        [&](auto& device, auto& queue)
-        {
-            using Complex = alpaka::math::Complex<double>;
-            for(PaddedShape const& s : shapes)
-            {
-                // The slab covers nz output planes with all nx/ny nodes.
-                std::size_t const workCount
-                    = static_cast<std::size_t>(s.mx) * s.my * s.mz;
-                std::vector<Complex> host(workCount);
-                for(std::uint32_t k = 0; k < s.mz; ++k)
-                    for(std::uint32_t j = 0; j < s.my; ++j)
-                        for(std::uint32_t i = 0; i < s.mx; ++i)
-                            host[static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(s.mx)
-                                    * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(s.my) * k)]
-                                = Complex{
-                                    sourceValue(i, j, k, 11),
-                                    sourceValue(i, j, k, 12)};
-
-                auto work = alpaka::onHost::allocUnified<Complex>(device, workCount);
-                for(std::size_t l = 0; l < workCount; ++l)
-                    work.data()[l] = host[l];
-
-                std::uint64_t const scaleCount
-                    = static_cast<std::uint64_t>(s.nx) * s.ny * s.nz;
-                queue.enqueue(
-                    alpaka::onHost::FrameSpec{
-                        static_cast<std::uint32_t>((scaleCount + 63u) / 64u),
-                        64u},
-                    SlabScaleKernel{},
-                    work.data(),
-                    s.nx,
-                    s.ny,
-                    s.nz,
-                    s.mx,
-                    s.my,
-                    1.375);
-                alpaka::onHost::wait(queue);
-
-                std::vector<Complex> const reference = [&]
-                {
-                    std::vector<Complex> out = host;
-                    for(std::uint32_t k = 0; k < s.nz; ++k)
-                        for(std::uint32_t j = 0; j < s.ny; ++j)
-                            for(std::uint32_t i = 0; i < s.nx; ++i)
-                            {
-                                std::size_t const idx = static_cast<std::size_t>(i)
-                                    + static_cast<std::size_t>(s.mx)
-                                        * (static_cast<std::size_t>(j)
-                                           + static_cast<std::size_t>(s.my)
-                                               * static_cast<std::size_t>(k));
-                                Complex const v = out[idx];
-                                out[idx] = Complex{v.real() * 1.375, 0.0};
-                            }
-                    return out;
-                }();
-
-                ASSERT_EQ(
-                    0,
-                    std::memcmp(work.data(), reference.data(), workCount * sizeof(Complex)))
-                    << "shape " << s.nx << "x" << s.ny << "x" << s.nz << " padded "
-                    << s.mx << "x" << s.my << "x" << s.mz;
-            }
         });
 }
 
