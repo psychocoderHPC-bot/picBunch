@@ -116,9 +116,10 @@ the input checkpoint. `patch_count = 1` is the previous layout.
 
 | key | required | meaning |
 | --- | --- | --- |
-| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. It sizes the FFT padding and velocity boxes, not the near-source, far-tail or checkpoint-precision error. |
+| `tolerance` | yes | Relative free-space convolution target; positive, floor `1e-14`. It sizes the FFT padding and velocity boxes, and the near-field remainder order: each decade below `1e-3` raises the Gauss order, capped at 32 nodes per axis, and pairs whose requirement exceeds the cap (including every gamma >= 100 oblique source) are routed to the exact evaluator. The default `1e-3` keeps the order-5 remainder. It does not bound the far-tail error or the checkpoint precision. |
 | `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (Lorentz-contracted adaptive reference; about `1e-4` axial and `1e-3` oblique at gamma 10, about `2%` at the closest axial node). |
 | `near_shell_radius` | no | Shell radius in PIC cells; `0` (default) derives it from `tolerance`. |
+| `near_shell_exact_cells` | no | Exact s-space routing of the fast near field. `-2` (default) is automatic: the observer-containing TSC support cell is exact, the rest keeps the order-5 remainder. `-1` forces legacy quadrature, `0` selects the observer cell only, `1` adds the six face-adjacent cells, `2` selects every in-support cell. A tolerance `<= 1e-4` makes the automatic policy full-support exact, and a tile with gamma `>= 100` is always full exact. The observer-cell default is neutral to 9% cheaper than base on the CPU and costs 0-1% on the GPU on-node workload; the GPU spread 12-cell cloud pays up to 30% because the per-source exact branch diverges whole warps. In-support L2 accuracy improves roughly twofold (static `1.80e-3 -> 5.74e-4`, axial gamma 10 E `9.35e-3 -> 3.14e-3`, B `3.55e-2 -> 2.35e-3`). The full-support mode is the accuracy reference for in-support points; it costs `0.93-1.19x` base on the CPU, `1.0-1.04x` on the GPU on-node workload, and `0.90-2.17x` on the GPU spread cloud. |
 | `near_shell_tile` | no | Tile edge in nodes; default `4`. |
 
 The accuracy target is not an end-to-end guarantee. The README error-budget table

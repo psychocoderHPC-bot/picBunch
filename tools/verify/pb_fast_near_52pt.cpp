@@ -385,13 +385,16 @@ namespace
                 double p = std::string(rg) == "interior" ? pc.interior
                              : std::string(rg) == "face" ? pc.face : pc.outside;
                 double ratio = p > 0.0 ? m / p : 0.0;
-                if(!(ratio > 0.5 && ratio < 2.0))
+                // A ratio below the paper value is an improvement (the exact
+                // s-space path replaced the remainder quadrature); only a
+                // regression above 2x fails the tab:fast reproduction gate.
+                if(!(ratio < 2.0))
                     allMatch = false;
                 std::printf("%-12s %-9s  %.3e       %.3e       %.3f\n", cs, rg,
                             m, p, ratio);
             }
         std::printf("\nverdict: %s\n",
-                    allMatch ? "paper tab:fast reproduced (all within 2x)"
+                    allMatch ? "no tab:fast regression (all within 2x; ratios <1 are improvements)"
                              : "DISCREPANCY vs paper (see ratios above)");
 
         // Deterministic per-point CSV.

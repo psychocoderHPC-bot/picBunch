@@ -69,7 +69,7 @@ source & measured magnitude & statement \\
 \midrule
 mesh / deposit & $1.38\times10^{-7}$ ($M\!-\!T$, $\gamma=1$, aspect 1, $d=48$); $2.6\times10^{-4}$ ($\gamma=10$, aspect 1, $d=48$) & Table~\ref{tab:d48}; far-field sweeps of Section~\ref{sec:farfield} \\
 velocity binning & $4.3\times10^{-6}$ relative ($B=16$ vs $64$, 5\% energy spread); $4.3\times10^{-4}\%$ in $B_z$ for the 5\% energy case; $1.4\%$ worst against the arbiter for the 1\,mrad case & Appendix~\ref{app:multivel}, Table~\ref{tab:multivel} \\
-near-source quadrature & $6.82\times10^{-4}$ stationary interior; $1.40\times10^{-4}$ moving axial interior; $1.94\times10^{-3}$ moving oblique interior (measured limit) & Table~\ref{tab:fast} \\
+near-source quadrature & $3.71\times10^{-4}$ stationary interior; $1.40\times10^{-4}$ moving axial interior; $1.94\times10^{-3}$ moving oblique interior (default observer-cell routing) & Table~\ref{tab:fast} \\
 far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the $512^3$ output (rosi\_v100 direct-charge-sum run; comparison data not in the repository, not re-measured) & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
 output precision & float32 checkpoint: bitwise arrival under PIConGPU, $\max_\mathrm{abs\,diff}=0.0$ after one step; float64 opt-in records a warning attribute & Section~\ref{sec:validation} \\
 \bottomrule
@@ -321,7 +321,7 @@ direct $d$-space ray integral, $16\times32\times4$ nodes, no remainder).}
 \toprule
 $\gamma$, direction & remainder order & interior & face & outside \\
 \midrule
- 1, stationary   & 5 & $6.82\times10^{-4}$ & $1.96\times10^{-5}$ & $1.63\times10^{-7}$ \\
+ 1, stationary   & 5 & $3.71\times10^{-4}$ & $1.96\times10^{-5}$ & $1.63\times10^{-7}$ \\
  10, axial       & 8 & $1.40\times10^{-4}$ & $1.11\times10^{-4}$ & $2.12\times10^{-6}$ \\
  10, oblique     & 5 & $1.94\times10^{-3}$ & $3.94\times10^{-3}$ & $1.01\times10^{-4}$ \\
 \bottomrule
@@ -333,7 +333,7 @@ The metric is
 $\max|\mathrm{mesh}-\mathrm{ref}|/(1+\max|\mathrm{ref}|)$ over $20$
 interior, $16$ face and $16$ outside points, cells $10^{-7}$\,m. The
 per-component values behind the stationary interior row are
-$6.82\times10^{-4}$, $3.36\times10^{-4}$, $5.84\times10^{-4}$, $0$, $0$,
+$3.71\times10^{-4}$, $1.80\times10^{-4}$, $9.69\times10^{-5}$, $0$, $0$,
 $0$ for $E_x,E_y,E_z,B_x,B_y,B_z$ (the magnetic field is identically zero
 for a stationary bunch); the moving axial interior row is
 $1.40\times10^{-4}$, $1.35\times10^{-4}$, $2.20\times10^{-5}$,
@@ -345,7 +345,12 @@ entries are below the published values, because the evaluator
 \texttt{indfield}) of this table are later revisions of the published
 ones; the difference is largest for the moving oblique interior,
 $8.15\times10^{-2}$ in the published table,
-$1.94\times10^{-3}$ in this table.
+$1.94\times10^{-3}$ in this table. The shipped default keeps the base
+order and ray and applies the exact evaluator only to the observer-containing
+TSC support cell; it lowers the stationary interior row from
+$6.82\times10^{-4}$ to $3.71\times10^{-4}$ and leaves the moving axial and
+oblique rows unchanged. A tolerance of $10^{-4}$ or below, or a tile with
+$\gamma\ge100$, selects the full-support exact path.
 
 The validity of each mode follows from the table. \texttt{exact} is the
 adaptive FP64 quadrature shared with the reference driver. Its in-support
@@ -373,9 +378,11 @@ host path to $5.4\times10^{-16}$ to $8.0\times10^{-16}$. The near-shell
 radii used on the slice geometry are stated in mesh nodes of that $h=1$
 grid (Appendix~\ref{app:slices}, shell-radius unit note). On
 \texttt{rosi\_v100} ($64^3$ output, $R=3$, tile 4, 2000 particles,
-$8.77\times10^{6}$ evaluations) the device path runs in $2.5$\,s against
-$18.3$\,s on the host, a $7.2\times$ speedup; it falls back to the host
-with a warning when no device is present.
+$6.144\times10^{6}$ pairs) the final default runs in $0.710$\,s on the
+device against $12.77$\,s on the host, a $18.0\times$ speedup; the
+pre-fix base is $0.704$\,s against $13.26$\,s. Both are one idle V100 node,
+so the ratio is a same-node comparison. It falls back to the host with a
+warning when no device is present.
 
 \subsection{Cost at $2\times10^{6}$ particles, one H100}
 \label{sec:cost}
@@ -425,7 +432,14 @@ costs $500.95$\,s end-to-end at $7.99\times10^{-4}$ interior error, the
 three-cell shell $1268.29$\,s, and the four-cell shell $1959.31$\,s, at the
 same interior error. $R=1.5$ to $R=4$ multiplies the end-to-end wall by
 $3.9\times$ at fixed particle count and grid, while the accuracy of the
-in-shell region is already at $7.99\times10^{-4}$ at $R=1.5$. The shell rate
+in-shell region is already at $7.99\times10^{-4}$ at $R=1.5$. The walls
+predate the hybrid near path; the final default routes only the
+observer-containing support cell to the exact evaluator, and on the
+$64^3$, $R=3$ workload that policy is $0.91$--$0.96\times$ the base CPU
+wall, $1.006$--$1.009\times$ the base on-node GPU wall, and
+$1.16$--$1.30\times$ the base GPU wall for the 12-cell cloud. A stationary
+integrated rerun was not made, so Table~\ref{tab:cost} keeps the measured
+pre-hybrid walls and its error column. The shell rate
 on the integrated path is $0.87\times10^{6}$, $1.15\times10^{6}$ and
 $1.36\times10^{6}$ pairs/s for the three radii, about $2\times$ slower per
 component than the standalone kernel, the overhead of the per-tile local FFT

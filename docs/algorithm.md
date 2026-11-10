@@ -285,13 +285,18 @@ performance claim about `hal`.
   (vendored FP64 reference quadrature), using a per-tile local zero-padded FFT
   for the `F_mesh(near)` subtraction. It is not lookup-class and its measured
   accuracy/cost envelope is reported with the change that added it. `--near-shell
-  fast` is the accurate backend for near-source points (README Accuracy): the
-  host path gates oblique in-support pairs on the octant residual and falls back
-  to the Lorentz-contracted reference, reaching `<=1e-3`; the CUDA in-kernel
-  path reaches about `5.3e-2` for gamma-10 oblique in-support and needs the
-  contracted reference in the kernel. `exact` is kept for comparison only; it
-  shares a quadrature with the driver reference and overestimates moving oblique
-  in-support points by about `10x` at the closest node.
+  fast` keeps the base order and ray and routes only the observer-containing TSC
+  support cell to the exact s-space evaluator; the remaining in-support cells keep
+  the order-5 (or gamma-derived) remainder quadrature. `--near-shell-exact-cells`
+  exposes the routing: `-2` automatic (default), `-1` legacy only, `0` observer
+  cell, `1` observer plus the six face-adjacent cells, `2` every in-support cell.
+  A tolerance of `1e-4` or below resolves `-2` to full support, and a tile with
+  gamma `>= 100` is always full exact because its contracted tube is not
+  resolvable on the legacy quadrature. On the 52-point set the default gives
+  `3.71e-4` stationary, `1.40e-4` moving axial gamma 10 and `1.94e-3` moving
+  oblique interior. `exact` is kept for comparison only; it shares a quadrature
+  with the driver reference and overestimates moving oblique in-support points by
+  about `10x` at the closest node.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
   cost/error measurements are recorded above.
