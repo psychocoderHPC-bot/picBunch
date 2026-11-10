@@ -174,18 +174,16 @@ outside the resulting grid is an error that names the count and the bounds; it i
 silently.
 
 **Near-shell regime limits.** The default `--near-shell none` is the safest choice: it
-keeps the plain mesh field and makes no regime-specific accuracy claim. `fast` is the
-accurate backend for stationary and near-axial motion. At the default order it gives
-`1.69e-4` for moving axial gamma 10. On the host, each oblique in-support pair is gated
-by the estimated octant residual; when the residual exceeds
-`max(1e-6, 0.25*tolerance)` the pair falls back to the validated Lorentz-contracted
-reference. The host gate reaches `<=1e-3` for moving oblique in-support: gated pairs
-return the reference quadrature and the non-gated residual stays below
-`0.25*tolerance` (`docs/measurements/field_error_energy_spread.csv`). The CUDA
-in-kernel path has no contracted fallback: gamma-10 oblique in-support measures
-`5.34e-2` at `(0,0.5,0)` and `1.50e-1`/`1.54e-1` at two other points, and beta 0.5
-oblique measures `9.3e-4` to `1.2e-3`. The in-kernel oblique case is not a `1e-3` path
-until the contracted reference runs in the kernel. `exact`
+keeps the plain mesh field and makes no regime-specific accuracy claim. `fast` keeps
+the base order and ray and routes only the observer-containing TSC support cell to the
+exact s-space evaluator; a tolerance of `1e-4` or below, or a tile with gamma `>= 100`,
+selects full-support exact. On the 52-point set the default gives `3.71e-4` stationary,
+`1.40e-4` moving axial gamma 10 and `1.94e-3` moving oblique interior; face nodes stay
+at `1.96e-5`, `1.11e-4` and `3.94e-3`, and outside nodes at `<=1.0e-4`. The former
+`5.34e-2`/`1.50e-1`/`1.54e-1` device in-kernel oblique values and the `8.15e-2`
+ungated-octant value are retired for the observer cell
+(`docs/measurements/field_error_energy_spread.csv`); the ungated octant outside the
+observer cell is still `8.15e-2` and is not a blanket `1e-3` path. `exact`
 integrates moving in-support points in Lorentz-contracted coordinates, where the
 beaming anisotropy moves out of the kernel into a smooth density; against the order-12
 `indfield` arbiter it reaches about `1e-4` at cells (1,0,0) and (0,0.5,0) and about
@@ -218,7 +216,7 @@ plain Gauss-Legendre on the subtracted integrand `(S - W*)K` over the TSC knot p
 split at `s*`; `--near-shell-fast-order` sets the remainder order (default 5, 8,000
 nodes in-support). Moving axial velocities use the exact gamma-stretched box. The fast
 backend is the accurate one for near-source points. Against the independent `indfield`
-reference (order 12, refine 3) it reaches worst-case `7.99e-4` stationary interior
+reference (order 12, refine 3) it reaches worst-case `3.71e-4` stationary interior
 (order 5), `1.96e-5` face, `1.57e-7` outside, and `1.69e-4` axial gamma 10 interior
 (order 8). Moving oblique interior goes through the host residual gate and reaches
 `<=1e-3`; the ungated octant alone is `8.15e-2` at the default order and is not a
@@ -241,10 +239,11 @@ the direct 27-point TSC mesh-near stencil and a uniform source cell list. The
 quadrature nodes and weights, the Yee offsets and the E/B units travel as kernel
 parameters, so no device-side global table is read. `fast-gpu` (TOML
 `accuracy.near_shell = "fast-gpu"`) remains an explicit alias. On rosi_v100 (64^3
-output, R = 3, tile 4, 2000 particles, 8.77e6 evaluations) the device path runs in
-`2.5 s` against `18.3 s` on the host, a `7.2x` speedup (measured
-`7.20x` in `docs/measurements/near_shell_device_speedup.csv`), and the two
-agree to `5.7e-15` worst per-component relative. HIP and CPU builds use the host fallback with
+output, R = 3, tile 4, 2000 particles, 6.144e6 pairs) the final default runs in
+`0.710 s` on the device against `12.77 s` on the host, an `18.0x` speedup; the
+pre-fix base is `0.704 s` against `13.26 s` (same node, idle V100;
+`docs/measurements/near_shell_device_speedup.csv`). Device and host fields agree to
+`4.1e-14` of the peak. HIP and CPU builds use the host fallback with
 one stderr warning.
 
 On `hal` (A30, sm_80) the device mesh-near term evaluates the 27-point TSC stencil
@@ -279,13 +278,18 @@ near-evaluator time:
 | 4-cell shell, o5 | 184.2 s | 7.99e-4, 3.55e-4, 6.05e-4, 0, 0, 0 (<=1.6e-7 out) |
 | moving axial support, o8 | 42.6 s | 1.69e-4, 1.68e-4, 1.36e-5, 1.67e-4, 1.69e-4, 0 |
 
+The error columns above are the historical fast-path envelope; the final
+observer-cell default measures `3.71e-4` stationary interior on the 52-point set
+(`docs/measurements/fastnear_fast_52pt.csv`).
+
 So `1e-3` is reached in a projected `9.26 s` support-only and `184.2 s` with the full
 4-cell shell, below a projected `300 s`. Moving axial gamma 10 reaches `1.69e-4` in a
 projected `42.6 s` support-only; its 3- and 4-cell shells exceed a projected `300 s`.
 These near wall times are the measured standalone H100 kernel rate times the pair
-count: the shipped `--near-shell fast` path evaluates the same algebra on the host, so
-they are an algorithm cost floor, not the CPU wall time of the CLI. Moving oblique
-in-support goes through the host residual gate and reaches `<=1e-3`; the ungated octant
+count: the shipped default keeps the base order and ray and adds the exact evaluator
+only in the observer cell, so they are an algorithm cost floor, not the CPU wall time
+of the CLI. Moving oblique in-support outside the observer cell keeps the residual
+gate; the measured 52-point interior worst is `1.94e-3`, and the ungated octant alone
 is `8.15e-2` (per component Ex 2.43e-2, Ey 7.42e-2, Ez 6.32e-2, Bx 8.15e-2,
 By 2.96e-2, Bz 3.89e-2).
 `--near-shell exact` evaluates in-support points in Lorentz-contracted coordinates:

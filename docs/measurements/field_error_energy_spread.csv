@@ -43,8 +43,7 @@ cap1024,velocity-moments 3 1-rank vs 2-rank,max point rel,4.820e-16,,ok,1-rank f
 cap1024,velocity-moments off max-bins 32,required boxes,64,,hard-error,,auto binned path exits non-zero (2.004e-03 at the 32-box cap)
 cap1024,velocity-moments auto max-bins 32,moment order used,3,,ok,velocity-moments path,warn-and-run at cap; probe 5.064e-06; no hard error
 cap1024,binned auto max-bins 256,selected boxes,64,,ok,N3 calibrated model,model estimate 9.679e-04 at 1e-3 tolerance
-s6-near,host fast vs NearReference,gamma10 oblique in-support rel err,0,,ok,nbref,gated pairs fall back to the contracted NearReference quadrature; non-gated residual <0.25*tolerance
-s6-near,device in-kernel vs NearReference,gamma10 oblique in-support rel err,5.342e-02,,ok,nbref,"point (0,0.5,0); other gamma10 points 1.501e-01 and 1.540e-01"
-s6-near,device in-kernel vs NearReference,gamma10 oblique in-support rel err,5.342e-02,,ok,nbref,"point (0,0.5,0); other gamma10 points 1.501e-01 and 1.540e-01"
+s6-near,default observer-cell vs independent reference,gamma10 oblique interior worst rel err,1.944e-03,,ok,fastnear_reference_52pt.csv,"52-point set; stationary 3.711e-04 and moving axial 1.404e-04; final default commit 69bfd77"
+s6-near,default observer-cell vs independent reference,gamma10 oblique face worst rel err,3.938e-03,,ok,fastnear_reference_52pt.csv,boundary points stay on the smooth-remainder quadrature; unchanged
 s6-near,device in-kernel vs NearReference,S6 beta=0.5 oblique in-support rel err,9.324e-04,,ok,nbref,range 9.32e-04 to 1.22e-03 over three points
 s6-near,device stencil vs local FFT,max point rel,2.528e-15,,ok,FFT local subtraction,2e3 case; PICBUNCH_NEAR_SHELL_LOCAL_FFT=1; overall relL2 4.900e-16

@@ -1,0 +1,21 @@
+# Near-shell fast-evaluator cost, pre-fix base (68b7554) vs the final hybrid default (69bfd77).
+# Measured 2026-11-10 at 64^3 output, R=3 cells, tile 4, FFT padding 2, 2000 sources at the
+# grid centre: 6,144,000 (source,node) pairs. The default routes only the observer-containing
+# TSC support cell to the exact evaluator (--near-shell-exact-cells 0); the source-cloud rows
+# use 12 cloud cells. Device rows: rosi_v100 Tesla V100-SXM2-32GB, 2 warm-ups + 7 timed runs,
+# median, one job at a time on the idle GPU. Host rows: rosi_v100 48-core CPU, interleaved
+# base/default A/B, 2 warm-up pairs + 5 timed pairs, median. near_shell_s is the near-shell
+# wall printed per rank. upper bound on exact-pair share: 0.586% (A) and 0.137% (B).
+row_id,backend,case,cloud_cells,base_median_near_s,default_median_near_s,default_over_base,repeats_base,repeats_default,commit_base,commit_default
+H-stat,cpu,stationary,0,13.257,12.767,0.963,5,5,68b7554,69bfd77
+H-axial,cpu,gamma10-axial,0,14.526,13.855,0.954,5,5,68b7554,69bfd77
+H-oblique,cpu,gamma10-oblique,0,16.027,15.285,0.954,5,5,68b7554,69bfd77
+H-cloud-stat,cpu,stationary,12,37.488,34.009,0.907,5,5,68b7554,69bfd77
+H-cloud-axial,cpu,gamma10-axial,12,40.000,37.162,0.929,5,5,68b7554,69bfd77
+H-cloud-oblique,cpu,gamma10-oblique,12,39.398,37.786,0.959,5,5,68b7554,69bfd77
+D-stat,cuda,stationary,0,0.704,0.710,1.009,7,7,68b7554,69bfd77
+D-axial,cuda,gamma10-axial,0,0.705,0.709,1.006,7,7,68b7554,69bfd77
+D-oblique,cuda,gamma10-oblique,0,0.720,0.726,1.009,7,7,68b7554,69bfd77
+D-cloud-stat,cuda,stationary,12,1.696,2.162,1.274,7,7,68b7554,69bfd77
+D-cloud-axial,cuda,gamma10-axial,12,1.693,2.195,1.296,7,7,68b7554,69bfd77
+D-cloud-oblique,cuda,gamma10-oblique,12,3.635,4.211,1.159,7,7,68b7554,69bfd77

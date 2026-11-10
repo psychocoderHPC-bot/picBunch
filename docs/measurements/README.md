@@ -80,14 +80,15 @@ requirement for reading the data.
 - `fastnear_fast_52pt.csv` — measured picBunch fast-near evaluator values at
   the same 52 points, one row per point with all six normalized field
   components, evaluated against `fastnear_reference_52pt.csv`. CPU-only and
-  header-only (no alpaka, CUDA or FFTW); two runs byte-identical. Host
-  `alpaka-bot-cli-y6h5m`, base commit
-  `4b07db214fabf8cbf16f8348aa7b85e2016855e1`, g++ 13.3.0. Face and outside
-  regions reproduce the published fast-near table to <1% for all three
-  configurations; the interior entries are below the published values
-  (notably g10-oblique, `8.15e-2` published to `1.94e-3` now) because the
-  evaluator and the reference changed after publication. SHA256
-  `0ab5e026b0e14a650b48db6a3026ee2b36be4289bdd8dc15e9c1977e1663cfe9`.
+  header-only (no alpaka, CUDA or FFTW); two runs byte-identical. Host `hal`,
+  final commit `69bfd77d03493a10e0da4c8fdad25c6480c0582a`, g++ 13.3.0. The final
+  default (base order/ray plus exact observer-cell routing, gamma>=100
+  auto-exact) gives `3.71e-4` stationary, `1.40e-4` moving axial and
+  `1.94e-3` moving oblique interior; face and outside rows reproduce the
+  published table to <1%. The former `5.34e-2`/`1.50e-1`/`1.54e-1` device
+  in-kernel oblique values and the `8.15e-2` ungated-octant value are retired
+  for the observer cell. SHA256
+  `a30479eb50ec002194b1424edd8bb1b37605c2f8f68fcf0042d5e42b050df461`.
 - `fastnear_fast_52pt.provenance.json` — tool command, base commit,
   compiler, reference-input SHA256, determinism and self-test records.
 
@@ -129,6 +130,19 @@ reproduces the committed `fastnear_fast_52pt.csv` byte-for-byte.
 - `cost_e2e_bp5_20261108.md` — clock/throttle probe (no clock cap: load at the full 1755 MHz, throttle reason 0x0), the cost rows R=1.5/3/4 at 2e6 particles on the centred 20-cell drawer (printed pair counts confirm the geometry), the v0.9.1 A/B decomposition of the R=1.5 gap (1.42x final-vs-v0.9.1 device path, 1.26x v0.9.1-here-vs-published host/stack), and the writer-inclusive e2e rows (BP5 here vs HDF5 in the published rows), including the g20 readout bimodality. Host `jureca-h100`, node `jrc0880`, 4x H100 PCIe, exclusive `dc-h100` allocation, ADIOS2 2.12.1 + openPMD 0.17.1 (BP5), HDF5 1.10.10, gcc 13.3.0, CUDA 13.4.92; final binary `e1ddfb5` sha256 `d6c964ae...`, v0.9.1 `c0bf82c` rebuilt on the same stack sha256 `6948df58...`. Date 2026-11-08. SHA256 see `MANIFEST.sha256`.
 - `cost_shell_bp5_20261108.csv` — reduced cost rows (E1 R=1.5 1+3 repeats, E2 v0.9.1 A/B, E3r3, E3r4) plus the E0 probe row: command, geometry, versions, clocks, throttle, input and binary sha256, per-repeat detail in the `notes` column. Same host, stack and date as `cost_e2e_bp5_20261108.md`. SHA256 see `MANIFEST.sha256`.
 - `e2e_bp5_20261108.csv` — reduced writer-inclusive e2e rows (g20/g100, N=2e6): totals, IQR/min/max, per-repeat readout, writer share, clocks, backend and the published HDF5 comparison. Same host, stack and date. SHA256 see `MANIFEST.sha256`.
+
+## Hybrid near-field cost (2026-11-10)
+
+- `cost_hybrid_final_20261110.csv` — near-shell wall for the pre-fix base
+  `68b7554` and the final default `69bfd77` at `64^3` output, `R=3` cells,
+  tile 4, 2000 sources at the grid centre (6,144,000 pairs). CPU rows are the
+  interleaved A/B median of 5 timed pairs; GPU rows are median of 7 timed runs
+  after 2 warm-ups on an idle V100, with and without a 12-cell source cloud.
+  The default is `0.91`--`0.96x` the base CPU wall, `1.006`--`1.009x` on the
+  on-node GPU workload, and `1.16`--`1.30x` with the source cloud. SHA256 see
+  `MANIFEST.sha256`.
+- `cost_hybrid_final_20261110.provenance.json` — commits, binary SHA-256,
+  geometry, commands, protocol, clocks and the exact-pair share.
 
 ## Distributed FFT re-validation, HIP/gfx1100 (2026-11-09)
 

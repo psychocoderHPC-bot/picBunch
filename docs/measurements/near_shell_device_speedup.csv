@@ -1,6 +1,10 @@
-# Near-shell fast evaluator, host vs CUDA device, run 2026-11-06, rosi_v100.
-# 2000 electrons, 64^3 output, R=3 cells, tile 4, 8.77e6 (source,node,component)
-# evaluations.  Same algebra; agreement 5.7e-15 worst relative.
-evaluator,wall_seconds,speedup,relative_difference_max,date
-host_cpu,18.36,1.00,0,2026-11-06
-cuda_device,2.55,7.20,5.7e-15,2026-11-06
+# Near-shell fast evaluator, host CPU vs CUDA device, final hybrid default, run 2026-11-10.
+# 2000 sources at the centre of a 64^3 grid, R=3 cells, tile 4, 6.144e6 (source,node) pairs.
+# Device and host are the same rosi_v100 node (Tesla V100-SXM2-32GB, CUDA 12.6), median of
+# 7 device runs after 2 warm-ups and 5 interleaved host pairs. Device and host fields agree
+# to 4.1e-14 of the peak. Base is 68b7554; default is 69bfd77 with --exact-cells 0.
+evaluator,code,node,wall_seconds,speedup_vs_device,relative_difference_max,date
+host_cpu,base,rosi_v100-48core,13.257,18.83,0,2026-11-10
+host_cpu,default,rosi_v100-48core,12.767,17.98,0,2026-11-10
+cuda_device,base,rosi_v100-V100,0.704,1.00,4.1e-14,2026-11-10
+cuda_device,default,rosi_v100-V100,0.710,1.00,4.1e-14,2026-11-10

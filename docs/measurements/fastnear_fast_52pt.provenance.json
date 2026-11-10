@@ -1,14 +1,41 @@
 {
   "case_id": "fastnear-fast-52pt",
-  "description": "Measured fast-near evaluator values for the 52-point validation set (20 interior, 16 face, 16 outside per configuration), one row per point with all six normalized field components; input is the exact-field reference fastnear_reference_52pt.csv",
-  "git_commit": "7e34ff4d4aa930a56b62f1db9371973b320023a4",
-  "commit_note": "working tree above 7e34ff4 (exact s-space wiring); generated before the wiring commit was created",
-  "generated_utc": "2026-11-09T22:55:00Z",
-  "host": "alpaka-bot-cli-y6h5m",
-  "hostname": "10.0.2.100",
+  "commit_note": "final default policy: base order/ray, exact observer-cell routing, gamma>=100 auto-exact",
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "compiler_flags": "-std=c++20 -O2 -Iinclude",
+  "description": "Measured fast-near evaluator values for the 52-point validation set (20 interior, 16 face, 16 outside per configuration), one row per point with all six normalized field components; input is the exact-field reference fastnear_reference_52pt.csv",
+  "determinism": {
+    "byte_identical": true,
+    "note": "two runs on this host are byte-identical; the CPU pointwise evaluator is host-independent",
+    "runs": 2,
+    "sha256_run1": "a30479eb50ec002194b1424edd8bb1b37605c2f8f68fcf0042d5e42b050df461",
+    "sha256_run2": "a30479eb50ec002194b1424edd8bb1b37605c2f8f68fcf0042d5e42b050df461"
+  },
+  "generated_utc": "2026-11-10T07:38:00Z",
+  "generator": {
+    "command": "g++ -std=c++20 -O2 -Iinclude tools/verify/pb_fast_near_52pt.cpp -o pb_fast_near_52pt && pb_fast_near_52pt --ref docs/measurements/fastnear_reference_52pt.csv --out docs/measurements/fastnear_fast_52pt.csv",
+    "path": "tools/verify/pb_fast_near_52pt.cpp",
+    "self_test_command": "pb_fast_near_52pt --self-test",
+    "self_test_result": "PASS (5 points, deterministic; fast matches independent exact evaluator <1e-2)"
+  },
+  "git_commit": "69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+  "host": "hal",
+  "hostname": "c692209a108c",
+  "notes": "Values are the picBunch fast-near evaluator (picBunch::pbfast::shape_field) with the final default observer-cell exact routing at unit cells, compared against the independent exact-field reference. The default lowers the stationary interior worst case to 3.71e-4 (from 6.82e-4); moving axial and oblique interior stay at 1.40e-4 and 1.94e-3, and the face/outside rows are unchanged. CPU-only: no alpaka, CUDA, or FFTW is linked.",
   "parameters": {
+    "cells_m": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "component_order": [
+      "Ex",
+      "Ey",
+      "Ez",
+      "Bx",
+      "By",
+      "Bz"
+    ],
     "configurations": {
       "g1": [
         0.0,
@@ -26,54 +53,27 @@
         8.12403840463596
       ]
     },
-    "cells_m": [
-      1.0,
-      1.0,
-      1.0
-    ],
-    "source_m": [
-      0.0,
-      0.0,
-      0.0
-    ],
+    "normalization": "per-unit-charge: E_n = 4*pi*eps0*E/q, B_n = 4*pi*eps0*c*B/q",
+    "oblique_order": 8,
+    "oblique_power": 5,
     "remainder_order": {
       "g1": 5,
       "g10-axial": 8,
       "g10-oblique": 5
     },
-    "oblique_order": 8,
-    "oblique_power": 5,
-    "component_order": [
-      "Ex",
-      "Ey",
-      "Ez",
-      "Bx",
-      "By",
-      "Bz"
-    ],
-    "normalization": "per-unit-charge: E_n = 4*pi*eps0*E/q, B_n = 4*pi*eps0*c*B/q"
-  },
-  "values": {
-    "path": "docs/measurements/fastnear_fast_52pt.csv",
-    "sha256": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
-    "rows": 156
-  },
-  "generator": {
-    "path": "tools/verify/pb_fast_near_52pt.cpp",
-    "command": "g++ -std=c++20 -O2 -Iinclude tools/verify/pb_fast_near_52pt.cpp -o pb_fast_near_52pt && pb_fast_near_52pt --ref docs/measurements/fastnear_reference_52pt.csv --out docs/measurements/fastnear_fast_52pt.csv",
-    "self_test_command": "pb_fast_near_52pt --self-test",
-    "self_test_result": "PASS (5 points, deterministic; fast matches independent exact evaluator <1e-2)"
+    "source_m": [
+      0.0,
+      0.0,
+      0.0
+    ]
   },
   "reference_input": {
     "path": "docs/measurements/fastnear_reference_52pt.csv",
     "sha256": "15bf50984349ba94d561bbed7de8da4376f9f1e3fbb66d38da40cc92ea488c81"
   },
-  "determinism": {
-    "runs": 2,
-    "byte_identical": true,
-    "sha256_run1": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
-    "sha256_run2": "0564bf3b5b5e9e763aa8ce95d5e74958d789a008acf285c2a55796c63ddab336",
-    "note": "two runs on this host are byte-identical; the CPU pointwise evaluator is host-independent"
-  },
-  "notes": "Values are the picBunch fast-near evaluator (picBunch::pbfast::shape_field) at unit cells, compared against the independent exact-field reference in fastnear_reference_52pt.csv. The exact s-space evaluator now handles every in-support pair, so the interior errors drop to 2.3e-7 (g1), 2.2e-7 (g10-axial) and 2.1e-5 (g10-oblique) from the previous 6.8e-4, 1.4e-4 and 1.9e-3. Face points sit exactly on the support boundary and outside points remain on the tolerance/gamma-derived smooth-remainder quadrature, so those rows are unchanged and still reproduce tab:fast to <1%. CPU-only: no alpaka, CUDA, or FFTW is linked."
+  "values": {
+    "path": "docs/measurements/fastnear_fast_52pt.csv",
+    "rows": 156,
+    "sha256": "a30479eb50ec002194b1424edd8bb1b37605c2f8f68fcf0042d5e42b050df461"
+  }
 }
