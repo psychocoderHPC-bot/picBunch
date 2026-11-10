@@ -528,3 +528,123 @@ TEST(NearShellAccuracy, DeviceGamma10AutoEqualsExplicitOrder4)
     }
 }
 #endif
+
+// ---- hybrid cell routing ---------------------------------------------------
+namespace
+{
+    Vec3 hybridField(Vec3 const& obs, Vec3 const& u, int reach)
+    {
+        picBunch::pbfast::Settings settings;
+        settings.order = 5;
+        settings.obliqueOrder = 8;
+        settings.exactCellReach = reach;
+        Vec3 E, B;
+        picBunch::pbfast::shape_field(obs, Vec3{}, u, 1.0, 1.0, 1.0, settings, E, B);
+        return E;
+    }
+}
+
+//! The routing predicate maps the source-relative TSC cell classes to the
+//! configured reach, and leaves out-of-support gamma-10 pairs on quadrature.
+TEST(NearShellAccuracy, HybridCellRoutingSelectsClasses)
+{
+    using picBunch::pbfast::Settings;
+    using picBunch::pbfast::detail::routesExact;
+    Vec3 const cells{1.0, 1.0, 1.0};
+    Vec3 const u{0.0, 0.0, kGamma10Beta};
+    struct Probe
+    {
+        Vec3 R0;
+        int cls;
+    };
+    Probe const probes[] = {
+        {{0.1, 0.2, -0.3}, 0},
+        {{0.7, 0.2, -0.3}, 1},
+        {{-0.7, 0.2, 0.3}, 1},
+        {{0.7, 0.9, -0.3}, 2},
+        {{0.7, -0.9, 1.2}, 3},
+        {{1.8, 0.0, 0.0}, 4},
+    };
+    for(Probe const& p : probes)
+    {
+        for(int reach = -1; reach <= 2; ++reach)
+        {
+            Settings s;
+            s.exactCellReach = reach;
+            bool const got = routesExact(p.R0, cells, u, s);
+            bool const want = reach < 0 ? false
+                : reach >= 2 ? p.cls <= 3
+                : reach == 1 ? p.cls <= 1
+                             : p.cls == 0;
+            EXPECT_EQ(got, want) << "cls=" << p.cls << " reach=" << reach;
+        }
+    }
+}
+
+//! In the observer-containing cell the hybrid and all-exact routing agree to
+//! round-off because both dispatch the same closed-form evaluator.
+TEST(NearShellAccuracy, HybridCentralCellMatchesAllExact)
+{
+    Vec3 const u = oblique45(kGamma10Beta);
+    for(Vec3 const obs : {Vec3{0.1, 0.2, -0.3}, Vec3{-0.45, 0.1, 0.2}, Vec3{0.0, -0.3, 0.4}})
+        EXPECT_LT(relativeErrorV(hybridField(obs, u, 0), hybridField(obs, u, 2)), 1.0e-12)
+            << "obs=(" << obs.x << "," << obs.y << "," << obs.z << ")";
+}
+
+//! Face-adjacent pairs are quadrature under the central-only rule and exact
+//! once the face reach is enabled.
+TEST(NearShellAccuracy, HybridFaceReachAddsNeighbours)
+{
+    Vec3 const u = oblique45(kGamma10Beta);
+    Vec3 const obs{0.7, 0.2, -0.3};
+    EXPECT_GT(relativeErrorV(hybridField(obs, u, 0), hybridField(obs, u, 2)), 1.0e-8);
+    EXPECT_LT(relativeErrorV(hybridField(obs, u, 1), hybridField(obs, u, 2)), 1.0e-12);
+}
+
+//! On-knot geometry (source on a node, observer on a TSC knot plane) uses the
+//! one-sided exact limit in the observer-containing cell.  The field stays
+//! finite and continuous across the knot; the outer support boundary stays on
+//! the legacy/quadrature branch under the central-only rule.
+TEST(NearShellAccuracy, OnKnotPairsUseExactLimitUnderHybrid)
+{
+    using picBunch::pbfast::Settings;
+    using picBunch::pbfast::detail::routesExact;
+    Vec3 const cells{1.0, 1.0, 1.0};
+    Vec3 const u{0.0, 0.0, kGamma10Beta};
+    Settings central;
+    central.exactCellReach = 0;
+    EXPECT_TRUE(routesExact(Vec3{0.5, 0.0, 0.0}, cells, u, central));
+    EXPECT_TRUE(routesExact(Vec3{-0.5, 0.3, 0.2}, cells, u, central));
+    EXPECT_FALSE(routesExact(Vec3{1.5, 0.0, 0.0}, cells, u, central));
+
+    for(Vec3 const obs : {Vec3{0.5, 0.0, 0.0}, Vec3{-0.5, 0.3, 0.2}})
+    {
+        Vec3 const a = hybridField(obs, u, 0);
+        Vec3 const b = hybridField(obs, u, 2);
+        EXPECT_TRUE(std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z));
+        // Central and all-exact agree at the knot because both use the limit.
+        EXPECT_LT(relativeErrorV(a, b), 1.0e-12);
+    }
+    // Continuity of the one-sided limit: moving 1e-9 off the knot must not
+    // change the field by more than the O(eps) bias.
+    Vec3 const lo = hybridField(Vec3{0.5 - 1.0e-9, 0.0, 0.0}, u, 0);
+    Vec3 const hi = hybridField(Vec3{0.5 + 1.0e-9, 0.0, 0.0}, u, 2);
+    EXPECT_LT(relativeErrorV(lo, hi), 1.0e-6);
+}
+
+//! Gamma 100 out-of-support pairs still use the exact evaluator under the
+//! hybrid rule; legacy quadrature cannot resolve their contracted tube.
+TEST(NearShellAccuracy, HybridKeepsHighGammaOutOfSupportExact)
+{
+    using picBunch::pbfast::Settings;
+    using picBunch::pbfast::detail::routesExact;
+    Vec3 const cells{1.0, 1.0, 1.0};
+    Vec3 const u{0.0, 0.0, kGamma100Beta};
+    Vec3 const obs{1.8, 0.4, 0.2};
+    Settings s;
+    s.exactCellReach = 0;
+    EXPECT_TRUE(routesExact(obs, cells, u, s));
+    Vec3 const hybrid = hybridField(obs, u, 0);
+    Vec3 const all = hybridField(obs, u, 2);
+    EXPECT_LT(relativeErrorV(hybrid, all), 1.0e-12);
+}

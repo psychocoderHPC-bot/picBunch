@@ -266,6 +266,8 @@ namespace picBunch
         pbfast::DeviceParams deviceParams;
         deviceParams.order = fastSettings.order;
         deviceParams.obliqueOrder = explicitObliqueOrder;
+        deviceParams.tolerance = options.tolerance;
+        deviceParams.exactCellReach = nearShell.exactCellReach;
         {
             auto const& xi = pbfast::detail::rule(fastSettings.order).x;
             auto const& wi = pbfast::detail::rule(fastSettings.order).w;
@@ -428,6 +430,11 @@ namespace picBunch
                             tileMaxGamma
                                 = std::max(tileMaxGamma, std::sqrt(1.0 + uq2));
                     }
+                    int exactReach = nearShell.exactCellReach;
+                    if(exactReach < 0 && options.tolerance <= 1.0e-4)
+                        exactReach = 0;
+                    if(exactReach < 0 && tileMaxGamma >= pbfast::kOutOfSupportExactGamma)
+                        exactReach = 2;
                     int const tileRemainderOrder = std::min(
                         pbfast::kQuadratureOrderCap,
                         std::max(
@@ -484,6 +491,7 @@ namespace picBunch
                     int const deviceOrder
                         = std::min(tileRemainderOrder, pbfast::DeviceParams::kMaxOrder);
                     deviceParams.order = deviceOrder;
+                    deviceParams.exactCellReach = exactReach;
                     {
                         auto const& tx = pbfast::detail::rule(deviceOrder).x;
                         auto const& tw = pbfast::detail::rule(deviceOrder).w;
@@ -494,9 +502,14 @@ namespace picBunch
                         }
                     }
 #endif
+                    // Fallback policy: legacy is the default.  The exact near
+                    // field turns on automatically for a tight global
+                    // tolerance (<= 1e-4) or when a tile's fastest source is
+                    // in the gamma-100 regime where the quadrature is unusable.
                     pbfast::Settings tileFastSettings = fastSettings;
                     tileFastSettings.obliqueOrder = tileObliqueOrder;
                     tileFastSettings.order = tileRemainderOrder;
+                    tileFastSettings.exactCellReach = exactReach;
 
                     // The local FFT subtraction is only needed on the legacy
                     // path.  The direct 27-point TSC stencil performs the same
@@ -570,6 +583,42 @@ namespace picBunch
                     std::size_t const nx = i1 - i0;
                     std::size_t const ny = j1 - j0;
                     std::size_t const nz = k1 - k0;
+
+                    // Diagnostic: count the exact (source, node, component)
+                    // pairs with the same predicate the evaluators use.  Only
+                    // runs when the caller asks for it, never in production.
+                    if(nearShell.exactPairCount)
+                    {
+                        std::size_t exactLocal = 0;
+                        nbref::Vec3 const cellVec{cells[0], cells[1], cells[2]};
+                        for(int c = 0; c < 6; ++c)
+                            for(std::size_t kk = 0; kk < nz; ++kk)
+                                for(std::size_t jj = 0; jj < ny; ++jj)
+                                    for(std::size_t ii = 0; ii < nx; ++ii)
+                                    {
+                                        nbref::Vec3 const xObs{
+                                            origin[0] + static_cast<double>(i0 + ii) * spacing[0]
+                                                + kYeeOffset[c][0] * cells[0],
+                                            origin[1] + static_cast<double>(j0 + jj) * spacing[1]
+                                                + kYeeOffset[c][1] * cells[1],
+                                            origin[2] + static_cast<double>(k0 + kk) * spacing[2]
+                                                + kYeeOffset[c][2] * cells[2]};
+                                        for(std::size_t q = 0; q < near.size(); ++q)
+                                        {
+                                            nbref::Vec3 const R0{
+                                                xObs.x - near.x[q],
+                                                xObs.y - near.y[q],
+                                                xObs.z - near.z[q]};
+                                            nbref::Vec3 const u{
+                                                near.ux[q], near.uy[q], near.uz[q]};
+                                            if(pbfast::detail::routesExact(
+                                                   R0, cellVec, u, tileFastSettings))
+                                                ++exactLocal;
+                                        }
+                                    }
+                        *nearShell.exactPairCount += exactLocal;
+                    }
+
                     if(useFastGpu)
                     {
 #if defined(PICBUNCH_BACKEND_CUDA)

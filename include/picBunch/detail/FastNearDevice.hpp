@@ -43,6 +43,8 @@ namespace picBunch::pbfast
         double unitB = 0.0;
         //! Per-pair error budget reserved for the exact-path validity gate.
         double tolerance = 1e-3;
+        //! Exact routing cell reach; mirrors Settings::exactCellReach.
+        int exactCellReach = 2;
     };
 
     static_assert(

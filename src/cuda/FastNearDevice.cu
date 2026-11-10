@@ -504,6 +504,38 @@ namespace picBunch::pbfast
                 }
         }
 
+        //! Knot-plane snap helpers; mirror FastNear.hpp.
+        inline constexpr double dkKnotDetect = 1.0e-6;
+        inline constexpr double dkKnotEvalSnapLowGamma = 1.0e-9;
+        inline constexpr double dkKnotEvalSnapHighGamma = 1.0e-7;
+        inline constexpr double dkKnotHighGammaThreshold = 20.0;
+        inline constexpr double dkKnotGateSnap = 1.0e-5;
+
+        ALPAKA_FN_ACC inline double dknotEvalSnap(double const gamma)
+        {
+            return gamma >= dkKnotHighGammaThreshold ? dkKnotEvalSnapHighGamma
+                                                     : dkKnotEvalSnapLowGamma;
+        }
+
+        ALPAKA_FN_ACC inline double dsnapKnotCoordinate(double const s, double const snap)
+        {
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            for(int k = 0; k < 4; ++k)
+                if(std::abs(s - knots[k]) < dkKnotDetect)
+                    return knots[k] + (knots[k] > 0.0 ? -snap : snap);
+            return s;
+        }
+
+        ALPAKA_FN_ACC inline void dsnapKnotOrigin(
+            double const R0[3],
+            double const cells[3],
+            double const snap,
+            double out[3])
+        {
+            for(int a = 0; a < 3; ++a)
+                out[a] = cells[a] * dsnapKnotCoordinate(R0[a] / cells[a], snap);
+        }
+
         ALPAKA_FN_ACC inline void dpolyBoxFieldS(
             double const R0[3],
             double const cells[3],
@@ -527,7 +559,8 @@ namespace picBunch::pbfast
             double const qA[3] = {0.5, -1.0, 0.5};
             double const qB[3] = {1.5, 0.0, -1.5};
             double const qC[3] = {1.125, 0.75, 1.125};
-            double const rr[3] = {R0[0], R0[1], R0[2]};
+            double rr[3];
+            dsnapKnotOrigin(R0, cells, dknotEvalSnap(gam), rr);
             double Iv[3] = {0.0, 0.0, 0.0};
             for(int sx = -1; sx <= 1; ++sx)
                 for(int sy = -1; sy <= 1; ++sy)
@@ -719,21 +752,70 @@ namespace picBunch::pbfast
                 if(!(cells[a] > 0.0) || !std::isfinite(cells[a]) || !std::isfinite(R0[a]))
                     return false;
             }
-            double const s[3] = {R0[0] / cells[0], R0[1] / cells[1], R0[2] / cells[2]};
-            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            double Rg[3];
+            dsnapKnotOrigin(R0, cells, dkKnotGateSnap, Rg);
+            double const s[3] = {Rg[0] / cells[0], Rg[1] / cells[1], Rg[2] / cells[2]};
             bool inside = true;
             for(int a = 0; a < 3; ++a)
             {
                 if(!std::isfinite(s[a]))
                     return false;
                 inside = inside && std::abs(s[a]) < 1.5;
-                for(int k = 0; k < 4; ++k)
-                    if(std::abs(s[a] - knots[k]) < 1.0e-6)
-                        return false;
             }
             if(inside && uu2 > 0.0)
-                return dPolyBoxUsable(R0, cells, u);
+                return dPolyBoxUsable(Rg, cells, u);
             return true;
+        }
+
+        //! Source-relative TSC cell class; mirrors supportCellClass.
+        ALPAKA_FN_ACC inline int dsupportCellClass(double const R0[3], double const cells[3])
+        {
+            int nonzero = 0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                int m = (std::abs(s) <= 0.5 + dkKnotDetect)
+                    ? 0
+                    : (s > 0.0 ? 1 : -1);
+                if(m != 0)
+                    ++nonzero;
+            }
+            return nonzero;
+        }
+
+        //! Exact-routing predicate; mirrors detail::routesExact.
+        ALPAKA_FN_ACC inline bool droutesExact(
+            double const R0[3],
+            double const cells[3],
+            double const u[3],
+            DeviceParams const& prm)
+        {
+            double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+            bool inside = true;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                if(!std::isfinite(s))
+                    return false;
+                inside = inside && std::abs(s) < 1.5;
+            }
+            if(inside)
+            {
+                if(prm.exactCellReach < 0)
+                    return false;
+                int const cls = dsupportCellClass(R0, cells);
+                bool const selected = prm.exactCellReach >= 2
+                    || (prm.exactCellReach == 1 && cls <= 1)
+                    || (prm.exactCellReach == 0 && cls == 0);
+                if(!selected)
+                    return false;
+                return dsSpaceExactUsable(R0, cells, u);
+            }
+            double const gam = std::sqrt(1.0 + uu2);
+            int const need = quadratureOrderFor(gam, prm.tolerance, prm.order);
+            if(!(gam >= kOutOfSupportExactGamma || need > kQuadratureOrderCap))
+                return false;
+            return dsSpaceExactUsable(R0, cells, u);
         }
 
         ALPAKA_FN_ACC inline void dsupportPlanes(
@@ -1062,20 +1144,9 @@ namespace picBunch::pbfast
             double const uu2all = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
             double const gamAll = std::sqrt(1.0 + uu2all);
 
-            // Exact s-space evaluator: all in-support pairs and out-of-support
-            // pairs whose d/gamma tube the remainder cannot resolve.
-            bool useExact = false;
-            if(dsSpaceExactUsable(R0, cells, u))
-            {
-                if(singular)
-                    useExact = true;
-                else
-                {
-                    int const need = quadratureOrderFor(gamAll, prm.tolerance, prm.order);
-                    useExact = gamAll >= kOutOfSupportExactGamma
-                        || need > kQuadratureOrderCap;
-                }
-            }
+            // Exact s-space evaluator for the selected support cell classes
+            // and out-of-support pairs the remainder cannot resolve.
+            bool const useExact = droutesExact(R0, cells, u, prm);
             if(useExact)
             {
                 dpolyBoxFieldS(R0, cells, u, E);

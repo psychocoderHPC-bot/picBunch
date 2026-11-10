@@ -113,6 +113,11 @@ namespace
             "                        oblique singular-box order: auto (default) raises it\n"
             "                        per tile from the source gamma, N in [4,12] forces it\n"
             "                        (4 is the fast path)\n"
+            "  --near-shell-exact-cells <n>\n"
+            "                        fast-path exact routing: -1 = legacy quadrature only\n"
+            "                        (default; exact auto-enables at tolerance <= 1e-4 or\n"
+            "                        gamma >= 100), 0 = observer cell only, 1 = add face\n"
+            "                        neighbours, 2 = all in-support cells\n"
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0)\n"
@@ -174,6 +179,7 @@ namespace
         std::size_t nearShellTile = 4;
         int nearShellFastOrder = 5;
         std::string nearShellObliqueOrder = "auto";
+        int nearShellExactCells = -1;
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
@@ -376,6 +382,24 @@ namespace
                     = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
             else if(option == "--near-shell-oblique-order")
                 args.nearShellObliqueOrder = value("--near-shell-oblique-order");
+            else if(option == "--near-shell-exact-cells")
+            {
+                std::size_t used = 0;
+                auto const text = value("--near-shell-exact-cells");
+                int cells = 0;
+                try
+                {
+                    cells = std::stoi(text, &used);
+                }
+                catch(std::exception const&)
+                {
+                    used = 0;
+                }
+                if(used != text.size() || cells < -1 || cells > 2)
+                    throw std::invalid_argument(
+                        "--near-shell-exact-cells must be an integer in [-1, 2]");
+                args.nearShellExactCells = cells;
+            }
             else if(option == "--velocity-bins")
                 args.velocityBins = parseIteration(value("--velocity-bins"), "--velocity-bins");
             else if(option == "--bin-model-constant")
@@ -473,6 +497,8 @@ namespace
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         if(args.nearShellTile == 0u)
             throw std::invalid_argument("--near-shell-tile must be positive");
+        if(args.nearShellExactCells < -1 || args.nearShellExactCells > 2)
+            throw std::invalid_argument("--near-shell-exact-cells must be in [-1, 2]");
         if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
             throw std::invalid_argument("--near-shell-fast-order must be between 2 and 32");
         if(args.nearShellObliqueOrder != "auto")
@@ -618,6 +644,7 @@ namespace
         options.nearShell.fastObliqueOrder = config.accuracy.nearShellObliqueOrder;
         options.nearShell.radiusCells = config.accuracy.nearShellRadius;
         options.nearShell.tileNodes = config.accuracy.nearShellTile;
+        options.nearShell.exactCellReach = config.accuracy.nearShellExactCells;
         std::printf(
             "field grid: cells=(%zu,%zu,%zu) cell_size=(%.9g,%.9g,%.9g) m "
             "origin=(%.9g,%.9g,%.9g) m\n",
@@ -755,6 +782,7 @@ namespace
             : std::stoi(args.nearShellObliqueOrder);
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
+        options.nearShell.exactCellReach = args.nearShellExactCells;
         options.fftMode = (args.fftMode == "replicated")
             ? picBunch::FftMode::Replicated
             : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
@@ -1003,6 +1031,7 @@ int main(int argc, char** argv)
             : std::stoi(args.nearShellObliqueOrder);
         options.nearShell.radiusCells = args.nearShellRadius;
         options.nearShell.tileNodes = args.nearShellTile;
+        options.nearShell.exactCellReach = args.nearShellExactCells;
         options.velocityBinning.mode
             = (args.velocityBins == 0u) ? picBunch::VelocityBinningOptions::Mode::Auto
                                         : picBunch::VelocityBinningOptions::Mode::Explicit;

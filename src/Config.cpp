@@ -307,6 +307,13 @@ namespace picBunch
                 config.accuracy.nearShellObliqueOrder = static_cast<int>(order);
             }
         }
+        if(auto const* node = accuracy.get("near_shell_exact_cells"))
+        {
+            auto const cells = asInteger(*node, "accuracy.near_shell_exact_cells");
+            if(cells < -1 || cells > 2)
+                fail("accuracy.near_shell_exact_cells", "must be between -1 and 2");
+            config.accuracy.nearShellExactCells = static_cast<int>(cells);
+        }
 
         // Validation.
         auto positive = [](double value, std::string const& key) {

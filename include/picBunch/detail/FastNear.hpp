@@ -61,6 +61,15 @@ namespace picBunch::pbfast
         //! controlled quadrature when the octant/Duffy order-pair residual
         //! exceeds a fraction of this value.
         double tolerance = 1e-3;
+        //! Which TSC support cell classes use the exact s-space evaluator.
+        //! The support is split at the TSC knots, so the source-relative cell
+        //! of an observer is ``floor(R0/cell + 1/2)`` per axis:
+        //!  - 2: every in-support pair (the historical all-exact routing),
+        //!  - 1: the observer-containing cell plus the six face-adjacent cells,
+        //!  - 0: only the observer-containing cell (production hybrid default),
+        //!  - -1: never (legacy quadrature only).
+        //! Out-of-support high-gamma pairs always use the exact evaluator.
+        int exactCellReach = 2;
     };
 
     namespace detail
@@ -1360,6 +1369,42 @@ namespace picBunch::pbfast
 
         //! Exact in-support TSC field in source frame (27 cells, 27 monomials).
         //! Internal knot planes are shared by adjacent cells: the face moments
+        //! Distance below which a source-index coordinate is treated as a knot.
+        inline constexpr double kKnotDetect = 1.0e-6;
+        //! One-sided offset used by the exact evaluator on a knot plane.  The
+        //! s-space field is continuous across every TSC knot, but the face
+        //! recurrence divides by the origin-to-face distance and is singular
+        //! there; the one-sided limit removes the removable degeneracy.
+        inline constexpr double kKnotEvalSnapLowGamma = 1.0e-9;
+        inline constexpr double kKnotEvalSnapHighGamma = 1.0e-7;
+        inline constexpr double kKnotHighGammaThreshold = 20.0;
+
+        inline double knotEvalSnap(double const gamma)
+        {
+            return gamma >= kKnotHighGammaThreshold ? kKnotEvalSnapHighGamma
+                                                    : kKnotEvalSnapLowGamma;
+        }
+        //! Gate-only offset: the conditioning check rejects points closer than
+        //! 1e-6 to a knot, so the gate nudges knot geometries past that guard.
+        inline constexpr double kKnotGateSnap = 1.0e-5;
+
+        inline double snapKnotCoordinate(double const s, double const snap)
+        {
+            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            for(int k = 0; k < 4; ++k)
+                if(std::abs(s - knots[k]) < kKnotDetect)
+                    return knots[k] + (knots[k] > 0.0 ? -snap : snap);
+            return s;
+        }
+
+        inline Vec3 snapKnotOrigin(Vec3 const& R0, Vec3 const& cells, double const snap)
+        {
+            return Vec3{
+                cells.x * snapKnotCoordinate(R0.x / cells.x, snap),
+                cells.y * snapKnotCoordinate(R0.y / cells.y, snap),
+                cells.z * snapKnotCoordinate(R0.z / cells.z, snap)};
+        }
+
         //! M[p][q] depend only on geometry, so they are evaluated once per
         //! 3x4x3x3 = 108 unique face-plane/transverse-cell combination instead
         //! of once per cell (162 evaluations).
@@ -1375,7 +1420,8 @@ namespace picBunch::pbfast
             static double const qA[3] = {0.5, -1.0, 0.5};
             static double const qB[3] = {1.5, 0.0, -1.5};
             static double const qC[3] = {1.125, 0.75, 1.125};
-            double const rr[3] = {R0.x, R0.y, R0.z};
+            Vec3 const Ra = snapKnotOrigin(R0, cells, knotEvalSnap(gam));
+            double const rr[3] = {Ra.x, Ra.y, Ra.z};
             double const cc[3] = {cells.x, cells.y, cells.z};
             // Shared face moments: [axis][plane 0..3][sb+1][sc+1][p][q].
             double Mf[3][4][3][3][3][3];
@@ -1615,21 +1661,79 @@ namespace picBunch::pbfast
                 return false;
             if(!(std::isfinite(R0.x) && std::isfinite(R0.y) && std::isfinite(R0.z)))
                 return false;
-            double const s[3] = {R0.x / cells.x, R0.y / cells.y, R0.z / cells.z};
-            constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
+            Vec3 const Rg = snapKnotOrigin(R0, cells, kKnotGateSnap);
+            double const s[3] = {Rg.x / cells.x, Rg.y / cells.y, Rg.z / cells.z};
             bool inside = true;
             for(int a = 0; a < 3; ++a)
             {
                 if(!std::isfinite(s[a]))
                     return false;
                 inside = inside && std::abs(s[a]) < 1.5;
-                for(int k = 0; k < 4; ++k)
-                    if(std::abs(s[a] - knots[k]) < 1.0e-6)
-                        return false;
             }
             if(inside && uu2 > 0.0)
-                return polyBoxUsable(R0, cells, u);
+                return polyBoxUsable(Rg, cells, u);
             return true;
+        }
+
+        //! Source-relative TSC cell of an observer, clamped to the support.
+        //! Returns the number of non-zero cell-offset axes: 0 is the cell
+        //! containing the source, 1 a face-adjacent cell, 2/3 edge or corner.
+        inline int supportCellClass(Vec3 const& R0, Vec3 const& cells)
+        {
+            int nonzero = 0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                // The shared knot plane belongs to the source-containing cell,
+                // so the closest node on either side of the source is central.
+                int m = (std::abs(s) <= 0.5 + kKnotDetect)
+                    ? 0
+                    : (s > 0.0 ? 1 : -1);
+                if(m != 0)
+                    ++nonzero;
+            }
+            return nonzero;
+        }
+
+        /*! Whether one (source, node) pair takes the exact s-space evaluator.
+         *
+         * In-support pairs follow ``Settings::exactCellReach``; out-of-support
+         * pairs stay on the smooth remainder unless their d/gamma tube cannot
+         * be resolved at the quadrature cap or gamma reaches the exact-only
+         * threshold.  This predicate is shared by the host evaluator, the
+         * device evaluator and the diagnostic pair counter so all three agree.
+         */
+        inline bool routesExact(Vec3 const& R0, Vec3 const& cells, Vec3 const& u, Settings const& settings)
+        {
+            // Reject the cheap invalid cases first.  In particular the knot
+            // planes are common for a source on a grid node; they must not pay
+            // for the conditioning gate (polyBoxUsable), which is the costly
+            // part of the exact-path validity check.
+            bool inside = true;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const s = R0[a] / cells[a];
+                if(!std::isfinite(s))
+                    return false;
+                inside = inside && std::abs(s) < 1.5;
+            }
+            if(inside)
+            {
+                if(settings.exactCellReach < 0)
+                    return false;
+                int const cls = supportCellClass(R0, cells);
+                bool const selected = settings.exactCellReach >= 2
+                    || (settings.exactCellReach == 1 && cls <= 1)
+                    || (settings.exactCellReach == 0 && cls == 0);
+                if(!selected)
+                    return false;
+                return sSpaceExactUsable(R0, cells, u);
+            }
+            double const gamma = std::sqrt(1.0 + nbref::dot(u, u));
+            int const need = pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order);
+            if(!(gamma >= pbfast::kOutOfSupportExactGamma || need > pbfast::kQuadratureOrderCap))
+                return false;
+            return sSpaceExactUsable(R0, cells, u);
         }
 
 
@@ -2021,24 +2125,10 @@ namespace picBunch::pbfast
         double const invg2 = 1.0 / (1.0 + uu2);
         double const gamma = std::sqrt(1.0 + uu2);
 
-        // Exact s-space evaluator for every in-support pair whose geometry
-        // passes the validity gate (oblique, axial, and the static uu2==0
-        // observer).  Out-of-support pairs fall back to the smooth remainder
-        // unless gamma is high enough that its d/gamma tube cannot be
-        // resolved, in which case the same exact evaluator is used.
-        bool useExact = false;
-        if(detail::sSpaceExactUsable(R0, cells, u))
-        {
-            if(singular)
-                useExact = true;
-            else
-            {
-                int const need
-                    = pbfast::quadratureOrderFor(gamma, settings.tolerance, settings.order);
-                useExact = gamma >= pbfast::kOutOfSupportExactGamma
-                    || need > pbfast::kQuadratureOrderCap;
-            }
-        }
+        // Exact s-space evaluator for the selected support cell classes.
+        // Out-of-support high-gamma pairs still route exact through the shared
+        // predicate.  Everything else keeps the tolerance-driven quadrature.
+        bool const useExact = detail::routesExact(R0, cells, u, settings);
         if(useExact)
         {
             E = detail::polyBoxFieldS(R0, cells, u);
