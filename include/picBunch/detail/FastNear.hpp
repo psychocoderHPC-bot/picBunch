@@ -35,6 +35,7 @@
 #pragma once
 
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/FastNearConstants.hpp"
 #include "picBunch/detail/ObliqueOrder.hpp"
 
 #include <algorithm>
@@ -1386,15 +1387,17 @@ namespace picBunch::pbfast
 
         //! Exact in-support TSC field in source frame (27 cells, 27 monomials).
         //! Internal knot planes are shared by adjacent cells: the face moments
+        //! Shared with the device backend; see FastNearConstants.hpp.  The
+        //! aliases preserve the existing names used throughout this header.
         //! Distance below which a source-index coordinate is treated as a knot.
-        inline constexpr double kKnotDetect = 1.0e-6;
+        inline constexpr double kKnotDetect = picBunch::pbfast::kKnotDetect;
         //! One-sided offset used by the exact evaluator on a knot plane.  The
         //! s-space field is continuous across every TSC knot, but the face
         //! recurrence divides by the origin-to-face distance and is singular
         //! there; the one-sided limit removes the removable degeneracy.
-        inline constexpr double kKnotEvalSnapLowGamma = 1.0e-9;
-        inline constexpr double kKnotEvalSnapHighGamma = 1.0e-7;
-        inline constexpr double kKnotHighGammaThreshold = 20.0;
+        inline constexpr double kKnotEvalSnapLowGamma = picBunch::pbfast::kKnotEvalSnapLowGamma;
+        inline constexpr double kKnotEvalSnapHighGamma = picBunch::pbfast::kKnotEvalSnapHighGamma;
+        inline constexpr double kKnotHighGammaThreshold = picBunch::pbfast::kKnotHighGammaThreshold;
 
         inline double knotEvalSnap(double const gamma)
         {
@@ -1403,7 +1406,7 @@ namespace picBunch::pbfast
         }
         //! Gate-only offset: the conditioning check rejects points closer than
         //! 1e-6 to a knot, so the gate nudges knot geometries past that guard.
-        inline constexpr double kKnotGateSnap = 1.0e-5;
+        inline constexpr double kKnotGateSnap = picBunch::pbfast::kKnotGateSnap;
 
         inline double snapKnotCoordinate(double const s, double const snap)
         {

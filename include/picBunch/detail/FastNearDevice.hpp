@@ -15,6 +15,7 @@
 #pragma once
 
 #include "picBunch/Types.hpp"
+#include "picBunch/detail/FastNearConstants.hpp"
 #include "picBunch/detail/ObliqueOrder.hpp"
 
 #include <cstddef>
@@ -22,6 +23,18 @@
 
 namespace picBunch::pbfast
 {
+    //! Device-side aliases of the shared knot constants.  The kernel uses these
+    //! names and the consistency test compares them against the host aliases in
+    //! pbfast::detail, so a one-sided edit of either implementation is caught.
+    namespace dconst
+    {
+        inline constexpr double kKnotDetect = picBunch::pbfast::kKnotDetect;
+        inline constexpr double kKnotEvalSnapLowGamma = picBunch::pbfast::kKnotEvalSnapLowGamma;
+        inline constexpr double kKnotEvalSnapHighGamma = picBunch::pbfast::kKnotEvalSnapHighGamma;
+        inline constexpr double kKnotHighGammaThreshold = picBunch::pbfast::kKnotHighGammaThreshold;
+        inline constexpr double kKnotGateSnap = picBunch::pbfast::kKnotGateSnap;
+    } // namespace dconst
+
     //! POD copy of the quadrature and geometry tables used by the device kernel.
     struct DeviceParams
     {

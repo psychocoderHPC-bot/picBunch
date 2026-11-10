@@ -506,24 +506,19 @@ namespace picBunch::pbfast
                 }
         }
 
-        //! Knot-plane snap helpers; mirror FastNear.hpp.
-        inline constexpr double dkKnotDetect = 1.0e-6;
-        inline constexpr double dkKnotEvalSnapLowGamma = 1.0e-9;
-        inline constexpr double dkKnotEvalSnapHighGamma = 1.0e-7;
-        inline constexpr double dkKnotHighGammaThreshold = 20.0;
-        inline constexpr double dkKnotGateSnap = 1.0e-5;
-
+        //! Knot-plane snap helpers; the constants come from the shared
+        //! FastNearConstants.hpp through the pbfast::dconst aliases.
         ALPAKA_FN_ACC inline double dknotEvalSnap(double const gamma)
         {
-            return gamma >= dkKnotHighGammaThreshold ? dkKnotEvalSnapHighGamma
-                                                     : dkKnotEvalSnapLowGamma;
+            return gamma >= dconst::kKnotHighGammaThreshold ? dconst::kKnotEvalSnapHighGamma
+                                                            : dconst::kKnotEvalSnapLowGamma;
         }
 
         ALPAKA_FN_ACC inline double dsnapKnotCoordinate(double const s, double const snap)
         {
             constexpr double knots[4] = {-1.5, -0.5, 0.5, 1.5};
             for(int k = 0; k < 4; ++k)
-                if(alpaka::math::abs(s - knots[k]) < dkKnotDetect)
+                if(alpaka::math::abs(s - knots[k]) < dconst::kKnotDetect)
                     return knots[k] + (knots[k] > 0.0 ? -snap : snap);
             return s;
         }
@@ -755,7 +750,7 @@ namespace picBunch::pbfast
                     return false;
             }
             double Rg[3];
-            dsnapKnotOrigin(R0, cells, dkKnotGateSnap, Rg);
+            dsnapKnotOrigin(R0, cells, dconst::kKnotGateSnap, Rg);
             double const s[3] = {Rg[0] / cells[0], Rg[1] / cells[1], Rg[2] / cells[2]};
             bool inside = true;
             for(int a = 0; a < 3; ++a)
@@ -776,7 +771,7 @@ namespace picBunch::pbfast
             for(int a = 0; a < 3; ++a)
             {
                 double const s = R0[a] / cells[a];
-                int m = (alpaka::math::abs(s) <= 0.5 + dkKnotDetect)
+                int m = (alpaka::math::abs(s) <= 0.5 + dconst::kKnotDetect)
                     ? 0
                     : (s > 0.0 ? 1 : -1);
                 if(m != 0)
