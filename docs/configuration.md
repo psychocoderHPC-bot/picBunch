@@ -215,6 +215,9 @@ hidden one: pending an alpakaVendor `finalize()` API, the guard stays. Once
 `alpaka::fft::onHost::finalize()` (idempotent, once-guarded) exists in
 alpakaVendor, it replaces the guard.
 
+The crash history, the proposed API and the validation steps are in
+[rocm-fft-teardown.md](rocm-fft-teardown.md).
+
 ## Example
 
 A complete example is committed as `examples/picbunch.toml`.

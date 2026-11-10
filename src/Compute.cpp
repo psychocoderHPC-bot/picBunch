@@ -1335,6 +1335,7 @@ namespace picBunch
         // destructor calls hipStreamDestroy after the HIP runtime has finalised
         // and segfaults at exit.  Without this teardown the picBunch.Io test
         // regresses on ROCm 7.2 (it was fixed by commit 833b627).
+        // Temporary ROCm 7.2 workaround. See docs/rocm-fft-teardown.md.
         // The teardown is a process-global operation: it must run once per
         // process, after all FFT plans have been destroyed and while the queue
         // and HIP device are still alive.  The guard is therefore declared
