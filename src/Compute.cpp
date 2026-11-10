@@ -15,6 +15,7 @@
 #include "picBunch/Kernel.hpp"
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
+#include "picBunch/Readout.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
 #include <alpaka/alpaka.hpp>
@@ -1100,6 +1101,27 @@ namespace picBunch
         auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
         auto outReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
 
+        // Read-out geometry for the replicated path.  The c2r output stays
+        // device-resident; a no-arithmetic gather copies the valid n^3 box into
+        // a compact device buffer, one D2H copy moves it into pinned host
+        // memory, and the host accumulate loop touches only the pinned buffer.
+        // Before this, the OpenMP loop dereferenced the managed ``outReal`` and
+        // paid a page migration on every first touch.  The staging buffers are
+        // allocated only in the replicated branch below: the distributed path
+        // reads its own z-slab and never gathers into them.
+        std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
+        std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
+        std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
+        std::size_t const outNodes
+            = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy)
+            * static_cast<std::size_t>(outNz);
+        // CompactGatherKernel indexes with 32-bit values; guard the narrowing so a
+        // future raise of kMaxPaddedNodes cannot silently truncate the count.
+        if(outNodes > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+            throw std::runtime_error(
+                "computeField: output node count " + std::to_string(outNodes)
+                + " exceeds the 32-bit gathered-index limit");
+
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
         auto depositHostImpl = [&](
@@ -1937,6 +1959,11 @@ namespace picBunch
         for(auto& component : field.data)
             component.assign(grid.size(), 0.0);
 
+        // Read-out staging exists only on this path; the distributed branch above
+        // returns before reaching it, so a rank that never gathers allocates nothing.
+        auto outStagingDev = alpaka::onHost::alloc<double>(device, outNodes);
+        auto outStagingHost = alpaka::onHost::allocMapped<double>(device, outNodes);
+
         // Replicated path: one whole FFT per rank, component-parallel across ranks.
         for(std::size_t b = 0; b < binCount; ++b)
         {
@@ -2031,29 +2058,32 @@ namespace picBunch
                 auto const readoutStart = Clock::now();
                 double const factor = scale * (c < 3 ? eFactor : bFactor);
                 // Every (k,j,i) owns one output node, so the parallel loop keeps
-                // exactly one deterministic write per node.  This is the host
-                // gather of the replicated path (the distributed path returns a
-                // z-slab through alltoallv instead).
-                std::uint32_t const outNz = static_cast<std::uint32_t>(grid.n[2]);
-                std::uint32_t const outNy = static_cast<std::uint32_t>(grid.n[1]);
-                std::uint32_t const outNx = static_cast<std::uint32_t>(grid.n[0]);
-#pragma omp parallel for collapse(2)
-                for(std::uint32_t k = 0; k < outNz; ++k)
-                    for(std::uint32_t j = 0; j < outNy; ++j)
-                        for(std::uint32_t i = 0; i < outNx; ++i)
-                        {
-                            auto const in = static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(Mx)
-                                    * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(My) * static_cast<std::size_t>(k));
-                            auto const out = static_cast<std::size_t>(i)
-                                + static_cast<std::size_t>(outNx)
-                                    * (static_cast<std::size_t>(j)
-                                       + static_cast<std::size_t>(outNy) * static_cast<std::size_t>(k));
-                            // Accumulate: the field of the mixed bunch is the sum
-                            // over the velocity classes.
-                            field.data[c][out] += outReal.data()[in] * factor;
-                        }
+                // exactly one deterministic write per node.  The padded c2r
+                // output is gathered on the device into a compact n^3 buffer
+                // (pure copy, no arithmetic) and moved to pinned host memory
+                // with a single D2H copy.  The host loop then reads only the
+                // pinned staging buffer, so no managed page migration happens.
+                std::uint32_t const outCount = static_cast<std::uint32_t>(outNodes);
+                queue.enqueue(
+                    alpaka::onHost::FrameSpec{(outCount + 63u) / 64u, 64u},
+                    detail::CompactGatherKernel{},
+                    outReal.data(),
+                    outStagingDev.data(),
+                    outNx,
+                    outNy,
+                    outNz,
+                    Mx,
+                    My);
+                alpaka::onHost::memcpy(queue, outStagingHost, outStagingDev);
+                alpaka::onHost::wait(queue);
+                double const* staged = outStagingHost.data();
+                double* fout = field.data[c].data();
+#pragma omp parallel for
+                for(std::uint32_t l = 0; l < outCount; ++l)
+                    // Accumulate: the field of the mixed bunch is the sum over
+                    // the velocity classes.  Same value, factor and order as the
+                    // former direct read of outReal, hence bit-identical.
+                    fout[l] += staged[l] * factor;
                 times.readoutMs += elapsedMs(readoutStart);
             }
         }

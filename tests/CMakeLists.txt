@@ -42,6 +42,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_mpi_failure.cpp
         test_near_shell_accuracy.cpp
         test_fastnear_poly.cpp
+        test_readout.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -58,7 +59,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments MpiOptions MpiFailure NearShellAccuracy)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments MpiOptions MpiFailure NearShellAccuracy Readout)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
