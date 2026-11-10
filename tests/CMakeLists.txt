@@ -38,11 +38,17 @@ if(PICBUNCH_BUILD_GTESTS)
         test_placement.cpp
         test_velocity_bins.cpp
         test_velocity_moments.cpp
+        test_alpaka_reductions.cpp
         test_mpi_options.cpp
         test_mpi_failure.cpp
         test_near_shell_accuracy.cpp
+        test_near_shell_alpaka.cpp
         test_fastnear_poly.cpp
+        test_fastnear_consistency.cpp
         test_readout.cpp
+        test_mpi_readout.cpp
+        test_alpaka_readout.cpp
+        test_openpmd_wait.cpp
     )
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -59,7 +65,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments MpiOptions MpiFailure NearShellAccuracy Readout)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency MpiReadout)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*

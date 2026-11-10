@@ -8,6 +8,14 @@
 // The series is written under a temporary name in the destination directory and
 // renamed only after a successful flush, so a failed write never leaves a
 // half-written output file behind.
+//
+// Host/queue contract: every input of this writer is a host-resident
+// std::vector.  The compute stage owns the alpaka queue and issues an explicit
+// alpaka::onHost::wait() before it copies device results into these vectors, so
+// this translation unit never reads device memory and owns no queue.  The
+// openPMD/HDF5 side is asynchronous in its own right: series.flush() executes
+// the queued reads and finalises the writes before any loaded pointer is
+// dereferenced or the series is closed.
 
 #include "picBunch/OpenPMDWriter.hpp"
 

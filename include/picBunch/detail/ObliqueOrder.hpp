@@ -13,15 +13,10 @@
 
 #include <cmath>
 
-// Only the host/device annotation on quadratureOrderFor is accelerator
-// specific.  Pulling the full alpaka header into every CUDA translation unit
-// that includes this ordering knob is unnecessary; the compiler builtins keep
-// this header dependency-free.
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#    define PICBUNCH_ORDER_HOST_ACC __host__ __device__
-#else
-#    define PICBUNCH_ORDER_HOST_ACC
-#endif
+// Use alpaka's host/device annotation from the single alpaka macro header.
+// Include it unconditionally so ALPAKA_FN_HOST_ACC is defined for host and
+// device translation units alike.
+#include <alpaka/core/common.hpp>
 
 namespace picBunch::pbfast
 {
@@ -93,7 +88,7 @@ namespace picBunch::pbfast
      * tighter than 1e-3 raises the order, one node per decade.  ``gamma`` is
      * kept in the signature for host/device call-site compatibility.
      */
-    inline PICBUNCH_ORDER_HOST_ACC int quadratureOrderFor(
+    inline ALPAKA_FN_HOST_ACC int quadratureOrderFor(
         double gamma, double tolerance, int requested)
     {
         (void)gamma;

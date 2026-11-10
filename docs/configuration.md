@@ -196,6 +196,29 @@ TOML parsing uses [toml++](https://github.com/marzer/tomlplusplus) v3.4.0 at
 commit `30172438cee64926dc41fdd9c11fb3ba5b2ba9de`, fetched by CMake
 `FetchContent`. The pin is recorded in `CMakeLists.txt`.
 
+## Known deviation: native ROCm cleanup call
+
+The code is otherwise pure alpaka, but one native ROCm vendor API call remains
+in `src/Compute.cpp`: a HIP-only `rocfft_cleanup()` teardown guard, compiled only
+for the ROCm/HIP backend. This `rocfft_cleanup()` is the only native vendor API
+call in the tree; all other device work goes through alpaka. It works around a
+ROCm 7.2 static-destruction-order bug in librocfft's process-global HIP-stream
+pool, which otherwise segfaults at exit and regresses the `picBunch.Io` test.
+The teardown is process-global and must run once per process, after all FFT plans
+have been destroyed and while the alpaka queue and HIP device are still alive.
+The guard is declared before the plans in its scope and destroyed after them, so
+it enforces that ordering. The native call itself is wrapped in a thread-safe
+`std::once_flag`/`std::call_once`, so repeated `computeField` calls cannot
+destroy the global pool more than once while every call still waits for its
+queue before leaving the scope. This is a documented constraint deviation, not a
+hidden one: pending an alpakaVendor `finalize()` API, the guard stays. Once
+`alpaka::fft::onHost::finalize()` (idempotent, once-guarded) exists in
+alpakaVendor, it replaces the guard. The open engineering items, including this
+teardown, are tracked in [known-limitations.md](known-limitations.md).
+
+The crash history, the proposed API and the validation steps are in
+[rocm-fft-teardown.md](rocm-fft-teardown.md).
+
 ## Example
 
 A complete example is committed as `examples/picbunch.toml`.

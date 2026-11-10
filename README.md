@@ -20,6 +20,9 @@ gates, the near-source limitation and their provenance are recorded in
 - **Paper:** [docs/paper/paper.pdf](docs/paper/paper.pdf) covers the method,
   measured cost and accuracy, and PIConGPU checkpoint cross-validation at
   v0.1.3.
+- **Known limitations:** [docs/known-limitations.md](docs/known-limitations.md)
+  records the open engineering items, their measured symptoms and the planned
+  fixes.
 
 ## Layout
 
@@ -1243,6 +1246,11 @@ table above covers the compute stages of the large-N sweep, not the write path.
   still uses the replicated mesh path because its correction buffers are full-grid host
   arrays. There is no multi-node redistribution. Tested with 1, 2 and 4 ranks on one node
   only. Without `--deterministic-deposit`, the GPU deposit is not bitwise reproducible.
+- **ROCm FFT teardown.** The HIP build keeps one native `rocfft_cleanup()` call
+  in `src/Compute.cpp` to avoid a ROCm 7.2 exit-time crash. It is the only native
+  vendor call in the tree. The root cause, the temporary guard and the proposed
+  alpakaVendor `finalize()` replacement are in
+  [docs/rocm-fft-teardown.md](docs/rocm-fft-teardown.md).
 
 ## Reproduce
 

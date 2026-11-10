@@ -6,17 +6,16 @@
 
 #include <cmath>
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#    define PICBUNCH_HD __host__ __device__ inline
-#else
-#    define PICBUNCH_HD inline
-#endif
+// Use alpaka's host/device annotation from the single alpaka macro header.
+// Include it unconditionally so ALPAKA_FN_ACC is defined for host and device
+// translation units alike.
+#include <alpaka/core/common.hpp>
 
 namespace picBunch
 {
     //! Support radius of a shape in cells, compile-time per shape.
     template<Shape S>
-    PICBUNCH_HD constexpr double shapeSupport()
+    ALPAKA_FN_ACC inline constexpr double shapeSupport()
     {
         if constexpr(S == Shape::CIC)
             return 1.0;
@@ -28,7 +27,7 @@ namespace picBunch
 
     //! Assignment weight of a shape, argument in cell units.  Compile-time shape.
     template<Shape S>
-    PICBUNCH_HD double shapeWeight(double x)
+    ALPAKA_FN_ACC inline double shapeWeight(double x)
     {
         double const ax = std::abs(x);
         if constexpr(S == Shape::CIC)
@@ -54,7 +53,7 @@ namespace picBunch
     }
 
     //! Runtime wrapper for non-hot paths and tests.
-    PICBUNCH_HD double shapeWeight(Shape shape, double x)
+    ALPAKA_FN_ACC inline double shapeWeight(Shape shape, double x)
     {
         if(shape == Shape::CIC)
             return shapeWeight<Shape::CIC>(x);
@@ -63,14 +62,14 @@ namespace picBunch
         return shapeWeight<Shape::PQS>(x);
     }
 
-    PICBUNCH_HD constexpr double shapeSupport(Shape shape)
+    ALPAKA_FN_ACC inline constexpr double shapeSupport(Shape shape)
     {
         return shape == Shape::CIC ? shapeSupport<Shape::CIC>()
             : (shape == Shape::TSC ? shapeSupport<Shape::TSC>() : shapeSupport<Shape::PQS>());
     }
 
     /** TSC assignment function, argument in cell units. */
-    PICBUNCH_HD double tscShape(double x)
+    ALPAKA_FN_ACC inline double tscShape(double x)
     {
         double const ax = fabs(x);
         if(ax < 0.5)
@@ -92,7 +91,7 @@ namespace picBunch
      * This is the algebraic form of the independently validated reference.
      * E is odd in ``R``; B is odd in ``R`` and odd in ``u``.
      */
-    PICBUNCH_HD void pointFieldNormalized(
+    ALPAKA_FN_ACC inline void pointFieldNormalized(
         double Rx,
         double Ry,
         double Rz,

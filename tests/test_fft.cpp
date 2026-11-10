@@ -11,6 +11,7 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Parallel.hpp"
+#include "picBunch/detail/SpectrumNorm.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -23,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 namespace
 {
@@ -351,4 +353,58 @@ TEST(Fft, DistributedProductionMatchesReplicatedWithDeviceDeposit)
                 std::abs(replicated.data[c][l] - automatic.data[c][l]));
     EXPECT_LT(autoWorst / peak, 1.0e-12)
         << "auto-selected distributed path must match the replicated field";
+}
+
+TEST(Fft, SpectrumNormMatchesSerialReference)
+{
+    picBunchTest::runOnDevice(
+        [](auto& device, auto& queue)
+        {
+            constexpr std::uint32_t count = 257u;
+            auto full = alpaka::onHost::allocUnified<double>(device, 2u * count);
+            auto order3 = alpaka::onHost::allocUnified<double>(device, 2u * count);
+            auto accNorm = alpaka::onHost::allocUnified<double>(device, 2u);
+
+            // Same input on both sides, including negative and mixed-magnitude
+            // components so the accumulation order matters.
+            std::vector<double> refFull(2u * count);
+            std::vector<double> refOrder3(2u * count);
+            for(std::uint32_t l = 0; l < 2u * count; ++l)
+            {
+                refFull[l] = referenceValue(l) * ((l % 3u) == 0u ? -1.0 : 1.0);
+                refOrder3[l] = 1.0e-3 * referenceValue(l + 7u);
+                full.data()[l] = refFull[l];
+                order3.data()[l] = refOrder3[l];
+            }
+            accNorm.data()[0] = 0.0;
+            accNorm.data()[1] = 0.0;
+
+            queue.enqueue(
+                alpaka::onHost::FrameSpec{1u, 1u},
+                picBunch::detail::SpectrumNormKernel{},
+                static_cast<double const*>(full.data()),
+                static_cast<double const*>(order3.data()),
+                count,
+                accNorm.data());
+            alpaka::onHost::wait(queue);
+
+            // Independent serial reference: exactly the kernel's order.
+            double ref0 = 0.0;
+            double ref1 = 0.0;
+            for(std::uint32_t i = 0; i < count; ++i)
+            {
+                double const fr = refFull[2u * i];
+                double const fi = refFull[2u * i + 1u];
+                double const orr = refOrder3[2u * i];
+                double const oi = refOrder3[2u * i + 1u];
+                ref0 += fr * fr + fi * fi;
+                ref1 += orr * orr + oi * oi;
+            }
+            // The addition order is fixed by the single-worker kernel.  A
+            // device backend may still contract the multiply-add into an FMA,
+            // so the comparison is a documented tolerance rather than a bit
+            // comparison; the CPU backend matches bit for bit.
+            EXPECT_NEAR(accNorm.data()[0], ref0, 1.0e-13 * std::max(1.0, std::abs(ref0)));
+            EXPECT_NEAR(accNorm.data()[1], ref1, 1.0e-13 * std::max(1.0, std::abs(ref1)));
+        });
 }
