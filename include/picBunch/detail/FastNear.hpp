@@ -776,7 +776,7 @@ namespace picBunch::pbfast
         }
 
         //! int_face (d-dc)^nu / |d| dA in foot-centred F_ab.
-        inline double faceMono(FaceData const& fd, Vec3 const& dc, int const nu[3])
+        inline double faceMono(FaceData const& fd, int const nu[3])
         {
             double T[7][7], R[7][7];
             bivarMul(fd.P[0][nu[0]], fd.P[1][nu[1]], T);
@@ -858,7 +858,7 @@ namespace picBunch::pbfast
                         for(int c = 0; c <= 6 - a - b; ++c)
                         {
                             int const nu[3] = {a, b, c};
-                            double const Fm = faceMono(fd, dc, nu);
+                            double const Fm = faceMono(fd, nu);
                             int const id = polyIdx.idx[a][b][c];
                             hF[id] += fd.h * Fm;
                             nF[id] = nF[id] + fd.n * Fm;
@@ -968,7 +968,7 @@ namespace picBunch::pbfast
                         for(int c = 0; c <= 5 - a - b; ++c)
                         {
                             int const nu[3] = {a, b, c};
-                            double const Fm = faceMono(fd, dc, nu);
+                            double const Fm = faceMono(fd, nu);
                             int const id = polyIdx.idx[a][b][c];
                             hF[id] += fd.h * Fm;
                         }
