@@ -8,6 +8,10 @@
 
 #include "picBunch/VelocityMoments.hpp"
 
+#include "picBunch/detail/Reduction.hpp"
+
+#include <alpaka/alpaka.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -16,6 +20,24 @@
 
 namespace picBunch
 {
+    namespace
+    {
+        //! Squared distance of the beam-frame momentum from the expansion centre.
+        struct MomentumDistanceSquared
+        {
+            Vec3 u0;
+
+            template<typename T>
+            ALPAKA_FN_ACC constexpr auto operator()(T const& ux, T const& uy, T const& uz) const
+            {
+                auto const dx = ux - u0[0];
+                auto const dy = uy - u0[1];
+                auto const dz = uz - u0[2];
+                return dx * dx + dy * dy + dz * dz;
+            }
+        };
+    } // namespace
+
     Vec3 velocityMomentsCentre(Bunch const& bunch)
     {
         std::size_t const n = bunch.size();
@@ -41,16 +63,20 @@ namespace picBunch
 
     double velocityMomentsRadius(Bunch const& bunch, Vec3 const& u0)
     {
-        double r = 0.0;
-        for(std::size_t p = 0; p < bunch.size(); ++p)
-        {
-            double const d[3] = {
-                bunch.ux[p] - u0[0],
-                bunch.uy[p] - u0[1],
-                bunch.uz[p] - u0[2]};
-            r = std::max(r, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
-        }
-        return r;
+        std::size_t const n = bunch.size();
+        if(n == 0u)
+            return 0.0;
+        auto const extent = alpaka::Vec<std::size_t, 1u>{n};
+        // sqrt is monotonic, so the largest squared distance belongs to the
+        // particle with the largest distance; taking the square root once is
+        // bit-identical to the former per-particle maximum of sqrt.
+        double const r2 = detail::transformReduceMax(
+            0.0,
+            MomentumDistanceSquared{u0},
+            alpaka::makeMdSpan(bunch.ux.data(), extent),
+            alpaka::makeMdSpan(bunch.uy.data(), extent),
+            alpaka::makeMdSpan(bunch.uz.data(), extent));
+        return std::sqrt(r2);
     }
 
 } // namespace picBunch
