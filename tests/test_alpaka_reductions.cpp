@@ -5,10 +5,12 @@
 //
 // The velocity-binning assignment/representatives and the far-tail multipoles
 // used to be plain particle loops; their per-particle arithmetic now runs in
-// alpaka host kernels.  The velocity-moment centre and radius stay serial
-// loops.  The accumulations deliberately keep the historical particle order,
-// so every result must be bit-identical to straightforward serial references
-// and must not change with the executor's thread count.
+// alpaka host kernels.  The velocity-moment centre stays a serial loop because
+// it is an ordered sum; its radius is an order-independent maximum folded by
+// the alpaka host reduction.  The accumulations deliberately keep the
+// historical particle order, so every result must be bit-identical to
+// straightforward serial references and must not change with the executor's
+// thread count.
 
 #include "picBunch/FarTail.hpp"
 #include "picBunch/VelocityBinning.hpp"
@@ -19,8 +21,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <random>
 #include <tuple>
 #include <vector>
@@ -211,6 +215,49 @@ TEST(AlpakaReductions, MomentsMatchSerialReference)
     for(int a = 0; a < 3; ++a)
         EXPECT_DOUBLE_EQ(centre[a], reference[a]) << "axis " << a;
     EXPECT_DOUBLE_EQ(picBunch::velocityMomentsRadius(bunch, centre), serialRadius(bunch, reference));
+}
+
+TEST(AlpakaReductions, BoundsMatchSerialReference)
+{
+    Bunch const bunch = mixedBunch(5000u, 0x2b17u);
+    std::array<std::array<double, 3>, 2> reference{};
+    reference[0].fill(std::numeric_limits<double>::max());
+    reference[1].fill(-std::numeric_limits<double>::max());
+    for(std::size_t p = 0; p < bunch.size(); ++p)
+    {
+        double const v[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+        for(int a = 0; a < 3; ++a)
+        {
+            reference[0][a] = std::min(reference[0][a], v[a]);
+            reference[1][a] = std::max(reference[1][a], v[a]);
+        }
+    }
+
+    auto const bits = [](double v) { return std::bit_cast<std::uint64_t>(v); };
+    auto const bounds = bunch.bounds();
+    for(int a = 0; a < 3; ++a)
+    {
+        EXPECT_EQ(bits(bounds[0][a]), bits(reference[0][a])) << "min axis " << a;
+        EXPECT_EQ(bits(bounds[1][a]), bits(reference[1][a])) << "max axis " << a;
+    }
+
+    // The min/max fold is order insensitive, so the executor choice and a
+    // repeated call must reproduce the same bits.
+    using picBunch::detail::HostReductionExecutor;
+    auto& executorOverride = picBunch::detail::hostReductionExecutorOverride();
+    executorOverride = HostReductionExecutor::Serial;
+    auto const serial = bunch.bounds();
+    executorOverride = HostReductionExecutor::Parallel;
+    auto const parallel = bunch.bounds();
+    executorOverride = HostReductionExecutor::Default;
+    auto const repeated = bunch.bounds();
+    for(int a = 0; a < 3; ++a)
+    {
+        EXPECT_EQ(bits(serial[0][a]), bits(parallel[0][a]));
+        EXPECT_EQ(bits(serial[1][a]), bits(parallel[1][a]));
+        EXPECT_EQ(bits(serial[0][a]), bits(repeated[0][a]));
+        EXPECT_EQ(bits(serial[1][a]), bits(repeated[1][a]));
+    }
 }
 
 TEST(AlpakaReductions, FarTailMatchesSerialReference)
