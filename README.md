@@ -504,15 +504,28 @@ behind the binning term is in `docs/algorithm.md`.
 
 ## Chunked particles and grouped far-tail multipoles
 
-**Chunked reading.** `--max-particle-chunk-gb <GB>` (float, e.g. `1.5`) streams
-the selected species in chunks of at most that many gigabytes.  The chunk is
-read on rank 0 and broadcast, then the field of each chunk is computed on the
-same fixed grid and added to the output field; the FFT of each chunk is repeated,
-so the option trades memory for FFT time.  It requires explicit
-`--grid`, `--origin` and `--cell-size`, and a single velocity class
-(`--velocity-bins 1`).  `--global-grid` is not combined with chunking yet.
-Measured: 200 particles in 1-particle chunks reproduce the unchunked field to
-`4.8e-16` (`docs/measurements/chunking_and_grouping.csv`).
+**Chunked reading.** `--max-particle-chunk-gb <GB>` (float, e.g. `1.5`) bounds
+the host memory used for particles while streaming the selected species.  Rank 0
+reads the next chunk on a worker thread while the main thread computes the
+current one (`std::async` double buffering); both chunks are live at most, so a
+chunk is at most half the requested value.  The chunks are still read and
+accumulated in increasing particle order, which keeps the floating-point
+reduction order deterministic and reproducible.  The first chunk is kept from
+the velocity-representative pass and reused, so a run that fits in a single
+chunk reads the input once instead of twice.  The field of each chunk is
+computed on the same fixed grid and added to the output field; the FFT of each
+chunk is repeated, so the option trades memory for FFT time.  Within a slot the reader holds
+one bunch array plus one raw component instead of the untransformed copy of all
+nine particle arrays, and the two slot buffers are reused by the next chunks
+rather than reallocated.  It requires explicit `--grid`, `--origin` and `--cell-size`, and a
+single velocity class (`--velocity-bins 1`).  `--global-grid` is not combined
+with chunking yet.  Measured: 200 particles in 1-particle chunks reproduce the
+unchunked field to `4.8e-16` (`docs/measurements/chunking_and_grouping.csv`);
+the streaming reader is bit-identical to the pre-overlap reader at the same
+effective chunk size.  On the `N=1e7` 20-cell case with the whole species in
+one chunk the pipeline lowers the peak from 1.6 GiB to 1.2 GiB and the wall
+clock from 4.9 s to 1.8 s; with `--max-particle-chunk-gb 0.2` it is 1.28 s at
+0.44 GiB (`docs/measurements/chunk_overlap_20261111.csv`).
 
 **Grouped multipoles.** `--multipole-group-cells <N>` (default `16`, `0` = one
 global multipole) splits the bunch into spatial supercells of `N` PIC cells and

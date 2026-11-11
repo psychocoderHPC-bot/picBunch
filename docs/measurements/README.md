@@ -148,3 +148,26 @@ reproduces the committed `fastnear_fast_52pt.csv` byte-for-byte.
 
 - `distributed_fft_validation.csv` — HIP rows re-measured on the current branch `repro/figures-20261108` at `688c2288137d4e2efacd14116b203a0525c444f5` with the same inputs and parameters as the original `defc079` run. Host `hal`, AMD Radeon RX 7900 XTX `gfx1100` (96 CU), ROCm 7.2.0 / HIP 7.2.26015, rocFFT 0.1.70200, openPMD 0.17.0, HDF5 1.10.10, Open MPI 3.1. Binary sha256 `7c9fac29771ac3d7bb4ce96acc892d146fed235b2ed16f87434d4609c9d57785`. One rank: `3.2e-16` (unchanged); four ranks: `5.35e-16` (original `5.375e-16`, roundoff-level). The one-rank replicated output is bit-identical to the original run. Date 2026-11-09. SHA256 see `MANIFEST.sha256`.
 - `distributed_fft_revalidation_20261109.json` — full provenance: original and current commit, commands, inputs, grid/origin, toolchain, binary hash, raw-log location and the measured values. SHA256 see `MANIFEST.sha256`.
+
+## Chunked read/compute overlap (2026-11-11)
+
+- `chunk_overlap_20261111.csv` — chunked-pipeline medians for `N=1e6` and
+  `N=1e7` at the 20- and 100-cell boxes, plus whole-input rows
+  (`--max-particle-chunk-gb 1.0`). Columns: wall median and IQR, main-pass
+  reader time, compute (deposit+kernel+FFT+readout), per-call setup (`plan`),
+  the time the main thread waited in the prefetch `get()` (`reader_wait`), the
+  representative-pass read, the hidden-reader fraction (`overlap`), and peak
+  RSS. Host `rosi_v100`, node `gv001`, 4x Tesla V100-SXM2 32GB, driver
+  570.158.01, CUDA 12.6.85, gcc 13.3.0, openPMD 0.17.1 / HDF5 1.10.10, date
+  2026-11-11. Serial per host, one GPU, `OMP_NUM_THREADS=8`, one warm-up plus 5
+  timed repeats (whole-input rows: 3), medians. Inputs are the
+  `tools/e2e/gen_inputs.py` main-family files on the node's GPFS mount
+  (`input_N1000000.h5` 72 MB, `input_N10000000.h5` 687 MiB). Baseline binary
+  (main `870c2e6`) sha256 `0ca13fefd75dd9a58f6a8b2ce6de40d93994b6d93212ea824d72d189f25a0ede`;
+  streaming binary sha256 `9ba8761f1a636cd38922f9db1db088c31aa074b72654ed6be820efd08eed8203`.
+  The flag bounds the two resident particle buffers, so the effective chunk is
+  half the flag; at the same effective chunk the output is bit-identical to the
+  baseline under `--deterministic-deposit` (CPU and CUDA), and at the same CLI
+  flag the largest field change on the fixed `N=1e6` 20-cell case is
+  `3.22e-8` V/m on a `1.87e7` V/m peak (`1.7e-15` relative) because the chunk
+  boundaries move. SHA256 `a6d6d653e5dd3c4f244e9cd204b2e934b001c6cb0290ee978b0f4a4d8ee64f21`.
