@@ -175,8 +175,8 @@ device_alloc_MiB,peak_device_MiB,peak_host_MiB
   `total_*` is the sum of deposit, kernel, FFT, and read-out per sample; min,
   median, and max over the repeats.
 - `device_alloc_MiB` is the exact allocation computed from the padded box and
-  particle count (three real `M^3` arrays, two packed complex half-spectra, four
-  per-particle arrays). `peak_device_MiB` is sampled with `cudaMemGetInfo` in a
+  particle count (one real `M^3` array shared by rho, the kernel and the c2r
+  output, two packed complex half-spectra, four per-particle arrays). `peak_device_MiB` is sampled with `cudaMemGetInfo` in a
   helper thread; `peak_host_MiB` is the reset `VmHWM` of the process.
 
 `--coulomb` writes `d,rel_error,l2_abs_error,scale,max_abs_error`; `--d-sweep`
