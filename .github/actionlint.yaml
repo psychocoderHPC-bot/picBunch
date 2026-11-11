@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: Rene Widera
+#
+# Custom self-hosted runner labels used by .github/workflows/ci.yml.
+self-hosted-runner:
+  labels:
+    - gpu
+    - cuda
+    - rocm
