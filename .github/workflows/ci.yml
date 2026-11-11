@@ -1,0 +1,240 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: Rene Widera
+#
+# Build and test picBunch on CPU, CUDA and HIP.
+#
+# Runner assumptions
+# ------------------
+# cpu:      GitHub-hosted ubuntu-latest. openPMD-api is not packaged for Ubuntu
+#           24.04, and CMakeLists.txt makes it a hard requirement, so this job
+#           builds openPMD 0.17.1 (HDF5 + MPI) once and caches the install
+#           prefix. Everything else comes from apt.
+# gpu-cuda: self-hosted runner carrying the labels `self-hosted`, `gpu`, `cuda`
+#           and a working `nvcc`, openPMD-api (HDF5 backend), HDF5, MPI, FFTW3,
+#           GoogleTest, Ninja, CMake >= 3.25 and ccache.
+# gpu-hip:  self-hosted runner carrying the labels `self-hosted`, `gpu`, `rocm`
+#           and ROCm (`amdclang++`, rocFFT) plus the same host dependencies as
+#           the CUDA runner.
+#
+# Set the repository variable OPENPMD_DIR when openPMD-api is not installed in
+# a location CMake searches by default. Set ROCM_PATH when ROCm is not in
+# /opt/rocm. HIP_ARCH and CUDA_ARCH may also be set as repository variables.
+
+name: CI
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      cuda_arch:
+        description: 'JSON array of CUDA architectures, e.g. ["70","80"]'
+        required: false
+        default: '["70"]'
+      hip_arch:
+        description: 'HIP architecture (gfx target)'
+        required: false
+        default: gfx1100
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # CTests carry TIMEOUT 900 and RESOURCE_LOCK picBunchGpuDevice, so CTest
+  # serializes them even when a parallel level is requested.
+  CTEST_OPTIONS: --output-on-failure --no-tests=error
+  OPENPMD_VERSION: '0.17.1'
+  OMPI_MCA_rmaps_base_oversubscribe: '1'
+
+jobs:
+  cpu:
+    name: cpu (ubuntu-latest, Release, MPI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set openPMD install prefix
+        run: echo "OPENPMD_PREFIX=$RUNNER_TOOL_CACHE/openpmd-0.17.1" >> "$GITHUB_ENV"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ pkg-config ccache \
+            libopenmpi-dev openmpi-bin \
+            libhdf5-openmpi-dev libfftw3-dev libgtest-dev python3-h5py
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: cpu-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Cache openPMD-api install
+        id: openpmd-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/openpmd-${{ env.OPENPMD_VERSION }}
+          key: openpmd-${{ env.OPENPMD_VERSION }}-hdf5-mpi-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build openPMD-api (cache miss)
+        if: steps.openpmd-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$OPENPMD_VERSION" \
+            https://github.com/openPMD/openPMD-api.git /tmp/openpmd-src
+          cmake -S /tmp/openpmd-src -B /tmp/openpmd-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OPENPMD_PREFIX" \
+            -DopenPMD_USE_HDF5=ON \
+            -DopenPMD_USE_MPI=ON \
+            -DopenPMD_USE_ADIOS2=OFF \
+            -DopenPMD_USE_PYTHON=OFF \
+            -DopenPMD_USE_INVASIVE_TESTS=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build /tmp/openpmd-build -j "$(nproc)"
+          cmake --install /tmp/openpmd-build
+
+      - name: Configure (CPU)
+        run: |
+          cmake -S . -B build/cpu -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DPICBUNCH_BUILD_TESTS=ON \
+            -DPICBUNCH_BUILD_GTESTS=ON \
+            -DPICBUNCH_ENABLE_MPI=ON \
+            -DopenPMD_DIR="$OPENPMD_PREFIX/lib/cmake/openPMD"
+
+      - name: Build (CPU)
+        run: cmake --build build/cpu -j "$(nproc)"
+
+      - name: Test (CPU)
+        run: ctest --test-dir build/cpu $CTEST_OPTIONS
+
+  gpu-cuda:
+    name: cuda (self-hosted, arch ${{ matrix.arch }})
+    runs-on: [self-hosted, gpu, cuda]
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # Defaults to one architecture; override through the workflow input or
+        # the CUDA_ARCH repository variable with a JSON list such as ["70","80"].
+        arch: ${{ fromJSON(inputs.cuda_arch || vars.CUDA_ARCH || '["70"]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight
+        run: |
+          command -v nvcc || { echo "nvcc not found on the CUDA runner" >&2; exit 1; }
+          cmake --version | head -1
+          ctest --version | head -1
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: cuda-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Configure (CUDA)
+        env:
+          OPENPMD_DIR: ${{ vars.OPENPMD_DIR }}
+        run: |
+          arch="${{ matrix.arch }}"
+          arch="${arch#sm_}"
+          extra=()
+          if [ -n "$OPENPMD_DIR" ]; then
+            extra+=("-DopenPMD_DIR=$OPENPMD_DIR")
+          fi
+          cmake -S . -B "build/cuda-${arch}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+            -DPICBUNCH_ENABLE_CUDA=ON \
+            -DPICBUNCH_BUILD_TESTS=ON \
+            -DPICBUNCH_BUILD_GTESTS=ON \
+            -DPICBUNCH_ARCH="$arch" \
+            -DCMAKE_CUDA_ARCHITECTURES="$arch" \
+            "${extra[@]}"
+
+      - name: Build (CUDA)
+        run: |
+          arch="${{ matrix.arch }}"; arch="${arch#sm_}"
+          cmake --build "build/cuda-${arch}" -j "$(nproc)"
+
+      - name: Test (CUDA, one device at a time)
+        run: |
+          arch="${{ matrix.arch }}"; arch="${arch#sm_}"
+          ctest --test-dir "build/cuda-${arch}" -j1 $CTEST_OPTIONS
+
+  gpu-hip:
+    name: hip (self-hosted, ${{ inputs.hip_arch || vars.HIP_ARCH || 'gfx1100' }})
+    runs-on: [self-hosted, gpu, rocm]
+    timeout-minutes: 120
+    env:
+      HIP_ARCH: ${{ inputs.hip_arch || vars.HIP_ARCH || 'gfx1100' }}
+      ROCM_PATH: ${{ vars.ROCM_PATH || '/opt/rocm' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight
+        run: |
+          test -x "$ROCM_PATH/bin/amdclang++" || {
+            echo "amdclang++ not found under ROCM_PATH=$ROCM_PATH" >&2; exit 1;
+          }
+          "$ROCM_PATH/bin/amdclang++" --version | head -1
+          cmake --version | head -1
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: hip-${{ env.HIP_ARCH }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Configure (HIP)
+        env:
+          OPENPMD_DIR: ${{ vars.OPENPMD_DIR }}
+        run: |
+          extra=()
+          if [ -n "$OPENPMD_DIR" ]; then
+            extra+=("-DopenPMD_DIR=$OPENPMD_DIR")
+          fi
+          cmake -S . -B "build/hip-${HIP_ARCH}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_HIP_COMPILER="$ROCM_PATH/bin/amdclang++" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_HIP_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_HIP_ARCHITECTURES="$HIP_ARCH" \
+            -DPICBUNCH_ENABLE_HIP=ON \
+            -DPICBUNCH_BUILD_TESTS=ON \
+            -DPICBUNCH_BUILD_GTESTS=ON \
+            -DPICBUNCH_ARCH="$HIP_ARCH" \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH" \
+            "${extra[@]}"
+
+      - name: Build (HIP)
+        run: cmake --build "build/hip-${HIP_ARCH}" -j "$(nproc)"
+
+      # Mandatory near-field correctness gate. These are the HIP near-field
+      # regressions from the #14 class (device/host divergence, near-shell
+      # accuracy, functor routing); any failure here fails CI even if the
+      # remaining suite passes.
+      - name: Near-field correctness gate (HIP)
+        run: |
+          for group in FastNearConsistency NearShellAccuracy NearShellAlpaka; do
+            echo "::group::near-field gate: $group"
+            ctest --test-dir "build/hip-${HIP_ARCH}" -j1 $CTEST_OPTIONS \
+              -R "^picBunch\\.${group}$"
+            echo "::endgroup::"
+          done
+
+      - name: Test (HIP)
+        run: ctest --test-dir "build/hip-${HIP_ARCH}" -j1 $CTEST_OPTIONS

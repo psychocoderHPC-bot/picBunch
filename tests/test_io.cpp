@@ -57,7 +57,7 @@ namespace
     std::vector<double> loadComponent(
         openPMD::Series& series,
         openPMD::RecordComponent& component,
-        std::array<std::size_t, 3> const& shape)
+        picBunch::Idx3 const& shape)
     {
         openPMD::Extent extent{
             static_cast<openPMD::Extent::value_type>(shape[2]),
@@ -151,7 +151,7 @@ TEST(Io, FieldRoundTripPreservesValuesAndMetadata)
     // readMeshGeometry normalizes the stored order back to x,y,z.
     {
         auto const geometry = picBunch::readMeshGeometry(path.string(), "E", 0, options.iteration);
-        EXPECT_EQ(geometry.shape, (std::array<std::size_t, 3>{4, 5, 6}));
+        EXPECT_EQ(geometry.shape, (picBunch::Idx3{4, 5, 6}));
         EXPECT_EQ(geometry.axisLabels, (std::array<std::string, 3>{"x", "y", "z"}));
         EXPECT_EQ(geometry.geometry, "cartesian");
         EXPECT_EQ(geometry.dataOrder, "C");
@@ -178,8 +178,8 @@ TEST(Io, MissingMacroWeightedUsesStandardDefault)
     double const massC = picBunch::kElectronMass * picBunch::kSpeedOfLight;
     double const weightValue = 3.0;
     // The chunk buffers must outlive openPMD's deferred flush.
-    std::array<double, 3> const positions{4.0, 4.0, 5.0};
-    std::array<double, 3> const momenta{0.0, 0.0, 1.0};
+    picBunch::Vec3 const positions{4.0, 4.0, 5.0};
+    picBunch::Vec3 const momenta{0.0, 0.0, 1.0};
     double const storedWeight = weightValue;
     {
         openPMD::Series series(path.string(), openPMD::Access::CREATE);
@@ -230,8 +230,8 @@ namespace
         std::filesystem::path const& path,
         double gridUnitSI,
         bool setUnitSI,
-        std::array<double, 3> const& spacingZYX = {0.5, 1.5, 2.5},
-        std::array<double, 3> const& offsetZYX = {3.0, 2.0, 1.0})
+        picBunch::Vec3 const& spacingZYX = {0.5, 1.5, 2.5},
+        picBunch::Vec3 const& offsetZYX = {3.0, 2.0, 1.0})
     {
         std::array<double, 4 * 5 * 6> const values{};
         openPMD::Series series(path.string(), openPMD::Access::CREATE);
@@ -239,8 +239,8 @@ namespace
         mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
         mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
         mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
-        mesh.setGridSpacing(std::vector<double>(spacingZYX.begin(), spacingZYX.end()));
-        mesh.setGridGlobalOffset(std::vector<double>(offsetZYX.begin(), offsetZYX.end()));
+        mesh.setGridSpacing(std::vector<double>{spacingZYX[0], spacingZYX[1], spacingZYX[2]});
+        mesh.setGridGlobalOffset(std::vector<double>{offsetZYX[0], offsetZYX[1], offsetZYX[2]});
         if(setUnitSI)
             mesh.setGridUnitSI(gridUnitSI);
         auto& component = mesh["x"];
@@ -254,12 +254,12 @@ namespace
     //! One particle plus an ``E`` mesh whose physical geometry is given in x,y,z.
     void writeCliOriginSample(
         std::filesystem::path const& path,
-        std::array<double, 3> const& offset,
-        std::array<double, 3> const& spacing,
+        picBunch::Vec3 const& offset,
+        picBunch::Vec3 const& spacing,
         double gridUnitSI)
     {
-        std::array<double, 3> const position{offset[0], offset[1], offset[2]};
-        std::array<double, 3> const momentum{0.0, 0.0, 1.0};
+        picBunch::Vec3 const position{offset[0], offset[1], offset[2]};
+        picBunch::Vec3 const momentum{0.0, 0.0, 1.0};
         std::array<double, 1> const weight{1.0};
         std::array<double, 1> const charge{-picBunch::kElementaryCharge};
         std::array<double, 6 * 5 * 4> const meshValues{};
@@ -325,7 +325,7 @@ TEST(Io, ReaderAppliesGridUnitSIToPhysicalSpacing)
     {
         writeGeometryMesh(path, unit, true);
         auto const geometry = picBunch::readMeshGeometry(path.string());
-        EXPECT_EQ(geometry.shape, (std::array<std::size_t, 3>{4, 5, 6}));
+        EXPECT_EQ(geometry.shape, (picBunch::Idx3{4, 5, 6}));
         EXPECT_EQ(geometry.axisLabels, (std::array<std::string, 3>{"x", "y", "z"}));
         // Stored z,y,x spacing/offset reversed to x,y,z and multiplied by unit.
         EXPECT_DOUBLE_EQ(geometry.gridUnitSI[0], unit);
@@ -352,7 +352,7 @@ TEST(Io, CliMeshGeometryIsConvertedExactlyOnce)
     auto const path = temporaryPath();
     std::filesystem::remove(path);
 
-    auto const checkCase = [&](double unit, std::array<double, 3> const& expected) {
+    auto const checkCase = [&](double unit, picBunch::Vec3 const& expected) {
         // Expected x,y,z = (2.5, 1.5, 0.5) * unit.  The raw z,y,x vector is
         // therefore (0.5, 1.5, 2.5) in units of gridUnitSI.
         writeGeometryMesh(
@@ -430,8 +430,8 @@ TEST(Io, CliUsesMeshGridGlobalOffsetAsOrigin)
     // units of gridUnitSI, so a second unit conversion would give 1e-12 m.
     auto const path = temporaryPath();
     std::filesystem::remove(path);
-    std::array<double, 3> const offset{1.0e-6, 2.0e-6, 3.0e-6};
-    std::array<double, 3> const spacing{1.0e-6, 1.0e-6, 1.0e-6};
+    picBunch::Vec3 const offset{1.0e-6, 2.0e-6, 3.0e-6};
+    picBunch::Vec3 const spacing{1.0e-6, 1.0e-6, 1.0e-6};
     writeCliOriginSample(path, offset, spacing, 1.0e-6);
 
     auto run = [&](std::string const& extra) {
@@ -451,7 +451,7 @@ TEST(Io, CliUsesMeshGridGlobalOffsetAsOrigin)
         return output;
     };
     auto parseOrigin = [](std::string const& output) {
-        std::array<double, 3> origin{
+        picBunch::Vec3 origin{
             std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::quiet_NaN()};
@@ -470,7 +470,7 @@ TEST(Io, CliUsesMeshGridGlobalOffsetAsOrigin)
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(defaults[a], offset[a], 1.0e-12) << "mesh-default origin axis " << a;
 
-    std::array<double, 3> const overrideOrigin{7.0e-7, 8.0e-7, 9.0e-7};
+    picBunch::Vec3 const overrideOrigin{7.0e-7, 8.0e-7, 9.0e-7};
     auto const overridden = parseOrigin(run("--origin 7e-7,8e-7,9e-7"));
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(overridden[a], overrideOrigin[a], 1.0e-12) << "--origin axis " << a;
@@ -521,7 +521,7 @@ TEST(Io, WriterPublishesIterationPatternAtomically)
         {
             ++files;
             auto const geometry = picBunch::readMeshGeometry(entry.path().string(), "E", 0, 7u);
-            EXPECT_EQ(geometry.shape, (std::array<std::size_t, 3>{4, 5, 6}));
+            EXPECT_EQ(geometry.shape, (picBunch::Idx3{4, 5, 6}));
         }
     }
     EXPECT_EQ(files, 1u);
@@ -633,9 +633,9 @@ namespace
         return result;
     }
 
-    std::array<std::size_t, 3> parseGrid(std::string const& output)
+    picBunch::Idx3 parseGrid(std::string const& output)
     {
-        std::array<std::size_t, 3> grid{
+        picBunch::Idx3 grid{
             std::numeric_limits<std::size_t>::max(),
             std::numeric_limits<std::size_t>::max(),
             std::numeric_limits<std::size_t>::max()};
@@ -650,9 +650,9 @@ namespace
         return grid;
     }
 
-    std::array<double, 3> parseOrigin(std::string const& output)
+    picBunch::Vec3 parseOrigin(std::string const& output)
     {
-        std::array<double, 3> origin{
+        picBunch::Vec3 origin{
             std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::quiet_NaN()};
@@ -674,10 +674,10 @@ namespace
     //! ``gridUnitSI``, so the reader has to undo both the order and the unit.
     void writeSample(
         std::filesystem::path const& path,
-        std::vector<std::array<double, 3>> const& positions,
-        std::optional<std::array<std::size_t, 3>> shape,
-        std::array<double, 3> const& offset,
-        std::array<double, 3> const& spacing,
+        std::vector<picBunch::Vec3> const& positions,
+        std::optional<picBunch::Idx3> shape,
+        picBunch::Vec3 const& offset,
+        picBunch::Vec3 const& spacing,
         double gridUnitSI)
     {
         auto const count = positions.size();
@@ -774,14 +774,14 @@ TEST(Io, MeshZeroOffsetAdoptsMeshExtentWithoutFlags)
     writeSample(
         path,
         {{12.0e-6, 12.0e-6, 6.0e-6}},
-        std::array<std::size_t, 3>{24, 24, 12},
+        picBunch::Idx3{24, 24, 12},
         {0.0, 0.0, 0.0},
         {1.0e-6, 1.0e-6, 1.0e-6},
         1.0e-6);
 
     auto const result = runApp(path, "");
     ASSERT_EQ(result.status, 0) << result.output;
-    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{24, 24, 12})) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (picBunch::Idx3{24, 24, 12})) << result.output;
     auto const origin = parseOrigin(result.output);
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(origin[a], 0.0, 1.0e-15) << result.output;
@@ -792,18 +792,18 @@ TEST(Io, MeshNonZeroOffsetAdoptsMeshExtentAndOriginWithoutFlags)
 {
     auto const path = temporaryPath();
     std::filesystem::remove(path);
-    std::array<double, 3> const offset{1.0e-6, 2.0e-6, 3.0e-6};
+    picBunch::Vec3 const offset{1.0e-6, 2.0e-6, 3.0e-6};
     writeSample(
         path,
         {{offset[0] + 2.0e-6, offset[1] + 3.0e-6, offset[2] + 1.0e-6}},
-        std::array<std::size_t, 3>{8, 10, 6},
+        picBunch::Idx3{8, 10, 6},
         offset,
         {1.0e-6, 1.0e-6, 1.0e-6},
         1.0e-6);
 
     auto const result = runApp(path, "");
     ASSERT_EQ(result.status, 0) << result.output;
-    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{8, 10, 6})) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (picBunch::Idx3{8, 10, 6})) << result.output;
     auto const origin = parseOrigin(result.output);
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(origin[a], offset[a], 1.0e-15) << result.output;
@@ -817,14 +817,14 @@ TEST(Io, GridAndOriginOverrideMeshExtent)
     writeSample(
         path,
         {{1.0e-6, 1.0e-6, 1.0e-6}},
-        std::array<std::size_t, 3>{24, 24, 12},
+        picBunch::Idx3{24, 24, 12},
         {0.0, 0.0, 0.0},
         {1.0e-6, 1.0e-6, 1.0e-6},
         1.0e-6);
 
     auto const result = runApp(path, "--grid 8,8,8 --origin 0,0,0");
     ASSERT_EQ(result.status, 0) << result.output;
-    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{8, 8, 8})) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (picBunch::Idx3{8, 8, 8})) << result.output;
     auto const origin = parseOrigin(result.output);
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(origin[a], 0.0, 1.0e-15) << result.output;
@@ -838,7 +838,7 @@ TEST(Io, ParticlesOutsideMeshGridAreRejectedByNameAndCount)
     writeSample(
         path,
         {{1.0e-6, 1.0e-6, 1.0e-6}, {100.0e-6, 1.0e-6, 1.0e-6}},
-        std::array<std::size_t, 3>{8, 8, 8},
+        picBunch::Idx3{8, 8, 8},
         {0.0, 0.0, 0.0},
         {1.0e-6, 1.0e-6, 1.0e-6},
         1.0e-6);
@@ -858,11 +858,11 @@ TEST(Io, AnisotropicCellSpacingWarnsWithoutChangingFields)
     // --cell-size paths share the resolved spacing, so both must warn.
     auto const path = temporaryPath();
 
-    auto runSpacing = [&](std::array<double, 3> const& spacing, std::string const& extra) {
+    auto runSpacing = [&](picBunch::Vec3 const& spacing, std::string const& extra) {
         std::filesystem::remove(path);
-        std::optional<std::array<std::size_t, 3>> const shape
-            = extra.empty() ? std::optional<std::array<std::size_t, 3>>{
-                  std::array<std::size_t, 3>{8, 8, 8}}
+        std::optional<picBunch::Idx3> const shape
+            = extra.empty() ? std::optional<picBunch::Idx3>{
+                  picBunch::Idx3{8, 8, 8}}
                             : std::nullopt;
         writeSample(path, {{4.0, 4.0, 4.0}}, shape, {0.0, 0.0, 0.0}, spacing, 1.0);
         auto const result = runApp(path, extra);
@@ -903,8 +903,8 @@ TEST(Io, AnisotropicCellSpacingWarnsWithoutChangingFields)
     bunch.charge[0] = -picBunch::kElementaryCharge;
     picBunch::ComputeOptions options;
     options.cellSize = {4.0, 1.0, 1.0};
-    options.gridSize = std::array<std::size_t, 3>{8, 8, 8};
-    options.gridOrigin = std::array<double, 3>{0.0, 0.0, 0.0};
+    options.gridSize = picBunch::Idx3{8, 8, 8};
+    options.gridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
     picBunch::Field const field = picBunch::computeField(bunch, options);
     double maxE = 0.0;
     double maxB = 0.0;
@@ -945,9 +945,9 @@ TEST(Io, NoMeshRequiresCellSizeAndUsesBunchAabb)
     auto const result = runApp(path, "--cell-size 1e-6");
     ASSERT_EQ(result.status, 0) << result.output;
     // One particle at (1,2,3) um, margin 4 cells: n = ceil(8)+1 rounded even = 10.
-    EXPECT_EQ(parseGrid(result.output), (std::array<std::size_t, 3>{10, 10, 10})) << result.output;
+    EXPECT_EQ(parseGrid(result.output), (picBunch::Idx3{10, 10, 10})) << result.output;
     auto const origin = parseOrigin(result.output);
-    std::array<double, 3> const expectedOrigin{-3.0e-6, -2.0e-6, -1.0e-6};
+    picBunch::Vec3 const expectedOrigin{-3.0e-6, -2.0e-6, -1.0e-6};
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(origin[a], expectedOrigin[a], 1.0e-15) << result.output;
     std::filesystem::remove(path);
@@ -978,8 +978,8 @@ TEST(Io, FarTailUsesYeeComponentPositions)
     for(auto& component : field.data)
         component.assign(field.grid.size(), 0.0);
 
-    std::array<std::size_t, 3> const globalN{16, 16, 16};
-    std::array<double, 3> const globalOrigin{0.0, 0.0, 0.0};
+    picBunch::Idx3 const globalN{16, 16, 16};
+    picBunch::Vec3 const globalOrigin{0.0, 0.0, 0.0};
     auto const path = temporaryPath();
     std::filesystem::remove(path);
     picBunch::FieldWriteOptions options;
@@ -999,12 +999,12 @@ TEST(Io, FarTailUsesYeeComponentPositions)
     series.flush();
 
     // A node outside the exact box [2,6)^3.
-    std::array<std::size_t, 3> const node{11, 12, 13};
+    picBunch::Idx3 const node{11, 12, 13};
     std::size_t const index = node[0] + globalN[0] * (node[1] + globalN[1] * node[2]);
     for(std::size_t c = 0; c < 6u; ++c)
     {
-        std::array<double, 3> position{};
-        std::array<double, 3> unshifted{};
+        picBunch::Vec3 position{};
+        picBunch::Vec3 unshifted{};
         for(int a = 0; a < 3; ++a)
         {
             unshifted[static_cast<std::size_t>(a)]

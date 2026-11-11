@@ -33,6 +33,11 @@
 
 namespace
 {
+    using picBunch::Idx3;
+    using picBunch::IVec3;
+    using picBunch::UVec3;
+    using picBunch::Vec3;
+
     constexpr char const* compiledBackend()
     {
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -195,14 +200,14 @@ namespace
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
-        std::optional<std::array<double, 3>> cellSize;
-        std::optional<std::array<std::size_t, 3>> grid;
-        std::optional<std::array<double, 3>> origin;
+        std::optional<Vec3> cellSize;
+        std::optional<Idx3> grid;
+        std::optional<Vec3> origin;
         std::string shape = "tsc";
         int multipoleGroupCells = 16;
         double maxParticleChunkGb = 0.0;
-        std::optional<std::array<std::size_t, 3>> globalGrid;
-        std::optional<std::array<double, 3>> globalOrigin;
+        std::optional<Idx3> globalGrid;
+        std::optional<Vec3> globalOrigin;
         std::string restartFormat = "standard";
         std::string outputDir = "checkpoints";
         std::optional<double> unitLength;
@@ -299,10 +304,10 @@ namespace
         return parts;
     }
 
-    std::array<double, 3> parseTripleDouble(std::string const& text, char const* option)
+    Vec3 parseTripleDouble(std::string const& text, char const* option)
     {
         auto const parts = splitTriple(text, option);
-        std::array<double, 3> result{};
+        Vec3 result{};
         for(int a = 0; a < 3; ++a)
         {
             std::size_t consumed = 0;
@@ -324,10 +329,10 @@ namespace
         return result;
     }
 
-    std::array<std::size_t, 3> parseTripleSize(std::string const& text, char const* option)
+    Idx3 parseTripleSize(std::string const& text, char const* option)
     {
         auto const parts = splitTriple(text, option);
-        std::array<std::size_t, 3> result{};
+        Idx3 result{};
         for(int a = 0; a < 3; ++a)
         {
             std::uint64_t const value = parseIteration(parts[a], option);
@@ -535,20 +540,20 @@ namespace
         if(args.restartFormat == "picongpu" && args.output)
             throw std::invalid_argument("--restart-format picongpu writes to --output-dir; do not pass --output");
         if(args.cellSize)
-            for(double c : *args.cellSize)
-                if(!(c > 0.0))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!((*args.cellSize)[a] > 0.0))
                     throw std::invalid_argument("--cell-size values must be positive metres");
         if(args.origin)
-            for(double o : *args.origin)
-                if(!std::isfinite(o))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!std::isfinite((*args.origin)[a]))
                     throw std::invalid_argument("--origin values must be finite metres");
         if(args.globalOrigin)
-            for(double o : *args.globalOrigin)
-                if(!std::isfinite(o))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!std::isfinite((*args.globalOrigin)[a]))
                     throw std::invalid_argument("--global-origin values must be finite metres");
         if(args.globalGrid)
-            for(std::size_t n : *args.globalGrid)
-                if(n == 0u || n % 2u != 0u)
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(std::size_t const n = (*args.globalGrid)[a]; n == 0u || n % 2u != 0u)
                     throw std::invalid_argument("--global-grid values must be even and positive");
         if(args.unitLength && !(*args.unitLength > 0.0))
             throw std::invalid_argument("--picongpu-unit-length must be positive");
@@ -805,7 +810,7 @@ namespace
         // Global representative for the single velocity class.  The chunk
         // fields are linear only if every chunk uses the same kernel, so the
         // representative must be derived from the whole species, not per chunk.
-        std::array<double, 3> velocitySum{0.0, 0.0, 0.0};
+        Vec3 velocitySum{0.0, 0.0, 0.0};
         double velocityWeight = 0.0;
         double prepassReadMs = 0.0;
         // Two reusable chunk buffers.  Slot 0 keeps the first chunk from the
@@ -1084,7 +1089,7 @@ int main(int argc, char** argv)
         picBunch::Field field;
         std::optional<picBunch::FarTail> farTail;
         bool const root = picBunch::mpiRank() == 0;
-        std::array<double, 3> globalOriginResolved{0.0, 0.0, 0.0};
+        Vec3 globalOriginResolved{0.0, 0.0, 0.0};
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
 
@@ -1149,9 +1154,9 @@ int main(int argc, char** argv)
         if(args.velocityMoments == "2" || args.velocityMoments == "3")
             options.velocityMoments.order = std::stoul(args.velocityMoments);
         options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
-        std::optional<std::array<double, 3>> meshCellSize;
-        std::optional<std::array<double, 3>> meshGridOrigin;
-        std::optional<std::array<std::size_t, 3>> meshGridExtent;
+        std::optional<Vec3> meshCellSize;
+        std::optional<Vec3> meshGridOrigin;
+        std::optional<Idx3> meshGridExtent;
         try
         {
             auto const geometry
@@ -1203,16 +1208,21 @@ int main(int argc, char** argv)
         // large enough that the shortest axis, not the requested "d cells",
         // controls the near-source accuracy.  This changes no computation.
         {
-            auto const [shortest, largest] = std::minmax_element(
-                options.cellSize.begin(), options.cellSize.end());
-            double const ratio = *largest / *shortest;
+            double shortest = options.cellSize[0];
+            double largest = options.cellSize[0];
+            for(std::size_t a = 1u; a < 3u; ++a)
+            {
+                shortest = std::min(shortest, options.cellSize[a]);
+                largest = std::max(largest, options.cellSize[a]);
+            }
+            double const ratio = largest / shortest;
             if(ratio >= 2.0)
                 std::fprintf(
                     stderr,
                     "picBunch: warning: anisotropic cell spacing: largest %.6g m, "
                     "shortest %.6g m (ratio %.3g); near-field accuracy is set by the "
                     "shortest axis (%.6g m)\n",
-                    *largest, *shortest, ratio, *shortest);
+                    largest, shortest, ratio, shortest);
         }
         // The mesh extent is the default computation grid; --grid is an explicit
         // override.  A --global-grid must not enlarge the computation, so the
@@ -1452,7 +1462,7 @@ int main(int argc, char** argv)
                 options.cellSize,
                 args.multipoleGroupCells);
             auto const bounds = bunchData.bunch.bounds();
-            std::array<double, 3> tailMargin{};
+            Vec3 tailMargin{};
             for(int a = 0; a < 3; ++a)
             {
                 double const halfExtent = 0.5 * (bounds[1][a] - bounds[0][a]);
@@ -1475,7 +1485,7 @@ int main(int argc, char** argv)
                     args.tolerance);
             else
             {
-                auto const computeWithMargin = [&](std::array<double, 3> const& useMargin) {
+                auto const computeWithMargin = [&](Vec3 const& useMargin) {
                     picBunch::ComputeOptions expanded = options;
                     expanded.marginCellsPerAxis = useMargin;
                     // The margin, not the previous explicit extent/origin, now
@@ -1490,7 +1500,7 @@ int main(int argc, char** argv)
                     maxE = peaks[0];
                     maxB = peaks[1];
                 };
-                std::array<double, 3> preferred = margin.marginCells;
+                Vec3 preferred = margin.marginCells;
                 bool needsExpansion = false;
                 for(int a = 0; a < 3; ++a)
                 {

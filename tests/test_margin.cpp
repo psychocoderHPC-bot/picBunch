@@ -55,11 +55,11 @@ namespace
         options.tolerance = 1.0e-3;
         options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
         options.deterministicDeposit = true;
-        options.marginCellsPerAxis = std::array<double, 3>{margin, margin, margin};
+        options.marginCellsPerAxis = picBunch::Vec3{margin, margin, margin};
         return options;
     }
 
-    using Vec3 = std::array<double, 3>;
+    using Vec3 = picBunch::Vec3;
 
     double vnorm(Vec3 const& v)
     {
@@ -149,7 +149,7 @@ TEST(Margin, QuadrupoleBoundUsesActualMoment)
 
     double const peak = picBunch::kCoulombConstant * e;
     auto const margin = picBunch::deriveFieldTailMargin(
-        bunch, peak, 1.0e-3, std::array<double, 3>{1.0, 1.0, 1.0});
+        bunch, peak, 1.0e-3, picBunch::Vec3{1.0, 1.0, 1.0});
 
     EXPECT_NEAR(margin.totalCharge, 0.0, 1.0e-30);
     EXPECT_NEAR(margin.dipoleMagnitude, 0.0, 1.0e-30);
@@ -170,11 +170,11 @@ TEST(Margin, FarTailMatchesDirectSum)
     double const peak = peakE(field);
     double const target = 1.0e-3 * peak;
 
-    auto directE = [&](std::array<double, 3> const& point) {
-        std::array<double, 3> result{0.0, 0.0, 0.0};
+    auto directE = [&](picBunch::Vec3 const& point) {
+        picBunch::Vec3 result{0.0, 0.0, 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
-            std::array<double, 3> const dr{
+            picBunch::Vec3 const dr{
                 point[0] - bunch.x[p], point[1] - bunch.y[p], point[2] - bunch.z[p]};
             double const r2 = dr[0] * dr[0] + dr[1] * dr[1] + dr[2] * dr[2];
             double const r = std::sqrt(r2);
@@ -186,7 +186,7 @@ TEST(Margin, FarTailMatchesDirectSum)
         return result;
     };
 
-    std::array<std::array<double, 3>, 7> const directions{{
+    std::array<picBunch::Vec3, 7> const directions{{
         {1.0, 0.0, 0.0},
         {0.0, 1.0, 0.0},
         {0.0, 0.0, 1.0},
@@ -202,7 +202,7 @@ TEST(Margin, FarTailMatchesDirectSum)
         {
             double const norm = std::sqrt(direction[0] * direction[0]
                 + direction[1] * direction[1] + direction[2] * direction[2]);
-            std::array<double, 3> point{};
+            picBunch::Vec3 point{};
             for(int a = 0; a < 3; ++a)
                 point[a] = tail.centre[a]
                     + direction[a] / norm * static_cast<double>(factor) * tail.supportRadius;
@@ -229,7 +229,7 @@ TEST(Margin, MarginBoxMatchesLargerReference)
     double const peak = peakE(base);
     double const target = 1.0e-3 * peak;
     auto const margin = picBunch::deriveFieldTailMargin(
-        bunch, peak, 1.0e-3, std::array<double, 3>{1.0e-6, 1.0e-6, 1.0e-6});
+        bunch, peak, 1.0e-3, picBunch::Vec3{1.0e-6, 1.0e-6, 1.0e-6});
     double const m = margin.marginCells[0];
 
     auto const small = picBunch::computeField(bunch, marginOptions(m));
@@ -466,8 +466,8 @@ TEST(Margin, MovingDipolarCloudBound)
     ASSERT_NEAR(tail.meanVelocity[2], picBunch::kSpeedOfLight * u / gamma, 1.0);
     ASSERT_NEAR(tail.charge, 0.0, 1.0e-30);
 
-    auto direct = [&](std::array<double, 3> const& point) {
-        std::array<double, 3> result{0.0, 0.0, 0.0};
+    auto direct = [&](picBunch::Vec3 const& point) {
+        picBunch::Vec3 result{0.0, 0.0, 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const R[3] = {
@@ -485,7 +485,7 @@ TEST(Margin, MovingDipolarCloudBound)
     };
 
     // Principal alignment: dipole along x, observation along x, motion along z.
-    std::array<double, 3> const along{12.0, 0.0, 0.0};
+    picBunch::Vec3 const along{12.0, 0.0, 0.0};
     auto const exact = direct(along);
     auto const approx = picBunch::evaluateFarTailE(tail, along);
     double num = 0.0;
@@ -502,7 +502,7 @@ TEST(Margin, MovingDipolarCloudBound)
     // the margin's conservative gamma-scaled static scale rather than claiming
     // a point-value accuracy the expansion does not have.
     double const scale = picBunch::kCoulombConstant * std::abs(bunch.charge[0]) / (12.0 * 12.0);
-    std::array<std::array<double, 3>, 3> const directions{{
+    std::array<picBunch::Vec3, 3> const directions{{
         {0.0, 12.0, 0.0},
         {0.0, 0.0, 12.0},
         {8.0, 8.0, 8.0},
@@ -543,8 +543,8 @@ TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
         bunch.weight[i] = 1.0;
         bunch.charge[i] = -picBunch::kElementaryCharge;
     }
-    auto direct = [&](std::array<double, 3> const& point) {
-        std::array<double, 3> result{0.0, 0.0, 0.0};
+    auto direct = [&](picBunch::Vec3 const& point) {
+        picBunch::Vec3 result{0.0, 0.0, 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const R[3] = {
@@ -560,7 +560,7 @@ TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
         }
         return result;
     };
-    auto relative = [](std::array<double, 3> const& value, std::array<double, 3> const& ref) {
+    auto relative = [](picBunch::Vec3 const& value, picBunch::Vec3 const& ref) {
         double num = 0.0;
         double den = 0.0;
         for(int a = 0; a < 3; ++a)
@@ -576,7 +576,7 @@ TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
             for(int dir = 0; dir < 3; ++dir)
                 for(int sign : {-1, 1})
                 {
-                    std::array<double, 3> point = tail.centre;
+                    picBunch::Vec3 point = tail.centre;
                     point[static_cast<std::size_t>(dir)]
                         += sign * factor * tail.supportRadius;
                     worst = std::max(
@@ -602,7 +602,7 @@ TEST(Margin, FarTailBatchMatchesRecursiveGroups)
     // order, no reassociation.  ``memcmp`` is used instead of ``==`` so a
     // changed signed zero is caught as well.
     auto sameBits = [](double a, double b) { return std::memcmp(&a, &b, sizeof(double)) == 0; };
-    auto compare = [&](picBunch::FarTail const& tail, std::array<double, 3> const& point) {
+    auto compare = [&](picBunch::FarTail const& tail, picBunch::Vec3 const& point) {
         auto const referenceE = picBunch::evaluateFarTailE(tail, point);
         auto const referenceB = picBunch::evaluateFarTailB(tail, point);
         auto const batch = picBunch::makeFarTailBatch(tail);
@@ -634,7 +634,7 @@ TEST(Margin, FarTailBatchMatchesRecursiveGroups)
         return bunch;
     };
 
-    std::array<std::array<double, 3>, 8> directions{{
+    std::array<picBunch::Vec3, 8> directions{{
         {1.0, 0.0, 0.0},
         {0.0, 1.0, 0.0},
         {0.0, 0.0, 1.0},
@@ -659,7 +659,7 @@ TEST(Margin, FarTailBatchMatchesRecursiveGroups)
             for(double factor : {1.5, 3.0, 6.0, 12.0})
                 for(auto const& direction : directions)
                 {
-                    std::array<double, 3> point = tail.centre;
+                    picBunch::Vec3 point = tail.centre;
                     for(int a = 0; a < 3; ++a)
                         point[a] += factor * tail.supportRadius * direction[a];
                     compare(tail, point);

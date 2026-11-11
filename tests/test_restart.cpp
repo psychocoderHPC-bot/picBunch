@@ -94,12 +94,12 @@ namespace
         H5Tclose(type);
     }
 
-    void writeDoubleArrayAttribute(hid_t object, char const* name, std::array<double, 3> const& values)
+    void writeDoubleArrayAttribute(hid_t object, char const* name, picBunch::Vec3 const& values)
     {
         hsize_t dimensions[1] = {3};
         hid_t space = H5Screate_simple(1, dimensions, nullptr);
         hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
-        H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data());
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]);
         H5Aclose(attribute);
         H5Sclose(space);
     }
@@ -109,7 +109,7 @@ namespace
         hsize_t dimensions[1] = {7};
         hid_t space = H5Screate_simple(1, dimensions, nullptr);
         hid_t attribute = H5Acreate2(object, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
-        H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data());
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]);
         H5Aclose(attribute);
         H5Sclose(space);
     }
@@ -420,16 +420,16 @@ namespace
 
 TEST(Restart, CellSizeExplicitOverridesMesh)
 {
-    std::array<double, 3> const explicitSize{1.0, 2.0, 3.0};
-    std::array<double, 3> const meshSize{4.0, 5.0, 6.0};
+    picBunch::Vec3 const explicitSize{1.0, 2.0, 3.0};
+    picBunch::Vec3 const meshSize{4.0, 5.0, 6.0};
     EXPECT_EQ(picBunch::resolveCellSize(explicitSize, meshSize), explicitSize);
     EXPECT_EQ(picBunch::resolveCellSize(std::nullopt, meshSize), meshSize);
     EXPECT_THROW(picBunch::resolveCellSize(std::nullopt, std::nullopt), std::runtime_error);
     EXPECT_THROW(
-        picBunch::resolveCellSize(std::array<double, 3>{0.0, 1.0, 1.0}, meshSize),
+        picBunch::resolveCellSize(picBunch::Vec3{0.0, 1.0, 1.0}, meshSize),
         std::invalid_argument);
     EXPECT_THROW(
-        picBunch::resolveCellSize(std::array<double, 3>{1.0, -1.0, 1.0}, meshSize),
+        picBunch::resolveCellSize(picBunch::Vec3{1.0, -1.0, 1.0}, meshSize),
         std::invalid_argument);
 }
 
@@ -440,11 +440,11 @@ TEST(Restart, GridAndOriginOverridesReplaceDerivedValues)
     options.marginCells = 4.0;
     auto const derived = picBunch::makeGrid(twoParticles(), options);
 
-    options.gridSize = std::array<std::size_t, 3>{16, 20, 24};
-    options.gridOrigin = std::array<double, 3>{-1.0, -2.0, -3.0};
+    options.gridSize = picBunch::Idx3{16, 20, 24};
+    options.gridOrigin = picBunch::Vec3{-1.0, -2.0, -3.0};
     auto const overridden = picBunch::makeGrid(twoParticles(), options);
-    EXPECT_EQ(overridden.n, (std::array<std::size_t, 3>{16, 20, 24}));
-    EXPECT_EQ(overridden.origin, (std::array<double, 3>{-1.0, -2.0, -3.0}));
+    EXPECT_EQ(overridden.n, (picBunch::Idx3{16, 20, 24}));
+    EXPECT_EQ(overridden.origin, (picBunch::Vec3{-1.0, -2.0, -3.0}));
     // Spacing still comes from the cell size; only n and origin are overridden.
     EXPECT_EQ(overridden.spacing, derived.spacing);
     EXPECT_NE(overridden.n, derived.n);
@@ -452,9 +452,9 @@ TEST(Restart, GridAndOriginOverridesReplaceDerivedValues)
     // Odd extents are supported by the parity-correct R2C path (task W3o): the
     // even-only requirement that previously rejected {15,20,24} is lifted, so an
     // odd explicit grid is now accepted verbatim.
-    options.gridSize = std::array<std::size_t, 3>{15, 20, 24};
+    options.gridSize = picBunch::Idx3{15, 20, 24};
     auto const oddGrid = picBunch::makeGrid(twoParticles(), options);
-    EXPECT_EQ(oddGrid.n, (std::array<std::size_t, 3>{15, 20, 24}));
+    EXPECT_EQ(oddGrid.n, (picBunch::Idx3{15, 20, 24}));
 }
 
 TEST(Restart, WriterEmitsPIConGPUCheckpointContract)

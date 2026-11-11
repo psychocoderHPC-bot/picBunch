@@ -237,9 +237,9 @@ namespace picBunch
 #undef PICBUNCH_LOAD
         }
 
-        std::array<double, 3> readComponentUnits(Record& record, std::string const& prefix)
+        Vec3 readComponentUnits(Record& record, std::string const& prefix)
         {
-            std::array<double, 3> units{};
+            Vec3 units{};
             for(std::size_t a = 0; a < 3; ++a)
             {
                 std::string const componentName = std::string(1, static_cast<char>('x' + a));
@@ -267,14 +267,14 @@ namespace picBunch
             return {it->second, static_cast<std::uint64_t>(it->first)};
         }
 
-        std::array<double, 3> meshGeometryVector(
-            std::array<std::size_t, 3> const& labelIndex,
+        Vec3 meshGeometryVector(
+            Idx3 const& labelIndex,
             std::vector<double> const& values,
-            std::array<double, 3> const& fallback)
+            Vec3 const& fallback)
         {
             if(values.size() != 3u)
                 return fallback;
-            std::array<double, 3> result{};
+            Vec3 result{};
             for(std::size_t a = 0; a < 3; ++a)
                 result[a] = values[labelIndex[a]];
             return result;
@@ -381,7 +381,7 @@ namespace picBunch
 
         auto const positionUnits = readComponentUnits(position, "position");
         Record* offsetRecord = nullptr;
-        std::array<double, 3> offsetUnits{0.0, 0.0, 0.0};
+        Vec3 offsetUnits{0.0, 0.0, 0.0};
         if(species.contains("positionOffset"))
         {
             offsetRecord = &species["positionOffset"];
@@ -634,7 +634,7 @@ namespace picBunch
         }
         if(labels.size() != 3u)
             labels = {"x", "y", "z"};
-        std::array<std::size_t, 3> labelIndex{0, 1, 2};
+        Idx3 labelIndex{0, 1, 2};
         for(std::size_t a = 0; a < 3; ++a)
         {
             std::string const wanted(1, static_cast<char>('x' + a));

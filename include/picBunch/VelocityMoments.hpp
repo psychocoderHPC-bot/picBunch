@@ -335,7 +335,7 @@ namespace picBunch
          */
         bool nonFinite = false;
         double probe = 0.0; //!< relative k-space remainder probe (order 2/3, auto)
-        std::array<double, 3> u0{}; //!< absolute-charge-weighted expansion centre
+        Vec3 u0{}; //!< absolute-charge-weighted expansion centre
         double maxSpread = 0.0; //!< largest |u_p - u0| (velocity-space radius)
     };
 
@@ -345,9 +345,9 @@ namespace picBunch
      * (opposite-charge) bunches, where the signed sum can approach zero; for a
      * same-sign bunch it is identical to the charge-weighted mean.
      */
-    std::array<double, 3> velocityMomentsCentre(Bunch const& bunch);
+    Vec3 velocityMomentsCentre(Bunch const& bunch);
 
     //! Largest ``|u_p - u0|`` over the particles (velocity-space radius).
-    double velocityMomentsRadius(Bunch const& bunch, std::array<double, 3> const& u0);
+    double velocityMomentsRadius(Bunch const& bunch, Vec3 const& u0);
 
 } // namespace picBunch

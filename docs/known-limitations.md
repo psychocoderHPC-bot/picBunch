@@ -135,13 +135,18 @@ wrapped in `std::once_flag`/`std::call_once` and fixed the `picBunch.Io` teardow
 regression on the validated `hal` host. The full teardown analysis is in the
 companion [ROCm FFT teardown](rocm-fft-teardown.md).
 
-**Why it is not fixed here.** The portable replacement is an idempotent
-`alpaka::fft::onHost::finalize()` in alpakaVendor. No ROCm machine is available
-here, so the guard cannot be removed and re-measured in this change.
+**Why it is not fixed here.** The guard is a temporary workaround. The portable
+replacement is an idempotent `alpaka::fft::onHost::finalize()` in alpakaVendor.
+The API, the ordering contract, the implementation sketch, the picBunch migration
+and the test plan are in
+[the finalize proposal](proposals/alpaka-fft-finalize.md) and summarized in the
+[ROCm FFT teardown](rocm-fft-teardown.md). No ROCm machine is available here, so
+the guard cannot be removed and re-measured in this change.
 
-**Plan.** Track the alpakaVendor `finalize()` API. When it exists, replace the
-native guard and rerun the teardown and `picBunch.Io` tests on a ROCm host. Update
-the teardown document with the measured exit behavior and drop the native call.
+**Plan.** Track the alpakaVendor `finalize()` API against the proposal. When it
+exists, replace the native guard and rerun the teardown and `picBunch.Io` tests
+on a ROCm host. Update the teardown document with the measured exit behavior and
+drop the native call.
 
 ## 6. CPU kernel-build sub-stage regression
 
@@ -163,24 +168,29 @@ bottleneck. Profile the fused pass, then either restore a dedicated build pass o
 specialize the fused loop by stage. Track the sub-stage time in the CPU cost table
 so the regression is visible next to the total.
 
-## 7. No in-repo CI
+## 7. CI coverage depends on self-hosted capacity
 
-**Symptom.** There is no workflow in the repository. The test suite is run
-manually, so a change can land without the regression tests having run, and the
-registered CTest count depends on the build options.
+**Symptom.** The repository now has a workflow, but only the CPU job runs on a
+hosted runner. The CUDA and HIP jobs need self-hosted machines with the `gpu`,
+`cuda` or `rocm` labels. Without those runners the device suites are skipped or
+left unrequired, so a device regression can still land.
 
-**Evidence.** The repository has no CI configuration. The README build section
-documents manual configure, build and CTest commands for each backend, and the
-docs note that CTest counts differ between configurations.
+**Evidence.** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) has the
+`cpu`, `gpu-cuda` and `gpu-hip` jobs. The CPU job builds openPMD 0.17.1 from
+source with HDF5 and MPI, caches the install prefix and runs the full CTest
+suite. The HIP job runs the `FastNearConsistency`, `NearShellAccuracy` and
+`NearShellAlpaka` groups as a required gate before the full suite. The README
+build section still documents the manual commands, and the registered CTest
+count depends on the build options.
 
-**Why it is not fixed here.** The validated configurations need GPU and ROCm hosts
-that standard hosted runners do not provide, and the reference data are large.
-Adding CI needs a decision on hosted versus self-hosted capacity.
+**Why it is not fixed here.** Hosted runners do not provide a GPU, ROCm or the
+large reference data. The GPU jobs are optional until the project provides
+runners for the labels above.
 
-**Plan.** Add a GitHub Actions workflow for a CPU/FFTW configure, build and CTest
-run, plus a documentation link check. Add optional self-hosted CUDA and ROCm jobs
-for the validated presets. Require the CPU job on every change. If the project
-does not want hosted CI, record the manual release checklist instead.
+**Plan.** Attach the self-hosted CUDA and ROCm runners, then mark both device
+jobs as required checks. Keep the CPU job required on every change. Run
+`actionlint` on workflow edits. Keep the openPMD cache key tied to the version,
+the HDF5/MPI options and the runner image.
 
 ## 8. Scalar min/max extrema in the ported loops
 
@@ -205,3 +215,27 @@ without a dedicated validation run, so it is deferred.
 change, then rerun the bit-stability pin, the read-out bitwise test and the
 near-field golden/consistency suite on CPU and CUDA, and record the exact
 extrema list in the commit message.
+
+## 9. Dense near-shell scaling has no H100 or HIP row
+
+**Symptom.** The dense-cloud near-shell cost is measured on V100 only. The
+H100 and gfx1100 rows needed to choose a tile size per host are missing, so the
+tile recommendation is proven for `sm_70` and only estimated for the other
+backends.
+
+**Evidence.** [Near-shell scaling](near-shell-scaling.md) records the V100
+measurements at `N = 1e6` and `N = 1e7`, box 64/100/128, tile 2/4 and `R = 3/4`.
+No H100 machine was available for that campaign. The H100 file in
+[measurements](measurements/) is the earlier 200-particle rank scaling, not
+this matrix. The gfx1100 probe ran on a shared card, was about 40x slower than
+the idle V100, and the dense runs were killed before they produced a pair
+count.
+
+**Why it is not fixed here.** The V100 node was the only exclusive device
+available. A HIP row needs an exclusive gfx1100 card and a profiler to separate
+contention from kernel cost.
+
+**Plan.** Re-run the same driver on an idle H100 and on an exclusive gfx1100
+card, with the box, tile and radius grid in the scaling note. Add the tile 2
+compact row and the `R = 4` row at `N = 1e7`. Update the recommendation and the
+projections only after those rows exist.

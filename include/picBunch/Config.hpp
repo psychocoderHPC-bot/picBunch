@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/Types.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -36,7 +38,7 @@ namespace picBunch
         {
             // Independent PIConGPU deck inputs.
             double deltaT = 0.0; //!< SI::DELTA_T_SI, seconds
-            std::array<double, 3> cellSize{0.0, 0.0, 0.0}; //!< CELL_*_SI, metres
+            Vec3 cellSize{0.0, 0.0, 0.0}; //!< CELL_*_SI, metres
             double baseMass = kDeckElectronMass; //!< SI::BASE_MASS_SI, kg
             double baseCharge = kDeckElectronCharge; //!< SI::BASE_CHARGE_SI, C (signed)
             double baseDensity = 0.0; //!< SI::BASE_DENSITY_SI, m^-3
@@ -61,9 +63,9 @@ namespace picBunch
 
         struct Domain
         {
-            std::array<std::size_t, 3> cells{0, 0, 0};
-            std::array<double, 3> cellSize{0.0, 0.0, 0.0}; //!< metres
-            std::array<double, 3> origin{0.0, 0.0, 0.0}; //!< metres
+            Idx3 cells{0, 0, 0};
+            Vec3 cellSize{0.0, 0.0, 0.0}; //!< metres
+            Vec3 origin{0.0, 0.0, 0.0}; //!< metres
         } domain;
 
         struct Placement
@@ -79,7 +81,7 @@ namespace picBunch
             //! ordered x, y, z, in metres or as a fraction of the domain
             //! extent.  Parsed from ``placement.position``; the deprecated
             //! ``left``/``front``/``top`` scalars map to x/y/z.
-            std::array<double, 3> offset{0.0, 0.0, 0.0};
+            Vec3 offset{0.0, 0.0, 0.0};
             bool fraction = true;
             //! ``bbox`` (default) or ``domain``.  A single domain-covering patch
             //! is the safe choice for a multi-rank restart; the bounding-box
