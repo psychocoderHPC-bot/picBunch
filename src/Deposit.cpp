@@ -24,13 +24,13 @@ namespace picBunch
         restMass.resize(n);
     }
 
-    std::array<std::array<double, 3>, 2> Bunch::bounds() const
+    std::array<Vec3, 2> Bunch::bounds() const
     {
         if(size() == 0)
             throw std::runtime_error("Bunch::bounds: empty bunch");
-        std::array<std::array<double, 3>, 2> b{};
-        b[0].fill(std::numeric_limits<double>::max());
-        b[1].fill(-std::numeric_limits<double>::max());
+        std::array<Vec3, 2> b{};
+        b[0] = Vec3::fill(std::numeric_limits<double>::max());
+        b[1] = Vec3::fill(-std::numeric_limits<double>::max());
         for(std::size_t p = 0; p < size(); ++p)
         {
             double const v[3] = {x[p], y[p], z[p]};

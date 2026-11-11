@@ -83,7 +83,7 @@ namespace
         }
     };
 
-    picBunch::Field makeField(std::array<std::size_t, 3> n = {3, 4, 5})
+    picBunch::Field makeField(picBunch::Idx3 n = {3, 4, 5})
     {
         picBunch::Field field;
         field.grid.n = n;
@@ -227,7 +227,7 @@ TEST(OpenPmdWait, QueueProducedFieldIsWaitedBeforeWriteAndReadBack)
     // Cubic dimensions keep the read-back extent free of the x-fastest
     // transposition used for the small default field.
     constexpr std::size_t kSide = 64u;
-    std::array<std::size_t, 3> const dims{kSide, kSide, kSide};
+    picBunch::Idx3 const dims{kSide, kSide, kSide};
 
     picBunchTest::runOnDevice(
         [&](auto& device, auto& queue)

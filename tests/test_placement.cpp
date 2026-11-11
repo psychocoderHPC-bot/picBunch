@@ -32,8 +32,8 @@ namespace
         hid_t dataset = H5Dcreate2(
             file, "data/0/particles/electrons/position/x", H5T_IEEE_F64LE, space,
             H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        std::array<double, 3> const values{0.0, 0.0, 0.0};
-        H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data());
+        picBunch::Vec3 const values{0.0, 0.0, 0.0};
+        H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &values[0]);
         H5Dclose(dataset);
         H5Sclose(space);
         H5Gclose(species);
@@ -101,7 +101,7 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
 
     picBunch::Bunch bunch;
     bunch.resize(3);
-    std::array<std::array<double, 3>, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    std::array<picBunch::Vec3, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
     for(std::size_t p = 0; p < 3; ++p)
     {
         bunch.x[p] = positions[p][0];
@@ -121,8 +121,8 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     EXPECT_NEAR(placed.centroid[2], 5.0, 1e-12);
     for(int a = 0; a < 3; ++a)
         EXPECT_NEAR(placed.targetCentre[a], 5.0, 1e-12);
-    EXPECT_EQ(placed.patchOffset, (std::array<std::int64_t, 3>{3, 3, 3}));
-    EXPECT_EQ(placed.patchExtent, (std::array<std::uint64_t, 3>{5, 5, 5}));
+    EXPECT_EQ(placed.patchOffset, (picBunch::IVec3{3, 3, 3}));
+    EXPECT_EQ(placed.patchExtent, (picBunch::UVec3{5, 5, 5}));
 
     std::filesystem::path const directory
         = std::filesystem::temp_directory_path() / "picbunch-placement-test";
@@ -277,7 +277,7 @@ TEST(Placement, DomainPatchCoversTheWholeDomain)
 
     picBunch::Bunch bunch;
     bunch.resize(3);
-    std::array<std::array<double, 3>, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    std::array<picBunch::Vec3, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
     for(std::size_t p = 0; p < 3; ++p)
     {
         bunch.x[p] = positions[p][0];
@@ -289,8 +289,8 @@ TEST(Placement, DomainPatchCoversTheWholeDomain)
     }
 
     auto const placed = picBunch::placeBunch(bunch, config);
-    EXPECT_EQ(placed.patchOffset, (std::array<std::int64_t, 3>{0, 0, 0}));
-    EXPECT_EQ(placed.patchExtent, (std::array<std::uint64_t, 3>{10, 12, 14}));
+    EXPECT_EQ(placed.patchOffset, (picBunch::IVec3{0, 0, 0}));
+    EXPECT_EQ(placed.patchExtent, (picBunch::UVec3{10, 12, 14}));
     // positionOffset still indexes the global cells, unchanged by the patch mode.
     EXPECT_NEAR(placed.centroid[0], 3.0, 1e-12);
 }
@@ -308,7 +308,7 @@ TEST(Placement, PatchCountSplitsTheRegionWithCumulativeCoverage)
 
     picBunch::Bunch bunch;
     bunch.resize(3);
-    std::array<std::array<double, 3>, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    std::array<picBunch::Vec3, 3> const positions{{{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
     for(std::size_t p = 0; p < 3; ++p)
     {
         bunch.x[p] = positions[p][0];

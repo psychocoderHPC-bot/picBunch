@@ -36,7 +36,7 @@
 namespace
 {
     //! One electron in SI units at the given position and dimensionless momentum.
-    picBunch::Bunch oneElectron(std::array<double, 3> const& position, std::array<double, 3> const& u)
+    picBunch::Bunch oneElectron(picBunch::Vec3 const& position, picBunch::Vec3 const& u)
     {
         picBunch::Bunch bunch;
         bunch.resize(1);
@@ -52,10 +52,10 @@ namespace
     }
 
     //! Three electrons sharing u, the cloud used by the physics group.
-    picBunch::Bunch threeElectronCloud(std::array<double, 3> const& u)
+    picBunch::Bunch threeElectronCloud(picBunch::Vec3 const& u)
     {
         picBunch::Bunch bunch;
-        std::array<std::array<double, 3>, 3> const positions{{
+        std::array<picBunch::Vec3, 3> const positions{{
             {4.0, 4.0, 4.0},
             {4.7, 5.1, 4.3},
             {6.2, 5.8, 6.1},
@@ -91,7 +91,7 @@ namespace
     }
 
     //! Independent Coulomb field of a charge at rest: E = k q R / |R|^3.
-    std::array<double, 3> independentCoulomb(std::array<double, 3> const& R, double q)
+    picBunch::Vec3 independentCoulomb(picBunch::Vec3 const& R, double q)
     {
         double const r2 = R[0] * R[0] + R[1] * R[1] + R[2] * R[2];
         double const r3 = r2 * std::sqrt(r2);
@@ -140,7 +140,7 @@ namespace
     std::array<double, 6> measurePaddingConvergence(
         char const* label,
         picBunch::Bunch const& bunch,
-        std::array<double, 3> const& cellSize)
+        picBunch::Vec3 const& cellSize)
     {
         picBunch::ComputeOptions options;
         options.tolerance = 1e-3;
@@ -180,7 +180,7 @@ namespace
     double measureDivergenceResidual(
         char const* label,
         picBunch::Bunch const& bunch,
-        std::array<double, 3> const& cellSize,
+        picBunch::Vec3 const& cellSize,
         unsigned padding)
     {
         picBunch::ComputeOptions options;
@@ -236,9 +236,9 @@ namespace
     struct DirectGrid
     {
         std::vector<double> rho;
-        std::array<double, 3> spacing;
-        std::array<double, 3> origin;
-        std::array<std::size_t, 3> n;
+        picBunch::Vec3 spacing;
+        picBunch::Vec3 origin;
+        picBunch::Idx3 n;
     };
 
     DirectGrid independentDeposit(picBunch::Bunch const& bunch, picBunch::Grid const& grid)
@@ -296,7 +296,7 @@ namespace
     }
 
     //! Yee offsets written out independently of Types.hpp.
-    std::array<std::array<double, 3>, 6> const kYeeOffsets{{
+    std::array<picBunch::Vec3, 6> const kYeeOffsets{{
         {0.5, 0.0, 0.0},
         {0.0, 0.5, 0.0},
         {0.0, 0.0, 0.5},
@@ -319,7 +319,7 @@ namespace
                 for(std::size_t j = 0; j < n[1]; ++j)
                     for(std::size_t i = 0; i < n[0]; ++i)
                     {
-                        std::array<double, 3> const observer{
+                        picBunch::Vec3 const observer{
                             field.grid.origin[0] + (static_cast<double>(i) + kYeeOffsets[c][0]) * field.grid.spacing[0],
                             field.grid.origin[1] + (static_cast<double>(j) + kYeeOffsets[c][1]) * field.grid.spacing[1],
                             field.grid.origin[2] + (static_cast<double>(k) + kYeeOffsets[c][2]) * field.grid.spacing[2]};
@@ -332,11 +332,11 @@ namespace
                                         std::size_t const sflat = si + n[0] * (sj + n[1] * sk);
                                         if(direct.rho[sflat] == 0.0)
                                             continue;
-                                        std::array<double, 3> const source{
+                                        picBunch::Vec3 const source{
                                             field.grid.origin[0] + static_cast<double>(si) * field.grid.spacing[0],
                                             field.grid.origin[1] + static_cast<double>(sj) * field.grid.spacing[1],
                                             field.grid.origin[2] + static_cast<double>(sk) * field.grid.spacing[2]};
-                                        std::array<double, 3> const R{
+                                        picBunch::Vec3 const R{
                                             observer[0] - source[0],
                                             observer[1] - source[1],
                                             observer[2] - source[2]};
@@ -355,10 +355,10 @@ namespace
 
 TEST(Audit, PaddingTwoVersusThreeAtRoundoff)
 {
-    std::array<double, 3> const u0{0.0, 0.0, 0.0};
-    std::array<double, 3> const u10{0.0, 0.0, 10.0};
-    std::array<double, 3> const aspect1{1.0, 1.0, 1.0};
-    std::array<double, 3> const aspect4{1.0, 4.0, 1.0};
+    picBunch::Vec3 const u0{0.0, 0.0, 0.0};
+    picBunch::Vec3 const u10{0.0, 0.0, 10.0};
+    picBunch::Vec3 const aspect1{1.0, 1.0, 1.0};
+    picBunch::Vec3 const aspect4{1.0, 4.0, 1.0};
 
     auto const single1 = oneElectron({5.0, 5.0, 5.0}, u0);
     auto const single10 = oneElectron({5.0, 5.0, 5.0}, u10);
@@ -384,10 +384,10 @@ TEST(Audit, PaddingTwoVersusThreeAtRoundoff)
 
 TEST(Audit, DiscreteGaussLawOnYeeLattice)
 {
-    std::array<double, 3> const u0{0.0, 0.0, 0.0};
-    std::array<double, 3> const u10{0.0, 0.0, 10.0};
-    std::array<double, 3> const aspect1{1.0, 1.0, 1.0};
-    std::array<double, 3> const aspect4{1.0, 4.0, 1.0};
+    picBunch::Vec3 const u0{0.0, 0.0, 0.0};
+    picBunch::Vec3 const u10{0.0, 0.0, 10.0};
+    picBunch::Vec3 const aspect1{1.0, 1.0, 1.0};
+    picBunch::Vec3 const aspect4{1.0, 4.0, 1.0};
 
     auto const single1 = oneElectron({5.0, 5.0, 5.0}, u0);
     auto const single10 = oneElectron({5.0, 5.0, 5.0}, u10);
@@ -398,7 +398,7 @@ TEST(Audit, DiscreteGaussLawOnYeeLattice)
     {
         char const* label;
         picBunch::Bunch const* bunch;
-        std::array<double, 3> cellSize;
+        picBunch::Vec3 cellSize;
     };
     std::array<Case, 6> const cases{{
         {"single gamma1 aspect1", &single1, aspect1},
@@ -434,7 +434,7 @@ TEST(Audit, HighDensityOverlappingSources)
     // adds instead of cancelling.
     std::mt19937 generator(0x5EEDu);
     std::uniform_real_distribution<double> uniform(8.0, 10.0);
-    std::vector<std::array<double, 3>> positions(1000);
+    std::vector<picBunch::Vec3> positions(1000);
     for(auto& p : positions)
         p = {uniform(generator), uniform(generator), uniform(generator)};
 

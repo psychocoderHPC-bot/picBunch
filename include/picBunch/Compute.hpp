@@ -19,9 +19,9 @@ namespace picBunch
      * explicit value is not finite and positive, and ``std::runtime_error`` when
      * neither source is available.
      */
-    std::array<double, 3> resolveCellSize(
-        std::optional<std::array<double, 3>> const& explicitCellSize,
-        std::optional<std::array<double, 3>> const& meshCellSize);
+    Vec3 resolveCellSize(
+        std::optional<Vec3> const& explicitCellSize,
+        std::optional<Vec3> const& meshCellSize);
 
     /** Physical cell size from mesh metadata, or ``std::nullopt`` when unusable.
      *
@@ -31,7 +31,7 @@ namespace picBunch
      * second time in the CLI was the v0.1 regression.  It rejects non-finite or
      * non-positive spacing so the caller can fall back to ``--cell-size``.
      */
-    std::optional<std::array<double, 3>> physicalCellSize(picBunch::MeshGeometry const& geometry);
+    std::optional<Vec3> physicalCellSize(picBunch::MeshGeometry const& geometry);
 
     /** Physical grid origin from mesh metadata, or ``std::nullopt`` when unusable.
      *
@@ -40,7 +40,7 @@ namespace picBunch
      * offset verbatim and applies ``gridUnitSI`` nowhere.  Non-finite offsets are
      * rejected so the caller can fall back to the bunch bounding box.
      */
-    std::optional<std::array<double, 3>> physicalGridOrigin(picBunch::MeshGeometry const& geometry);
+    std::optional<Vec3> physicalGridOrigin(picBunch::MeshGeometry const& geometry);
 
     /** Output-grid extent from the mesh dataset shape, or ``std::nullopt`` when unusable.
      *
@@ -49,7 +49,7 @@ namespace picBunch
      * This helper copies the shape verbatim, so the conversion stays owned by
      * the reader.  A zero extent is rejected.
      */
-    std::optional<std::array<std::size_t, 3>> physicalGridExtent(picBunch::MeshGeometry const& geometry);
+    std::optional<Idx3> physicalGridExtent(picBunch::MeshGeometry const& geometry);
 
     /** Tolerance-derived field tail outside a compact source region.
      *
@@ -93,7 +93,7 @@ namespace picBunch
         double totalCharge = 0.0;
         double absoluteCharge = 0.0;
         double dipoleMagnitude = 0.0;
-        std::array<double, 3> dipoleMoment{0.0, 0.0, 0.0};
+        Vec3 dipoleMoment{0.0, 0.0, 0.0};
         std::array<double, 9> quadrupoleMoment{};
         //! Largest absolute eigenvalue of the traceless quadrupole tensor.
         double quadrupoleNorm = 0.0;
@@ -106,14 +106,14 @@ namespace picBunch
         //! Value of the bound at ``distance`` (same units as ``fieldPeak``).
         double bound = 0.0;
         //! Extra cells beyond each bounding-box face.
-        std::array<double, 3> marginCells{0.0, 0.0, 0.0};
+        Vec3 marginCells{0.0, 0.0, 0.0};
     };
 
     FieldTailMargin deriveFieldTailMargin(
         Bunch const& bunch,
         double fieldPeak,
         double tolerance,
-        std::array<double, 3> const& cellSize,
+        Vec3 const& cellSize,
         double maxDistance = 1.0e30);
 
     /** Build the output grid.

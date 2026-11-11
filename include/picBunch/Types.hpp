@@ -4,6 +4,8 @@
 
 #include "picBunch/Parallel.hpp"
 
+#include <alpaka/Vec.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +15,15 @@
 
 namespace picBunch
 {
+    /** Three-component physical vector (positions, momenta, cell sizes). */
+    using Vec3 = alpaka::Vec<double, 3u>;
+    /** Three-component index/extent vector in nodes or cells. */
+    using Idx3 = alpaka::Vec<std::size_t, 3u>;
+    /** Signed 64-bit cell-offset vector. */
+    using IVec3 = alpaka::Vec<std::int64_t, 3u>;
+    /** Unsigned 64-bit cell-extent vector. */
+    using UVec3 = alpaka::Vec<std::uint64_t, 3u>;
+
     //! Particle shape used for the TSC-style charge deposit.
     enum class Shape
     {
@@ -40,9 +51,9 @@ namespace picBunch
      */
     struct Grid
     {
-        std::array<std::size_t, 3> n{48, 48, 48};
-        std::array<double, 3> spacing{1.0, 1.0, 1.0}; //!< physical node spacing
-        std::array<double, 3> origin{0.0, 0.0, 0.0}; //!< physical position of node (0,0,0)
+        Idx3 n{48, 48, 48};
+        Vec3 spacing{1.0, 1.0, 1.0}; //!< physical node spacing
+        Vec3 origin{0.0, 0.0, 0.0}; //!< physical position of node (0,0,0)
         unsigned fftPadding{2};
         //! Deposit shape; the near shell currently supports TSC only.
         Shape shape = Shape::TSC;
@@ -53,7 +64,7 @@ namespace picBunch
             return n[0] * n[1] * n[2];
         }
         //! Number of nodes per axis of the zero-padded FFT box.
-        [[nodiscard]] std::array<std::size_t, 3> paddedSize() const
+        [[nodiscard]] Idx3 paddedSize() const
         {
             return {n[0] * fftPadding, n[1] * fftPadding, n[2] * fftPadding};
         }
@@ -82,7 +93,7 @@ namespace picBunch
         void resize(std::size_t n);
 
         /** min/max corner of the particle positions. */
-        [[nodiscard]] std::array<std::array<double, 3>, 2> bounds() const;
+        [[nodiscard]] std::array<Vec3, 2> bounds() const;
     };
 
     /** Six staggered field components on one grid.
@@ -129,8 +140,8 @@ namespace picBunch
      */
     struct ParticlePatch
     {
-        std::array<std::int64_t, 3> offset{0, 0, 0};
-        std::array<std::uint64_t, 3> extent{1, 1, 1};
+        IVec3 offset{0, 0, 0};
+        UVec3 extent{1, 1, 1};
     };
 
     //! Wall-clock time per pipeline stage, milliseconds.
@@ -273,17 +284,17 @@ namespace picBunch
         //! Total box count ``N1*N2*N3`` (1 for a single-velocity bunch).
         std::size_t count = 1u;
         //! Box counts per beam-frame axis.
-        std::array<std::size_t, 3> perAxis{1u, 1u, 1u};
+        Idx3 perAxis{1u, 1u, 1u};
         //! Orthonormal beam-frame basis, rows ``e1, e2, e3`` (lab frame).
-        std::array<std::array<double, 3>, 3> basis{{{1.0, 0.0, 0.0},
+        std::array<Vec3, 3> basis{{{1.0, 0.0, 0.0},
                                                     {0.0, 1.0, 0.0},
                                                     {0.0, 0.0, 1.0}}};
         //! Box extent in beam-frame ``u`` units, axis ``i``: ``[uMin[i], uMax[i]]``.
-        std::array<double, 3> uMin{0.0, 0.0, 0.0};
-        std::array<double, 3> uMax{0.0, 0.0, 0.0};
+        Vec3 uMin{0.0, 0.0, 0.0};
+        Vec3 uMax{0.0, 0.0, 0.0};
         //! Representative ``u`` (lab frame) per box, box index order
         //! ``i1 + N1*(i2 + N2*i3)``.
-        std::vector<std::array<double, 3>> representativeU;
+        std::vector<Vec3> representativeU;
         //! Box index of each particle; size equals the bunch size the binning
         //! was derived for.  A fixed binning applied to a sub-bunch must
         //! re-derive the assignment with ``boxIndex``.
@@ -380,7 +391,7 @@ namespace picBunch
          */
         double tolerance = 1e-3;
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
-        std::array<double, 3> cellSize{1.0, 1.0, 1.0};
+        Vec3 cellSize{1.0, 1.0, 1.0};
         /*! Diagnostic override of the FFT zero-padding factor; 0 selects the
          * tolerance policy.  A non-zero value (including 1 for the wraparound
          * test) bypasses the policy and must be >= 1.
@@ -393,7 +404,7 @@ namespace picBunch
          * bounding-box face, so anisotropic boxes do not pay the largest axis'
          * margin on every axis.  Unset keeps the scalar ``marginCells``.
          */
-        std::optional<std::array<double, 3>> marginCellsPerAxis;
+        std::optional<Vec3> marginCellsPerAxis;
         /*! Output-grid overrides supplied by the input mesh.
 
          * The CLI fills ``meshGridSize`` from the mesh dataset shape (already
@@ -402,8 +413,8 @@ namespace picBunch
          * and ``gridOrigin`` still win when set.  Leaving both unset keeps the
          * bunch-bounding-box derivation.
          */
-        std::optional<std::array<std::size_t, 3>> meshGridSize;
-        std::optional<std::array<double, 3>> meshGridOrigin;
+        std::optional<Idx3> meshGridSize;
+        std::optional<Vec3> meshGridOrigin;
         /*! Explicit output-grid overrides (metres / node counts).
 
          * Unset values keep the mesh default or, when there is no mesh, the
@@ -412,8 +423,8 @@ namespace picBunch
          * the mesh or derived value.  Grid node counts must be even and positive
          * so the R2C transform keeps its even last extent.
          */
-        std::optional<std::array<std::size_t, 3>> gridSize;
-        std::optional<std::array<double, 3>> gridOrigin;
+        std::optional<Idx3> gridSize;
+        std::optional<Vec3> gridOrigin;
         /*! Global output domain written by the chunked writer.
          *
          * The computation stays on the (small) output grid derived above; these
@@ -425,8 +436,8 @@ namespace picBunch
          * When unset, the written domain is the compute grid itself (the v0.1
          * behaviour).
          */
-        std::optional<std::array<std::size_t, 3>> globalGridSize;
-        std::optional<std::array<double, 3>> globalGridOrigin;
+        std::optional<Idx3> globalGridSize;
+        std::optional<Vec3> globalGridOrigin;
         /*! Serial host TSC deposit, used to make runs bitwise reproducible.
          *
          * The CUDA/HIP deposit uses double atomicAdd, whose summation order is
@@ -461,7 +472,7 @@ namespace picBunch
          * different approximation and leave a residual inside the shell.
          * Unset means "derive from the bunch" (the ordinary moment path).
          */
-        std::optional<std::array<double, 3>> velocityMomentsCentre;
+        std::optional<Vec3> velocityMomentsCentre;
         //! Precomputed binning to use verbatim instead of deriving it from the
         //! bunch.  The near shell sets this on every per-tile local mesh so
         //! the subtraction cancels the global mesh bin for bin.
@@ -488,6 +499,8 @@ namespace picBunch
         "B_z"};
 
     //! Yee offsets in units of the PIC cell, same order as kComponentNames.
+    //! Frozen [component][axis] table for the openPMD ``position`` attribute;
+    //! the C array keeps the 6x3 storage order explicit.
     inline constexpr double kYeeOffset[6][3] = {
         {0.5, 0.0, 0.0},
         {0.0, 0.5, 0.0},
@@ -512,10 +525,10 @@ namespace picBunch
      */
     struct MeshGeometry
     {
-        std::array<std::size_t, 3> shape{0, 0, 0};       //!< nodes per x, y, z
-        std::array<double, 3> gridSpacing{1.0, 1.0, 1.0}; //!< physical spacing per axis
-        std::array<double, 3> gridGlobalOffset{0.0, 0.0, 0.0}; //!< physical offset per axis
-        std::array<double, 3> gridUnitSI{1.0, 1.0, 1.0}; //!< raw gridUnitSI per axis
+        Idx3 shape{0, 0, 0};       //!< nodes per x, y, z
+        Vec3 gridSpacing{1.0, 1.0, 1.0}; //!< physical spacing per axis
+        Vec3 gridGlobalOffset{0.0, 0.0, 0.0}; //!< physical offset per axis
+        Vec3 gridUnitSI{1.0, 1.0, 1.0}; //!< raw gridUnitSI per axis
         std::array<std::string, 3> axisLabels{"x", "y", "z"};
         std::string geometry{"cartesian"};
         std::string dataOrder{"C"};

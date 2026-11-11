@@ -855,13 +855,13 @@ namespace picBunch
         }
     } // namespace
 
-    std::array<double, 3> resolveCellSize(
-        std::optional<std::array<double, 3>> const& explicitCellSize,
-        std::optional<std::array<double, 3>> const& meshCellSize)
+    Vec3 resolveCellSize(
+        std::optional<Vec3> const& explicitCellSize,
+        std::optional<Vec3> const& meshCellSize)
     {
-        auto validate = [](std::array<double, 3> const& value, char const* source) {
-            for(double c : value)
-                if(!(c > 0.0) || !std::isfinite(c))
+        auto validate = [](Vec3 const& value, char const* source) {
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(double const c = value[a]; !(c > 0.0) || !std::isfinite(c))
                     throw std::invalid_argument(
                         std::string("resolveCellSize: ") + source + " cell size must be finite and positive");
         };
@@ -880,34 +880,34 @@ namespace picBunch
             "pass --cell-size <dx>[,<dy>,<dz>] in metres");
     }
 
-    std::optional<std::array<double, 3>> physicalCellSize(MeshGeometry const& geometry)
+    std::optional<Vec3> physicalCellSize(MeshGeometry const& geometry)
     {
         // readMeshGeometry returns physical SI spacing and offset.  Do not
         // multiply by geometry.gridUnitSI here: the reader already did it, and
         // the CLI did it again in v0.1 (physical 1e-6 m became 1e-12 m).
-        for(double spacing : geometry.gridSpacing)
-            if(!(spacing > 0.0) || !std::isfinite(spacing))
+        for(std::size_t a = 0u; a < 3u; ++a)
+            if(double const spacing = geometry.gridSpacing[a]; !(spacing > 0.0) || !std::isfinite(spacing))
                 return std::nullopt;
         return geometry.gridSpacing;
     }
 
-    std::optional<std::array<double, 3>> physicalGridOrigin(MeshGeometry const& geometry)
+    std::optional<Vec3> physicalGridOrigin(MeshGeometry const& geometry)
     {
         // Same ownership rule as the spacing: readMeshGeometry already multiplied
         // gridGlobalOffset by gridUnitSI, so the CLI must not apply it again.
-        for(double offset : geometry.gridGlobalOffset)
-            if(!std::isfinite(offset))
+        for(std::size_t a = 0u; a < 3u; ++a)
+            if(double const offset = geometry.gridGlobalOffset[a]; !std::isfinite(offset))
                 return std::nullopt;
         return geometry.gridGlobalOffset;
     }
 
-    std::optional<std::array<std::size_t, 3>> physicalGridExtent(MeshGeometry const& geometry)
+    std::optional<Idx3> physicalGridExtent(MeshGeometry const& geometry)
     {
         // readMeshGeometry already mapped the dataset extent from the stored axis
         // order to x,y,z.  A node count has no unit conversion; the reader owns
         // the gridUnitSI handling of spacing and offset.
-        for(std::size_t nodes : geometry.shape)
-            if(nodes == 0u)
+        for(std::size_t a = 0u; a < 3u; ++a)
+            if(std::size_t const nodes = geometry.shape[a]; nodes == 0u)
                 return std::nullopt;
         return geometry.shape;
     }
@@ -916,7 +916,7 @@ namespace picBunch
         Bunch const& bunch,
         double fieldPeak,
         double tolerance,
-        std::array<double, 3> const& cellSize,
+        Vec3 const& cellSize,
         double maxDistance)
     {
         if(bunch.size() == 0u)
@@ -927,16 +927,16 @@ namespace picBunch
             throw std::invalid_argument("deriveFieldTailMargin: field peak must be finite and non-negative");
         if(!(maxDistance > 0.0) || !std::isfinite(maxDistance))
             throw std::invalid_argument("deriveFieldTailMargin: maxDistance must be finite and positive");
-        for(double h : cellSize)
-            if(!(h > 0.0) || !std::isfinite(h))
+        for(std::size_t a = 0u; a < 3u; ++a)
+            if(double const h = cellSize[a]; !(h > 0.0) || !std::isfinite(h))
                 throw std::invalid_argument("deriveFieldTailMargin: cell sizes must be finite and positive");
 
         // Source moments about the bounding-box centre.  Using the box half
         // extents for the per-axis conversion is tighter than the circumscribed
         // radius and still bounds every point outside the expanded box.
         auto const bounds = bunch.bounds();
-        std::array<double, 3> centre{};
-        std::array<double, 3> halfExtent{};
+        Vec3 centre{};
+        Vec3 halfExtent{};
         for(int a = 0; a < 3; ++a)
         {
             centre[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
@@ -945,7 +945,7 @@ namespace picBunch
 
         double totalCharge = 0.0;
         double absoluteCharge = 0.0;
-        std::array<double, 3> dipole{0.0, 0.0, 0.0};
+        Vec3 dipole{0.0, 0.0, 0.0};
         std::array<double, 9> quadrupole{};
         double sourceRadius = 0.0;
         double maxGamma = 1.0;
@@ -957,7 +957,7 @@ namespace picBunch
             double const q = bunch.weight[p] * bunch.charge[p];
             totalCharge += q;
             absoluteCharge += std::abs(q);
-            std::array<double, 3> const displacement{
+            Vec3 const displacement{
                 bunch.x[p] - centre[0],
                 bunch.y[p] - centre[1],
                 bunch.z[p] - centre[2]};
@@ -1053,12 +1053,12 @@ namespace picBunch
         if(options.marginCells < 0.0)
             throw std::invalid_argument("makeGrid: marginCells must not be negative");
         if(options.marginCellsPerAxis)
-            for(double margin : *options.marginCellsPerAxis)
-                if(!(margin >= 0.0) || !std::isfinite(margin))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(double const margin = (*options.marginCellsPerAxis)[a]; !(margin >= 0.0) || !std::isfinite(margin))
                     throw std::invalid_argument(
                         "makeGrid: every marginCellsPerAxis value must be finite and non-negative");
-        for(double c : options.cellSize)
-            if(!(c > 0.0) || !std::isfinite(c))
+        for(std::size_t a = 0u; a < 3u; ++a)
+            if(double const c = options.cellSize[a]; !(c > 0.0) || !std::isfinite(c))
                 throw std::invalid_argument("makeGrid: every cell size must be finite and positive");
 
         auto const b = bunch.bounds();
@@ -1131,7 +1131,7 @@ namespace picBunch
         }
         // An explicit --origin overrides the mesh gridGlobalOffset, which in
         // turn overrides the derived bunch-box minimum.
-        std::optional<std::array<double, 3>> const& originOverride
+        std::optional<Vec3> const& originOverride
             = options.gridOrigin ? options.gridOrigin : options.meshGridOrigin;
         if(originOverride)
         {
@@ -1149,9 +1149,9 @@ namespace picBunch
         // no interpolation is needed; clip it to the global extent.
         if(options.globalGridSize)
         {
-            std::array<std::size_t, 3> const globalN = *options.globalGridSize;
-            std::array<double, 3> const globalOrigin
-                = options.globalGridOrigin.value_or(std::array<double, 3>{0.0, 0.0, 0.0});
+            Idx3 const globalN = *options.globalGridSize;
+            Vec3 const globalOrigin
+                = options.globalGridOrigin.value_or(Vec3{0.0, 0.0, 0.0});
             for(int a = 0; a < 3; ++a)
             {
                 if(globalN[a] == 0u || globalN[a] % 2u != 0u)
@@ -1197,8 +1197,8 @@ namespace picBunch
         // a trace.  Reject that instead.  The physical extent of the node set
         // is [origin, origin + n*spacing], matching the mesh dataset extent.
         {
-            std::array<double, 3> lower{};
-            std::array<double, 3> upper{};
+            Vec3 lower{};
+            Vec3 upper{};
             for(int a = 0; a < 3; ++a)
             {
                 lower[a] = grid.origin[a];
@@ -1387,7 +1387,7 @@ namespace picBunch
         Extents3 const realExt{Mz, My, Mx};
         Extents3 const specExt{Mz, My, CP};
 
-        auto const cell = std::array<double, 3>{
+        auto const cell = Vec3{
             grid.spacing[0] / kRefinement,
             grid.spacing[1] / kRefinement,
             grid.spacing[2] / kRefinement};
@@ -2039,7 +2039,7 @@ namespace picBunch
 
             if(bunch.size() > 0u && bunch.size() <= 0xffffffffu)
             {
-                std::array<double, 3> u0{};
+                Vec3 u0{};
                 double maxSpread = 0.0;
                 try
                 {
@@ -2479,12 +2479,12 @@ namespace picBunch
                 = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy);
 
             std::size_t globalNz = grid.n[2];
-            std::array<double, 3> writeOrigin = grid.origin;
+            Vec3 writeOrigin = grid.origin;
             if(options.globalGridSize)
             {
                 globalNz = (*options.globalGridSize)[2];
                 writeOrigin = options.globalGridOrigin.value_or(
-                    std::array<double, 3>{0.0, 0.0, 0.0});
+                    Vec3{0.0, 0.0, 0.0});
             }
             long long const base2 = static_cast<long long>(std::llround(
                 (grid.origin[2] - writeOrigin[2]) / grid.spacing[2]));
@@ -2648,7 +2648,7 @@ namespace picBunch
                 // ------------------------------------------- rho forward transform
                 dfft.forwardWorkToSpectrum();
 
-                std::array<double, 3> const uRep{
+                Vec3 const uRep{
                     binning.representativeU[b][0],
                     binning.representativeU[b][1],
                     binning.representativeU[b][2]};
@@ -2796,7 +2796,7 @@ namespace picBunch
             using OutRealViewExtents = typename MdSpanExtents<OutRealView>::type;
             static_assert(std::is_same_v<typename OutRealViewExtents::value_type, std::uint32_t>);
 
-            std::array<double, 3> const uRep{
+            Vec3 const uRep{
                 binning.representativeU[b][0],
                 binning.representativeU[b][1],
                 binning.representativeU[b][2]};

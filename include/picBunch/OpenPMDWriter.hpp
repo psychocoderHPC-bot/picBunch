@@ -92,8 +92,8 @@ namespace picBunch
         Field const& field,
         std::string const& fileName,
         FieldWriteOptions const& options,
-        std::array<std::size_t, 3> const& globalGridSize,
-        std::array<double, 3> const& globalGridOrigin,
+        Idx3 const& globalGridSize,
+        Vec3 const& globalGridOrigin,
         FarTail const* tail = nullptr);
 
 
@@ -123,10 +123,10 @@ namespace picBunch
     {
         std::string species;
         Bunch bunch; //!< positions already shifted to the placement
-        std::array<double, 3> domainOrigin{0.0, 0.0, 0.0}; //!< SI metres
-        std::array<double, 3> cellSize{1.0, 1.0, 1.0}; //!< SI metres
-        std::array<std::int64_t, 3> patchOffset{0, 0, 0}; //!< cells from domain origin
-        std::array<std::uint64_t, 3> patchExtent{1, 1, 1};
+        Vec3 domainOrigin{0.0, 0.0, 0.0}; //!< SI metres
+        Vec3 cellSize{1.0, 1.0, 1.0}; //!< SI metres
+        IVec3 patchOffset{0, 0, 0}; //!< cells from domain origin
+        UVec3 patchExtent{1, 1, 1};
         //! Patch regions.  Empty keeps the single ``patchOffset``/``patchExtent``
         //! layout.  With more than one, particles are reordered so each patch
         //! owns a contiguous range and ``numParticlesOffset`` is cumulative.

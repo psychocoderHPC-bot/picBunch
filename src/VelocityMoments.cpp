@@ -16,7 +16,7 @@
 
 namespace picBunch
 {
-    std::array<double, 3> velocityMomentsCentre(Bunch const& bunch)
+    Vec3 velocityMomentsCentre(Bunch const& bunch)
     {
         std::size_t const n = bunch.size();
         if(n == 0u)
@@ -39,7 +39,7 @@ namespace picBunch
         return {sum[0] / w, sum[1] / w, sum[2] / w};
     }
 
-    double velocityMomentsRadius(Bunch const& bunch, std::array<double, 3> const& u0)
+    double velocityMomentsRadius(Bunch const& bunch, Vec3 const& u0)
     {
         double r = 0.0;
         for(std::size_t p = 0; p < bunch.size(); ++p)

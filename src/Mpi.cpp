@@ -77,22 +77,22 @@ namespace picBunch
 
         void hashOptionalSizes(
             OptionsHasher& hasher,
-            std::optional<std::array<std::size_t, 3>> const& value)
+            std::optional<Idx3> const& value)
         {
             hasher.u64(value ? 1u : 0u);
             if(value)
-                for(auto const entry : *value)
-                    hasher.u64(static_cast<std::uint64_t>(entry));
+                for(std::size_t a = 0u; a < 3u; ++a)
+                    hasher.u64(static_cast<std::uint64_t>((*value)[a]));
         }
 
         void hashOptionalReals(
             OptionsHasher& hasher,
-            std::optional<std::array<double, 3>> const& value)
+            std::optional<Vec3> const& value)
         {
             hasher.u64(value ? 1u : 0u);
             if(value)
-                for(auto const entry : *value)
-                    hasher.real(entry);
+                for(std::size_t a = 0u; a < 3u; ++a)
+                    hasher.real((*value)[a]);
         }
     } // namespace
 
@@ -234,8 +234,8 @@ namespace picBunch
         hasher.u64(static_cast<std::uint64_t>(options.shape));
         hasher.u64(static_cast<std::uint64_t>(options.velocityMoments.mode));
         hasher.u64(static_cast<std::uint64_t>(options.velocityMoments.order));
-        for(auto const entry : options.cellSize)
-            hasher.real(entry);
+        for(std::size_t a = 0u; a < 3u; ++a)
+            hasher.real(options.cellSize[a]);
         // Optional grid overrides: presence plus values.
         hashOptionalSizes(hasher, options.meshGridSize);
         hashOptionalReals(hasher, options.meshGridOrigin);
@@ -281,7 +281,7 @@ namespace picBunch
         MPI_Bcast(integers, 14, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         // Optional arrays: one presence flag, then three values each.
-        auto broadcastOptional = [&](std::optional<std::array<std::size_t, 3>>& value) {
+        auto broadcastOptional = [&](std::optional<Idx3>& value) {
             std::uint64_t present = (mpiRank() == root && value) ? 1u : 0u;
             MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
             if(present == 0u)
@@ -294,12 +294,12 @@ namespace picBunch
                 for(int a = 0; a < 3; ++a)
                     data[a] = (*value)[static_cast<std::size_t>(a)];
             MPI_Bcast(data, 3, MPI_UINT64_T, root, MPI_COMM_WORLD);
-            value = std::array<std::size_t, 3>{
+            value = Idx3{
                 static_cast<std::size_t>(data[0]),
                 static_cast<std::size_t>(data[1]),
                 static_cast<std::size_t>(data[2])};
         };
-        auto broadcastOptionalDouble = [&](std::optional<std::array<double, 3>>& value) {
+        auto broadcastOptionalDouble = [&](std::optional<Vec3>& value) {
             std::uint64_t present = (mpiRank() == root && value) ? 1u : 0u;
             MPI_Bcast(&present, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
             if(present == 0u)
@@ -312,7 +312,7 @@ namespace picBunch
                 for(int a = 0; a < 3; ++a)
                     data[a] = (*value)[static_cast<std::size_t>(a)];
             MPI_Bcast(data, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
-            value = std::array<double, 3>{data[0], data[1], data[2]};
+            value = Vec3{data[0], data[1], data[2]};
         };
         broadcastOptional(options.meshGridSize);
         broadcastOptionalDouble(options.meshGridOrigin);

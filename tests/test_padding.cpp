@@ -302,7 +302,7 @@ TEST(Padding, ExplicitPaddingOneSupportsLargeGridAndPaddingTwoHitsTheGuard)
 
     options.fftPadding = 1;
     picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
-    EXPECT_EQ(grid.n, (std::array<std::size_t, 3>{384u, 384u, 384u}));
+    EXPECT_EQ(grid.n, (picBunch::Idx3{384u, 384u, 384u}));
     EXPECT_EQ(grid.fftPadding, 1u);
 
     options.fftPadding = 2;

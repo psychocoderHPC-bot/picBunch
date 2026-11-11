@@ -41,11 +41,11 @@ namespace picBunch
      */
     struct FarTail
     {
-        std::array<double, 3> centre{0.0, 0.0, 0.0};
+        Vec3 centre{0.0, 0.0, 0.0};
         double charge = 0.0;
-        std::array<double, 3> dipole{0.0, 0.0, 0.0};
+        Vec3 dipole{0.0, 0.0, 0.0};
         std::array<double, 9> quadrupole{};
-        std::array<double, 3> meanVelocity{0.0, 0.0, 0.0};
+        Vec3 meanVelocity{0.0, 0.0, 0.0};
         double supportRadius = 0.0;
         double switchDistance = 0.0;
         double gammaMax = 1.0;
@@ -73,9 +73,9 @@ namespace picBunch
     {
         //! Centre of the flattened tail; only used for the ``r == 0`` test that
         //! short-circuits the whole evaluation.
-        std::array<double, 3> centre{0.0, 0.0, 0.0};
+        Vec3 centre{0.0, 0.0, 0.0};
         //! Velocity used by the magnetic field, ``B = v x E / c^2``.
-        std::array<double, 3> meanVelocity{0.0, 0.0, 0.0};
+        Vec3 meanVelocity{0.0, 0.0, 0.0};
         //! Number of flattened groups.
         std::size_t count = 0;
         std::vector<double> centreX, centreY, centreZ;
@@ -97,7 +97,7 @@ namespace picBunch
     FarTail deriveFarTail(
         Bunch const& bunch,
         double switchFactor = 6.0,
-        std::array<double, 3> const& cellSize = {0.0, 0.0, 0.0},
+        Vec3 const& cellSize = {0.0, 0.0, 0.0},
         int groupCells = 0);
 
     /** Flatten a tail and its spatial groups into an evaluation-ready batch.
@@ -109,27 +109,27 @@ namespace picBunch
     FarTailBatch makeFarTailBatch(FarTail const& tail);
 
     //! Static multipole electric field of the tail at a physical position.
-    std::array<double, 3> evaluateFarTailE(
+    Vec3 evaluateFarTailE(
         FarTail const& tail,
-        std::array<double, 3> const& position);
+        Vec3 const& position);
 
     //! Uniform-velocity magnetic field of the tail, ``v x E / c^2``.
-    std::array<double, 3> evaluateFarTailB(
+    Vec3 evaluateFarTailB(
         FarTail const& tail,
-        std::array<double, 3> const& position);
+        Vec3 const& position);
 
     /** Static multipole electric field of a flattened tail.
      *
      * Same value as the :cpp:struct:`FarTail` overload, without per-node
      * per-group constant recomputation.
      */
-    std::array<double, 3> evaluateFarTailE(
+    Vec3 evaluateFarTailE(
         FarTailBatch const& tail,
-        std::array<double, 3> const& position);
+        Vec3 const& position);
 
     //! Magnetic field of a flattened tail, ``v x E / c^2``.
-    std::array<double, 3> evaluateFarTailB(
+    Vec3 evaluateFarTailB(
         FarTailBatch const& tail,
-        std::array<double, 3> const& position);
+        Vec3 const& position);
 
 } // namespace picBunch
