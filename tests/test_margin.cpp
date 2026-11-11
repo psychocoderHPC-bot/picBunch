@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <random>
 #include <vector>
 
@@ -592,4 +593,77 @@ TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
     double const groupedWorst = worstFor(grouped);
     EXPECT_LT(groupedWorst, globalWorst) << "grouped multipoles must improve the tail";
     EXPECT_LT(groupedWorst, 5.0e-4);
+}
+
+TEST(Margin, FarTailBatchMatchesRecursiveGroups)
+{
+    // The flattened batch path is what the writer uses.  It must reproduce the
+    // recursive group evaluation bit for bit: same expressions, same group
+    // order, no reassociation.  ``memcmp`` is used instead of ``==`` so a
+    // changed signed zero is caught as well.
+    auto sameBits = [](double a, double b) { return std::memcmp(&a, &b, sizeof(double)) == 0; };
+    auto compare = [&](picBunch::FarTail const& tail, std::array<double, 3> const& point) {
+        auto const referenceE = picBunch::evaluateFarTailE(tail, point);
+        auto const referenceB = picBunch::evaluateFarTailB(tail, point);
+        auto const batch = picBunch::makeFarTailBatch(tail);
+        auto const batchE = picBunch::evaluateFarTailE(batch, point);
+        auto const batchB = picBunch::evaluateFarTailB(batch, point);
+        for(int a = 0; a < 3; ++a)
+        {
+            EXPECT_TRUE(sameBits(referenceE[a], batchE[a])) << "E[" << a << "] differs";
+            EXPECT_TRUE(sameBits(referenceB[a], batchB[a])) << "B[" << a << "] differs";
+        }
+    };
+
+    auto fill = [](std::size_t n, double clusterOffset, double uz) {
+        picBunch::Bunch bunch;
+        bunch.resize(n);
+        for(std::size_t i = 0; i < n; ++i)
+        {
+            double const side = (i < n / 2) ? -1.0 : 1.0;
+            bunch.x[i] = side * clusterOffset + 0.3 * static_cast<double>(i % 7);
+            bunch.y[i] = 0.2 * static_cast<double>(i % 11) - 1.0;
+            bunch.z[i] = 0.1 * static_cast<double>(i % 13) - 0.6;
+            bunch.ux[i] = 0.05 * static_cast<double>(i % 5) - 0.1;
+            bunch.uy[i] = 0.02 * static_cast<double>(i % 3);
+            bunch.uz[i] = uz + 0.01 * static_cast<double>(i % 9);
+            bunch.weight[i] = 1.0;
+            bunch.charge[i] = -picBunch::kElementaryCharge;
+            bunch.restMass[i] = 9.1093837015e-31;
+        }
+        return bunch;
+    };
+
+    std::array<std::array<double, 3>, 8> directions{{
+        {1.0, 0.0, 0.0},
+        {0.0, 1.0, 0.0},
+        {0.0, 0.0, 1.0},
+        {1.0, 1.0, 0.0},
+        {0.0, 1.0, 1.0},
+        {1.0, 1.0, 1.0},
+        {1.0, -1.0, 0.5},
+        {-0.5, 0.25, 1.0},
+    }};
+
+    for(double uz : {0.0, 99.0})
+    {
+        auto const bunch = fill(600, 2.0, uz);
+        for(int groupCells : {0, 2, 5})
+        {
+            auto const tail = picBunch::deriveFarTail(bunch, 6.0, {1.0, 1.0, 1.0}, groupCells);
+            // Exact centre (r == 0) as well as the centres of the first groups,
+            // which exercise the per-group early-out.
+            compare(tail, tail.centre);
+            for(std::size_t g = 0; g < std::min<std::size_t>(tail.groups.size(), 3u); ++g)
+                compare(tail, tail.groups[g].centre);
+            for(double factor : {1.5, 3.0, 6.0, 12.0})
+                for(auto const& direction : directions)
+                {
+                    std::array<double, 3> point = tail.centre;
+                    for(int a = 0; a < 3; ++a)
+                        point[a] += factor * tail.supportRadius * direction[a];
+                    compare(tail, point);
+                }
+        }
+    }
 }

@@ -451,4 +451,303 @@ namespace picBunch
             (v[0] * e[1] - v[1] * e[0]) * inverseC2};
     }
 
+    FarTailBatch makeFarTailBatch(FarTail const& tail)
+    {
+        FarTailBatch batch;
+        batch.centre = tail.centre;
+        batch.meanVelocity = tail.meanVelocity;
+
+        auto append = [&batch](FarTail const& entry)
+        {
+            batch.centreX.push_back(entry.centre[0]);
+            batch.centreY.push_back(entry.centre[1]);
+            batch.centreZ.push_back(entry.centre[2]);
+            batch.charge.push_back(entry.charge);
+            batch.dipoleX.push_back(entry.dipole[0]);
+            batch.dipoleY.push_back(entry.dipole[1]);
+            batch.dipoleZ.push_back(entry.dipole[2]);
+            for(int i = 0; i < 9; ++i)
+                batch.quadrupole[static_cast<std::size_t>(i)].push_back(entry.quadrupole[i]);
+
+            // Precompute the boost geometry once per group instead of once per
+            // node and group.  The expressions match evaluateFarTailE exactly.
+            double const c = kSpeedOfLight;
+            std::array<double, 3> const beta{
+                entry.meanVelocity[0] / c,
+                entry.meanVelocity[1] / c,
+                entry.meanVelocity[2] / c};
+            double const betaSq = beta[0] * beta[0] + beta[1] * beta[1] + beta[2] * beta[2];
+            double const invG2 = std::max(1.0 - betaSq, 1.0e-15);
+            double const gamma = 1.0 / std::sqrt(invG2);
+            double const bnorm = std::sqrt(betaSq);
+            batch.betaX.push_back(beta[0]);
+            batch.betaY.push_back(beta[1]);
+            batch.betaZ.push_back(beta[2]);
+            batch.bhatX.push_back((bnorm > 0.0) ? beta[0] / bnorm : 0.0);
+            batch.bhatY.push_back((bnorm > 0.0) ? beta[1] / bnorm : 0.0);
+            batch.bhatZ.push_back((bnorm > 0.0) ? beta[2] / bnorm : 0.0);
+            batch.invGamma2.push_back(invG2);
+            batch.gammaMinusOne.push_back(gamma - 1.0);
+        };
+
+        if(tail.groups.empty())
+        {
+            append(tail);
+        }
+        else
+        {
+            std::size_t const groups = tail.groups.size();
+            batch.centreX.reserve(groups);
+            batch.centreY.reserve(groups);
+            batch.centreZ.reserve(groups);
+            batch.charge.reserve(groups);
+            batch.dipoleX.reserve(groups);
+            batch.dipoleY.reserve(groups);
+            batch.dipoleZ.reserve(groups);
+            for(auto& component : batch.quadrupole)
+                component.reserve(groups);
+            batch.betaX.reserve(groups);
+            batch.betaY.reserve(groups);
+            batch.betaZ.reserve(groups);
+            batch.bhatX.reserve(groups);
+            batch.bhatY.reserve(groups);
+            batch.bhatZ.reserve(groups);
+            batch.invGamma2.reserve(groups);
+            batch.gammaMinusOne.reserve(groups);
+            for(auto const& group : tail.groups)
+            {
+                if(!group.groups.empty())
+                    throw std::invalid_argument(
+                        "makeFarTailBatch: nested far-tail groups are not supported");
+                append(group);
+            }
+        }
+        batch.count = batch.centreX.size();
+        return batch;
+    }
+
+    namespace
+    {
+        /*! Evaluate ``W`` consecutive flattened groups at one position.
+         *
+         * The group loop is split into stages that each read contiguous arrays
+         * and write one staging array.  Every stage is a plain elementwise loop
+         * over ``W`` lanes, so the compiler vectorises it and the independent
+         * lanes hide the ``sqrt``/divide latency.  The expressions and their
+         * association match :cpp:func:`evaluateFarTailE` term by term, so the
+         * results are bit-identical.
+         */
+        template<std::size_t W>
+        void evaluateBatchBlock(
+            FarTailBatch const& batch,
+            std::size_t base,
+            std::array<double, 3> const& position,
+            std::array<double, W>& ex,
+            std::array<double, W>& ey,
+            std::array<double, W>& ez)
+        {
+            std::array<double, W> r0;
+            std::array<double, W> r1;
+            std::array<double, W> r2;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                r0[k] = position[0] - batch.centreX[i];
+                r1[k] = position[1] - batch.centreY[i];
+                r2[k] = position[2] - batch.centreZ[i];
+            }
+            std::array<double, W> d2;
+            for(std::size_t k = 0; k < W; ++k)
+                d2[k] = r0[k] * r0[k] + r1[k] * r1[k] + r2[k] * r2[k];
+            std::array<double, W> active;
+            for(std::size_t k = 0; k < W; ++k)
+                active[k] = (d2[k] == 0.0) ? 0.0 : 1.0;
+
+            // Rest-frame observation vector.
+            std::array<double, W> rr0;
+            std::array<double, W> rr1;
+            std::array<double, W> rr2;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                double const rn = r0[k] * batch.bhatX[i] + r1[k] * batch.bhatY[i]
+                    + r2[k] * batch.bhatZ[i];
+                double const g1 = batch.gammaMinusOne[i];
+                rr0[k] = r0[k] + g1 * rn * batch.bhatX[i];
+                rr1[k] = r1[k] + g1 * rn * batch.bhatY[i];
+                rr2[k] = r2[k] + g1 * rn * batch.bhatZ[i];
+            }
+            std::array<double, W> d2r;
+            for(std::size_t k = 0; k < W; ++k)
+                d2r[k] = rr0[k] * rr0[k] + rr1[k] * rr1[k] + rr2[k] * rr2[k];
+            std::array<double, W> dr;
+            std::array<double, W> restActive;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                restActive[k] = (d2r[k] > 0.0) ? 1.0 : 0.0;
+                dr[k] = std::sqrt((d2r[k] > 0.0) ? d2r[k] : 1.0);
+            }
+            std::array<double, W> nr0;
+            std::array<double, W> nr1;
+            std::array<double, W> nr2;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                double const safe = (restActive[k] != 0.0) ? dr[k] : 1.0;
+                nr0[k] = (restActive[k] != 0.0) ? rr0[k] / safe : 0.0;
+                nr1[k] = (restActive[k] != 0.0) ? rr1[k] / safe : 0.0;
+                nr2[k] = (restActive[k] != 0.0) ? rr2[k] / safe : 0.0;
+            }
+
+            std::array<double, W> pDotN;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                pDotN[k] = batch.dipoleX[i] * nr0[k] + batch.dipoleY[i] * nr1[k]
+                    + batch.dipoleZ[i] * nr2[k];
+            }
+            std::array<double, W> qn0;
+            std::array<double, W> qn1;
+            std::array<double, W> qn2;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                qn0[k] = batch.quadrupole[0][i] * nr0[k] + batch.quadrupole[1][i] * nr1[k]
+                    + batch.quadrupole[2][i] * nr2[k];
+                qn1[k] = batch.quadrupole[3][i] * nr0[k] + batch.quadrupole[4][i] * nr1[k]
+                    + batch.quadrupole[5][i] * nr2[k];
+                qn2[k] = batch.quadrupole[6][i] * nr0[k] + batch.quadrupole[7][i] * nr1[k]
+                    + batch.quadrupole[8][i] * nr2[k];
+            }
+            std::array<double, W> nDotDn;
+            for(std::size_t k = 0; k < W; ++k)
+                nDotDn[k] = nr0[k] * qn0[k] + nr1[k] * qn1[k] + nr2[k] * qn2[k];
+
+            std::array<double, W> dipoleScale;
+            std::array<double, W> quadrupoleScale;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                double const drSafe = (restActive[k] != 0.0) ? dr[k] : 1.0;
+                dipoleScale[k] = kCoulombConstant * 2.0 / (d2r[k] * drSafe);
+                quadrupoleScale[k] = kCoulombConstant * 0.5 / (d2r[k] * d2r[k]);
+            }
+            std::array<double, W> h0;
+            std::array<double, W> h1;
+            std::array<double, W> h2;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                double const dipoleTerm0 = (1.5 * pDotN[k]) * nr0[k] - 0.5 * batch.dipoleX[i];
+                double const dipoleTerm1 = (1.5 * pDotN[k]) * nr1[k] - 0.5 * batch.dipoleY[i];
+                double const dipoleTerm2 = (1.5 * pDotN[k]) * nr2[k] - 0.5 * batch.dipoleZ[i];
+                double const quadrupoleTerm0 = (5.0 * nDotDn[k]) * nr0[k] - 2.0 * qn0[k];
+                double const quadrupoleTerm1 = (5.0 * nDotDn[k]) * nr1[k] - 2.0 * qn1[k];
+                double const quadrupoleTerm2 = (5.0 * nDotDn[k]) * nr2[k] - 2.0 * qn2[k];
+                h0[k] = dipoleScale[k] * dipoleTerm0 + quadrupoleScale[k] * quadrupoleTerm0;
+                h1[k] = dipoleScale[k] * dipoleTerm1 + quadrupoleScale[k] * quadrupoleTerm1;
+                h2[k] = dipoleScale[k] * dipoleTerm2 + quadrupoleScale[k] * quadrupoleTerm2;
+            }
+
+            // Boost to the lab.  For a stationary group ``gammaMinusOne == 0``
+            // exactly, so the add is a no-op and the scalar reference's branch
+            // is not needed.
+            std::array<double, W> ePar;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                ePar[k] = h0[k] * batch.bhatX[i] + h1[k] * batch.bhatY[i]
+                    + h2[k] * batch.bhatZ[i];
+            }
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                double const g1 = batch.gammaMinusOne[i];
+                h0[k] = h0[k] + g1 * (h0[k] - ePar[k] * batch.bhatX[i]);
+                h1[k] = h1[k] + g1 * (h1[k] - ePar[k] * batch.bhatY[i]);
+                h2[k] = h2[k] + g1 * (h2[k] - ePar[k] * batch.bhatZ[i]);
+            }
+
+            // Exact Lienard monopole of the group charge.
+            std::array<double, W> rb;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                rb[k] = r0[k] * batch.betaX[i] + r1[k] * batch.betaY[i]
+                    + r2[k] * batch.betaZ[i];
+            }
+            std::array<double, W> monopoleF;
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                std::size_t const i = base + k;
+                double const invG2 = batch.invGamma2[i];
+                double const denom = d2[k] * invG2 + rb[k] * rb[k];
+                monopoleF[k] = (denom > 0.0)
+                    ? kCoulombConstant * batch.charge[i] * invG2 / (denom * std::sqrt(denom))
+                    : 0.0;
+            }
+            for(std::size_t k = 0; k < W; ++k)
+            {
+                ex[k] = (active[k] != 0.0) ? (h0[k] + monopoleF[k] * r0[k]) : 0.0;
+                ey[k] = (active[k] != 0.0) ? (h1[k] + monopoleF[k] * r1[k]) : 0.0;
+                ez[k] = (active[k] != 0.0) ? (h2[k] + monopoleF[k] * r2[k]) : 0.0;
+            }
+        }
+    } // namespace
+
+    std::array<double, 3> evaluateFarTailE(
+        FarTailBatch const& batch,
+        std::array<double, 3> const& position)
+    {
+        std::array<double, 3> const r{
+            position[0] - batch.centre[0],
+            position[1] - batch.centre[1],
+            position[2] - batch.centre[2]};
+        double const d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        if(d2 == 0.0)
+            return {0.0, 0.0, 0.0};
+
+        std::array<double, 3> sum{0.0, 0.0, 0.0};
+        constexpr std::size_t kWidth = 8;
+        std::size_t i = 0;
+        for(; i + kWidth <= batch.count; i += kWidth)
+        {
+            std::array<double, kWidth> ex{};
+            std::array<double, kWidth> ey{};
+            std::array<double, kWidth> ez{};
+            evaluateBatchBlock<kWidth>(batch, i, position, ex, ey, ez);
+            // Keep the group order of the recursive sum so the result stays
+            // bit-identical.
+            for(std::size_t k = 0; k < kWidth; ++k)
+            {
+                sum[0] += ex[k];
+                sum[1] += ey[k];
+                sum[2] += ez[k];
+            }
+        }
+        for(; i < batch.count; ++i)
+        {
+            std::array<double, 1> ex{};
+            std::array<double, 1> ey{};
+            std::array<double, 1> ez{};
+            evaluateBatchBlock<1>(batch, i, position, ex, ey, ez);
+            sum[0] += ex[0];
+            sum[1] += ey[0];
+            sum[2] += ez[0];
+        }
+        return sum;
+    }
+
+    std::array<double, 3> evaluateFarTailB(
+        FarTailBatch const& batch,
+        std::array<double, 3> const& position)
+    {
+        auto const e = evaluateFarTailE(batch, position);
+        std::array<double, 3> const& v = batch.meanVelocity;
+        double const inverseC2 = 1.0 / (kSpeedOfLight * kSpeedOfLight);
+        return {
+            (v[1] * e[2] - v[2] * e[1]) * inverseC2,
+            (v[2] * e[0] - v[0] * e[2]) * inverseC2,
+            (v[0] * e[1] - v[1] * e[0]) * inverseC2};
+    }
+
+
 } // namespace picBunch
