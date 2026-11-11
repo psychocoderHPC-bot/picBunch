@@ -57,7 +57,7 @@ namespace
         return bunch;
     }
 
-    std::array<double, 3> serialCentre(Bunch const& bunch)
+    picBunch::Vec3 serialCentre(Bunch const& bunch)
     {
         double sum[3] = {0.0, 0.0, 0.0};
         double w = 0.0;
@@ -72,7 +72,7 @@ namespace
         return {sum[0] / w, sum[1] / w, sum[2] / w};
     }
 
-    double serialRadius(Bunch const& bunch, std::array<double, 3> const& u0)
+    double serialRadius(Bunch const& bunch, picBunch::Vec3 const& u0)
     {
         double r = 0.0;
         for(std::size_t p = 0; p < bunch.size(); ++p)
@@ -89,18 +89,18 @@ namespace
     picBunch::FarTail serialFarTail(Bunch const& bunch, double switchFactor)
     {
         auto const bounds = bunch.bounds();
-        std::array<double, 3> centre{};
+        picBunch::Vec3 centre{};
         for(int a = 0; a < 3; ++a)
             centre[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
         picBunch::FarTail tail;
         tail.centre = centre;
         double absoluteCharge = 0.0;
-        std::array<double, 3> velocitySumCharge{0.0, 0.0, 0.0};
-        std::array<double, 3> velocitySumAbs{0.0, 0.0, 0.0};
+        picBunch::Vec3 velocitySumCharge{0.0, 0.0, 0.0};
+        picBunch::Vec3 velocitySumAbs{0.0, 0.0, 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const q = bunch.weight[p] * bunch.charge[p];
-            std::array<double, 3> const rel{
+            picBunch::Vec3 const rel{
                 bunch.x[p] - centre[0],
                 bunch.y[p] - centre[1],
                 bunch.z[p] - centre[2]};
@@ -124,7 +124,7 @@ namespace
         bool const neutral
             = (absoluteCharge == 0.0)
             || (std::abs(tail.charge) <= 1.0e-12 * absoluteCharge);
-        std::array<double, 3> const& velocitySum = neutral ? velocitySumAbs : velocitySumCharge;
+        picBunch::Vec3 const& velocitySum = neutral ? velocitySumAbs : velocitySumCharge;
         double const velocityWeight = neutral ? absoluteCharge : tail.charge;
         if(velocityWeight != 0.0)
             for(int a = 0; a < 3; ++a)
@@ -136,19 +136,19 @@ namespace
             = 1.0 / std::max(1.0 - meanSpeed2 / (picBunch::kSpeedOfLight * picBunch::kSpeedOfLight), 1.0e-300);
         double const meanGamma = std::sqrt(meanGamma2);
         double const meanSpeed = std::sqrt(meanSpeed2);
-        std::array<double, 3> const nhat{
+        picBunch::Vec3 const nhat{
             (meanSpeed > 0.0) ? tail.meanVelocity[0] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[1] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[2] / meanSpeed : 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const q = bunch.weight[p] * bunch.charge[p];
-            std::array<double, 3> const rel{
+            picBunch::Vec3 const rel{
                 bunch.x[p] - centre[0],
                 bunch.y[p] - centre[1],
                 bunch.z[p] - centre[2]};
             double const rn = rel[0] * nhat[0] + rel[1] * nhat[1] + rel[2] * nhat[2];
-            std::array<double, 3> rest{};
+            picBunch::Vec3 rest{};
             for(int a = 0; a < 3; ++a)
                 rest[a] = rel[a] + (meanGamma - 1.0) * rn * nhat[a];
             double const r2 = rest[0] * rest[0] + rest[1] * rest[1] + rest[2] * rest[2];
@@ -180,7 +180,7 @@ namespace
     }
 
     using ReductionResults = std::tuple<
-        std::array<double, 3>,
+        picBunch::Vec3,
         double,
         picBunch::FarTail,
         picBunch::VelocityBinning>;
@@ -245,7 +245,7 @@ TEST(AlpakaReductions, BinningMatchesSerialReference)
         absCharge[p] = std::abs(bunch.weight[p] * bunch.charge[p]);
         EXPECT_EQ(binning.boxOf[p], expectedBox[p]) << "particle " << p;
     }
-    std::vector<std::array<double, 3>> sumU(binning.count);
+    std::vector<picBunch::Vec3> sumU(binning.count);
     std::vector<double> sumW(binning.count, 0.0);
     for(std::size_t p = 0; p < bunch.size(); ++p)
     {

@@ -85,7 +85,7 @@ TEST(Config, ParsesEveryRequiredKey)
     EXPECT_EQ(config.picongpu.step, 42u);
     EXPECT_TRUE(config.picongpu.float64);
     EXPECT_EQ(config.picongpu.species, "electrons");
-    EXPECT_EQ(config.domain.cells, (std::array<std::size_t, 3>{32, 24, 16}));
+    EXPECT_EQ(config.domain.cells, (picBunch::Idx3{32, 24, 16}));
     EXPECT_DOUBLE_EQ(config.domain.cellSize[0], 1.0e-7);
     EXPECT_DOUBLE_EQ(config.domain.origin[0], 1.0e-6);
     EXPECT_TRUE(config.placement.fraction);

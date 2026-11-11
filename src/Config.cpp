@@ -71,23 +71,23 @@ namespace picBunch
             return *value;
         }
 
-        std::array<double, 3> asTriple(toml::node const& node, std::string const& key)
+        Vec3 asTriple(toml::node const& node, std::string const& key)
         {
             auto const* array = node.as_array();
             if(array == nullptr || array->size() != 3u)
                 fail(key, "expected an array of three numbers");
-            std::array<double, 3> result{};
+            Vec3 result{};
             for(std::size_t a = 0; a < 3; ++a)
                 result[a] = asDouble((*array)[a], key);
             return result;
         }
 
-        std::array<std::size_t, 3> asCells(toml::node const& node, std::string const& key)
+        Idx3 asCells(toml::node const& node, std::string const& key)
         {
             auto const* array = node.as_array();
             if(array == nullptr || array->size() != 3u)
                 fail(key, "expected an array of three positive integers");
-            std::array<std::size_t, 3> result{};
+            Idx3 result{};
             for(std::size_t a = 0; a < 3; ++a)
             {
                 auto const value = asInteger((*array)[a], key);
@@ -209,7 +209,7 @@ namespace picBunch
         // they must agree, otherwise the unit derivation and the geometry
         // would silently describe different decks.
         bool const picCellGiven = picongpu.get("cell_size") != nullptr;
-        std::optional<std::array<double, 3>> domainCellSize;
+        std::optional<Vec3> domainCellSize;
         if(auto const* node = domain.get("cell_size"))
             domainCellSize = asTriple(*node, "domain.cell_size");
         if(!picCellGiven)

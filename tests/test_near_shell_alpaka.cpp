@@ -207,8 +207,8 @@ namespace
         picBunch::ComputeOptions options;
         options.tolerance = 1.0e-3;
         options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
-        options.gridSize = std::array<std::size_t, 3>{4u, 4u, 4u};
-        options.gridOrigin = std::array<double, 3>{-2.0e-6, -2.0e-6, -2.0e-6};
+        options.gridSize = picBunch::Idx3{4u, 4u, 4u};
+        options.gridOrigin = picBunch::Vec3{-2.0e-6, -2.0e-6, -2.0e-6};
         options.deterministicDeposit = true;
         // Keep the per-tile mesh subtraction cheap; the exact near field is
         // bin-free, so the box count only selects the subtraction operator.
@@ -294,8 +294,8 @@ namespace
 {
     struct OriginCase
     {
-        std::array<double, 3> origin;
-        std::array<double, 3> source;
+        picBunch::Vec3 origin;
+        picBunch::Vec3 source;
     };
 
     struct OriginProbe
@@ -321,7 +321,7 @@ namespace
         picBunch::ComputeOptions options;
         options.tolerance = 1.0e-3;
         options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
-        options.gridSize = std::array<std::size_t, 3>{4u, 4u, 4u};
+        options.gridSize = picBunch::Idx3{4u, 4u, 4u};
         options.gridOrigin = c.origin;
         options.deterministicDeposit = true;
         options.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;

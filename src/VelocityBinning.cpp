@@ -25,7 +25,7 @@ namespace picBunch
 {
     namespace
     {
-        using Vec3 = std::array<double, 3>;
+        using Vec3 = Vec3;
         using KernelVec3 = alpaka::Vec<double, 3u>;
         using KernelIndex3 = alpaka::Vec<std::size_t, 3u>;
 
@@ -293,9 +293,9 @@ namespace picBunch
         {
             std::array<Vec3, 3> basis; //!< rows e1, e2, e3 (lab frame)
             std::vector<Vec3> uBeam;   //!< per particle, beam frame
-            std::array<double, 3> uMin{0.0, 0.0, 0.0};
-            std::array<double, 3> uMax{0.0, 0.0, 0.0};
-            std::array<double, 3> range{0.0, 0.0, 0.0};
+            Vec3 uMin{0.0, 0.0, 0.0};
+            Vec3 uMax{0.0, 0.0, 0.0};
+            Vec3 range{0.0, 0.0, 0.0};
             bool active[3] = {false, false, false};
         };
 
@@ -341,7 +341,7 @@ namespace picBunch
                 frame.uMin[i] = std::numeric_limits<double>::infinity();
                 frame.uMax[i] = -std::numeric_limits<double>::infinity();
             }
-            // Vec3 is a contiguous std::array<double, 3>, so the kernel writes
+            // The beam-frame vectors are contiguous, so the kernel writes
             // the beam-frame components in place.  The extrema are reduced in
             // the same pass.
             auto const particleExtent = alpaka::Vec<std::size_t, 1u>{count};
@@ -360,8 +360,8 @@ namespace picBunch
                 alpaka::makeMdSpan(
                     &frame.uBeam[0][0],
                     alpaka::Vec<std::size_t, 1u>{3u * count}),
-                alpaka::makeMdSpan(frame.uMin.data(), alpaka::Vec<std::size_t, 1u>{3u}),
-                alpaka::makeMdSpan(frame.uMax.data(), alpaka::Vec<std::size_t, 1u>{3u}));
+                alpaka::makeMdSpan(&frame.uMin[0], alpaka::Vec<std::size_t, 1u>{3u}),
+                alpaka::makeMdSpan(&frame.uMax[0], alpaka::Vec<std::size_t, 1u>{3u}));
             for(int i = 0; i < 3; ++i)
             {
                 frame.range[i] = frame.uMax[i] - frame.uMin[i];
@@ -384,13 +384,13 @@ namespace picBunch
         //! ``N1*N2*N3 = B``.  With two active axes the minimum is closed-form
         //! (``N_i`` proportional to ``sqrt(range_i)``); with three, a grid over
         //! the power-of-two factors of ``B`` (which is always a power of two).
-        std::array<std::size_t, 3> chooseSplit(
+        Idx3 chooseSplit(
             std::size_t B,
-            std::array<double, 3> const& range,
+            Vec3 const& range,
             bool const* active,
             double gammaWeighted)
         {
-            std::array<std::size_t, 3> N{1u, 1u, 1u};
+            Idx3 N{1u, 1u, 1u};
             int a1 = -1, a2 = -1, a3 = -1;
             for(int i = 0; i < 3; ++i)
             {
@@ -421,7 +421,7 @@ namespace picBunch
                 N[static_cast<std::size_t>(a2)] = std::max<std::size_t>(1u, B / n1);
                 return N;
             }
-            auto geometricScore = [&](std::array<std::size_t, 3> const& cand) {
+            auto geometricScore = [&](Idx3 const& cand) {
                 double s = 0.0;
                 for(int i = 0; i < 3; ++i)
                     if(active[i])
@@ -432,7 +432,7 @@ namespace picBunch
                     }
                 return std::sqrt(s);
             };
-            std::array<std::size_t, 3> best{1u, 1u, 1u};
+            Idx3 best{1u, 1u, 1u};
             double bestScore = std::numeric_limits<double>::infinity();
             for(std::size_t n1 = 1; n1 <= B; n1 *= 2u)
             {
@@ -440,7 +440,7 @@ namespace picBunch
                 {
                     if((B / n1) % n2 != 0u)
                         continue;
-                    std::array<std::size_t, 3> const cand{n1, n2, B / (n1 * n2)};
+                    Idx3 const cand{n1, n2, B / (n1 * n2)};
                     double const score = geometricScore(cand);
                     if(score < bestScore)
                     {
@@ -458,7 +458,7 @@ namespace picBunch
         double evaluateSplit(
             Bunch const& bunch,
             BeamFrame const& frame,
-            std::array<std::size_t, 3> const& N,
+            Idx3 const& N,
             std::vector<double> const& absCharge,
             std::vector<double> const& particleGamma,
             double totalAbsoluteCharge,

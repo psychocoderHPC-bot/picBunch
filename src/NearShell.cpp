@@ -749,7 +749,7 @@ namespace picBunch
                                 localHi[a] = std::max(localHi[a], hi);
                             }
                         }
-                        std::array<std::size_t, 3> localN{};
+                        Idx3 localN{};
                         for(int a = 0; a < 3; ++a)
                         {
                             std::int64_t const len64 = localHi[a] - localLo[a] + 1;
@@ -761,7 +761,7 @@ namespace picBunch
                                 ++len;
                             localN[a] = len;
                         }
-                        std::array<double, 3> localOrigin{};
+                        Vec3 localOrigin{};
                         for(int a = 0; a < 3; ++a)
                             localOrigin[a] = origin[a] + static_cast<double>(localLo[a]) * spacing[a];
 

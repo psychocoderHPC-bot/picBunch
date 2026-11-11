@@ -130,7 +130,7 @@ namespace picBunch
     FarTail deriveFarTail(
         Bunch const& bunch,
         double switchFactor,
-        std::array<double, 3> const& cellSize,
+        Vec3 const& cellSize,
         int groupCells)
     {
         if(bunch.size() == 0u)
@@ -139,7 +139,7 @@ namespace picBunch
             throw std::invalid_argument("deriveFarTail: switchFactor must be finite and positive");
 
         auto const bounds = bunch.bounds();
-        std::array<double, 3> centre{};
+        Vec3 centre{};
         for(int a = 0; a < 3; ++a)
             centre[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
 
@@ -152,8 +152,8 @@ namespace picBunch
         // uses the absolute-charge weights.  The weighting therefore never
         // flips with the running partial charge sum, which made the direction
         // of a nearly neutral bunch effectively noise.
-        std::array<double, 3> velocitySumCharge{0.0, 0.0, 0.0};
-        std::array<double, 3> velocitySumAbs{0.0, 0.0, 0.0};
+        Vec3 velocitySumCharge{0.0, 0.0, 0.0};
+        Vec3 velocitySumAbs{0.0, 0.0, 0.0};
         std::size_t const count = bunch.size();
         // Reused scratch; the function is not called concurrently on one thread.
         thread_local std::vector<double> supportDistance;
@@ -214,7 +214,7 @@ namespace picBunch
         bool const neutral
             = (absoluteCharge == 0.0)
             || (std::abs(tail.charge) <= 1.0e-12 * absoluteCharge);
-        std::array<double, 3> const& velocitySum = neutral ? velocitySumAbs : velocitySumCharge;
+        Vec3 const& velocitySum = neutral ? velocitySumAbs : velocitySumCharge;
         double const velocityWeight = neutral ? absoluteCharge : tail.charge;
         if(velocityWeight != 0.0)
             for(int a = 0; a < 3; ++a)
@@ -233,7 +233,7 @@ namespace picBunch
             = 1.0 / std::max(1.0 - meanSpeed2 / (kSpeedOfLight * kSpeedOfLight), 1.0e-300);
         double const meanGamma = std::sqrt(meanGamma2);
         double const meanSpeed = std::sqrt(meanSpeed2);
-        std::array<double, 3> const nhat{
+        Vec3 const nhat{
             (meanSpeed > 0.0) ? tail.meanVelocity[0] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[1] / meanSpeed : 0.0,
             (meanSpeed > 0.0) ? tail.meanVelocity[2] / meanSpeed : 0.0};
@@ -276,7 +276,7 @@ namespace picBunch
 
         if(groupCells > 0 && cellSize[0] > 0.0 && cellSize[1] > 0.0 && cellSize[2] > 0.0)
         {
-            std::array<double, 3> extent{};
+            Vec3 extent{};
             for(int a = 0; a < 3; ++a)
                 extent[a] = static_cast<double>(groupCells) * cellSize[a];
             std::array<long, 3> dims{};
@@ -326,18 +326,18 @@ namespace picBunch
                         sub.restMass[k] = bunch.restMass.empty() ? 0.0 : bunch.restMass[p];
                     }
                     tail.groups.push_back(
-                        deriveFarTail(sub, switchFactor, std::array<double, 3>{0.0, 0.0, 0.0}, 0));
+                        deriveFarTail(sub, switchFactor, Vec3{0.0, 0.0, 0.0}, 0));
                 }
             }
         }
         return tail;
     }
 
-    std::array<double, 3> evaluateFarTailE(
+    Vec3 evaluateFarTailE(
         FarTail const& tail,
-        std::array<double, 3> const& position)
+        Vec3 const& position)
     {
-        std::array<double, 3> const r{
+        Vec3 const r{
             position[0] - tail.centre[0],
             position[1] - tail.centre[1],
             position[2] - tail.centre[2]};
@@ -346,7 +346,7 @@ namespace picBunch
             return {0.0, 0.0, 0.0};
         if(!tail.groups.empty())
         {
-            std::array<double, 3> sum{0.0, 0.0, 0.0};
+            Vec3 sum{0.0, 0.0, 0.0};
             for(auto const& group : tail.groups)
             {
                 auto const value = evaluateFarTailE(group, position);
@@ -356,12 +356,12 @@ namespace picBunch
             return sum;
         }
         double const d = std::sqrt(d2);
-        std::array<double, 3> const n{r[0] / d, r[1] / d, r[2] / d};
+        Vec3 const n{r[0] / d, r[1] / d, r[2] / d};
 
         // Motion of the compact bunch: beta = meanVelocity / c, with
         // 1/gamma^2 = 1 - |beta|^2.  bhat is the unit direction of motion.
         double const c = kSpeedOfLight;
-        std::array<double, 3> const beta{
+        Vec3 const beta{
             tail.meanVelocity[0] / c,
             tail.meanVelocity[1] / c,
             tail.meanVelocity[2] / c};
@@ -371,7 +371,7 @@ namespace picBunch
         double const invG2 = std::max(1.0 - betaSq, 1.0e-15);
         double const gamma = 1.0 / std::sqrt(invG2);
         double const bnorm = std::sqrt(betaSq);
-        std::array<double, 3> const bhat{
+        Vec3 const bhat{
             (bnorm > 0.0) ? beta[0] / bnorm : 0.0,
             (bnorm > 0.0) ? beta[1] / bnorm : 0.0,
             (bnorm > 0.0) ? beta[2] / bnorm : 0.0};
@@ -380,21 +380,21 @@ namespace picBunch
         // by gamma.  The dipole and quadrupole in FarTail are rest-frame
         // moments, so their static field must be evaluated at R', not at R.
         double const rn = r[0] * bhat[0] + r[1] * bhat[1] + r[2] * bhat[2];
-        std::array<double, 3> const rRest{
+        Vec3 const rRest{
             r[0] + (gamma - 1.0) * rn * bhat[0],
             r[1] + (gamma - 1.0) * rn * bhat[1],
             r[2] + (gamma - 1.0) * rn * bhat[2]};
         double const d2r = rRest[0] * rRest[0] + rRest[1] * rRest[1]
             + rRest[2] * rRest[2];
         double const dr = std::sqrt(d2r);
-        std::array<double, 3> const nr{
+        Vec3 const nr{
             (dr > 0.0) ? rRest[0] / dr : 0.0,
             (dr > 0.0) ? rRest[1] / dr : 0.0,
             (dr > 0.0) ? rRest[2] / dr : 0.0};
 
         double const pDotN
             = tail.dipole[0] * nr[0] + tail.dipole[1] * nr[1] + tail.dipole[2] * nr[2];
-        std::array<double, 3> dTimesN{};
+        Vec3 dTimesN{};
         for(int i = 0; i < 3; ++i)
             dTimesN[i] = tail.quadrupole[i * 3 + 0] * nr[0]
                 + tail.quadrupole[i * 3 + 1] * nr[1]
@@ -406,7 +406,7 @@ namespace picBunch
         // exact Lienard point field below and is not part of this expansion.
         double const dipoleScale = kCoulombConstant * 2.0 / (d2r * dr);
         double const quadrupoleScale = kCoulombConstant * 0.5 / (d2r * d2r);
-        std::array<double, 3> high{};
+        Vec3 high{};
         for(int a = 0; a < 3; ++a)
         {
             double const dipoleTerm = 1.5 * pDotN * nr[a] - 0.5 * tail.dipole[a];
@@ -432,18 +432,18 @@ namespace picBunch
             ? kCoulombConstant * tail.charge * invG2 / (denom * std::sqrt(denom))
             : 0.0;
 
-        std::array<double, 3> field{};
+        Vec3 field{};
         for(int a = 0; a < 3; ++a)
             field[a] = high[a] + monopoleF * r[a];
         return field;
     }
 
-    std::array<double, 3> evaluateFarTailB(
+    Vec3 evaluateFarTailB(
         FarTail const& tail,
-        std::array<double, 3> const& position)
+        Vec3 const& position)
     {
         auto const e = evaluateFarTailE(tail, position);
-        std::array<double, 3> const& v = tail.meanVelocity;
+        Vec3 const& v = tail.meanVelocity;
         double const inverseC2 = 1.0 / (kSpeedOfLight * kSpeedOfLight);
         return {
             (v[1] * e[2] - v[2] * e[1]) * inverseC2,
@@ -472,7 +472,7 @@ namespace picBunch
             // Precompute the boost geometry once per group instead of once per
             // node and group.  The expressions match evaluateFarTailE exactly.
             double const c = kSpeedOfLight;
-            std::array<double, 3> const beta{
+            Vec3 const beta{
                 entry.meanVelocity[0] / c,
                 entry.meanVelocity[1] / c,
                 entry.meanVelocity[2] / c};
@@ -541,7 +541,7 @@ namespace picBunch
         void evaluateBatchBlock(
             FarTailBatch const& batch,
             std::size_t base,
-            std::array<double, 3> const& position,
+            Vec3 const& position,
             std::array<double, W>& ex,
             std::array<double, W>& ey,
             std::array<double, W>& ez)
@@ -693,11 +693,11 @@ namespace picBunch
         }
     } // namespace
 
-    std::array<double, 3> evaluateFarTailE(
+    Vec3 evaluateFarTailE(
         FarTailBatch const& batch,
-        std::array<double, 3> const& position)
+        Vec3 const& position)
     {
-        std::array<double, 3> const r{
+        Vec3 const r{
             position[0] - batch.centre[0],
             position[1] - batch.centre[1],
             position[2] - batch.centre[2]};
@@ -705,7 +705,7 @@ namespace picBunch
         if(d2 == 0.0)
             return {0.0, 0.0, 0.0};
 
-        std::array<double, 3> sum{0.0, 0.0, 0.0};
+        Vec3 sum{0.0, 0.0, 0.0};
         constexpr std::size_t kWidth = 8;
         std::size_t i = 0;
         for(; i + kWidth <= batch.count; i += kWidth)
@@ -736,12 +736,12 @@ namespace picBunch
         return sum;
     }
 
-    std::array<double, 3> evaluateFarTailB(
+    Vec3 evaluateFarTailB(
         FarTailBatch const& batch,
-        std::array<double, 3> const& position)
+        Vec3 const& position)
     {
         auto const e = evaluateFarTailE(batch, position);
-        std::array<double, 3> const& v = batch.meanVelocity;
+        Vec3 const& v = batch.meanVelocity;
         double const inverseC2 = 1.0 / (kSpeedOfLight * kSpeedOfLight);
         return {
             (v[1] * e[2] - v[2] * e[1]) * inverseC2,
