@@ -61,7 +61,7 @@ namespace
 {
     struct Point
     {
-        std::array<std::size_t, 3> node;
+        picBunch::Idx3 node;
         std::array<double, 6> expected;
         double tolerance;
     };
@@ -109,8 +109,8 @@ TEST(Physics, OneParticleAgainstIndependentReference)
     options.marginCells = 4.0;
 
     picBunch::Field const field = picBunch::computeField(bunch, options);
-    EXPECT_EQ(field.grid.n, (std::array<std::size_t, 3>{10, 10, 10}));
-    EXPECT_EQ(field.grid.origin, (std::array<double, 3>{1.0, 1.0, 1.0}));
+    EXPECT_EQ(field.grid.n, (picBunch::Idx3{10, 10, 10}));
+    EXPECT_EQ(field.grid.origin, (picBunch::Vec3{1.0, 1.0, 1.0}));
     EXPECT_EQ(field.grid.fftPadding, 2u);
 
     // Normalize against the reference point-field scale q/(4 pi eps0) / (1 m)^2,
@@ -149,7 +149,7 @@ TEST(Physics, OneParticleAgainstIndependentReference)
 TEST(Physics, MultiParticleAgainstIndependentReference)
 {
     picBunch::Bunch bunch;
-    std::array<std::array<double, 3>, 3> const positions{{
+    std::array<picBunch::Vec3, 3> const positions{{
         {4.0, 4.0, 4.0},
         {4.7, 5.1, 4.3},
         {6.2, 5.8, 6.1},
@@ -174,8 +174,8 @@ TEST(Physics, MultiParticleAgainstIndependentReference)
     options.marginCells = 4.0;
 
     picBunch::Field const field = picBunch::computeField(bunch, options);
-    EXPECT_EQ(field.grid.n, (std::array<std::size_t, 3>{12, 12, 12}));
-    EXPECT_EQ(field.grid.origin, (std::array<double, 3>{0.0, 0.0, 0.0}));
+    EXPECT_EQ(field.grid.n, (picBunch::Idx3{12, 12, 12}));
+    EXPECT_EQ(field.grid.origin, (picBunch::Vec3{0.0, 0.0, 0.0}));
     EXPECT_EQ(field.grid.fftPadding, 2u);
 
     std::ifstream input(std::string(PICBUNCH_TEST_DATA_DIR) + "/physics_multiparticle.csv");
@@ -221,8 +221,8 @@ TEST(Physics, MultiParticleAgainstIndependentReference)
 namespace
 {
     std::array<double, 6> coulombField(
-        std::array<double, 3> const& obs,
-        std::array<double, 3> const& src,
+        picBunch::Vec3 const& obs,
+        picBunch::Vec3 const& src,
         double q)
     {
         std::array<double, 6> out{};
@@ -242,7 +242,7 @@ namespace
     //! One stationary electron on an explicit even grid; max |field-analytic|/|analytic|
     //! over the six components at the on-axis observer node (obsX, charge, charge).
     double maxCoulombRelError(
-        std::array<double, 3> const& cell,
+        picBunch::Vec3 const& cell,
         std::size_t N,
         std::size_t charge,
         std::size_t obsX)
@@ -265,12 +265,12 @@ namespace
         options.gridOrigin = {0.0, 0.0, 0.0};
 
         picBunch::Field const field = picBunch::computeField(bunch, options);
-        std::array<double, 3> const src{bunch.x[0], bunch.y[0], bunch.z[0]};
+        picBunch::Vec3 const src{bunch.x[0], bunch.y[0], bunch.z[0]};
         std::size_t const flat = obsX + field.grid.n[0] * (charge + field.grid.n[1] * charge);
         double maxRel = 0.0;
         for(int c = 0; c < 6; ++c)
         {
-            std::array<double, 3> obs{};
+            picBunch::Vec3 obs{};
             for(int a = 0; a < 3; ++a)
             {
                 std::size_t const node = (a == 0) ? obsX : charge;
@@ -386,8 +386,8 @@ TEST(Physics, BoundarySourceMatchesLargerComputeBox)
     bunch.weight[0] = 1.0;
     bunch.charge[0] = -picBunch::kElementaryCharge;
 
-    auto const fieldFor = [&](std::array<std::size_t, 3> const& n,
-                              std::array<double, 3> const& origin,
+    auto const fieldFor = [&](picBunch::Idx3 const& n,
+                              picBunch::Vec3 const& origin,
                               bool deterministic) {
         picBunch::ComputeOptions options;
         options.tolerance = 1e-3; // padding 2
@@ -408,11 +408,11 @@ TEST(Physics, BoundarySourceMatchesLargerComputeBox)
         picBunch::Field const small = fieldFor({8, 8, 8}, {0.0, 0.0, 0.0}, deterministic);
         picBunch::Field const large
             = fieldFor({32, 32, 32}, {-8.0, -8.0, -8.0}, deterministic);
-        ASSERT_EQ(small.grid.n, (std::array<std::size_t, 3>{8, 8, 8}));
-        ASSERT_EQ(large.grid.n, (std::array<std::size_t, 3>{32, 32, 32}));
+        ASSERT_EQ(small.grid.n, (picBunch::Idx3{8, 8, 8}));
+        ASSERT_EQ(large.grid.n, (picBunch::Idx3{32, 32, 32}));
 
         double const scale = picBunch::kCoulombConstant * std::abs(bunch.charge[0]);
-        std::array<std::array<std::size_t, 3>, 5> const nodes{{
+        std::array<picBunch::Idx3, 5> const nodes{{
             {0, 0, 0},
             {1, 0, 0},
             {0, 1, 0},

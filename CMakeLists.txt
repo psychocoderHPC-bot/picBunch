@@ -261,6 +261,20 @@ add_library(
     src/Placement.cpp
 )
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
+# This host-only layer never initializes an alpaka backend.  It does include
+# alpaka::Vec through the public headers, so satisfy alpaka's finalize guard
+# instead of finalizing the target (which would switch the openPMD/HDF5
+# translation units to CUDA/HIP under those backends).
+target_compile_definitions(
+    picBunchOpenPMD
+    PRIVATE
+        ALPAKA_CMAKE_TARGET_ALPAKA_FINALIZE_CALLED
+        ALPAKA_CMAKE_TARGET_HEADERS_FINALIZE_CALLED
+        ALPAKA_CMAKE_TARGET_HOST_FINALIZE_CALLED
+        ALPAKA_CMAKE_TARGET_CUDA_FINALIZE_CALLED
+        ALPAKA_CMAKE_TARGET_HIP_FINALIZE_CALLED
+        ALPAKA_CMAKE_TARGET_ONEAPI_FINALIZE_CALLED
+)
 # The chunked writer needs the multipole far tail from the host library.
 target_link_libraries(picBunchOpenPMD PUBLIC picBunch)
 target_include_directories(

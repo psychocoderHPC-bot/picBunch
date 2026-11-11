@@ -63,9 +63,9 @@ int main(int argc, char** argv)
         bunch.weight = {1.0};
         bunch.charge = {-1.602176634e-19};
         ComputeOptions options;
-        options.gridSize = std::array<std::size_t, 3>{8, 8, 8};
-        options.gridOrigin = std::array<double, 3>{-4e-6, -4e-6, -4e-6};
-        options.cellSize = std::array<double, 3>{1e-6, 1e-6, 1e-6};
+        options.gridSize = picBunch::Idx3{8, 8, 8};
+        options.gridOrigin = picBunch::Vec3{-4e-6, -4e-6, -4e-6};
+        options.cellSize = picBunch::Vec3{1e-6, 1e-6, 1e-6};
         options.tolerance = 1e-3;
         options.deterministicDeposit = true;
         options.parallel = &parallel;
@@ -249,7 +249,7 @@ int main(int argc, char** argv)
 
         Bunch three;
         three.resize(3);
-        std::array<std::array<double, 3>, 3> const positions{{
+        std::array<picBunch::Vec3, 3> const positions{{
             {4.0, 4.0, 4.0}, {4.7, 5.1, 4.3}, {6.2, 5.8, 6.1}}};
         for(std::size_t p = 0; p < 3; ++p)
         {

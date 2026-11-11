@@ -53,8 +53,8 @@ TEST(Domain, GridStaysOnBunchBox)
     picBunch::ComputeOptions options;
     options.cellSize = {1.0, 1.0, 1.0};
     options.marginCells = 4.0;
-    options.globalGridSize = std::array<std::size_t, 3>{1024, 1024, 1024};
-    options.globalGridOrigin = std::array<double, 3>{0.0, 0.0, 0.0};
+    options.globalGridSize = picBunch::Idx3{1024, 1024, 1024};
+    options.globalGridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
     auto const grid = picBunch::makeGrid(bunch, options);
 
     EXPECT_LT(grid.size(), 1024u * 1024u * 1024u);
@@ -70,8 +70,8 @@ TEST(Domain, GridStaysOnBunchBox)
 TEST(Domain, ChunkedWriteZerosAndOffset)
 {
     auto const field = makeField();
-    std::array<std::size_t, 3> const globalN{16, 16, 16};
-    std::array<double, 3> const globalOrigin{0.0, 0.0, 0.0};
+    picBunch::Idx3 const globalN{16, 16, 16};
+    picBunch::Vec3 const globalOrigin{0.0, 0.0, 0.0};
 
     auto const path = std::filesystem::temp_directory_path() / "picbunch_domain_test.h5";
     std::filesystem::remove(path);
@@ -128,13 +128,13 @@ TEST(Domain, TailMarginMonopoleBound)
     double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
     double const tolerance = 1.0e-3;
     auto const margin = picBunch::deriveFieldTailMargin(
-        bunch, peak, tolerance, std::array<double, 3>{cell, cell, cell});
+        bunch, peak, tolerance, picBunch::Vec3{cell, cell, cell});
 
     double const target = tolerance * peak;
     EXPECT_LE(margin.bound, target);
     EXPECT_LE(margin.distance, std::sqrt(picBunch::kCoulombConstant * picBunch::kElementaryCharge / target) + 1.0e-9);
     // A point charge has R=0 and a 32-cell margin at 1e-3.
-    EXPECT_EQ(margin.marginCells, (std::array<double, 3>{32.0, 32.0, 32.0}));
+    EXPECT_EQ(margin.marginCells, (picBunch::Vec3{32.0, 32.0, 32.0}));
     // Just inside the margin the neglected field is above target; this is why
     // the boundary must be at the solved distance, not at the old 4 cells.
     double const inside = margin.distance - 1.0;
@@ -158,7 +158,7 @@ TEST(Domain, TailMarginIncludesDipoleForNeutralBunch)
     double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
     double const tolerance = 1.0e-3;
     auto const margin = picBunch::deriveFieldTailMargin(
-        bunch, peak, tolerance, std::array<double, 3>{cell, cell, cell});
+        bunch, peak, tolerance, picBunch::Vec3{cell, cell, cell});
 
     EXPECT_NEAR(margin.totalCharge, 0.0, 1.0e-30);
     EXPECT_NEAR(margin.dipoleMagnitude, picBunch::kElementaryCharge, 1.0e-30);
@@ -179,15 +179,15 @@ TEST(Domain, GlobalDomainEndingInsideMarginHasNoZeroHole)
 
     picBunch::ComputeOptions options;
     options.cellSize = {1.0, 1.0, 1.0};
-    options.marginCellsPerAxis = std::array<double, 3>{32.0, 32.0, 32.0};
-    options.globalGridSize = std::array<std::size_t, 3>{16, 16, 16};
-    options.globalGridOrigin = std::array<double, 3>{0.0, 0.0, 0.0};
+    options.marginCellsPerAxis = picBunch::Vec3{32.0, 32.0, 32.0};
+    options.globalGridSize = picBunch::Idx3{16, 16, 16};
+    options.globalGridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
     auto const grid = picBunch::makeGrid(bunch, options);
 
     // The requested margin exceeds the written domain, so makeGrid clips the
     // compute box to the whole domain: there is no interior zero-fill region.
-    EXPECT_EQ(grid.n, (std::array<std::size_t, 3>{16, 16, 16}));
-    EXPECT_EQ(grid.origin, (std::array<double, 3>{0.0, 0.0, 0.0}));
+    EXPECT_EQ(grid.n, (picBunch::Idx3{16, 16, 16}));
+    EXPECT_EQ(grid.origin, (picBunch::Vec3{0.0, 0.0, 0.0}));
 }
 
 TEST(Domain, TailMarginIncludesBeaming)
@@ -203,7 +203,7 @@ TEST(Domain, TailMarginIncludesBeaming)
     double const peak = picBunch::kCoulombConstant * picBunch::kElementaryCharge;
     double const tolerance = 1.0e-3;
     auto const margin = picBunch::deriveFieldTailMargin(
-        bunch, peak, tolerance, std::array<double, 3>{1.0, 1.0, 1.0});
+        bunch, peak, tolerance, picBunch::Vec3{1.0, 1.0, 1.0});
 
     EXPECT_NEAR(margin.maxGamma, std::sqrt(101.0), 1.0e-12);
     EXPECT_LE(margin.bound, tolerance * peak);

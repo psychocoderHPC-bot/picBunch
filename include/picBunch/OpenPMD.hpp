@@ -89,6 +89,20 @@ namespace picBunch
         std::size_t offset,
         std::size_t count);
 
+    /** Chunked-reader entry point that reuses a caller-owned destination.
+     *
+     * ``destination`` may be a buffer from an earlier call.  Its bunch arrays
+     * keep their capacity and every field is overwritten, so the double-buffered
+     * chunk pipeline does not allocate a full bunch per chunk.  The units and
+     * record conventions are the same as :func:`readBunchRange`.
+     */
+    void readBunchRangeInto(
+        std::string const& fileName,
+        BunchSelection const& selection,
+        std::size_t offset,
+        std::size_t count,
+        BunchData& destination);
+
     /** Read the geometry metadata of a mesh record of the first iteration.
      *
      * Reads grid spacing, ``gridUnitSI``, ``gridGlobalOffset``, axis labels,

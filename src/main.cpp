@@ -24,13 +24,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <future>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
 {
+    using picBunch::Idx3;
+    using picBunch::IVec3;
+    using picBunch::UVec3;
+    using picBunch::Vec3;
+
     constexpr char const* compiledBackend()
     {
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -153,9 +160,11 @@ namespace
             "                        spatial supercell size for the far-tail multipoles,\n"
             "                        in PIC cells (default: 16; 0 = one global multipole)\n"
             "  --max-particle-chunk-gb <GB>\n"
-            "                        stream the particle species in chunks of at most\n"
-            "                        this many gigabytes (float; 0 = load all).  Requires\n"
-            "                        explicit --grid, --origin, --cell-size and a fixed\n"
+            "                        bound the resident particle buffers while streaming\n"
+            "                        the species (float; 0 = load all).  The reader and\n"
+            "                        the compute consume two double-buffered chunks, so a\n"
+            "                        chunk is at most half this value.  Requires explicit\n"
+            "                        --grid, --origin, --cell-size and a fixed\n"
             "                        --velocity-bins N; --global-grid is not combined with\n"
             "                        chunking yet\n"
             "  --backend <name>      auto|cuda|hip|cpu (default: auto)\n"
@@ -191,14 +200,14 @@ namespace
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
-        std::optional<std::array<double, 3>> cellSize;
-        std::optional<std::array<std::size_t, 3>> grid;
-        std::optional<std::array<double, 3>> origin;
+        std::optional<Vec3> cellSize;
+        std::optional<Idx3> grid;
+        std::optional<Vec3> origin;
         std::string shape = "tsc";
         int multipoleGroupCells = 16;
         double maxParticleChunkGb = 0.0;
-        std::optional<std::array<std::size_t, 3>> globalGrid;
-        std::optional<std::array<double, 3>> globalOrigin;
+        std::optional<Idx3> globalGrid;
+        std::optional<Vec3> globalOrigin;
         std::string restartFormat = "standard";
         std::string outputDir = "checkpoints";
         std::optional<double> unitLength;
@@ -295,10 +304,10 @@ namespace
         return parts;
     }
 
-    std::array<double, 3> parseTripleDouble(std::string const& text, char const* option)
+    Vec3 parseTripleDouble(std::string const& text, char const* option)
     {
         auto const parts = splitTriple(text, option);
-        std::array<double, 3> result{};
+        Vec3 result{};
         for(int a = 0; a < 3; ++a)
         {
             std::size_t consumed = 0;
@@ -320,10 +329,10 @@ namespace
         return result;
     }
 
-    std::array<std::size_t, 3> parseTripleSize(std::string const& text, char const* option)
+    Idx3 parseTripleSize(std::string const& text, char const* option)
     {
         auto const parts = splitTriple(text, option);
-        std::array<std::size_t, 3> result{};
+        Idx3 result{};
         for(int a = 0; a < 3; ++a)
         {
             std::uint64_t const value = parseIteration(parts[a], option);
@@ -531,20 +540,20 @@ namespace
         if(args.restartFormat == "picongpu" && args.output)
             throw std::invalid_argument("--restart-format picongpu writes to --output-dir; do not pass --output");
         if(args.cellSize)
-            for(double c : *args.cellSize)
-                if(!(c > 0.0))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!((*args.cellSize)[a] > 0.0))
                     throw std::invalid_argument("--cell-size values must be positive metres");
         if(args.origin)
-            for(double o : *args.origin)
-                if(!std::isfinite(o))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!std::isfinite((*args.origin)[a]))
                     throw std::invalid_argument("--origin values must be finite metres");
         if(args.globalOrigin)
-            for(double o : *args.globalOrigin)
-                if(!std::isfinite(o))
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(!std::isfinite((*args.globalOrigin)[a]))
                     throw std::invalid_argument("--global-origin values must be finite metres");
         if(args.globalGrid)
-            for(std::size_t n : *args.globalGrid)
-                if(n == 0u || n % 2u != 0u)
+            for(std::size_t a = 0u; a < 3u; ++a)
+                if(std::size_t const n = (*args.globalGrid)[a]; n == 0u || n % 2u != 0u)
                     throw std::invalid_argument("--global-grid values must be even and positive");
         if(args.unitLength && !(*args.unitLength > 0.0))
             throw std::invalid_argument("--picongpu-unit-length must be positive");
@@ -740,7 +749,14 @@ namespace
         std::size_t chunkSize = static_cast<std::size_t>(totalCount);
         if(args.maxParticleChunkGb > 0.0)
         {
-            double const budget = args.maxParticleChunkGb * 1.0e9;
+            // Two particle buffers are resident while the pipeline runs (the
+            // chunk being computed and the one being read).  The option bounds
+            // the resident particle storage, so each slot gets half of it.
+            // Halving a double is exact, which keeps the effective chunk size
+            // identical to the historical ``--max-particle-chunk-gb <half>``
+            // partition and therefore the same accumulation order.
+            double const slotGb = args.maxParticleChunkGb * 0.5;
+            double const budget = slotGb * 1.0e9;
             std::size_t const byBudget
                 = static_cast<std::size_t>(budget / static_cast<double>(bytesPerParticle));
             chunkSize = std::max<std::size_t>(1u, std::min<std::size_t>(chunkSize, byBudget));
@@ -794,23 +810,38 @@ namespace
         // Global representative for the single velocity class.  The chunk
         // fields are linear only if every chunk uses the same kernel, so the
         // representative must be derived from the whole species, not per chunk.
-        std::array<double, 3> velocitySum{0.0, 0.0, 0.0};
+        Vec3 velocitySum{0.0, 0.0, 0.0};
         double velocityWeight = 0.0;
+        double prepassReadMs = 0.0;
+        // Two reusable chunk buffers.  Slot 0 keeps the first chunk from the
+        // representative pass and feeds the first compute step; after that the
+        // reader and the consumer alternate slots.  Capacity is reused, so the
+        // chunked pipeline holds two bunches for its whole lifetime instead of
+        // allocating and freeing a bunch per chunk.
+        std::array<picBunch::BunchData, 2> chunkSlots;
+        // Non-root ranks receive the broadcast into one reusable buffer.
+        picBunch::BunchData remoteChunk;
         for(std::size_t offset = 0; offset < static_cast<std::size_t>(totalCount);
             offset += chunkSize)
         {
             std::size_t const count
                 = std::min<std::size_t>(chunkSize, static_cast<std::size_t>(totalCount) - offset);
-            picBunch::BunchData chunk;
+            picBunch::BunchData* chunk = root
+                ? &chunkSlots[(offset == 0u) ? 0u : 1u]
+                : &remoteChunk;
             if(root)
-                chunk = picBunch::readBunchRange(args.input, selection, offset, count);
-            picBunch::mpiBroadcastBunch(chunk.bunch, 0);
-            for(std::size_t p = 0; p < chunk.bunch.size(); ++p)
             {
-                double const w = std::abs(chunk.bunch.weight[p] * chunk.bunch.charge[p]);
-                velocitySum[0] += w * chunk.bunch.ux[p];
-                velocitySum[1] += w * chunk.bunch.uy[p];
-                velocitySum[2] += w * chunk.bunch.uz[p];
+                auto const readStart = Clock::now();
+                picBunch::readBunchRangeInto(args.input, selection, offset, count, *chunk);
+                prepassReadMs += elapsedMs(readStart);
+            }
+            picBunch::mpiBroadcastBunch(chunk->bunch, 0);
+            for(std::size_t p = 0; p < chunk->bunch.size(); ++p)
+            {
+                double const w = std::abs(chunk->bunch.weight[p] * chunk->bunch.charge[p]);
+                velocitySum[0] += w * chunk->bunch.ux[p];
+                velocitySum[1] += w * chunk->bunch.uy[p];
+                velocitySum[2] += w * chunk->bunch.uz[p];
                 velocityWeight += w;
             }
         }
@@ -825,60 +856,113 @@ namespace
         fixedBinning.representativeU[0] = velocitySum;
         options.fixedBinning = fixedBinning;
 
+        // Producer/consumer overlap: rank 0 reads the next chunk on a worker
+        // thread while the main thread broadcasts, computes and accumulates the
+        // current one.  The chunks are still read and accumulated strictly in
+        // index order, so the floating-point reduction order is unchanged; only
+        // the wall-clock placement of the read moves.  Two chunk buffers are
+        // live at most (the current one and the one being read).
+        std::size_t const totalChunks = chunks;
+        auto const chunkParticleCount = [&](std::size_t index) {
+            std::size_t const offset = index * chunkSize;
+            return std::min<std::size_t>(
+                chunkSize,
+                static_cast<std::size_t>(totalCount) - offset);
+        };
+        // Fill one slot while the main thread computes the other.  ``readInto``
+        // reuses the slot's buffers, so the two bunches allocated here are the
+        // whole chunked particle footprint.
+        auto const readInto = [&](std::size_t index, std::size_t slot) {
+            auto const readStart = Clock::now();
+            picBunch::readBunchRangeInto(
+                args.input,
+                selection,
+                index * chunkSize,
+                chunkParticleCount(index),
+                chunkSlots[slot]);
+            return elapsedMs(readStart);
+        };
+        double waitMs = 0.0;
+        std::optional<std::future<double>> pendingRead;
+        // Chunk 0 was already read by the representative pass (slot 0), so the
+        // pipeline starts by prefetching chunk 1 into slot 1.
+        if(root && totalChunks > 1u)
+            pendingRead.emplace(
+                std::async(std::launch::async, readInto, std::size_t{1}, std::size_t{1}));
+
         picBunch::Field totalField;
         double metaTime = 0.0;
         double metaTimeUnitSI = 1.0;
         std::uint64_t metaIteration = 0;
         bool haveMeta = false;
-        for(std::size_t offset = 0; offset < static_cast<std::size_t>(totalCount);
-            offset += chunkSize)
+        auto const pipelineStart = Clock::now();
+        for(std::size_t chunkIndex = 0; chunkIndex < totalChunks; ++chunkIndex)
         {
-            std::size_t const count
-                = std::min<std::size_t>(chunkSize, static_cast<std::size_t>(totalCount) - offset);
-            picBunch::BunchData chunk;
+            picBunch::BunchData* chunk = root ? nullptr : &remoteChunk;
             if(root)
             {
-                auto const t0 = Clock::now();
-                chunk = picBunch::readBunchRange(args.input, selection, offset, count);
-                times.readerMs += elapsedMs(t0);
+                if(chunkIndex == 0u)
+                {
+                    chunk = &chunkSlots[0];
+                }
+                else
+                {
+                    auto const waitStart = Clock::now();
+                    times.readerMs += pendingRead->get();
+                    waitMs += elapsedMs(waitStart);
+                    chunk = &chunkSlots[chunkIndex % 2u];
+                    // Start the next read before this chunk is computed; it runs
+                    // concurrently with the whole compute stage below and writes
+                    // the slot the previous chunk used (already consumed).
+                    if(chunkIndex + 1u < totalChunks)
+                        pendingRead.emplace(
+                            std::async(
+                                std::launch::async,
+                                readInto,
+                                chunkIndex + 1u,
+                                (chunkIndex + 1u) % 2u));
+                }
             }
-            picBunch::mpiBroadcastBunch(chunk.bunch, 0);
+            picBunch::mpiBroadcastBunch(chunk->bunch, 0);
             double chunkMeta[3] = {
-                chunk.time,
-                chunk.timeUnitSI,
-                static_cast<double>(chunk.iteration)};
+                chunk->time,
+                chunk->timeUnitSI,
+                static_cast<double>(chunk->iteration)};
             if(root)
             {
-                chunkMeta[0] = chunk.time;
-                chunkMeta[1] = chunk.timeUnitSI;
-                chunkMeta[2] = static_cast<double>(chunk.iteration);
+                chunkMeta[0] = chunk->time;
+                chunkMeta[1] = chunk->timeUnitSI;
+                chunkMeta[2] = static_cast<double>(chunk->iteration);
             }
             picBunch::mpiBroadcast(chunkMeta, 3, 0);
             if(!root)
             {
-                chunk.time = chunkMeta[0];
-                chunk.timeUnitSI = chunkMeta[1];
-                chunk.iteration = static_cast<std::uint64_t>(chunkMeta[2]);
+                chunk->time = chunkMeta[0];
+                chunk->timeUnitSI = chunkMeta[1];
+                chunk->iteration = static_cast<std::uint64_t>(chunkMeta[2]);
             }
             if(!haveMeta)
             {
-                metaTime = chunk.time;
-                metaTimeUnitSI = chunk.timeUnitSI;
-                metaIteration = chunk.iteration;
+                metaTime = chunk->time;
+                metaTimeUnitSI = chunk->timeUnitSI;
+                metaIteration = chunk->iteration;
                 haveMeta = true;
             }
 
+            std::size_t const chunkParticles = chunk->bunch.size();
             picBunch::StageTimes chunkTimes;
-            picBunch::Field const part
-                = picBunch::computeField(chunk.bunch, options, &chunkTimes);
+            picBunch::Field part = picBunch::computeField(chunk->bunch, options, &chunkTimes);
             times.depositMs += chunkTimes.depositMs;
             times.kernelMs += chunkTimes.kernelMs;
             times.fftMs += chunkTimes.fftMs;
             times.readoutMs += chunkTimes.readoutMs;
             times.transposeMs += chunkTimes.transposeMs;
+            times.planMs += chunkTimes.planMs;
             if(totalField.data[0].empty())
             {
-                totalField = part;
+                // Move the first chunk instead of copying a full six-component
+                // grid next to the freshly computed one.
+                totalField = std::move(part);
             }
             else
             {
@@ -894,11 +978,33 @@ namespace
             if(root)
                 std::printf(
                     "chunk %zu: %zu particles\n",
-                    offset / chunkSize + 1u,
-                    chunk.bunch.size());
+                    chunkIndex + 1u,
+                    chunkParticles);
         }
+        double const pipelineWallMs = elapsedMs(pipelineStart);
         if(totalField.data[0].empty())
             throw std::runtime_error("chunked mode: no particle chunk produced a field");
+        if(root)
+        {
+            double const computeMs = times.depositMs + times.kernelMs + times.fftMs
+                + times.transposeMs + times.readoutMs;
+            // Fraction of the reader time that the main thread did not wait
+            // for, i.e. how much of the I/O the compute overlapped.  ``waitMs``
+            // is the time spent in the prefetch ``get()`` calls.
+            double const overlap = (times.readerMs > 0.0)
+                ? std::clamp(1.0 - waitMs / times.readerMs, 0.0, 1.0)
+                : 0.0;
+            std::printf(
+                "chunked pipeline: wall=%.1f ms read=%.1f ms compute=%.1f ms "
+                "plan=%.1f ms wait=%.1f ms prepass_read=%.1f ms overlap=%.2f\n",
+                pipelineWallMs,
+                times.readerMs,
+                computeMs,
+                times.planMs,
+                waitMs,
+                prepassReadMs,
+                overlap);
+        }
 
         std::array<double, 2> peaks{0.0, 0.0};
         for(int c = 0; c < 6; ++c)
@@ -983,7 +1089,7 @@ int main(int argc, char** argv)
         picBunch::Field field;
         std::optional<picBunch::FarTail> farTail;
         bool const root = picBunch::mpiRank() == 0;
-        std::array<double, 3> globalOriginResolved{0.0, 0.0, 0.0};
+        Vec3 globalOriginResolved{0.0, 0.0, 0.0};
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
 
@@ -1048,9 +1154,9 @@ int main(int argc, char** argv)
         if(args.velocityMoments == "2" || args.velocityMoments == "3")
             options.velocityMoments.order = std::stoul(args.velocityMoments);
         options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
-        std::optional<std::array<double, 3>> meshCellSize;
-        std::optional<std::array<double, 3>> meshGridOrigin;
-        std::optional<std::array<std::size_t, 3>> meshGridExtent;
+        std::optional<Vec3> meshCellSize;
+        std::optional<Vec3> meshGridOrigin;
+        std::optional<Idx3> meshGridExtent;
         try
         {
             auto const geometry
@@ -1102,16 +1208,21 @@ int main(int argc, char** argv)
         // large enough that the shortest axis, not the requested "d cells",
         // controls the near-source accuracy.  This changes no computation.
         {
-            auto const [shortest, largest] = std::minmax_element(
-                options.cellSize.begin(), options.cellSize.end());
-            double const ratio = *largest / *shortest;
+            double shortest = options.cellSize[0];
+            double largest = options.cellSize[0];
+            for(std::size_t a = 1u; a < 3u; ++a)
+            {
+                shortest = std::min(shortest, options.cellSize[a]);
+                largest = std::max(largest, options.cellSize[a]);
+            }
+            double const ratio = largest / shortest;
             if(ratio >= 2.0)
                 std::fprintf(
                     stderr,
                     "picBunch: warning: anisotropic cell spacing: largest %.6g m, "
                     "shortest %.6g m (ratio %.3g); near-field accuracy is set by the "
                     "shortest axis (%.6g m)\n",
-                    *largest, *shortest, ratio, *shortest);
+                    largest, shortest, ratio, shortest);
         }
         // The mesh extent is the default computation grid; --grid is an explicit
         // override.  A --global-grid must not enlarge the computation, so the
@@ -1351,7 +1462,7 @@ int main(int argc, char** argv)
                 options.cellSize,
                 args.multipoleGroupCells);
             auto const bounds = bunchData.bunch.bounds();
-            std::array<double, 3> tailMargin{};
+            Vec3 tailMargin{};
             for(int a = 0; a < 3; ++a)
             {
                 double const halfExtent = 0.5 * (bounds[1][a] - bounds[0][a]);
@@ -1374,7 +1485,7 @@ int main(int argc, char** argv)
                     args.tolerance);
             else
             {
-                auto const computeWithMargin = [&](std::array<double, 3> const& useMargin) {
+                auto const computeWithMargin = [&](Vec3 const& useMargin) {
                     picBunch::ComputeOptions expanded = options;
                     expanded.marginCellsPerAxis = useMargin;
                     // The margin, not the previous explicit extent/origin, now
@@ -1389,7 +1500,7 @@ int main(int argc, char** argv)
                     maxE = peaks[0];
                     maxB = peaks[1];
                 };
-                std::array<double, 3> preferred = margin.marginCells;
+                Vec3 preferred = margin.marginCells;
                 bool needsExpansion = false;
                 for(int a = 0; a < 3; ++a)
                 {

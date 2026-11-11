@@ -62,7 +62,7 @@ namespace picBunch
     {
         //! x,y,z -> z,y,x, the stored openPMD axis order.
         template<typename T>
-        std::vector<T> reverse(std::array<T, 3> const& value)
+        std::vector<T> reverse(alpaka::Vec<T, 3u> const& value)
         {
             return {value[2], value[1], value[0]};
         }
@@ -254,7 +254,7 @@ namespace picBunch
                         field.data[spec.firstComponent + a].data(), offset, extent);
                     component.setUnitSI(1.0);
                     // position attribute in cell-size units, stored axis order z,y,x.
-                    std::array<double, 3> const yee{
+                    Vec3 const yee{
                         kYeeOffset[spec.firstComponent + a][0] / kRefinement,
                         kYeeOffset[spec.firstComponent + a][1] / kRefinement,
                         kYeeOffset[spec.firstComponent + a][2] / kRefinement};
@@ -302,8 +302,8 @@ namespace picBunch
         //! Check that the compute field lies on global nodes and inside the domain.
         std::array<long long, 3> globalBase(
             Grid const& fieldGrid,
-            std::array<std::size_t, 3> const& globalGridSize,
-            std::array<double, 3> const& globalGridOrigin)
+            Idx3 const& globalGridSize,
+            Vec3 const& globalGridOrigin)
         {
             std::array<long long, 3> base{};
             for(int a = 0; a < 3; ++a)
@@ -341,11 +341,11 @@ namespace picBunch
             Field const& field,
             int component,
             std::array<long long, 3> const& base,
-            std::array<std::size_t, 3> const& globalN,
+            Idx3 const& globalN,
             std::size_t zBegin,
             std::size_t zEnd,
             FarTailBatch const* tail,
-            std::array<double, 3> const& globalOrigin)
+            Vec3 const& globalOrigin)
         {
             std::size_t const nx = globalN[0];
             std::size_t const ny = globalN[1];
@@ -416,7 +416,7 @@ namespace picBunch
                         // PIC-cell units.  Evaluate the tail at the same
                         // staggered point as the exact compute box, whose node
                         // spacing is kRefinement * cellSize.
-                        std::array<double, 3> const position{
+                        Vec3 const position{
                             globalOrigin[0] + static_cast<double>(i) * spacing[0]
                                 + kYeeOffset[component][0] * spacing[0] / kRefinement,
                             globalOrigin[1] + static_cast<double>(j) * spacing[1]
@@ -440,8 +440,8 @@ namespace picBunch
         Field const& field,
         std::string const& fileName,
         FieldWriteOptions const& options,
-        std::array<std::size_t, 3> const& globalGridSize,
-        std::array<double, 3> const& globalGridOrigin,
+        Idx3 const& globalGridSize,
+        Vec3 const& globalGridOrigin,
         FarTail const* tail)
     {
         for(std::size_t c = 0; c < field.data.size(); ++c)
@@ -574,7 +574,7 @@ namespace picBunch
                     auto& component = mesh[name];
                     component.resetDataset(dataset);
                     component.setUnitSI(1.0);
-                    std::array<double, 3> const yee{
+                    Vec3 const yee{
                         kYeeOffset[spec.firstComponent + a][0] / kRefinement,
                         kYeeOffset[spec.firstComponent + a][1] / kRefinement,
                         kYeeOffset[spec.firstComponent + a][2] / kRefinement};
@@ -772,13 +772,13 @@ namespace picBunch
             closeQuietly(space);
         }
 
-        void setDoubleArrayAttribute(hid_t object, char const* name, std::array<double, 3> const& values)
+        void setDoubleArrayAttribute(hid_t object, char const* name, Vec3 const& values)
         {
             hsize_t const dimensions[1] = {3};
             hid_t space = checked(H5Screate_simple(1, dimensions, nullptr), "H5Screate_simple");
             hid_t attribute = checked(
                 H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT), "H5Acreate2");
-            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data()), "H5Awrite");
+            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]), "H5Awrite");
             closeQuietly(attribute);
             closeQuietly(space);
         }
@@ -790,7 +790,7 @@ namespace picBunch
             hid_t attribute = checked(
                 H5Acreate2(object, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT),
                 "H5Acreate2");
-            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data()), "H5Awrite");
+            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]), "H5Awrite");
             closeQuietly(attribute);
             closeQuietly(space);
         }
@@ -815,7 +815,7 @@ namespace picBunch
             double const* data,
             std::size_t count,
             double unit,
-            std::array<double, 3> const& position,
+            Vec3 const& position,
             bool float64 = false)
         {
             hid_t space = checked(H5Screate_simple(3, dimensions, nullptr), "H5Screate_simple");
@@ -1327,11 +1327,11 @@ namespace picBunch
             Field const& field,
             PicOnGPUWriteOptions const& options)
         {
-            std::array<double, 3> const spacing{
+            Vec3 const spacing{
                 field.grid.spacing[2] / options.unitLength,
                 field.grid.spacing[1] / options.unitLength,
                 field.grid.spacing[0] / options.unitLength};
-            std::array<double, 3> const origin{
+            Vec3 const origin{
                 field.grid.origin[2] / options.unitLength,
                 field.grid.origin[1] / options.unitLength,
                 field.grid.origin[0] / options.unitLength};
@@ -1402,7 +1402,7 @@ namespace picBunch
             hid_t attribute = checked(
                 H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT),
                 "H5Acreate2");
-            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, values.data()), "H5Awrite");
+            checked(H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]), "H5Awrite");
             closeQuietly(attribute);
             closeQuietly(space);
         }
@@ -1441,7 +1441,7 @@ namespace picBunch
             hid_t species,
             char const* recordName,
             std::array<std::vector<double>, 3> const& values,
-            std::array<double, 3> const& unitSI,
+            Vec3 const& unitSI,
             std::array<double, 7> const& unitDimension,
             bool macroWeighted,
             double weightingPower,
@@ -1494,7 +1494,7 @@ namespace picBunch
             hid_t species,
             char const* recordName,
             std::array<std::vector<std::int32_t>, 3> const& values,
-            std::array<double, 3> const& unitSI)
+            Vec3 const& unitSI)
         {
             hid_t record = checked(
                 H5Gcreate2(species, recordName, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
@@ -1711,7 +1711,7 @@ namespace picBunch
                 mass[slot] = restMass / generated.unitMass;
             }
 
-            std::array<double, 3> const cellUnit{
+            Vec3 const cellUnit{
                 generated.cellSize[0], generated.cellSize[1], generated.cellSize[2]};
             writeFloatVectorRecord(
                 particles,
@@ -2031,11 +2031,11 @@ namespace picBunch
                 for(auto const& spec : records)
                 {
                     hid_t record = createFieldGroup(fields, spec.name);
-                    std::array<double, 3> const spacing{
+                    Vec3 const spacing{
                         field.grid.spacing[2] / options.unitLength,
                         field.grid.spacing[1] / options.unitLength,
                         field.grid.spacing[0] / options.unitLength};
-                    std::array<double, 3> const origin{
+                    Vec3 const origin{
                         field.grid.origin[2] / options.unitLength,
                         field.grid.origin[1] / options.unitLength,
                         field.grid.origin[0] / options.unitLength};
@@ -2045,7 +2045,7 @@ namespace picBunch
                     setUnitDimension(record, spec.unitDimension);
                     for(std::size_t a = 0; a < 3; ++a)
                     {
-                        std::array<double, 3> const position{
+                        Vec3 const position{
                             kYeeOffset[spec.firstComponent + a][0],
                             kYeeOffset[spec.firstComponent + a][1],
                             kYeeOffset[spec.firstComponent + a][2]};

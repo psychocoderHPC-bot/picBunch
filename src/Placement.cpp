@@ -16,18 +16,18 @@ namespace picBunch
 {
     namespace
     {
-        std::array<double, 3> position(Bunch const& bunch, std::size_t p)
+        Vec3 position(Bunch const& bunch, std::size_t p)
         {
             return {bunch.x[p], bunch.y[p], bunch.z[p]};
         }
     } // namespace
 
-    std::array<double, 3> chargeWeightedCentroid(Bunch const& bunch)
+    Vec3 chargeWeightedCentroid(Bunch const& bunch)
     {
         if(bunch.size() == 0u)
             throw std::runtime_error("chargeWeightedCentroid: empty bunch");
         double weightSum = 0.0;
-        std::array<double, 3> sum{0.0, 0.0, 0.0};
+        Vec3 sum{0.0, 0.0, 0.0};
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const w = bunch.weight[p] * bunch.charge[p];
@@ -40,16 +40,16 @@ namespace picBunch
             throw std::runtime_error(
                 "chargeWeightedCentroid: the total charge-weighted weight is zero; "
                 "the charge-weighted centroid is undefined");
-        std::array<double, 3> result{};
+        Vec3 result{};
         for(int a = 0; a < 3; ++a)
             result[a] = sum[a] / weightSum;
         return result;
     }
 
-    std::array<double, 3> boundingBoxCentre(Bunch const& bunch)
+    Vec3 boundingBoxCentre(Bunch const& bunch)
     {
         auto const bounds = bunch.bounds();
-        std::array<double, 3> result{};
+        Vec3 result{};
         for(int a = 0; a < 3; ++a)
             result[a] = 0.5 * (bounds[0][a] + bounds[1][a]);
         return result;

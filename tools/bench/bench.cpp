@@ -222,8 +222,8 @@ namespace
         double gamma = 0.0;
         double spacing = 0.0;
         unsigned padding = 2;
-        std::array<std::size_t, 3> n{0, 0, 0};
-        std::array<std::size_t, 3> m{0, 0, 0};
+        picBunch::Idx3 n{0, 0, 0};
+        picBunch::Idx3 m{0, 0, 0};
         double planMin = 0.0;
         double planMedian = 0.0;
         double depositMin = 0.0;
