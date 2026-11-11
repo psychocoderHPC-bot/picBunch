@@ -102,26 +102,38 @@ namespace picBunch
             return first;
         }
 
-        std::vector<double> loadValues(
+        void loadValuesInto(
             Series& series,
             RecordComponent& component,
             std::size_t offset,
             std::size_t count,
-            std::string const& path);
+            std::string const& path,
+            std::vector<double>& destination);
 
-        //! Read a scalar record in either the plain-dataset or 2.0 group form.
-        std::vector<double> loadScalarValues(
+        /*! Read a scalar record into a reusable buffer.
+         *
+         * This is the streaming form of the former ``loadScalarValues``: the
+         * per-component scratch buffer is the destination itself, so a chunked
+         * read never holds a second full particle array next to the bunch.
+         * ``destination`` is resized to ``count``.
+         */
+        void loadScalarValuesInto(
             Series& series,
             Record& record,
             std::size_t offset,
             std::size_t count,
-            std::string const& path)
+            std::string const& path,
+            std::vector<double>& destination)
         {
+            destination.resize(count);
             // A constant scalar record may carry a ``value`` attribute instead of
             // a dataset.  Prefer a real ``value`` child when both exist.
             if(!record.contains("value") && record.containsAttribute("value"))
-                return std::vector<double>(count, record.getAttribute("value").get<double>());
-            return loadValues(series, scalarComponent(record, path), offset, count, path);
+            {
+                std::fill(destination.begin(), destination.end(), record.getAttribute("value").get<double>());
+                return;
+            }
+            loadValuesInto(series, scalarComponent(record, path), offset, count, path, destination);
         }
 
         double scalarUnitSI(Record& record, std::string const& path)
@@ -156,27 +168,29 @@ namespace picBunch
             return record.getAttribute("weightingPower").get<double>();
         }
 
-        template<typename T>
-        std::vector<double> copyValues(std::shared_ptr<T> const& data, std::size_t count)
-        {
-            std::vector<double> result(count);
-            for(std::size_t i = 0; i < count; ++i)
-                result[i] = static_cast<double>(data.get()[i]);
-            return result;
-        }
-
-        std::vector<double> loadValues(
+        /*! Read one component range into ``destination``.
+         *
+         * The typed buffer returned by openPMD is converted straight into the
+         * destination and released before the next component is read.  A chunked
+         * read therefore peaks at one particle array per component instead of a
+         * copy of every component held until the bunch is assembled.
+         */
+        void loadValuesInto(
             Series& series,
             RecordComponent& component,
             std::size_t offset,
             std::size_t count,
-            std::string const& path)
+            std::string const& path,
+            std::vector<double>& destination)
         {
+            if(destination.size() != count)
+                destination.resize(count);
             if(component.constant())
             {
                 if(!component.containsAttribute("value"))
                     fail(path + ": constant component without a 'value' attribute");
-                return std::vector<double>(count, component.getAttribute("value").get<double>());
+                std::fill(destination.begin(), destination.end(), component.getAttribute("value").get<double>());
+                return;
             }
             auto const extent = component.getExtent();
             std::size_t total = 1;
@@ -188,11 +202,16 @@ namespace picBunch
             auto const datatype = component.getDatatype();
             openPMD::Offset const chunkOffset{static_cast<openPMD::Offset::value_type>(offset)};
             openPMD::Extent const requested{count};
+            auto const convert = [&](auto const& raw) {
+                for(std::size_t i = 0; i < count; ++i)
+                    destination[i] = static_cast<double>(raw.get()[i]);
+            };
 #define PICBUNCH_LOAD(type)                                                                                      \
     {                                                                                                            \
         auto raw = component.loadChunk<type>(chunkOffset, requested);                                                 \
         series.flush();                                                                                          \
-        return copyValues(raw, count);                                                                           \
+        convert(raw);                                                                                            \
+        return;                                                                                                  \
     }
             switch(datatype)
             {
@@ -229,25 +248,6 @@ namespace picBunch
                 units[a] = checkedUnitSI(record[componentName], path, &record);
             }
             return units;
-        }
-
-        //! Read all three components of a vector record (one value per particle).
-        std::array<std::vector<double>, 3> readVectorSeries(
-            Series& series,
-            Record& record,
-            std::size_t offset,
-            std::size_t count,
-            std::string const& prefix)
-        {
-            std::array<std::vector<double>, 3> result;
-            for(std::size_t a = 0; a < 3; ++a)
-            {
-                std::string const componentName = std::string(1, static_cast<char>('x' + a));
-                std::string const path = prefix + "/" + componentName;
-                requireRecord(record, componentName, prefix);
-                result[a] = loadValues(series, record[componentName], offset, count, path);
-            }
-            return result;
         }
 
         std::pair<Iteration&, std::uint64_t> selectIteration(
@@ -295,9 +295,20 @@ namespace picBunch
 
     namespace
     {
-        BunchData readBunchImpl(std::string const& fileName, BunchSelection const& selection, std::size_t offset, std::size_t count)
+        /*! Fill ``result`` with one particle range.
+         *
+         * ``result`` may own buffers from an earlier call; ``Bunch::resize``
+         * reuses their capacity and every particle field is overwritten, so a
+         * chunked reader keeps a fixed pair of buffers instead of allocating a
+         * full bunch per chunk.
+         */
+        void readBunchImpl(
+            std::string const& fileName,
+            BunchSelection const& selection,
+            std::size_t offset,
+            std::size_t count,
+            BunchData& result)
         {
-        BunchData result;
         Series series(fileName, openPMD::Access::READ_ONLY);
         auto [iteration, iterationIndex] = selectIteration(series, selection.iteration);
         result.iteration = iterationIndex;
@@ -358,28 +369,54 @@ namespace picBunch
         if(offset > totalCount || chunkCount > totalCount - offset)
             fail("requested particle range is outside the species extent");
 
-        auto const positionValues = readVectorSeries(series, position, offset, chunkCount, "position");
-        auto const positionUnits = readComponentUnits(position, "position");
+        // The bunch arrays are the only per-chunk particle storage kept alive.
+        // Every component is read into one reusable scratch vector, converted,
+        // and released before the next component, so the reader peak is the
+        // bunch itself plus one raw component instead of a full untransformed
+        // copy of all nine particle arrays.
+        Bunch& bunch = result.bunch;
+        bunch.resize(chunkCount);
+        std::vector<double> scratch;
+        std::vector<double> scratchOffset;
 
-        std::array<std::vector<double>, 3> offsetValues;
+        auto const positionUnits = readComponentUnits(position, "position");
+        Record* offsetRecord = nullptr;
         std::array<double, 3> offsetUnits{0.0, 0.0, 0.0};
         if(species.contains("positionOffset"))
         {
-            Record& offsetRecord = species["positionOffset"];
-            offsetValues = readVectorSeries(series, offsetRecord, offset, chunkCount, "positionOffset");
-            offsetUnits = readComponentUnits(offsetRecord, "positionOffset");
+            offsetRecord = &species["positionOffset"];
+            offsetUnits = readComponentUnits(*offsetRecord, "positionOffset");
         }
-        else
+        std::array<std::vector<double>*, 3> coordinates{&bunch.x, &bunch.y, &bunch.z};
+        for(std::size_t a = 0; a < 3; ++a)
         {
-            for(auto& component : offsetValues)
-                component.assign(chunkCount, 0.0);
+            std::string const componentName = std::string(1, static_cast<char>('x' + a));
+            std::string const path = "position/" + componentName;
+            requireRecord(position, componentName, "position");
+            loadValuesInto(series, position[componentName], offset, chunkCount, path, scratch);
+            std::vector<double>* offsetValues = nullptr;
+            if(offsetRecord != nullptr)
+            {
+                requireRecord(*offsetRecord, componentName, "positionOffset");
+                loadValuesInto(
+                    series,
+                    (*offsetRecord)[componentName],
+                    offset,
+                    chunkCount,
+                    "positionOffset/" + componentName,
+                    scratchOffset);
+                offsetValues = &scratchOffset;
+            }
+            std::vector<double>& destination = *coordinates[a];
+            for(std::size_t p = 0; p < chunkCount; ++p)
+                destination[p] = scratch[p] * positionUnits[a]
+                    + (offsetValues != nullptr ? (*offsetValues)[p] * offsetUnits[a] : 0.0);
         }
 
         if(!species.contains("momentum"))
             fail("species '" + speciesName + "' has no 'momentum' record");
         Record& momentum = species["momentum"];
         checkUnitDimension(momentum, "momentum", {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0});
-        auto const momentumValues = readVectorSeries(series, momentum, offset, chunkCount, "momentum");
         auto const momentumUnits = readComponentUnits(momentum, "momentum");
         // openPMD standard default for macroWeighted is false; the momentum is
         // then a per-particle value and the weightingPower must not be applied.
@@ -395,9 +432,10 @@ namespace picBunch
         Record& weightingRecord = species["weighting"];
         checkUnitDimension(weightingRecord, "weighting", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
         double const weightUnitSI = scalarUnitSI(weightingRecord, "weighting");
-        auto const rawWeight = loadScalarValues(series, weightingRecord, offset, chunkCount, "weighting");
+        loadScalarValuesInto(series, weightingRecord, offset, chunkCount, "weighting", bunch.weight);
+        for(std::size_t p = 0; p < chunkCount; ++p)
+            bunch.weight[p] *= weightUnitSI;
 
-        std::vector<double> chargePerParticle;
         bool const chargeDefaulted = !species.contains("charge");
         if(chargeDefaulted)
             std::cerr << "picBunch openPMD reader: species '" << speciesName
@@ -408,44 +446,64 @@ namespace picBunch
             Record& chargeRecord = species["charge"];
             checkUnitDimension(chargeRecord, "charge", {0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0});
             double const chargeUnitSI = scalarUnitSI(chargeRecord, "charge");
-            auto const rawCharge = loadScalarValues(series, chargeRecord, offset, chunkCount, "charge");
-            chargePerParticle.resize(chunkCount);
+            loadScalarValuesInto(series, chargeRecord, offset, chunkCount, "charge", bunch.charge);
             for(std::size_t p = 0; p < chunkCount; ++p)
-                chargePerParticle[p] = rawCharge[p] * chargeUnitSI;
+                bunch.charge[p] *= chargeUnitSI;
+        }
+        else
+        {
+            std::fill(bunch.charge.begin(), bunch.charge.end(), -kElementaryCharge);
         }
 
-        std::vector<double> restMass;
         if(species.contains("mass"))
         {
             Record& massRecord = species["mass"];
             checkUnitDimension(massRecord, "mass", {0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
             double const massUnitSI = scalarUnitSI(massRecord, "mass");
-            auto const rawMass = loadScalarValues(series, massRecord, offset, chunkCount, "mass");
-            restMass.resize(chunkCount);
+            loadScalarValuesInto(series, massRecord, offset, chunkCount, "mass", bunch.restMass);
             for(std::size_t p = 0; p < chunkCount; ++p)
-                restMass[p] = rawMass[p] * massUnitSI;
+                bunch.restMass[p] *= massUnitSI;
         }
-
-        Bunch& bunch = result.bunch;
-        bunch.resize(chunkCount);
-        for(std::size_t p = 0; p < chunkCount; ++p)
+        else
         {
-            double const weight = rawWeight[p] * weightUnitSI;
-            double const mass = (restMass.empty() || !(restMass[p] > 0.0)) ? kElectronMass : restMass[p];
-            double const factor = momentumMacro ? std::pow(weight, momentumPower) : 1.0;
-            double const denominator = mass * kSpeedOfLight * factor;
-
-            bunch.x[p] = positionValues[0][p] * positionUnits[0] + offsetValues[0][p] * offsetUnits[0];
-            bunch.y[p] = positionValues[1][p] * positionUnits[1] + offsetValues[1][p] * offsetUnits[1];
-            bunch.z[p] = positionValues[2][p] * positionUnits[2] + offsetValues[2][p] * offsetUnits[2];
-            bunch.ux[p] = (denominator != 0.0) ? momentumValues[0][p] * momentumUnits[0] / denominator : 0.0;
-            bunch.uy[p] = (denominator != 0.0) ? momentumValues[1][p] * momentumUnits[1] / denominator : 0.0;
-            bunch.uz[p] = (denominator != 0.0) ? momentumValues[2][p] * momentumUnits[2] / denominator : 0.0;
-            bunch.weight[p] = weight;
-            bunch.charge[p] = chargePerParticle.empty() ? -kElementaryCharge : chargePerParticle[p];
-            bunch.restMass[p] = mass;
+            // The buffer may be reused from an earlier chunk; a species without
+            // a mass record must not inherit those values.
+            std::fill(bunch.restMass.begin(), bunch.restMass.end(), kElectronMass);
         }
-        return result;
+        for(std::size_t p = 0; p < chunkCount; ++p)
+            if(!(bunch.restMass[p] > 0.0))
+                bunch.restMass[p] = kElectronMass;
+
+        // The momentum denominator is per particle and, for a macro-weighted
+        // record, needs the weighting power.  Compute it once and reuse it for
+        // the three components; the non-macro default keeps the historical
+        // mass * c * 1.0 ordering exactly.
+        std::vector<double> momentumDenominator;
+        if(momentumMacro)
+        {
+            momentumDenominator.resize(chunkCount);
+            for(std::size_t p = 0; p < chunkCount; ++p)
+                momentumDenominator[p]
+                    = bunch.restMass[p] * kSpeedOfLight * std::pow(bunch.weight[p], momentumPower);
+        }
+        auto const denominatorOf = [&](std::size_t p) {
+            return momentumMacro ? momentumDenominator[p] : bunch.restMass[p] * kSpeedOfLight;
+        };
+        std::array<std::vector<double>*, 3> momenta{&bunch.ux, &bunch.uy, &bunch.uz};
+        for(std::size_t a = 0; a < 3; ++a)
+        {
+            std::string const componentName = std::string(1, static_cast<char>('x' + a));
+            std::string const path = "momentum/" + componentName;
+            requireRecord(momentum, componentName, "momentum");
+            loadValuesInto(series, momentum[componentName], offset, chunkCount, path, scratch);
+            std::vector<double>& destination = *momenta[a];
+            for(std::size_t p = 0; p < chunkCount; ++p)
+            {
+                double const denominator = denominatorOf(p);
+                destination[p]
+                    = (denominator != 0.0) ? scratch[p] * momentumUnits[a] / denominator : 0.0;
+            }
+        }
         }
     } // namespace
 
@@ -453,12 +511,16 @@ namespace picBunch
     {
         BunchSelection selection;
         selection.speciesIndex = speciesIndex;
-        return readBunchImpl(fileName, selection, 0u, 0u);
+        BunchData result;
+        readBunchImpl(fileName, selection, 0u, 0u, result);
+        return result;
     }
 
     BunchData readBunch(std::string const& fileName, BunchSelection const& selection)
     {
-        return readBunchImpl(fileName, selection, 0u, 0u);
+        BunchData result;
+        readBunchImpl(fileName, selection, 0u, 0u, result);
+        return result;
     }
 
     std::size_t readParticleCount(std::string const& fileName, BunchSelection const& selection)
@@ -502,7 +564,19 @@ namespace picBunch
         std::size_t offset,
         std::size_t count)
     {
-        return readBunchImpl(fileName, selection, offset, count);
+        BunchData result;
+        readBunchImpl(fileName, selection, offset, count, result);
+        return result;
+    }
+
+    void readBunchRangeInto(
+        std::string const& fileName,
+        BunchSelection const& selection,
+        std::size_t offset,
+        std::size_t count,
+        BunchData& destination)
+    {
+        readBunchImpl(fileName, selection, offset, count, destination);
     }
 
     MeshGeometry readMeshGeometry(
