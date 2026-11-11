@@ -343,7 +343,7 @@ TEST(NearShellAccuracy, FastOrderAboveCapStaysBounded)
 
 // ---- adaptive oblique order ------------------------------------------------
 #include "picBunch/detail/ObliqueOrder.hpp"
-#if defined(PICBUNCH_BACKEND_CUDA)
+#if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
 #    include "picBunch/detail/FastNearDevice.hpp"
 #endif
 
@@ -401,7 +401,7 @@ TEST(NearShellAccuracy, Gamma10AutoEqualsExplicitFastOrder)
     }
 }
 
-#if defined(PICBUNCH_BACKEND_CUDA)
+#if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
 namespace
 {
     Vec3 deviceField(Vec3 const& obs, Vec3 const& u, int obliqueOrder)
@@ -449,7 +449,7 @@ namespace
 TEST(NearShellAccuracy, DeviceGamma100ObliqueMatchesHost)
 {
     if(!picBunch::pbfast::fastNearDeviceAvailable())
-        GTEST_SKIP() << "no CUDA device";
+        GTEST_SKIP() << "no GPU device";
     Vec3 const u = oblique45(kGamma100Beta);
     for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.2, -0.3, 0.4}, Vec3{0.0, 0.5, 0.0}})
     {
@@ -462,7 +462,7 @@ TEST(NearShellAccuracy, DeviceGamma100ObliqueMatchesHost)
 TEST(NearShellAccuracy, DeviceGamma100FiveDegreeMatchesReference)
 {
     if(!picBunch::pbfast::fastNearDeviceAvailable())
-        GTEST_SKIP() << "no CUDA device";
+        GTEST_SKIP() << "no GPU device";
     Vec3 const u = tilt5(kGamma100Beta, 5.0);
     struct Case
     {
@@ -485,7 +485,7 @@ TEST(NearShellAccuracy, DeviceGamma100FiveDegreeMatchesReference)
 TEST(NearShellAccuracy, DeviceNearDistanceExactMatchesHost)
 {
     if(!picBunch::pbfast::fastNearDeviceAvailable())
-        GTEST_SKIP() << "no CUDA device";
+        GTEST_SKIP() << "no GPU device";
     std::array<double, 3> const dir{0.6, 0.0, 0.8};
     struct Config
     {
@@ -522,7 +522,7 @@ TEST(NearShellAccuracy, DeviceNearDistanceExactMatchesHost)
 TEST(NearShellAccuracy, DeviceGamma10AutoEqualsExplicitOrder4)
 {
     if(!picBunch::pbfast::fastNearDeviceAvailable())
-        GTEST_SKIP() << "no CUDA device";
+        GTEST_SKIP() << "no GPU device";
     Vec3 const u = oblique45(kGamma10Beta);
     for(Vec3 const obs : {Vec3{-0.6, 0.4, -0.3}, Vec3{0.0, 0.5, 0.0}})
     {
