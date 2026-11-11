@@ -35,6 +35,7 @@
 #include <cstdlib>
 #include <limits>
 #include <atomic>
+#include <map>
 #include <mutex>
 #if defined(_OPENMP)
 #    include <omp.h>
@@ -42,7 +43,9 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace picBunch
@@ -816,6 +819,40 @@ namespace picBunch
                     + "; raise --tolerance (the FFT padding cannot deliver a tighter target)");
             return (tolerance < kPadding2ErrorBound) ? 3u : 2u;
         }
+
+        /*! Reuse one unified work buffer per (thread, type, slot).
+         *
+         * A chunked CLI run and the benchmark's timed repeats call
+         * ``computeField`` many times with the same padded FFT extents.  The
+         * historical code allocated (and later freed) every FFT buffer on each
+         * call, so the allocator and the zero-fill dominated the setup time at
+         * large extents.  Keeping the last buffer per slot turns that into one
+         * allocation for the first call and none afterwards.
+         *
+         * The slot count is fixed (three double slots, two complex slots), so
+         * memory stays bounded: a new shape replaces the previous buffer of the
+         * same slot instead of accumulating one per distinct extent.  Slot
+         * identity is part of the key so two live buffers cannot alias.  The
+         * cache is intentionally leaked, which avoids a static destructor
+         * calling a vendor free after the runtime has finalised.
+         */
+        template<typename T_Type, typename T_Device>
+        auto& cachedUnifiedBuffer(T_Device& device, std::size_t count, int slot)
+        {
+            using Buffer = decltype(alpaka::onHost::allocUnified<T_Type>(device, count));
+            using Key = std::pair<std::thread::id, int>;
+            static auto* cache = new std::map<Key, std::pair<std::size_t, Buffer>>{};
+            static auto* guard = new std::mutex{};
+            Key const key{std::this_thread::get_id(), slot};
+            std::lock_guard lock{*guard};
+            auto it = cache->find(key);
+            if(it == cache->end())
+                it = cache->emplace(key, std::make_pair(count, alpaka::onHost::allocUnified<T_Type>(device, count)))
+                         .first;
+            else if(it->second.first != count)
+                it->second = {count, alpaka::onHost::allocUnified<T_Type>(device, count)};
+            return it->second.second;
+        }
     } // namespace
 
     std::array<double, 3> resolveCellSize(
@@ -1380,11 +1417,21 @@ namespace picBunch
         // inside the flat prefix the FFT reads.  Reused across the velocity
         // bins below, the stale padding carried the previous bin's charge
         // into the transform (characterised in tools/fft-size).
-        auto rhoReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
-        auto rhoSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
-        auto kernelReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
-        auto kernelSpec = alpaka::onHost::allocUnified<Complex>(device, static_cast<std::size_t>(spectrumCount));
-        auto outReal = alpaka::onHost::allocUnified<double>(device, static_cast<std::size_t>(paddedNodes));
+        //
+        // One real array serves rho, the kernel and the inverse-transform
+        // output.  Their lifetimes do not overlap: rho is dead once its r2c
+        // transform has produced rhoSpec, and the kernel array is dead once its
+        // r2c transform has produced kernelSpec, before the c2r output is
+        // written.  Aliasing them halves the padded real-space footprint
+        // (three M^3 arrays -> one) without changing any value.  The two
+        // packed half-spectra must stay distinct because the product reads
+        // both.  All buffers are reused across calls by shape.
+        auto& realWork = cachedUnifiedBuffer<double>(device, static_cast<std::size_t>(paddedNodes), 0);
+        auto& rhoSpec = cachedUnifiedBuffer<Complex>(device, static_cast<std::size_t>(spectrumCount), 1);
+        auto& kernelSpec = cachedUnifiedBuffer<Complex>(device, static_cast<std::size_t>(spectrumCount), 2);
+        auto& rhoReal = realWork;
+        auto& kernelReal = realWork;
+        auto& outReal = realWork;
 
         // Read-out geometry for the replicated path.  The c2r output stays
         // device-resident; a no-arithmetic gather copies the valid n^3 box into
@@ -1850,10 +1897,54 @@ namespace picBunch
         };
 
         // ---------------------------------------------------------------- FFT
-        auto r2cPlan
+        // Plans are shapes-only objects (the vendor handle plus the layout), so
+        // they are reused across computeField calls with the same padded
+        // extents.  cuFFT/FFTW plan construction is a large share of the setup
+        // time at M ~ 200-400; a chunked run or a repeated benchmark call paid
+        // it on every chunk.  Each thread keeps the plan pair for its last
+        // shape; a new shape rebuilds and drops the previous pair.
+        using R2cPlan = decltype(
+            alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device));
+        using C2rPlan = decltype(
+            alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device));
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+        // The rocFFT teardown guard below calls rocfft_cleanup() at the end of
+        // this call, so a cached plan would outlive the pool it belongs to.
+        auto r2cPlanOwned
             = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
-        auto c2rPlan
+        auto c2rPlanOwned
             = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device);
+        R2cPlan* r2cPlan = &r2cPlanOwned;
+        C2rPlan* c2rPlan = &c2rPlanOwned;
+#else
+        struct PlanSlot
+        {
+            std::array<std::uint32_t, 3> key{};
+            bool valid = false;
+            std::optional<R2cPlan> r2c;
+            std::optional<C2rPlan> c2r;
+        };
+        static auto* planSlots = new std::map<std::thread::id, PlanSlot>{};
+        static auto* planGuard = new std::mutex{};
+        std::array<std::uint32_t, 3> const planKey{Mx, My, Mz};
+        PlanSlot* slot = nullptr;
+        {
+            std::lock_guard lock{*planGuard};
+            PlanSlot& entry = (*planSlots)[std::this_thread::get_id()];
+            if(!entry.valid || entry.key != planKey)
+            {
+                entry.r2c.emplace(
+                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device));
+                entry.c2r.emplace(
+                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device));
+                entry.key = planKey;
+                entry.valid = true;
+            }
+            slot = &entry;
+        }
+        R2cPlan* r2cPlan = &*slot->r2c;
+        C2rPlan* c2rPlan = &*slot->c2r;
+#endif
 #if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
         // Deviation from the pure-alpaka rule, kept on purpose.  This is the only
         // native vendor API call in the tree: the HIP-only rocfft_cleanup() from
@@ -2121,7 +2212,7 @@ namespace picBunch
                         alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
                         launchMomentDeposit(mi.a1, mi.a2, mi.a3);
                         alpaka::fft::onHost::executeForward(
-                            queue, r2cPlan, rhoReal, momentBufs[static_cast<std::size_t>(mi.idx)]);
+                            queue, *r2cPlan, rhoReal, momentBufs[static_cast<std::size_t>(mi.idx)]);
                         alpaka::onHost::wait(queue);
                     }
                     times.depositMs += elapsedMs(depStart);
@@ -2181,7 +2272,7 @@ namespace picBunch
                                 continue;
                             alpaka::fft::onHost::executeForward(
                                 queue,
-                                r2cPlan,
+                                *r2cPlan,
                                 planeView(static_cast<std::size_t>(mi.idx)),
                                 kernelSpec);
                             if(inFull)
@@ -2225,7 +2316,7 @@ namespace picBunch
                                 spectrumCount,
                                 probeAcc.data());
                         }
-                        alpaka::fft::onHost::executeBackward(queue, c2rPlan, rhoSpec, outReal);
+                        alpaka::fft::onHost::executeBackward(queue, *c2rPlan, rhoSpec, outReal);
                         alpaka::onHost::wait(queue);
                         times.fftMs += elapsedMs(specStart);
 
@@ -2691,7 +2782,7 @@ namespace picBunch
 
             // ------------------------------------------------------------- FFT
             auto const fftStart = Clock::now();
-            alpaka::fft::onHost::executeForward(queue, r2cPlan, rhoReal, rhoSpec);
+            alpaka::fft::onHost::executeForward(queue, *r2cPlan, rhoReal, rhoSpec);
             alpaka::onHost::wait(queue);
             times.fftMs += elapsedMs(fftStart);
 
@@ -2740,7 +2831,7 @@ namespace picBunch
 
                 // --------------------------------------------------------- spectrum
                 auto const spectrumStart = Clock::now();
-                alpaka::fft::onHost::executeForward(queue, r2cPlan, kernelReal, kernelSpec);
+                alpaka::fft::onHost::executeForward(queue, *r2cPlan, kernelReal, kernelSpec);
                 alpaka::onHost::wait(queue);
                 // product of two packed half-spectra; Complex<double> is two adjacent doubles
                 static_assert(sizeof(Complex) == 2u * sizeof(double), "unexpected Complex layout");
@@ -2751,7 +2842,7 @@ namespace picBunch
                     packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
                     spectrumCount);
                 alpaka::onHost::wait(queue);
-                alpaka::fft::onHost::executeBackward(queue, c2rPlan, kernelSpec, outReal);
+                alpaka::fft::onHost::executeBackward(queue, *c2rPlan, kernelSpec, outReal);
                 alpaka::onHost::wait(queue);
                 times.fftMs += elapsedMs(spectrumStart);
 

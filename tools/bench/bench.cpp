@@ -316,10 +316,11 @@ namespace
         double const my = static_cast<double>(row.m[1]);
         double const mz = static_cast<double>(row.m[2]);
         double const spec = mz * my * (std::floor(mx / 2.0) + 1.0);
-        // exact allocation of computeField: 3 real M^3 arrays, 2 packed
-        // complex half-spectra, and 4 per-particle arrays.
+        // exact allocation of computeField: one real M^3 array (rho, kernel
+        // and c2r output alias it), 2 packed complex half-spectra, and 4
+        // per-particle arrays.
         row.deviceAllocMiB
-            = (3.0 * mx * my * mz * 8.0 + 2.0 * spec * 16.0
+            = (1.0 * mx * my * mz * 8.0 + 2.0 * spec * 16.0
                + 32.0 * static_cast<double>(particles))
             / (1024.0 * 1024.0);
 
