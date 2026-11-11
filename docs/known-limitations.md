@@ -194,27 +194,31 @@ the HDF5/MPI options and the runner image.
 
 ## 8. Scalar min/max extrema in the ported loops
 
-**Symptom.** Eight scalar `std::min`/`std::max` accumulator sites in the ported
-host loops still reduce one element at a time on the serial side instead of
-going through an alpaka reduction.
+**Symptom.** A few host-side scalar `std::min`/`std::max` accumulators in the
+ported loops still run serially instead of through an alpaka reduction.
 
-**Evidence.** The sites are the moment scans in `src/Compute.cpp`
-(`deriveFieldTailMargin`: `maxGamma`, `sourceRadius`), the far-tail pass in
-`src/FarTail.cpp` (`deriveFarTail`: `supportRadius`, `gammaMax`), and the
-velocity-binning scans in `src/VelocityBinning.cpp` (`firstBadMomentum`,
-`firstBadCharge`, `scaleU`, `uMin`/`uMax`). Each is a running extremum over a
-loop that already has a documented deterministic summation order.
+**Evidence.** `velocityMomentsRadius` in `src/VelocityMoments.cpp` now uses
+`alpaka::onHost::transformReduce` with a SIMD-capable max functor from
+`include/picBunch/detail/Reduction.hpp`. The remaining host extrema are
+`maxGamma` and `sourceRadius` in `src/Compute.cpp` (`deriveFieldTailMargin`),
+`supportRadius` and `gammaMax` in `src/FarTail.cpp` (`deriveFarTail`),
+`Bunch::bounds`, the per-box gamma range and maximum member angle in
+`src/VelocityBinning.cpp`, and the field peaks in `src/main.cpp`. The
+`firstBadMomentum`, `firstBadCharge`, `scaleU`, and `uMin`/`uMax` entries in an
+earlier version of this section were stale: those run inside alpaka kernels,
+and their serial `std::min`/`std::max` branches only execute when atomics are
+disabled on the CPU lane.
 
-**Why it is not fixed here.** The conversion to `alpaka::onHost::reduce` is
-numerically exact for min/max, but it changes the loop structure around the
-ordered floating-point accumulations these scans share. Doing it in the same
-change as the clamp and span-type fixes would widen the bit-identity surface
-without a dedicated validation run, so it is deferred.
+**Why it is not fixed here.** The reduction is exact for min/max, but it is
+slower for these host-array scans. Release CPU, median of 9 samples, 1e6
+particles: `Bunch::bounds` 2.4 -> 8.5 ms, `deriveFarTail` 13.6 -> 33.5 ms, and
+the velocity-binning statistics pass 64 -> 90 ms. The converted
+`velocityMomentsRadius` is 6.8 -> 4.8 ms at 4e6 particles and about even at
+1e6 (1.5-1.9 ms against 1.6-1.7 ms serial).
 
-**Plan.** Convert the eight sites to `alpaka::onHost::reduce` in a separate
-change, then rerun the bit-stability pin, the read-out bitwise test and the
-near-field golden/consistency suite on CPU and CUDA, and record the exact
-extrema list in the commit message.
+**Plan.** Keep the serial extrema unless profiling shows that one dominates.
+The `Compute.cpp` moment scans and the `main.cpp` field peaks stay in the pass
+that owns those files.
 
 ## 9. Dense near-shell scaling has no H100 or HIP row
 
