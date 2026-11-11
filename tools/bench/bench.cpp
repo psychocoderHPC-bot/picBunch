@@ -12,6 +12,10 @@
 #include "picBunch/Kernel.hpp"
 #include "picBunch/Types.hpp"
 
+#if defined(PICBUNCH_ENABLE_MPI)
+#    include "picBunch/Mpi.hpp"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -35,6 +39,12 @@
 
 namespace
 {
+    //! FFT mode selected on the command line; applied to every timed case.
+    picBunch::FftMode gFftMode = picBunch::FftMode::Auto;
+    //! Rank-parallel context (MPI, or a local single-rank context).
+    picBunch::ParallelContext* gParallel = nullptr;
+    int gRank = 0;
+
     // ---------------------------------------------------------------- memory
 
     std::size_t hostPeakMiB()
@@ -110,6 +120,22 @@ namespace
         }
     };
 #endif
+
+    //! Single-process context used when the benchmark is built without MPI.
+    struct SingleRankContext final : picBunch::ParallelContext
+    {
+        void alltoallv(
+            double* send,
+            int const* sendCounts,
+            int const* sendDispls,
+            double* recv,
+            int const* recvCounts,
+            int const* recvDispls) const override
+        {
+            if(sendCounts != nullptr && recvCounts != nullptr && sendCounts[0] > 0)
+                std::copy_n(send + sendDispls[0], sendCounts[0], recv + recvDispls[0]);
+        }
+    };
 
     // ---------------------------------------------------------------- bunch
 
@@ -263,6 +289,8 @@ namespace
         options.cellSize = {spacing, spacing, spacing};
         options.fftPadding = padding;
         options.marginCells = 4.0;
+        options.fftMode = gFftMode;
+        options.parallel = gParallel;
 
         std::vector<picBunch::StageTimes> samples;
         Row row;
@@ -468,6 +496,8 @@ namespace
         options.tolerance = 1e-3;
         options.cellSize = {h, h, h};
         options.fftPadding = 2;
+        options.fftMode = gFftMode;
+        options.parallel = gParallel;
         options.marginCells = 4.0;
         picBunch::Field const field = picBunch::computeField(bunch, options);
         auto const& g = field.grid;
@@ -575,6 +605,8 @@ namespace
         options.tolerance = 1e-3;
         options.cellSize = {h, h, h};
         options.fftPadding = 2;
+        options.fftMode = gFftMode;
+        options.parallel = gParallel;
         options.marginCells = 4.0;
         picBunch::Field const field = picBunch::computeField(bunch, options);
         auto const& g = field.grid;
@@ -666,6 +698,7 @@ namespace
         unsigned padding = 2;
         int repeat = 9;
         int warmup = 2;
+        std::string fftMode = "auto";
         std::string csv;
         std::string rawCsv;
         bool sweep = false;
@@ -690,6 +723,9 @@ namespace
             "  --padding p       FFT zero-padding factor (default 2)\n"
             "  --repeat R        timed repeats, min/median/max (default 9)\n"
             "  --warmup W        untimed warm-up repeats (default 2)\n"
+            "  --fft-mode M      auto|replicated|distributed (default auto).  Run the\n"
+            "                    distributed case under mpirun -n <ranks>; with one\n"
+            "                    rank the slab spans the whole padded box.\n"
             "  --sweep           run the paper matrix A-D\n"
             "  --coulomb         u=0 mesh vs direct TSC Coulomb stencil\n"
             "  --d-sweep         mesh vs analytic point field, d=2..48, gamma 1 and 10\n"
@@ -723,6 +759,8 @@ namespace
                 args.repeat = std::stoi(value("--repeat"));
             else if(option == "--warmup")
                 args.warmup = std::stoi(value("--warmup"));
+            else if(option == "--fft-mode")
+                args.fftMode = value("--fft-mode");
             else if(option == "--csv")
                 args.csv = value("--csv");
             else if(option == "--raw-csv")
@@ -751,6 +789,14 @@ namespace
             throw std::invalid_argument("--warmup must not be negative");
         if(args.padding < 1)
             throw std::invalid_argument("--padding must be at least 1");
+        if(args.fftMode == "auto")
+            gFftMode = picBunch::FftMode::Auto;
+        else if(args.fftMode == "replicated")
+            gFftMode = picBunch::FftMode::Replicated;
+        else if(args.fftMode == "distributed")
+            gFftMode = picBunch::FftMode::Distributed;
+        else
+            throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         return args;
     }
 
@@ -785,9 +831,19 @@ int main(int argc, char** argv)
         return 2;
     }
 
+#if defined(PICBUNCH_ENABLE_MPI)
+    picBunch::MpiGuard mpiGuard{argc, argv};
+    picBunch::MpiParallelContext parallelContext;
+    gParallel = &parallelContext;
+    gRank = picBunch::mpiRank();
+#else
+    SingleRankContext parallelContext;
+    gParallel = &parallelContext;
+#endif
+
     std::FILE* csv = nullptr;
     std::FILE* rawCsv = nullptr;
-    if(!args.csv.empty())
+    if(!args.csv.empty() && gRank == 0)
     {
         csv = std::fopen(args.csv.c_str(), "w");
         if(!csv)
@@ -796,7 +852,7 @@ int main(int argc, char** argv)
             return 2;
         }
     }
-    if(!args.rawCsv.empty())
+    if(!args.rawCsv.empty() && gRank == 0)
     {
         rawCsv = std::fopen(args.rawCsv.c_str(), "w");
         if(!rawCsv)
@@ -819,7 +875,8 @@ int main(int argc, char** argv)
         }
         else if(args.sweep)
         {
-            writeCsvHeader(stdout);
+            if(gRank == 0)
+                writeCsvHeader(stdout);
             if(csv)
                 writeCsvHeader(csv);
             struct Config
@@ -857,7 +914,8 @@ int main(int argc, char** argv)
                     args.warmup,
                     rawCsv,
                     id);
-                writeCsvRow(stdout, row);
+                if(gRank == 0)
+                    writeCsvRow(stdout, row);
                 if(csv)
                     writeCsvRow(csv, row);
                 std::fflush(stdout);
@@ -879,8 +937,11 @@ int main(int argc, char** argv)
                 args.warmup,
                 rawCsv,
                 id);
-            writeCsvHeader(stdout);
-            writeCsvRow(stdout, row);
+            if(gRank == 0)
+            {
+                writeCsvHeader(stdout);
+                writeCsvRow(stdout, row);
+            }
             if(csv)
             {
                 writeCsvHeader(csv);

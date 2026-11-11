@@ -3,6 +3,7 @@
 #pragma once
 
 #include "picBunch/Parallel.hpp"
+#include "picBunch/detail/FftPlanCache.hpp"
 
 #include <alpaka/alpaka.hpp>
 #include <alpaka/fft.hpp>
@@ -110,31 +111,95 @@ namespace picBunch
                 m_spectrum.emplace(alpaka::onHost::allocUnified<Complex>(device, spectrumSize));
                 m_kernel.emplace(alpaka::onHost::allocUnified<Complex>(device, spectrumSize));
 
-                m_xPlan.emplace(
-                    alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mx}}
-                        .c2c()
-                        .inPlace()
-                        .batch(My * m_nz)
-                        .distances(Mx * sizeof(Complex), Mx * sizeof(Complex))
-                        .build(device));
-                m_yPlan.emplace(
-                    alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{My}}
-                        .c2c()
-                        .inPlace()
-                        .batch(Mx)
-                        .strides(Mx * sizeof(Complex), Mx * sizeof(Complex))
-                        .distances(sizeof(Complex), sizeof(Complex))
-                        .build(device));
-                m_zPlan.emplace(
-                    alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mz}}
-                        .c2c()
-                        .inPlace()
-                        .batch(m_nx * My)
-                        .strides(
-                            static_cast<std::size_t>(m_nx) * My * sizeof(Complex),
-                            static_cast<std::size_t>(m_nx) * My * sizeof(Complex))
-                        .distances(sizeof(Complex), sizeof(Complex))
-                        .build(device));
+                // Every plan is keyed by the complete layout.  The x/y/z
+                // transforms use different extents, batch counts, strides and
+                // distances, and the replicated path's full-grid plans must
+                // never be reused here.  A key mismatch builds a new plan;
+                // alternating layouts therefore rebuilds instead of failing
+                // with a vendor execution error.
+                auto const shape = std::array<std::uint32_t, 3u>{Mx, My, Mz};
+                auto const slab
+                    = std::array<std::uint32_t, 4u>{m_nx, m_nz, m_z0, static_cast<std::uint32_t>(parallel->size)};
+                auto const zeroStride = alpaka::Vec<std::size_t, 1u>{};
+                auto const xStride = alpaka::Vec<std::size_t, 1u>{Mx * sizeof(Complex)};
+                auto const yStride
+                    = alpaka::Vec<std::size_t, 1u>{static_cast<std::size_t>(m_nx) * My * sizeof(Complex)};
+                auto const xKey = detail::makeFftPlanKey<Complex>(
+                    device,
+                    alpaka::fft::Transform::c2c,
+                    Extents1{Mx},
+                    static_cast<std::uint32_t>(My * m_nz),
+                    zeroStride,
+                    zeroStride,
+                    Mx * sizeof(Complex),
+                    Mx * sizeof(Complex),
+                    alpaka::fft::Placement::inPlace,
+                    detail::FftLayoutKind::DistributedSlab,
+                    shape,
+                    slab);
+                auto const yKey = detail::makeFftPlanKey<Complex>(
+                    device,
+                    alpaka::fft::Transform::c2c,
+                    Extents1{My},
+                    static_cast<std::uint32_t>(Mx),
+                    xStride,
+                    xStride,
+                    sizeof(Complex),
+                    sizeof(Complex),
+                    alpaka::fft::Placement::inPlace,
+                    detail::FftLayoutKind::DistributedSlab,
+                    shape,
+                    slab);
+                auto const zKey = detail::makeFftPlanKey<Complex>(
+                    device,
+                    alpaka::fft::Transform::c2c,
+                    Extents1{Mz},
+                    static_cast<std::uint32_t>(m_nx * My),
+                    yStride,
+                    yStride,
+                    sizeof(Complex),
+                    sizeof(Complex),
+                    alpaka::fft::Placement::inPlace,
+                    detail::FftLayoutKind::DistributedSlab,
+                    shape,
+                    slab);
+                m_xPlan = acquirePlan(
+                    device,
+                    xKey,
+                    [&] {
+                        return alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mx}}
+                            .c2c()
+                            .inPlace()
+                            .batch(My * m_nz)
+                            .distances(Mx * sizeof(Complex), Mx * sizeof(Complex))
+                            .build(device);
+                    });
+                m_yPlan = acquirePlan(
+                    device,
+                    yKey,
+                    [&] {
+                        return alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{My}}
+                            .c2c()
+                            .inPlace()
+                            .batch(Mx)
+                            .strides(Mx * sizeof(Complex), Mx * sizeof(Complex))
+                            .distances(sizeof(Complex), sizeof(Complex))
+                            .build(device);
+                    });
+                m_zPlan = acquirePlan(
+                    device,
+                    zKey,
+                    [&] {
+                        return alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mz}}
+                            .c2c()
+                            .inPlace()
+                            .batch(m_nx * My)
+                            .strides(
+                                static_cast<std::size_t>(m_nx) * My * sizeof(Complex),
+                                static_cast<std::size_t>(m_nx) * My * sizeof(Complex))
+                            .distances(sizeof(Complex), sizeof(Complex))
+                            .build(device);
+                    });
 
                 buildTransposeCounts();
             }
@@ -170,6 +235,12 @@ namespace picBunch
             [[nodiscard]] Complex* kernelSpectrum()
             {
                 return m_kernel->data();
+            }
+            //! Owning view of the local kernel spectrum; keeps the alpaka API
+            //! trait that a bare pointer view loses for onHost::memcpy.
+            [[nodiscard]] Buffer& kernelSpectrumBuffer()
+            {
+                return *m_kernel;
             }
 
             void clearWork()
@@ -261,6 +332,24 @@ namespace picBunch
             }
 
         private:
+            template<typename T_Builder>
+            static std::shared_ptr<Plan> acquirePlan(
+                T_Device& device,
+                detail::FftPlanKey const& key,
+                T_Builder&& builder)
+            {
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+                // The HIP teardown workaround still owns plans per process
+                // call; do not put them into the process cache.
+                static_cast<void>(device);
+                static_cast<void>(key);
+                return std::make_shared<Plan>(builder());
+#else
+                static_cast<void>(device);
+                return detail::FftPlanCache<Plan>::acquire(key, std::forward<T_Builder>(builder));
+#endif
+            }
+
             using Clock = std::chrono::steady_clock;
 
             static double elapsed(Clock::time_point const& start)
@@ -506,9 +595,9 @@ namespace picBunch
             std::optional<Buffer> m_recv;
             std::optional<Buffer> m_spectrum;
             std::optional<Buffer> m_kernel;
-            std::optional<Plan> m_xPlan;
-            std::optional<Plan> m_yPlan;
-            std::optional<Plan> m_zPlan;
+            std::shared_ptr<Plan> m_xPlan;
+            std::shared_ptr<Plan> m_yPlan;
+            std::shared_ptr<Plan> m_zPlan;
             std::vector<int> m_sendCounts;
             std::vector<int> m_sendDispls;
             std::vector<int> m_recvCounts;

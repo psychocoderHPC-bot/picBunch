@@ -405,6 +405,11 @@ if(PICBUNCH_BUILD_BENCH)
     find_package(Threads REQUIRED)
     add_executable(picBunchBench tools/bench/bench.cpp)
     target_link_libraries(picBunchBench PRIVATE picBunch::picBunch Threads::Threads)
+    if(PICBUNCH_ENABLE_MPI)
+        # The rank-parallel context lives in the host-only library; the MPI
+        # benchmark path runs the same computeField call on every rank.
+        target_link_libraries(picBunchBench PRIVATE picBunch::openPMD MPI::MPI_CXX)
+    endif()
     if(PICBUNCH_ENABLE_CUDA)
         find_package(CUDAToolkit QUIET)
         if(CUDAToolkit_FOUND)

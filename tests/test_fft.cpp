@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -287,6 +288,108 @@ namespace
         }
     };
 } // namespace
+
+TEST(Fft, MixedLayoutPlanAndSpectrumCacheOrders)
+{
+    // Regression for the plan cache that was keyed on the padded extents only.
+    // A process that alternates the replicated full-grid r2c/c2r plans with the
+    // distributed batched c2c plans reused an incompatible cuFFT plan and
+    // failed with CUFFT_EXEC_FAILED.  The complete plan key must rebuild on a
+    // layout mismatch, and the kernel-spectrum cache must return the same
+    // values as a fresh build.
+    //
+    // The sequences below start with the distributed layout (first) and then
+    // with the replicated layout (second), and each repeats every layout three
+    // times so the second-miss kernel insertion and the later cache hits are
+    // exercised in both directions.
+    picBunch::Bunch bunch;
+    bunch.resize(4);
+    bunch.x = {-2.0e-6, 0.5e-6, 1.5e-6, 3.0e-6};
+    bunch.y = {0.5e-6, -1.5e-6, 2.0e-6, 0.0};
+    bunch.z = {1.0e-6, -0.5e-6, 0.0, 2.5e-6};
+    bunch.ux = {0.0, 0.3, -0.2, 0.5};
+    bunch.uy = {0.0, -0.1, 0.4, 0.0};
+    bunch.uz = {0.0, 0.2, 0.0, -0.3};
+    bunch.weight = {1.0, 2.0, 0.5, 1.5};
+    bunch.charge = {
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge};
+
+    SelfContext context;
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
+    options.gridSize = {8, 8, 8};
+    options.gridOrigin = {-4.0e-6, -4.0e-6, -4.0e-6};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+    options.parallel = &context;
+
+    auto run = [&](picBunch::FftMode mode) {
+        options.fftMode = mode;
+        return picBunch::computeField(bunch, options);
+    };
+
+    auto expectBitIdentical = [](picBunch::Field const& expected, picBunch::Field const& actual) {
+        for(int c = 0; c < 6; ++c)
+        {
+            if(expected.data[c].size() != actual.data[c].size())
+            {
+                ADD_FAILURE() << "component " << c << " size differs";
+                continue;
+            }
+            EXPECT_EQ(
+                0,
+                std::memcmp(
+                    expected.data[c].data(),
+                    actual.data[c].data(),
+                    expected.data[c].size() * sizeof(double)))
+                << "component " << c << " differs between repeated calls";
+        }
+    };
+
+    auto runOrder = [&](picBunch::FftMode first, picBunch::FftMode second) {
+        std::array<picBunch::Field, 3> firstFields;
+        std::array<picBunch::Field, 3> secondFields;
+        for(int i = 0; i < 3; ++i)
+        {
+            firstFields[static_cast<std::size_t>(i)] = run(first);
+            secondFields[static_cast<std::size_t>(i)] = run(second);
+        }
+        for(int i = 1; i < 3; ++i)
+        {
+            expectBitIdentical(firstFields[0], firstFields[static_cast<std::size_t>(i)]);
+            expectBitIdentical(secondFields[0], secondFields[static_cast<std::size_t>(i)]);
+        }
+        return std::make_pair(firstFields[0], secondFields[0]);
+    };
+
+    // Distributed-first sequence, then replicated-first sequence.
+    auto const distributedFirst
+        = runOrder(picBunch::FftMode::Distributed, picBunch::FftMode::Replicated);
+    auto const replicatedFirst
+        = runOrder(picBunch::FftMode::Replicated, picBunch::FftMode::Distributed);
+
+    expectBitIdentical(distributedFirst.first, replicatedFirst.second);
+    expectBitIdentical(distributedFirst.second, replicatedFirst.first);
+
+    double peak = 0.0;
+    double worst = 0.0;
+    for(int c = 0; c < 6; ++c)
+        for(std::size_t l = 0; l < distributedFirst.second.data[c].size(); ++l)
+        {
+            peak = std::max(peak, std::abs(distributedFirst.second.data[c][l]));
+            worst = std::max(
+                worst,
+                std::abs(
+                    distributedFirst.second.data[c][l]
+                    - replicatedFirst.first.data[c][l]));
+        }
+    ASSERT_GT(peak, 0.0);
+    EXPECT_LT(worst / peak, 1.0e-12)
+        << "the two layouts must agree after repeated alternating calls";
+}
 
 TEST(Fft, DistributedProductionMatchesReplicatedWithDeviceDeposit)
 {
