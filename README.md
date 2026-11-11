@@ -509,7 +509,13 @@ two-cluster gamma-10 bunch the worst far-tail error against the direct Liénard
 sum at `6R`/`8R`/`12R` falls from `1.72e-3` (global) to `1.81e-4` (grouped,
 4-cell groups).  The evaluation cost grows with the number of occupied groups
 per tail node, so choose the group size from the bunch extent: large groups are
-cheaper, small groups are more accurate near the transition.
+cheaper, small groups are more accurate near the transition.  The writer
+flattens the groups once into `picBunch::FarTailBatch` (contiguous per-group
+coefficient arrays with the boost geometry hoisted out of the node loop) and
+evaluates every tail node from that form.  The values are bit-identical to the
+recursive group evaluation (`tests/test_margin.cpp`,
+`Margin.FarTailBatchMatchesRecursiveGroups`); the per-node cost drops by about
+2x for 8, 64 and 343 groups.
 
 ## Particle shapes
 

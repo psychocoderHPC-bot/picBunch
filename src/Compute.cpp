@@ -34,7 +34,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <atomic>
 #include <mutex>
+#if defined(_OPENMP)
+#    include <omp.h>
+#endif
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -68,6 +72,23 @@ namespace picBunch
                 r[i] = static_cast<decltype(a[0])>((a[i] + b[i] - 1u) / b[i]);
             return r;
         }
+
+        //! Number of OpenMP workers used by the host-side ordering pass.
+        inline int hostOrderingThreads()
+        {
+#if defined(_OPENMP)
+            return omp_get_max_threads();
+#else
+            return 1;
+#endif
+        }
+
+#if !defined(_OPENMP)
+        inline int omp_get_thread_num()
+        {
+            return 0;
+        }
+#endif
 
         //! Wrap a logical source index into the padded extent; the source halo lives there.
         ALPAKA_FN_ACC inline long wrapPaddedIndex(long i, std::uint32_t m)
@@ -148,6 +169,214 @@ namespace picBunch
                             }
                         }
                     }
+                }
+            }
+        };
+
+        //! Ordered particle payload of the binned TSC deposit.  32-byte aligned
+        //! so one particle is one memory transaction on the device.
+        struct alignas(32) BinnedParticle
+        {
+            double tx;
+            double ty;
+            double tz;
+            double q;
+        };
+
+        //! Histogram of the wrapped nearest node for the wide-mesh path.  The
+        //! atomic contention is low there because cells hold few particles.
+        struct TscBinCountKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                alpaka::concepts::IMdSpan auto const& particles,
+                alpaka::concepts::IMdSpan auto counts,
+                std::uint32_t numParticles,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz) const
+            {
+                for(auto [m] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{numParticles}))
+                {
+                    BinnedParticle const particle = particles[alpaka::Vec{m}];
+                    long const cx = static_cast<long>(alpaka::math::floor(particle.tx + 0.5));
+                    long const cy = static_cast<long>(alpaka::math::floor(particle.ty + 0.5));
+                    long const cz = static_cast<long>(alpaka::math::floor(particle.tz + 0.5));
+                    auto const wrap = [](long c, std::uint32_t mm) {
+                        long const mml = static_cast<long>(mm);
+                        while(c < 0)
+                            c += mml;
+                        while(c >= mml)
+                            c -= mml;
+                        return static_cast<std::uint32_t>(c);
+                    };
+                    std::uint32_t const key = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx
+                        + wrap(cx, Mx);
+                    alpaka::onAcc::atomicAdd(acc, &counts[key], 1u);
+                }
+            }
+        };
+
+        //! Atomic ordering for wide meshes: one 32-bit atomic claims the slot of
+        //! a particle in its cell, and the ordered particle plus the permutation
+        //! are written coalesced.  Used when the cell count is too large for the
+        //! per-worker histogram of the host path; the low occupancy per cell
+        //! there also keeps the atomic contention low.
+        struct TscBinScatterKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                alpaka::concepts::IMdSpan auto const& particles,
+                alpaka::concepts::IMdSpan auto cursor,
+                alpaka::concepts::IMdSpan auto ordered,
+                alpaka::concepts::IMdSpan auto slot,
+                std::uint32_t numParticles,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz) const
+            {
+                for(auto [m] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{numParticles}))
+                {
+                    BinnedParticle const particle = particles[alpaka::Vec{m}];
+                    long const cx = static_cast<long>(alpaka::math::floor(particle.tx + 0.5));
+                    long const cy = static_cast<long>(alpaka::math::floor(particle.ty + 0.5));
+                    long const cz = static_cast<long>(alpaka::math::floor(particle.tz + 0.5));
+                    auto const wrap = [](long c, std::uint32_t mm) {
+                        long const mml = static_cast<long>(mm);
+                        while(c < 0)
+                            c += mml;
+                        while(c >= mml)
+                            c -= mml;
+                        return static_cast<std::uint32_t>(c);
+                    };
+                    std::uint32_t const key = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx
+                        + wrap(cx, Mx);
+                    std::uint32_t const j = alpaka::onAcc::atomicAdd(acc, &cursor[key], 1u);
+                    ordered[j] = BinnedParticle{
+                        particle.tx - static_cast<double>(cx),
+                        particle.ty - static_cast<double>(cy),
+                        particle.tz - static_cast<double>(cz),
+                        particle.q};
+                    // dPart is replaced by the ordered buffer below, so the
+                    // deposit uses the identity permutation here.
+                    slot[j] = j;
+                }
+            }
+        };
+
+        //! Binned TSC deposit: one thread block owns one occupied grid cell (the
+        //! nearest node of its particles) and accumulates that cell's 3x3x3
+        //! stencil in shared memory.  One global atomic per stencil node is
+        //! issued for the whole block instead of one per particle, which removes
+        //! the serialization on the hot cells when the bunch oversubscribes the
+        //! mesh.  ``binKey[b]`` is the wrapped nearest node,
+        //! ``binStart[b] .. binStart[b+1]`` is its particle range, and the four
+        //! ordered arrays hold the TSC argument ``t - nearestNode`` and the
+        //! source charge of each particle in that range.
+        struct TscBinnedDepositKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(
+                TAcc const& acc,
+                alpaka::concepts::IMdSpan auto const& particles,
+                alpaka::concepts::IMdSpan auto const& slot,
+                alpaka::concepts::IMdSpan auto const& binKey,
+                alpaka::concepts::IMdSpan auto const& binStart,
+                std::uint32_t numBins,
+                alpaka::concepts::IMdSpan auto rho,
+                std::uint32_t zOffset,
+                std::uint32_t zExtent,
+                std::uint32_t Mx,
+                std::uint32_t My,
+                std::uint32_t Mz) const
+            {
+                auto tile = alpaka::onAcc::declareSharedMdArray<double, alpaka::uniqueId()>(
+                    acc,
+                    alpaka::CVec<std::uint32_t, 27u>{});
+                for(auto [b] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::blocksInGrid,
+                        alpaka::IdxRange{alpaka::Vec<std::uint32_t, 1u>{0u}, alpaka::Vec<std::uint32_t, 1u>{numBins}}))
+                {
+                    for(auto [c] : alpaka::onAcc::makeIdxMap(
+                            acc,
+                            alpaka::onAcc::worker::threadsInBlock,
+                            alpaka::IdxRange{alpaka::Vec<std::uint32_t, 1u>{0u}, alpaka::Vec<std::uint32_t, 1u>{27u}}))
+                        tile[alpaka::Vec{c}] = 0.0;
+                    alpaka::onAcc::syncBlockThreads(acc);
+
+                    std::uint32_t const key = binKey[alpaka::Vec{b}];
+                    std::uint32_t const cx = key % Mx;
+                    std::uint32_t const rem = key / Mx;
+                    std::uint32_t const cy = rem % My;
+                    std::uint32_t const cz = rem / My;
+                    std::uint32_t const first = binStart[alpaka::Vec{b}];
+                    std::uint32_t const last = binStart[alpaka::Vec<std::uint32_t, 1u>{b + 1u}];
+                    for(auto [j] : alpaka::onAcc::makeIdxMap(
+                            acc,
+                            alpaka::onAcc::worker::threadsInBlock,
+                            alpaka::IdxRange{alpaka::Vec<std::uint32_t, 1u>{first}, alpaka::Vec<std::uint32_t, 1u>{last}}))
+                    {
+                        BinnedParticle const particle
+                            = particles[alpaka::Vec{slot[alpaka::Vec{j}]}];
+                        double const q = particle.q;
+                        double const fx = particle.tx - static_cast<double>(cx);
+                        double const fy = particle.ty - static_cast<double>(cy);
+                        double const fz = particle.tz - static_cast<double>(cz);
+                        double wx[3];
+                        double wy[3];
+                        double wz[3];
+                        for(int i = 0; i < 3; ++i)
+                        {
+                            double const d = static_cast<double>(i - 1);
+                            wx[i] = shapeWeight<Shape::TSC>(d - fx);
+                            wy[i] = shapeWeight<Shape::TSC>(d - fy);
+                            wz[i] = shapeWeight<Shape::TSC>(d - fz);
+                        }
+                        for(int ix = 0; ix < 3; ++ix)
+                            for(int iy = 0; iy < 3; ++iy)
+                                for(int iz = 0; iz < 3; ++iz)
+                                {
+                                    std::uint32_t const flat = static_cast<std::uint32_t>(ix * 9 + iy * 3 + iz);
+                                    alpaka::onAcc::atomicAdd(
+                                        acc,
+                                        &tile[alpaka::Vec<std::uint32_t, 1u>{flat}],
+                                        q * wx[ix] * wy[iy] * wz[iz]);
+                                }
+                    }
+                    alpaka::onAcc::syncBlockThreads(acc);
+                    for(auto [c] : alpaka::onAcc::makeIdxMap(
+                            acc,
+                            alpaka::onAcc::worker::threadsInBlock,
+                            alpaka::IdxRange{alpaka::Vec<std::uint32_t, 1u>{0u}, alpaka::Vec<std::uint32_t, 1u>{27u}}))
+                    {
+                        double const value = tile[alpaka::Vec{c}];
+                        if(value == 0.0)
+                            continue;
+                        int const di = static_cast<int>(c / 9u) - 1;
+                        int const dj = static_cast<int>((c / 3u) % 3u) - 1;
+                        int const dk = static_cast<int>(c % 3u) - 1;
+                        long const ma = wrapPaddedIndex(static_cast<long>(cx) + di, Mx);
+                        long const mb = wrapPaddedIndex(static_cast<long>(cy) + dj, My);
+                        long const mc = wrapPaddedIndex(static_cast<long>(cz) + dk, Mz);
+                        if(mc < static_cast<long>(zOffset)
+                           || mc >= static_cast<long>(zOffset + zExtent))
+                            continue;
+                        auto const idx = alpaka::Vec{
+                            static_cast<std::uint32_t>(mc - static_cast<long>(zOffset)),
+                            static_cast<std::uint32_t>(mb),
+                            static_cast<std::uint32_t>(ma)};
+                        alpaka::onAcc::atomicAdd(acc, reinterpret_cast<double*>(&rho[idx]), value);
+                    }
+                    alpaka::onAcc::syncBlockThreads(acc);
                 }
             }
         };
@@ -1278,6 +1507,300 @@ namespace picBunch
                                  std::uint32_t zOffset,
                                  std::uint32_t zExtent) {
             auto const numParticles = static_cast<std::uint32_t>(list.size());
+            // Binned TSC path.  The particles are counting-sorted by their
+            // wrapped nearest node: a parallel host pass builds the keys and the
+            // TSC argument, a serial histogram gives the per-cell ranges, and a
+            // parallel pass writes the ordered payload.  One thread block per
+            // occupied cell then accumulates that cell's 3x3x3 stencil in shared
+            // memory, so the global atomic count drops from 27 per particle to
+            // 27 per cell.  Weights, support and charge are unchanged; only the
+            // association order of the contributions of different particles
+            // changes (atomic rounding).
+            constexpr std::uint64_t kMaxBinnedCells = 1ull << 26;
+            std::uint64_t const paddedCells
+                = static_cast<std::uint64_t>(Mx) * static_cast<std::uint64_t>(My)
+                * static_cast<std::uint64_t>(Mz);
+            if(grid.shape == Shape::TSC && numParticles >= 4096u && paddedCells <= kMaxBinnedCells)
+            {
+                double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+                double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
+                auto const invSp = alpaka::Vec{1.0 / sp[0], 1.0 / sp[1], 1.0 / sp[2]};
+                auto const wrap = [](long c, std::uint32_t m) {
+                    long const mm = static_cast<long>(m);
+                    while(c < 0)
+                        c += mm;
+                    while(c >= mm)
+                        c -= mm;
+                    return static_cast<std::uint32_t>(c);
+                };
+                std::vector<std::uint32_t> cursor(static_cast<std::size_t>(paddedCells) + 1u, 0u);
+                // Host-side staging, all unified: the host owns the pages before
+                // the kernel reads them, so the GPU migrates them once in bulk.
+                auto keys = alpaka::onHost::allocHost<std::uint32_t>(numParticles);
+                auto upart = alpaka::onHost::allocHost<BinnedParticle>(numParticles);
+#pragma omp parallel for schedule(static)
+                for(long long m = 0; m < static_cast<long long>(numParticles); ++m)
+                {
+                    std::size_t const p = list[static_cast<std::size_t>(m)];
+                    double const tx = (bunch.x[p] - org[0]) * invSp[0];
+                    double const ty = (bunch.y[p] - org[1]) * invSp[1];
+                    double const tz = (bunch.z[p] - org[2]) * invSp[2];
+                    long const cx = static_cast<long>(alpaka::math::floor(tx + 0.5));
+                    long const cy = static_cast<long>(alpaka::math::floor(ty + 0.5));
+                    long const cz = static_cast<long>(alpaka::math::floor(tz + 0.5));
+                    std::size_t const i = static_cast<std::size_t>(m);
+                    keys.data()[i] = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx + wrap(cx, Mx);
+                    upart.data()[i] = BinnedParticle{
+                        tx,
+                        ty,
+                        tz,
+                        bunch.weight[p] * bunch.charge[p]};
+                }
+                bool const parallelOrder = paddedCells <= (1ull << 18);
+#if defined(PICBUNCH_BACKEND_CUDA)
+                // The wide-mesh device ordering relies on the GPU atomic
+                // throughput; on the host backend the serial host path below is
+                // both correct and cheaper than a host atomic scatter.
+                bool const deviceOrdering = !parallelOrder;
+#else
+                bool const deviceOrdering = false;
+#endif
+                auto dPart = alpaka::onHost::alloc<BinnedParticle>(device, numParticles);
+                alpaka::onHost::memcpy(queue, dPart, upart);
+                if(!deviceOrdering)
+                {
+                    for(std::uint32_t m = 0; m < numParticles; ++m)
+                        ++cursor[static_cast<std::size_t>(keys.data()[m]) + 1u];
+                }
+                else
+                {
+                    // Wide mesh: the host cursor array does not fit in cache and
+                    // a random host histogram is the remaining serial cost, so
+                    // count on the device and bring the histogram back for the
+                    // prefix sum.
+                    auto dCounts = alpaka::onHost::alloc<std::uint32_t>(
+                        device,
+                        static_cast<std::size_t>(paddedCells) + 1u);
+                    alpaka::onHost::memset(queue, dCounts, std::uint8_t{0});
+                    std::uint32_t const countFrame = 128u;
+                    queue.enqueue(
+                        alpaka::onHost::FrameSpec{
+                            (numParticles + countFrame - 1u) / countFrame,
+                            countFrame},
+                        TscBinCountKernel{},
+                        alpaka::makeMdSpan(dPart.data(), alpaka::Vec<std::uint32_t, 1u>{numParticles}),
+                        alpaka::makeMdSpan(dCounts.data(), alpaka::Vec<std::uint32_t, 1u>{static_cast<std::uint32_t>(paddedCells) + 1u}),
+                        numParticles,
+                        Mx,
+                        My,
+                        Mz);
+                    alpaka::onHost::wait(queue);
+                    alpaka::onHost::memcpy(queue, cursor, dCounts);
+                    alpaka::onHost::wait(queue);
+                }
+                for(std::size_t k = 1; k < cursor.size(); ++k)
+                    cursor[k] += cursor[k - 1u];
+                std::vector<std::uint32_t> binKey;
+                std::vector<std::uint32_t> binStart;
+                binKey.reserve(numParticles);
+                binStart.reserve(numParticles);
+                constexpr std::uint32_t kNoBin = 0xffffffffu;
+                std::vector<std::uint32_t> keyToBin;
+                if(parallelOrder)
+                    keyToBin.assign(static_cast<std::size_t>(paddedCells), kNoBin);
+                for(std::size_t k = 0; k < static_cast<std::size_t>(paddedCells); ++k)
+                {
+                    if(cursor[k + 1u] != cursor[k])
+                    {
+                        if(parallelOrder)
+                            keyToBin[k] = static_cast<std::uint32_t>(binKey.size());
+                        binKey.push_back(static_cast<std::uint32_t>(k));
+                        binStart.push_back(cursor[k]);
+                    }
+                }
+                binStart.push_back(numParticles);
+                auto slot = alpaka::onHost::allocHost<std::uint32_t>(numParticles);
+                if(parallelOrder)
+                {
+                    // Parallel counting-sort permutation.  Each worker counts
+                    // its own contiguous particle chunk per compact bin, then
+                    // writes the ordered payload at per-worker offsets.  This
+                    // removes the serial dependency on the shared cursor.
+                    int const workers = hostOrderingThreads();
+                    std::size_t const bins = binKey.size();
+                    std::vector<std::uint32_t> counts(static_cast<std::size_t>(workers) * bins, 0u);
+#pragma omp parallel
+                    {
+                        int const t = omp_get_thread_num();
+                        std::size_t const begin = static_cast<std::size_t>(numParticles)
+                            * static_cast<std::size_t>(t) / static_cast<std::size_t>(workers);
+                        std::size_t const end = static_cast<std::size_t>(numParticles)
+                            * static_cast<std::size_t>(t + 1) / static_cast<std::size_t>(workers);
+                        std::uint32_t* local = counts.data() + static_cast<std::size_t>(t) * bins;
+                        for(std::size_t m = begin; m < end; ++m)
+                            ++local[keyToBin[static_cast<std::size_t>(keys.data()[m])]];
+                    }
+                    std::vector<std::uint32_t> starts(static_cast<std::size_t>(workers) * bins, 0u);
+#pragma omp parallel for schedule(static)
+                    for(std::size_t b = 0; b < bins; ++b)
+                    {
+                        std::uint32_t running = binStart[b];
+                        for(int t = 0; t < workers; ++t)
+                        {
+                            starts[static_cast<std::size_t>(t) * bins + b] = running;
+                            running += counts[static_cast<std::size_t>(t) * bins + b];
+                        }
+                    }
+#pragma omp parallel
+                    {
+                        int const t = omp_get_thread_num();
+                        std::size_t const begin = static_cast<std::size_t>(numParticles)
+                            * static_cast<std::size_t>(t) / static_cast<std::size_t>(workers);
+                        std::size_t const end = static_cast<std::size_t>(numParticles)
+                            * static_cast<std::size_t>(t + 1) / static_cast<std::size_t>(workers);
+                        std::uint32_t* local = starts.data() + static_cast<std::size_t>(t) * bins;
+                        for(std::size_t m = begin; m < end; ++m)
+                        {
+                            std::uint32_t const b = keyToBin[static_cast<std::size_t>(keys.data()[m])];
+                            std::uint32_t const j = local[b]++;
+                            slot.data()[j] = static_cast<std::uint32_t>(m);
+                        }
+                    }
+                }
+                else if(!deviceOrdering)
+                {
+                    for(std::uint32_t m = 0; m < numParticles; ++m)
+                    {
+                        std::uint32_t const j = cursor[static_cast<std::size_t>(keys.data()[m])]++;
+                        slot.data()[j] = m;
+                    }
+                }
+                auto const binCount = static_cast<std::uint32_t>(binKey.size());
+#if !defined(PICBUNCH_BACKEND_CUDA) && !defined(PICBUNCH_BACKEND_HIP)
+                // Host backend: the alpaka "shared" array of the device kernel
+                // is not a per-block tile on the CPU executor, so accumulate
+                // each cell's stencil in a local array instead and flush the 27
+                // values with atomics (the per-cell complement of the device
+                // kernel, same weights and same charge).
+                {
+                    // The staged payload copy was queued above; finish it while
+                    // its host source is still alive (the CPU queue is async).
+                    alpaka::onHost::wait(queue);
+                    auto const wrap = [](long c, std::uint32_t m) {
+                        long const mm = static_cast<long>(m);
+                        while(c < 0)
+                            c += mm;
+                        while(c >= mm)
+                            c -= mm;
+                        return static_cast<std::uint32_t>(c);
+                    };
+#pragma omp parallel for schedule(dynamic, 1)
+                    for(std::uint32_t b = 0; b < binCount; ++b)
+                    {
+                        std::uint32_t const key = binKey[b];
+                        std::uint32_t const cx = key % Mx;
+                        std::uint32_t const rem = key / Mx;
+                        std::uint32_t const cy = rem % My;
+                        std::uint32_t const cz = rem / My;
+                        double tile[27] = {};
+                        for(std::uint32_t j = binStart[b]; j < binStart[b + 1u]; ++j)
+                        {
+                            BinnedParticle const particle = upart.data()[slot.data()[j]];
+                            double const fx = particle.tx - static_cast<double>(cx);
+                            double const fy = particle.ty - static_cast<double>(cy);
+                            double const fz = particle.tz - static_cast<double>(cz);
+                            double wx[3];
+                            double wy[3];
+                            double wz[3];
+                            for(int i = 0; i < 3; ++i)
+                            {
+                                double const d = static_cast<double>(i - 1);
+                                wx[i] = shapeWeight<Shape::TSC>(d - fx);
+                                wy[i] = shapeWeight<Shape::TSC>(d - fy);
+                                wz[i] = shapeWeight<Shape::TSC>(d - fz);
+                            }
+                            for(int ix = 0; ix < 3; ++ix)
+                                for(int iy = 0; iy < 3; ++iy)
+                                    for(int iz = 0; iz < 3; ++iz)
+                                        tile[ix * 9 + iy * 3 + iz]
+                                            += particle.q * wx[ix] * wy[iy] * wz[iz];
+                        }
+                        for(int c = 0; c < 27; ++c)
+                        {
+                            double const value = tile[c];
+                            if(value == 0.0)
+                                continue;
+                            int const di = c / 9 - 1;
+                            int const dj = (c / 3) % 3 - 1;
+                            int const dk = c % 3 - 1;
+                            long const ma = wrap(static_cast<long>(cx) + di, Mx);
+                            long const mb = wrap(static_cast<long>(cy) + dj, My);
+                            long const mc = wrap(static_cast<long>(cz) + dk, Mz);
+                            if(mc < static_cast<long>(zOffset)
+                               || mc >= static_cast<long>(zOffset + zExtent))
+                                continue;
+                            auto const idx = alpaka::Vec{
+                                static_cast<std::uint32_t>(mc - static_cast<long>(zOffset)),
+                                static_cast<std::uint32_t>(mb),
+                                static_cast<std::uint32_t>(ma)};
+                            std::atomic_ref<double>(*reinterpret_cast<double*>(&rhoView[idx])) += value;
+                        }
+                    }
+                    return;
+                }
+#endif
+                auto const partExtents = alpaka::Vec<std::uint32_t, 1u>{numParticles};
+                auto const binExtents = alpaka::Vec<std::uint32_t, 1u>{binCount};
+                auto const startExtents = alpaka::Vec<std::uint32_t, 1u>{binCount + 1u};
+                auto dSlot = alpaka::onHost::alloc<std::uint32_t>(device, numParticles);
+                if(!deviceOrdering)
+                    alpaka::onHost::memcpy(queue, dSlot, slot);
+                else
+                {
+                    auto dCursor = alpaka::onHost::alloc<std::uint32_t>(
+                        device,
+                        static_cast<std::size_t>(paddedCells) + 1u);
+                    auto dOrdered = alpaka::onHost::alloc<BinnedParticle>(device, numParticles);
+                    alpaka::onHost::memcpy(queue, dCursor, cursor, alpaka::Vec<std::uint32_t, 1u>{static_cast<std::uint32_t>(paddedCells) + 1u});
+                    std::uint32_t const scatterFrame = 128u;
+                    queue.enqueue(
+                        alpaka::onHost::FrameSpec{
+                            (numParticles + scatterFrame - 1u) / scatterFrame,
+                            scatterFrame},
+                        TscBinScatterKernel{},
+                        alpaka::makeMdSpan(dPart.data(), partExtents),
+                        alpaka::makeMdSpan(dCursor.data(), alpaka::Vec<std::uint32_t, 1u>{static_cast<std::uint32_t>(paddedCells) + 1u}),
+                        alpaka::makeMdSpan(dOrdered.data(), partExtents),
+                        alpaka::makeMdSpan(dSlot.data(), partExtents),
+                        numParticles,
+                        Mx,
+                        My,
+                        Mz);
+                    alpaka::onHost::wait(queue);
+                    alpaka::onHost::memcpy(queue, dPart, dOrdered);
+                }
+                auto dBinKey = alpaka::onHost::alloc<std::uint32_t>(device, binCount);
+                auto dBinStart = alpaka::onHost::alloc<std::uint32_t>(device, binCount + 1u);
+                alpaka::onHost::memcpy(queue, dBinKey, binKey);
+                alpaka::onHost::memcpy(queue, dBinStart, binStart);
+                std::uint32_t const frame = 128u;
+                queue.enqueue(
+                    alpaka::onHost::ThreadSpec{binCount, frame},
+                    TscBinnedDepositKernel{},
+                    alpaka::makeMdSpan(dPart.data(), partExtents),
+                    alpaka::makeMdSpan(dSlot.data(), partExtents),
+                    alpaka::makeMdSpan(dBinKey.data(), binExtents),
+                    alpaka::makeMdSpan(dBinStart.data(), startExtents),
+                    binCount,
+                    rhoView,
+                    zOffset,
+                    zExtent,
+                    Mx,
+                    My,
+                    Mz);
+                alpaka::onHost::wait(queue);
+                return;
+            }
             auto posX = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto posY = alpaka::onHost::allocUnified<double>(device, numParticles);
             auto posZ = alpaka::onHost::allocUnified<double>(device, numParticles);
