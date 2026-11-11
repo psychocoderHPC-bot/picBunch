@@ -201,3 +201,20 @@ if(Python3_Interpreter_FOUND)
         )
     endif()
 endif()
+
+# Harden the suite against a wedged HIP call.  On the shared gfx1100 host a
+# test can block forever inside libhsa (stream/queue creation).  CTest then
+# waits indefinitely, the operator interrupts it, and the surviving process
+# keeps the single device busy: later HIP runs hang at stream creation or abort
+# in the runtime with allocator corruption.  A bounded timeout stops the first
+# hang, and the resource lock keeps two device tests from running concurrently
+# under `ctest -j`, which is the other way to leave the device in a bad state.
+get_property(picBunchTests DIRECTORY PROPERTY TESTS)
+if(picBunchTests)
+    set_tests_properties(
+        ${picBunchTests}
+        PROPERTIES
+            TIMEOUT 900
+            RESOURCE_LOCK picBunchGpuDevice
+    )
+endif()
