@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -1393,36 +1394,65 @@ namespace picBunch::pbfast
         //! from the former CUDA ``.cu`` extract kernel.  The CPU backend now
         //! runs the same kernel too, so the CPU result is subject to the same
         //! non-deterministic last-bit combining order.
+        // Style rule for the G1/G3/G6 port: build spans with CTAD
+        // (``alpaka::makeMdSpan``) where it is safe, and spell the explicit
+        // MdSpan type only where the compiler requires it.  Here nvcc 12.6
+        // ICEs on abbreviated ``IMdSpan auto`` placeholders used as parameters
+        // of a function template inside a class template, so the span types
+        // are spelled out.  The 1-D particle fields are dense
+        // (pitch == sizeof(double)).  The accumulator is a dense 2-D {6, nodes}
+        // view with the component as the outer/slow index and the node as the
+        // x-fastest inner index, i.e. exactly the flat ``6*nodes`` allocation
+        // that the host copies out linearly; pitches therefore stay
+        // {nodes*sizeof(double), sizeof(double)} with no row padding.  The
+        // allocation is at least double-aligned (allocUnified), which is all
+        // the span contract needs.
+        using Span1D = alpaka::MdSpan<
+            double,
+            alpaka::Vec<std::uint32_t, 1u>,
+            alpaka::Vec<std::uint32_t, 1u>,
+            alpaka::Alignment<>>;
+        using SpanAcc = alpaka::MdSpan<
+            double,
+            alpaka::Vec<std::uint32_t, 2u>,
+            alpaka::Vec<std::size_t, 2u>,
+            alpaka::Alignment<>>;
+        static_assert(alpaka::concepts::IMdSpan<Span1D>);
+        static_assert(alpaka::concepts::IMdSpan<SpanAcc>);
+        //! Extent value type and the index vector used by the kernel agree.
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<
+                          decltype(std::declval<Span1D const&>().getExtents())>::value_type,
+                      std::uint32_t>);
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<
+                          decltype(std::declval<SpanAcc const&>().getExtents())>::value_type,
+                      std::uint32_t>);
+
         struct FastNearKernel
         {
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
-                double* out6,
-                double const* px,
-                double const* py,
-                double const* pz,
-                double const* pux,
-                double const* puy,
-                double const* puz,
-                double const* pq,
-                double const* prux,
-                double const* pruy,
-                double const* pruz,
+                SpanAcc out,
+                Span1D const& px,
+                Span1D const& py,
+                Span1D const& pz,
+                Span1D const& pux,
+                Span1D const& puy,
+                Span1D const& puz,
+                Span1D const& pq,
+                Span1D const& prux,
+                Span1D const& pruy,
+                Span1D const& pruz,
                 bool stencilMesh,
                 std::uint32_t nsrc,
                 std::uint32_t nx,
                 std::uint32_t ny,
                 std::uint32_t nz,
-                double ox,
-                double oy,
-                double oz,
-                double spx,
-                double spy,
-                double spz,
-                double cx,
-                double cy,
-                double cz,
+                alpaka::Vec<double, 3u> const origin,
+                alpaka::Vec<double, 3u> const spacing,
+                alpaka::Vec<double, 3u> const cells,
                 std::uint32_t chunks,
                 DeviceParams prm,
                 std::uint32_t total) const
@@ -1446,33 +1476,48 @@ namespace picBunch::pbfast
                     std::uint32_t const jj = (node / nx) % ny;
                     std::uint32_t const kk = node / (nx * ny);
 
-                    double const nodeBase[3] = {
-                        ox + static_cast<double>(ii) * spx,
-                        oy + static_cast<double>(jj) * spy,
-                        oz + static_cast<double>(kk) * spz};
-                    double const sp[3] = {spx, spy, spz};
-                    double const cells[3] = {cx, cy, cz};
+                    auto const nodeBase
+                        = origin
+                        + alpaka::Vec<double, 3u>{
+                              static_cast<double>(ii),
+                              static_cast<double>(jj),
+                              static_cast<double>(kk)}
+                            * spacing;
+                    // The shared device helpers still take C arrays (see the
+                    // migration spec, G2 §2.2); build them from the Vec.
+                    double const nodeBaseArr[3] = {nodeBase[0], nodeBase[1], nodeBase[2]};
+                    double const sp[3] = {spacing[0], spacing[1], spacing[2]};
+                    double const cellArr[3] = {cells[0], cells[1], cells[2]};
                     double sum = 0.0;
                     for(std::uint32_t q = chunk; q < nsrc; q += chunks)
                     {
-                        double const x_src[3] = {px[q], py[q], pz[q]};
-                        double const u[3] = {pux[q], puy[q], puz[q]};
-                        double const urep[3] = {prux[q], pruy[q], pruz[q]};
+                        auto const x_src = alpaka::Vec<double, 3u>{px[q], py[q], pz[q]};
+                        auto const u = alpaka::Vec<double, 3u>{pux[q], puy[q], puz[q]};
+                        auto const urep = alpaka::Vec<double, 3u>{prux[q], pruy[q], pruz[q]};
                         double const qw = pq[q];
-                        double const x_obs[3] = {
-                            nodeBase[0] + prm.delta[c][0] * cx,
-                            nodeBase[1] + prm.delta[c][1] * cy,
-                            nodeBase[2] + prm.delta[c][2] * cz};
+                        auto const x_obs
+                            = nodeBase
+                            + alpaka::Vec<double, 3u>{
+                                  prm.delta[c][0] * cells[0],
+                                  prm.delta[c][1] * cells[1],
+                                  prm.delta[c][2] * cells[2]};
+                        double const x_srcArr[3] = {x_src[0], x_src[1], x_src[2]};
+                        double const uArr[3] = {u[0], u[1], u[2]};
+                        double const urepArr[3] = {urep[0], urep[1], urep[2]};
+                        double const x_obsArr[3] = {x_obs[0], x_obs[1], x_obs[2]};
                         double E[3], B[3];
-                        dshapeField(x_obs, x_src, u, cells, prm, E, B);
+                        dshapeField(x_obsArr, x_srcArr, uArr, cellArr, prm, E, B);
                         double comp = c < 3 ? E[c] : B[c - 3];
                         if(stencilMesh)
-                            comp -= dmeshComp(x_src, urep, cells, nodeBase, sp, prm.delta[c], c);
+                            comp -= dmeshComp(x_srcArr, urepArr, cellArr, nodeBaseArr, sp, prm.delta[c], c);
                         double const unit = c < 3 ? prm.unitE : prm.unitB;
                         sum += unit * qw * comp;
                     }
-                    std::uint32_t const o = static_cast<std::uint32_t>(c) * nx * ny * nz + node;
-                    alpaka::onAcc::atomicAdd(acc, &out6[o], sum);
+                    // {component, node}: component is the slow index, the node
+                    // the x-fastest one; the span's pitches encode the old
+                    // ``c*nx*ny*nz + node`` flat offset.
+                    auto const o = alpaka::Vec<std::uint32_t, 2u>{static_cast<std::uint32_t>(c), node};
+                    alpaka::onAcc::atomicAdd(acc, &out[o], sum);
                 }
             }
         };
@@ -1519,7 +1564,16 @@ namespace picBunch::pbfast
 
         Context& context()
         {
-            static Context ctx;
+            // Deliberately leaked.  A function-local static device/queue pair
+            // is destroyed during static destruction, after the HIP runtime
+            // has registered its own teardown.  On ROCm 7.2 the device
+            // destructor then allocates from a runtime that is already partly
+            // finalised and glibc aborts on a corrupted fastbin.  The process
+            // is about to exit, so keeping the one Context alive is bounded;
+            // the OS reclaims the device and its unified allocations.  This is
+            // the same teardown-ordering workaround as the rocFFT handler in
+            // src/Compute.cpp, scoped to the fast near-shell device context.
+            static Context& ctx = *new Context();
             return ctx;
         }
 
@@ -1599,35 +1653,40 @@ namespace picBunch::pbfast
         std::uint32_t const total
             = 6u * static_cast<std::uint32_t>(nodes) * chunks;
 
+        // Build the span views once at the enqueue site.  The particle fields
+        // are dense 1-D views; the accumulator is the dense {6, nodes} view
+        // (x-fastest node, component as slow index) over the flat 6*nodes
+        // buffer, with explicit pitches so no padding is introduced.
+        auto const particleExtents = alpaka::Vec<std::uint32_t, 1u>{n};
+        auto const accExtents
+            = alpaka::Vec<std::uint32_t, 2u>{6u, static_cast<std::uint32_t>(nodes)};
+        auto const accPitches = alpaka::Vec<std::size_t, 2u>{
+            static_cast<std::size_t>(nodes) * sizeof(double),
+            sizeof(double)};
+
         std::uint32_t const frame = 256u;
         ctx.queue.enqueue(
             alpaka::onHost::FrameSpec{(total + frame - 1u) / frame, frame},
             FastNearKernel{},
-            dout.data(),
-            px.data(),
-            py.data(),
-            pz.data(),
-            pux.data(),
-            puy.data(),
-            puz.data(),
-            pq.data(),
-            prux.data(),
-            pruy.data(),
-            pruz.data(),
+            alpaka::makeMdSpan(dout.data(), accExtents, accPitches),
+            alpaka::makeMdSpan(px.data(), particleExtents),
+            alpaka::makeMdSpan(py.data(), particleExtents),
+            alpaka::makeMdSpan(pz.data(), particleExtents),
+            alpaka::makeMdSpan(pux.data(), particleExtents),
+            alpaka::makeMdSpan(puy.data(), particleExtents),
+            alpaka::makeMdSpan(puz.data(), particleExtents),
+            alpaka::makeMdSpan(pq.data(), particleExtents),
+            alpaka::makeMdSpan(prux.data(), particleExtents),
+            alpaka::makeMdSpan(pruy.data(), particleExtents),
+            alpaka::makeMdSpan(pruz.data(), particleExtents),
             stencilMesh,
             n,
             static_cast<std::uint32_t>(nx),
             static_cast<std::uint32_t>(ny),
             static_cast<std::uint32_t>(nz),
-            ox,
-            oy,
-            oz,
-            spx,
-            spy,
-            spz,
-            cx,
-            cy,
-            cz,
+            alpaka::Vec<double, 3u>{ox, oy, oz},
+            alpaka::Vec<double, 3u>{spx, spy, spz},
+            alpaka::Vec<double, 3u>{cx, cy, cz},
             chunks,
             params,
             total);

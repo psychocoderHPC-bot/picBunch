@@ -18,6 +18,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace picBunch
@@ -25,6 +26,8 @@ namespace picBunch
     namespace
     {
         using Vec3 = std::array<double, 3>;
+        using KernelVec3 = alpaka::Vec<double, 3u>;
+        using KernelIndex3 = alpaka::Vec<std::size_t, 3u>;
 
         //! Dedicated CPU-side alpaka queue for the particle bookkeeping kernels.
         //!
@@ -101,20 +104,31 @@ namespace picBunch
         template<bool TAtomic>
         struct LabMomentumKernel
         {
-            template<typename TAcc>
+            template<
+                typename TAcc,
+                alpaka::concepts::IMdSpan TUx,
+                alpaka::concepts::IMdSpan TUy,
+                alpaka::concepts::IMdSpan TUz,
+                alpaka::concepts::IMdSpan TWeight,
+                alpaka::concepts::IMdSpan TCharge,
+                alpaka::concepts::IMdSpan TAbsoluteCharge,
+                alpaka::concepts::IMdSpan TGamma,
+                alpaka::concepts::IMdSpan TScaleU,
+                alpaka::concepts::IMdSpan TFirstBadMomentum,
+                alpaka::concepts::IMdSpan TFirstBadCharge>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 std::size_t count,
-                double const* ux,
-                double const* uy,
-                double const* uz,
-                double const* weight,
-                double const* charge,
-                double* absoluteCharge,
-                double* gamma,
-                double* scaleU,
-                std::size_t* firstBadMomentum,
-                std::size_t* firstBadCharge) const
+                TUx const& ux,
+                TUy const& uy,
+                TUz const& uz,
+                TWeight const& weight,
+                TCharge const& charge,
+                TAbsoluteCharge absoluteCharge,
+                TGamma gamma,
+                TScaleU scaleU,
+                TFirstBadMomentum firstBadMomentum,
+                TFirstBadCharge firstBadCharge) const
             {
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
@@ -128,30 +142,30 @@ namespace picBunch
                     if constexpr(TAtomic)
                     {
                         if(badMomentum)
-                            alpaka::onAcc::atomicMin(acc, firstBadMomentum, p);
+                            alpaka::onAcc::atomicMin(acc, firstBadMomentum.data(), p);
                         if(badCharge)
-                            alpaka::onAcc::atomicMin(acc, firstBadCharge, p);
+                            alpaka::onAcc::atomicMin(acc, firstBadCharge.data(), p);
                         if(!badMomentum)
                         {
                             double const absMax = alpaka::math::max(
                                 alpaka::math::abs(ux[p]),
                                 alpaka::math::max(alpaka::math::abs(uy[p]), alpaka::math::abs(uz[p])));
-                            alpaka::onAcc::atomicMax(acc, scaleU, absMax);
+                            alpaka::onAcc::atomicMax(acc, scaleU.data(), absMax);
                         }
                     }
                     else
                     {
                         std::size_t const index = static_cast<std::size_t>(p);
                         if(badMomentum)
-                            *firstBadMomentum = std::min(*firstBadMomentum, index);
+                            firstBadMomentum[0] = std::min(firstBadMomentum[0], index);
                         if(badCharge)
-                            *firstBadCharge = std::min(*firstBadCharge, index);
+                            firstBadCharge[0] = std::min(firstBadCharge[0], index);
                         if(!badMomentum)
                         {
                             double const absMax = alpaka::math::max(
                                 alpaka::math::abs(ux[p]),
                                 alpaka::math::max(alpaka::math::abs(uy[p]), alpaka::math::abs(uz[p])));
-                            *scaleU = std::max(*scaleU, absMax);
+                            scaleU[0] = std::max(scaleU[0], absMax);
                         }
                     }
                     absoluteCharge[p] = alpaka::math::abs(weight[p] * charge[p]);
@@ -165,37 +179,46 @@ namespace picBunch
         template<bool TAtomic>
         struct BeamFrameKernel
         {
-            template<typename TAcc>
+            template<
+                typename TAcc,
+                alpaka::concepts::IMdSpan TUx,
+                alpaka::concepts::IMdSpan TUy,
+                alpaka::concepts::IMdSpan TUz,
+                alpaka::concepts::IMdSpan TBeam,
+                alpaka::concepts::IMdSpan TUMin,
+                alpaka::concepts::IMdSpan TUMax>
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 std::size_t count,
-                double const* ux,
-                double const* uy,
-                double const* uz,
-                std::array<double, 3> const e1,
-                std::array<double, 3> const e2,
-                std::array<double, 3> const e3,
-                double* beam,
-                double* uMin,
-                double* uMax) const
+                TUx const& ux,
+                TUy const& uy,
+                TUz const& uz,
+                KernelVec3 const e1,
+                KernelVec3 const e2,
+                KernelVec3 const e3,
+                TBeam beam,
+                TUMin uMin,
+                TUMax uMax) const
             {
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    double const u[3] = {ux[p], uy[p], uz[p]};
-                    double const b[3] = {
+                    auto const u = KernelVec3{ux[p], uy[p], uz[p]};
+                    // The pin has no Vec dot product; keep the explicit
+                    // three-term sums, including their association order.
+                    auto const b = KernelVec3{
                         u[0] * e1[0] + u[1] * e1[1] + u[2] * e1[2],
                         u[0] * e2[0] + u[1] * e2[1] + u[2] * e2[2],
                         u[0] * e3[0] + u[1] * e3[1] + u[2] * e3[2]};
-                    for(int a = 0; a < 3; ++a)
+                    for(std::uint32_t a = 0u; a < 3u; ++a)
                     {
-                        beam[3u * p + static_cast<std::size_t>(a)] = b[a];
+                        beam[3u * p + a] = b[a];
                         if constexpr(TAtomic)
                         {
-                            alpaka::onAcc::atomicMin(acc, uMin + a, b[a]);
-                            alpaka::onAcc::atomicMax(acc, uMax + a, b[a]);
+                            alpaka::onAcc::atomicMin(acc, uMin.data() + a, b[a]);
+                            alpaka::onAcc::atomicMax(acc, uMax.data() + a, b[a]);
                         }
                         else
                         {
@@ -214,25 +237,25 @@ namespace picBunch
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 std::size_t count,
-                double const* beam,
-                std::array<std::size_t, 3> const N,
-                std::array<double, 3> const uMin,
-                std::array<double, 3> const range,
-                double const* width,
-                std::size_t* boxOf) const
+                alpaka::concepts::IMdSpan auto const& beam,
+                KernelIndex3 const N,
+                KernelVec3 const uMin,
+                KernelVec3 const range,
+                alpaka::concepts::IMdSpan auto const& width,
+                alpaka::concepts::IMdSpan auto boxOf) const
             {
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    std::size_t idx[3] = {0u, 0u, 0u};
-                    for(int a = 0; a < 3; ++a)
+                    KernelIndex3 idx{0u, 0u, 0u};
+                    for(std::uint32_t a = 0u; a < 3u; ++a)
                     {
                         if(range[a] <= 0.0)
                             continue;
                         long t = static_cast<long>(
-                            alpaka::math::floor((beam[3u * p + static_cast<std::size_t>(a)] - uMin[a]) / width[a]));
+                            alpaka::math::floor((beam[3u * p + a] - uMin[a]) / width[a]));
                         idx[a] = (t < 0) ? 0u
                                          : (static_cast<std::size_t>(t) >= N[a] ? N[a] - 1u
                                                                                 : static_cast<std::size_t>(t));
@@ -321,18 +344,24 @@ namespace picBunch
             // Vec3 is a contiguous std::array<double, 3>, so the kernel writes
             // the beam-frame components in place.  The extrema are reduced in
             // the same pass.
+            auto const particleExtent = alpaka::Vec<std::size_t, 1u>{count};
+            static_assert(std::is_same_v<
+                          std::remove_cvref_t<decltype(particleExtent)>::value_type,
+                          KernelIndex3::value_type>);
             runHostReductionKernel<BeamFrameKernel<false>, BeamFrameKernel<true>>(
                 count,
                 count,
-                bunch.ux.data(),
-                bunch.uy.data(),
-                bunch.uz.data(),
-                e1,
-                e2,
-                e3,
-                &frame.uBeam[0][0],
-                frame.uMin.data(),
-                frame.uMax.data());
+                alpaka::makeMdSpan(bunch.ux.data(), particleExtent),
+                alpaka::makeMdSpan(bunch.uy.data(), particleExtent),
+                alpaka::makeMdSpan(bunch.uz.data(), particleExtent),
+                KernelVec3{e1[0], e1[1], e1[2]},
+                KernelVec3{e2[0], e2[1], e2[2]},
+                KernelVec3{e3[0], e3[1], e3[2]},
+                alpaka::makeMdSpan(
+                    &frame.uBeam[0][0],
+                    alpaka::Vec<std::size_t, 1u>{3u * count}),
+                alpaka::makeMdSpan(frame.uMin.data(), alpaka::Vec<std::size_t, 1u>{3u}),
+                alpaka::makeMdSpan(frame.uMax.data(), alpaka::Vec<std::size_t, 1u>{3u}));
             for(int i = 0; i < 3; ++i)
             {
                 frame.range[i] = frame.uMax[i] - frame.uMin[i];
@@ -498,12 +527,16 @@ namespace picBunch
                     count,
                     BoxAssignmentKernel{},
                     count,
-                    &frame.uBeam[0][0],
-                    N,
-                    frame.uMin,
-                    frame.range,
-                    width,
-                    boxOf.data());
+                    alpaka::makeMdSpan(
+                        &frame.uBeam[0][0],
+                        alpaka::Vec<std::size_t, 1u>{3u * count}),
+                    KernelIndex3{N[0], N[1], N[2]},
+                    KernelVec3{frame.uMin[0], frame.uMin[1], frame.uMin[2]},
+                    KernelVec3{frame.range[0], frame.range[1], frame.range[2]},
+                    alpaka::makeMdSpan(width, alpaka::Vec<std::size_t, 1u>{3u}),
+                    alpaka::makeMdSpan(
+                        boxOf.data(),
+                        alpaka::Vec<std::size_t, 1u>{count}));
             }
             out.boxOf = boxOf;
 
@@ -652,19 +685,27 @@ namespace picBunch
         // names the first failure in particle order.
         std::size_t firstBadMomentum = count;
         std::size_t firstBadCharge = count;
+        auto const particleExtent = alpaka::Vec<std::size_t, 1u>{count};
+        auto const scalarExtent = alpaka::Vec<std::size_t, 1u>{1u};
+        static_assert(std::is_same_v<
+                      std::remove_cvref_t<decltype(particleExtent)>::value_type,
+                      KernelIndex3::value_type>);
+        static_assert(std::is_same_v<
+                      std::remove_cvref_t<decltype(scalarExtent)>::value_type,
+                      KernelIndex3::value_type>);
         runHostReductionKernel<LabMomentumKernel<false>, LabMomentumKernel<true>>(
             count,
             count,
-            bunch.ux.data(),
-            bunch.uy.data(),
-            bunch.uz.data(),
-            bunch.weight.data(),
-            bunch.charge.data(),
-            absCharge.data(),
-            particleGamma.data(),
-            &scaleU,
-            &firstBadMomentum,
-            &firstBadCharge);
+            alpaka::makeMdSpan(bunch.ux.data(), particleExtent),
+            alpaka::makeMdSpan(bunch.uy.data(), particleExtent),
+            alpaka::makeMdSpan(bunch.uz.data(), particleExtent),
+            alpaka::makeMdSpan(bunch.weight.data(), particleExtent),
+            alpaka::makeMdSpan(bunch.charge.data(), particleExtent),
+            alpaka::makeMdSpan(absCharge.data(), particleExtent),
+            alpaka::makeMdSpan(particleGamma.data(), particleExtent),
+            alpaka::makeMdSpan(&scaleU, scalarExtent),
+            alpaka::makeMdSpan(&firstBadMomentum, scalarExtent),
+            alpaka::makeMdSpan(&firstBadCharge, scalarExtent));
         if(firstBadMomentum < count || firstBadCharge < count)
         {
             if(firstBadMomentum <= firstBadCharge)

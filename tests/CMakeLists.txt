@@ -65,7 +65,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency MpiReadout)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -97,7 +97,27 @@ if(PICBUNCH_BUILD_GTESTS)
                     --cell-size 1e-6
             )
             set_tests_properties(picBunch.MpiInvalidInput PROPERTIES WILL_FAIL TRUE TIMEOUT 30)
+            # The read-out gather/scale must stay rank-local.  Run the same
+            # group under one and two ranks so both the single-rank and the
+            # multi-rank launch path are exercised.
+            add_test(
+                NAME picBunch.MpiReadoutN1
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 1 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MpiReadout.*
+            )
+            add_test(
+                NAME picBunch.MpiReadoutN2
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MpiReadout.*
+            )
         endif()
+    else()
+        add_test(
+            NAME picBunch.MpiReadout
+            COMMAND picBunchUnitTests --gtest_filter=MpiReadout.*
+        )
     endif()
 endif()
 

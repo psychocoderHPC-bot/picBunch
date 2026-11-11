@@ -32,6 +32,8 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace picBunch
@@ -102,19 +104,51 @@ namespace picBunch
             alpaka::onHost::wait(queue);
         }
 
+        //! Dense 1-D span over one field component, local-mesh component or
+        //! particle property.
+        //!
+        //! ``Field`` keeps its six components in six separate ``std::vector``
+        //! allocations, so the correction and local terms are six independent
+        //! dense x-fastest 1-D views here.  A single 2-D ``{6, nodes}`` view
+        //! is only possible for the G2 device accumulator, whose storage is
+        //! one contiguous ``6*nodes`` block.  This host path is scalar (one
+        //! index per thread via ``makeIdxMap`` with a scalar ``IdxRange``), so
+        //! only element alignment is required; no vector-load alignment is
+        //! assumed from the allocation.
+        //! Local cell indices live in the distributed global cell space, so
+        //! the span extents and the local origin use 64-bit indices.
+        using SpanIndex = alpaka::Vec<std::size_t, 1u>;
+        using LocalCellVec = alpaka::Vec<std::size_t, 3u>;
+        //! Signed local-cell offset.  The subtraction box may start below the
+        //! global grid origin when a near source's TSC stencil reaches there;
+        //! a signed type lets the box include that part instead of dropping it.
+        using LocalOffsetVec = alpaka::Vec<std::int64_t, 3u>;
+        using Span1D = alpaka::MdSpan<double, SpanIndex, SpanIndex, alpaka::Alignment<>>;
+        using Span1DConst = alpaka::MdSpan<double const, SpanIndex, SpanIndex, alpaka::Alignment<>>;
+        static_assert(alpaka::concepts::IMdSpan<Span1D>);
+        static_assert(alpaka::concepts::IMdSpan<Span1DConst>);
+        //! The span extent type must agree with the local index vector type;
+        //! mixing 32-bit extents with 64-bit indices would narrow silently.
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<decltype(std::declval<Span1D const&>().getExtents())>::value_type,
+                      LocalCellVec::value_type>);
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<decltype(std::declval<Span1DConst const&>().getExtents())>::value_type,
+                      LocalCellVec::value_type>);
+
         //! POD arguments of the exact per-tile host kernel.
         struct ExactNearHostArgs
         {
-            double* correction[6]{};
-            double const* local[6]{};
-            double const* x{};
-            double const* y{};
-            double const* z{};
-            double const* ux{};
-            double const* uy{};
-            double const* uz{};
-            double const* weight{};
-            double const* charge{};
+            Span1D correction[6]{};
+            Span1DConst local[6]{};
+            Span1DConst x{};
+            Span1DConst y{};
+            Span1DConst z{};
+            Span1DConst ux{};
+            Span1DConst uy{};
+            Span1DConst uz{};
+            Span1DConst weight{};
+            Span1DConst charge{};
             std::size_t nsrc{};
             std::size_t nx{};
             std::size_t ny{};
@@ -124,12 +158,12 @@ namespace picBunch
             std::size_t k0{};
             std::size_t n0{};
             std::size_t n1{};
-            long localLo[3]{};
+            LocalOffsetVec localLo{};
             std::size_t nLocalX{};
             std::size_t nLocalY{};
-            double origin[3]{};
-            double spacing[3]{};
-            double cells[3]{};
+            alpaka::Vec<double, 3u> origin{};
+            alpaka::Vec<double, 3u> spacing{};
+            alpaka::Vec<double, 3u> cells{};
             bool useFast{};
             pbfast::Settings fastSettings{};
             nbref::Settings settings{};
@@ -146,7 +180,7 @@ namespace picBunch
         struct ExactNearHostKernel
         {
             template<typename TAcc>
-            ALPAKA_FN_HOST void operator()(TAcc const& acc, ExactNearHostArgs const args) const
+            ALPAKA_FN_HOST void operator()(TAcc const& acc, ExactNearHostArgs args) const
             {
                 std::size_t const nodes = args.nx * args.ny * args.nz;
                 for(auto [idx] : alpaka::onAcc::makeIdxMap(
@@ -164,9 +198,12 @@ namespace picBunch
                     std::size_t const j = args.j0 + jj;
                     std::size_t const k = args.k0 + kk;
                     std::size_t const gidx = i + args.n0 * (j + args.n1 * k);
-                    std::size_t const li = i - static_cast<std::size_t>(args.localLo[0]);
-                    std::size_t const lj = j - static_cast<std::size_t>(args.localLo[1]);
-                    std::size_t const lk = k - static_cast<std::size_t>(args.localLo[2]);
+                    std::size_t const li = static_cast<std::size_t>(
+                        static_cast<std::int64_t>(i) - args.localLo[0]);
+                    std::size_t const lj = static_cast<std::size_t>(
+                        static_cast<std::int64_t>(j) - args.localLo[1]);
+                    std::size_t const lk = static_cast<std::size_t>(
+                        static_cast<std::int64_t>(k) - args.localLo[2]);
                     std::size_t const lidx
                         = li + args.nLocalX * (lj + args.nLocalY * lk);
                     double value = -args.local[c][lidx];
@@ -638,7 +675,7 @@ namespace picBunch
                     bool const deviceStencil = useFastGpu
                         && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
                     Field local;
-                    long localLo[3] = {0, 0, 0};
+                    std::int64_t localLo[3] = {0, 0, 0};
                     std::size_t nLocalX = 0;
                     std::size_t nLocalY = 0;
                     if(!deviceStencil)
@@ -646,18 +683,34 @@ namespace picBunch
                         // Local node box: the tile plus the full TSC support of
                         // every near source.  It must contain every source used
                         // in the subtraction and every observer in the tile.
-                        long localHi[3] = {
-                            static_cast<long>(i1 - 1u),
-                            static_cast<long>(j1 - 1u),
-                            static_cast<long>(k1 - 1u)};
+                        // The bounds are derived in signed 64-bit space: the
+                        // TSC stencil of a near source close to the lower grid
+                        // origin starts at a negative global index.  Clamping
+                        // that to zero would silently drop the part of the
+                        // deposit below the origin.  Instead the local box
+                        // starts at the negative index and gets its own origin;
+                        // the exact kernel maps global indices with the same
+                        // signed offset, so the subtraction stays complete.
+                        std::int64_t localHi[3] = {
+                            static_cast<std::int64_t>(i1 - 1u),
+                            static_cast<std::int64_t>(j1 - 1u),
+                            static_cast<std::int64_t>(k1 - 1u)};
                         for(std::size_t q = 0; q < near.size(); ++q)
                         {
                             double const pos[3] = {near.x[q], near.y[q], near.z[q]};
                             for(int a = 0; a < 3; ++a)
                             {
                                 double const t = (pos[a] - origin[a]) / spacing[a];
-                                long const lo = static_cast<long>(std::floor(t - 1.5)) - 1;
-                                long const hi = static_cast<long>(std::ceil(t + 1.5)) + 1;
+                                if(!(std::isfinite(t)))
+                                    throw std::runtime_error(
+                                        "near shell: non-finite source coordinate while "
+                                        "deriving the local subtraction box");
+                                // Full TSC stencil plus one guard cell, in the
+                                // signed global cell index space.
+                                std::int64_t const lo
+                                    = static_cast<std::int64_t>(std::floor(t - 1.5)) - 1;
+                                std::int64_t const hi
+                                    = static_cast<std::int64_t>(std::ceil(t + 1.5)) + 1;
                                 localLo[a] = std::min(localLo[a], lo);
                                 localHi[a] = std::max(localHi[a], hi);
                             }
@@ -665,7 +718,11 @@ namespace picBunch
                         std::array<std::size_t, 3> localN{};
                         for(int a = 0; a < 3; ++a)
                         {
-                            std::size_t len = static_cast<std::size_t>(localHi[a] - localLo[a] + 1);
+                            std::int64_t const len64 = localHi[a] - localLo[a] + 1;
+                            if(len64 <= 0)
+                                throw std::runtime_error(
+                                    "near shell: empty local subtraction box");
+                            std::size_t len = static_cast<std::size_t>(len64);
                             if(len % 2u)
                                 ++len;
                             localN[a] = len;
@@ -795,9 +852,12 @@ namespace picBunch
                                         std::size_t const j = j0 + jj;
                                         std::size_t const k = k0 + kk;
                                         std::size_t const gidx = i + n[0] * (j + n[1] * k);
-                                        std::size_t const li = i - static_cast<std::size_t>(localLo[0]);
-                                        std::size_t const lj = j - static_cast<std::size_t>(localLo[1]);
-                                        std::size_t const lk = k - static_cast<std::size_t>(localLo[2]);
+                                        std::size_t const li = static_cast<std::size_t>(
+                                            static_cast<std::int64_t>(i) - localLo[0]);
+                                        std::size_t const lj = static_cast<std::size_t>(
+                                            static_cast<std::int64_t>(j) - localLo[1]);
+                                        std::size_t const lk = static_cast<std::size_t>(
+                                            static_cast<std::int64_t>(k) - localLo[2]);
                                         std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
                                         std::size_t const didx = ii + nx * (jj + ny * kk);
                                         correction.data[c][gidx]
@@ -815,19 +875,29 @@ namespace picBunch
                         // keeps the source order, so the field is bit-identical
                         // to the former hand-written loop for every thread count.
                         ExactNearHostArgs exactArgs;
+                        // Build the span views once per tile.  Each field and
+                        // local-mesh component is a separate dense x-fastest
+                        // allocation, so it gets its own 1-D view; the particle
+                        // properties are dense 1-D views of length nsrc.  This
+                        // scalar host path needs only element alignment.
+                        auto const fieldExtents = SpanIndex{correction.data[0].size()};
+                        auto const localExtents = SpanIndex{local.data[0].size()};
+                        auto const particleExtents = SpanIndex{near.size()};
                         for(int c = 0; c < 6; ++c)
                         {
-                            exactArgs.correction[c] = correction.data[c].data();
-                            exactArgs.local[c] = local.data[c].data();
+                            exactArgs.correction[c]
+                                = alpaka::makeMdSpan(correction.data[c].data(), fieldExtents);
+                            exactArgs.local[c] = Span1DConst{
+                                alpaka::makeMdSpan(local.data[c].data(), localExtents)};
                         }
-                        exactArgs.x = near.x.data();
-                        exactArgs.y = near.y.data();
-                        exactArgs.z = near.z.data();
-                        exactArgs.ux = near.ux.data();
-                        exactArgs.uy = near.uy.data();
-                        exactArgs.uz = near.uz.data();
-                        exactArgs.weight = near.weight.data();
-                        exactArgs.charge = near.charge.data();
+                        exactArgs.x = alpaka::makeMdSpan(near.x.data(), particleExtents);
+                        exactArgs.y = alpaka::makeMdSpan(near.y.data(), particleExtents);
+                        exactArgs.z = alpaka::makeMdSpan(near.z.data(), particleExtents);
+                        exactArgs.ux = alpaka::makeMdSpan(near.ux.data(), particleExtents);
+                        exactArgs.uy = alpaka::makeMdSpan(near.uy.data(), particleExtents);
+                        exactArgs.uz = alpaka::makeMdSpan(near.uz.data(), particleExtents);
+                        exactArgs.weight = alpaka::makeMdSpan(near.weight.data(), particleExtents);
+                        exactArgs.charge = alpaka::makeMdSpan(near.charge.data(), particleExtents);
                         exactArgs.nsrc = near.size();
                         exactArgs.nx = nx;
                         exactArgs.ny = ny;
@@ -837,13 +907,12 @@ namespace picBunch
                         exactArgs.k0 = k0;
                         exactArgs.n0 = n[0];
                         exactArgs.n1 = n[1];
-                        for(int a = 0; a < 3; ++a)
-                        {
-                            exactArgs.localLo[a] = localLo[a];
-                            exactArgs.origin[a] = origin[a];
-                            exactArgs.spacing[a] = spacing[a];
-                            exactArgs.cells[a] = cells[a];
-                        }
+                        exactArgs.localLo = LocalOffsetVec{localLo[0], localLo[1], localLo[2]};
+                        exactArgs.origin
+                            = alpaka::Vec<double, 3u>{origin[0], origin[1], origin[2]};
+                        exactArgs.spacing
+                            = alpaka::Vec<double, 3u>{spacing[0], spacing[1], spacing[2]};
+                        exactArgs.cells = alpaka::Vec<double, 3u>{cells[0], cells[1], cells[2]};
                         exactArgs.nLocalX = nLocalX;
                         exactArgs.nLocalY = nLocalY;
                         exactArgs.useFast = useFast;

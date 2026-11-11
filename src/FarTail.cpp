@@ -17,6 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace picBunch
@@ -71,22 +73,22 @@ namespace picBunch
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 std::size_t count,
-                double const* x,
-                double const* y,
-                double const* z,
-                double const* ux,
-                double const* uy,
-                double const* uz,
-                std::array<double, 3> const centre,
-                double* supportDistance,
-                double* gamma) const
+                alpaka::concepts::IMdSpan auto const& x,
+                alpaka::concepts::IMdSpan auto const& y,
+                alpaka::concepts::IMdSpan auto const& z,
+                alpaka::concepts::IMdSpan auto const& ux,
+                alpaka::concepts::IMdSpan auto const& uy,
+                alpaka::concepts::IMdSpan auto const& uz,
+                alpaka::Vec<double, 3u> const centre,
+                alpaka::concepts::IMdSpan auto supportDistance,
+                alpaka::concepts::IMdSpan auto gamma) const
             {
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    double const rel[3] = {x[p] - centre[0], y[p] - centre[1], z[p] - centre[2]};
+                    auto const rel = alpaka::Vec{x[p], y[p], z[p]} - centre;
                     double const r2 = rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2];
                     supportDistance[p] = alpaka::math::sqrt(r2);
                     double const u2 = ux[p] * ux[p] + uy[p] * uy[p] + uz[p] * uz[p];
@@ -102,20 +104,20 @@ namespace picBunch
             ALPAKA_FN_ACC void operator()(
                 TAcc const& acc,
                 std::size_t count,
-                double const* x,
-                double const* y,
-                double const* z,
-                std::array<double, 3> const centre,
-                std::array<double, 3> const nhat,
+                alpaka::concepts::IMdSpan auto const& x,
+                alpaka::concepts::IMdSpan auto const& y,
+                alpaka::concepts::IMdSpan auto const& z,
+                alpaka::Vec<double, 3u> const centre,
+                alpaka::Vec<double, 3u> const nhat,
                 double meanGamma,
-                double* rest) const
+                alpaka::concepts::IMdSpan auto rest) const
             {
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    double const rel[3] = {x[p] - centre[0], y[p] - centre[1], z[p] - centre[2]};
+                    auto const rel = alpaka::Vec{x[p], y[p], z[p]} - centre;
                     double const rn = rel[0] * nhat[0] + rel[1] * nhat[1] + rel[2] * nhat[2];
                     for(int a = 0; a < 3; ++a)
                         rest[3u * p + static_cast<std::size_t>(a)]
@@ -158,19 +160,33 @@ namespace picBunch
         thread_local std::vector<double> gammaOf;
         supportDistance.resize(count);
         gammaOf.resize(count);
+        auto const particleExtent = alpaka::Vec<std::size_t, 1u>{count};
+        auto const xView = alpaka::makeMdSpan(std::as_const(bunch.x).data(), particleExtent);
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<
+                          decltype(std::declval<decltype(xView) const&>().getExtents())>::value_type,
+                      std::size_t>);
+        auto const yView = alpaka::makeMdSpan(std::as_const(bunch.y).data(), particleExtent);
+        auto const zView = alpaka::makeMdSpan(std::as_const(bunch.z).data(), particleExtent);
+        auto const uxView = alpaka::makeMdSpan(std::as_const(bunch.ux).data(), particleExtent);
+        auto const uyView = alpaka::makeMdSpan(std::as_const(bunch.uy).data(), particleExtent);
+        auto const uzView = alpaka::makeMdSpan(std::as_const(bunch.uz).data(), particleExtent);
+        auto const centreVec = alpaka::Vec{centre[0], centre[1], centre[2]};
+        auto const supportDistanceView = alpaka::makeMdSpan(supportDistance.data(), particleExtent);
+        auto const gammaView = alpaka::makeMdSpan(gammaOf.data(), particleExtent);
         runHostKernel(
             count,
             FarTailPassKernel{},
             count,
-            bunch.x.data(),
-            bunch.y.data(),
-            bunch.z.data(),
-            bunch.ux.data(),
-            bunch.uy.data(),
-            bunch.uz.data(),
-            centre,
-            supportDistance.data(),
-            gammaOf.data());
+            xView,
+            yView,
+            zView,
+            uxView,
+            uyView,
+            uzView,
+            centreVec,
+            supportDistanceView,
+            gammaView);
         // The running sums keep the historical particle order.  Reordering a
         // floating-point sum would make the mean velocity depend on the thread
         // count, so the reduction itself stays serial.
@@ -223,17 +239,24 @@ namespace picBunch
             (meanSpeed > 0.0) ? tail.meanVelocity[2] / meanSpeed : 0.0};
         thread_local std::vector<double> restFrame;
         restFrame.resize(3u * count);
+        auto const nhatVec = alpaka::Vec{nhat[0], nhat[1], nhat[2]};
+        auto const restExtent = alpaka::Vec<std::size_t, 1u>{3u * count};
+        auto const restView = alpaka::makeMdSpan(restFrame.data(), restExtent);
+        static_assert(std::is_same_v<
+                      typename std::remove_cvref_t<
+                          decltype(std::declval<decltype(restView) const&>().getExtents())>::value_type,
+                      std::size_t>);
         runHostKernel(
             count,
             RestFrameKernel{},
             count,
-            bunch.x.data(),
-            bunch.y.data(),
-            bunch.z.data(),
-            centre,
-            nhat,
+            xView,
+            yView,
+            zView,
+            centreVec,
+            nhatVec,
             meanGamma,
-            restFrame.data());
+            restView);
         // Ordered accumulation: the multipoles are sums and their rounding must
         // not follow the executor's thread count.
         for(std::size_t p = 0; p < count; ++p)

@@ -24,26 +24,34 @@ teardown order between the two libraries unspecified.
 
 ## Current mitigation
 
-`RocfftTeardownGuard` in `src/Compute.cpp` performs the cleanup from application
-code, while the alpaka queue and the HIP device are still alive:
+`src/Compute.cpp` registers a process-exit handler after the FFT plans have been
+created, instead of calling cleanup inline at the end of `computeField`:
 
 ```cpp
-static std::once_flag rocfftCleanupOnce;
-struct RocfftTeardownGuard
-{
-    decltype(queue)& queue;
-    ~RocfftTeardownGuard()
-    {
-        alpaka::onHost::wait(queue);
-        std::call_once(rocfftCleanupOnce, [] { static_cast<void>(rocfft_cleanup()); });
-    }
-} rocfftTeardownGuard{queue};
+static std::once_flag rocfftAtexitOnce;
+std::call_once(
+    rocfftAtexitOnce,
+    [] { std::atexit([] { static_cast<void>(rocfft_cleanup()); }); });
 ```
 
-The guard is declared before the FFT plans in the same scope. C++ destroys it
-after those plans, so the pool is cleaned after every plan is gone and before
-the queue and device are released. `std::call_once` makes the native cleanup
-run once per process; every call still waits for its own queue.
+Calling cleanup inline was wrong: the librocfft stream pool is process-global,
+so the first `computeField` destroyed it and every later `computeField` in the
+same process failed in `rocfft_plan_create` with error 1. The process also
+crashed on exit.
+
+The handler is registered after both plans are built. C++ runs `atexit`
+handlers in reverse order of registration. alpakaVendor registers its own
+`rocfft_cleanup` hook when the first plan is created, and the HIP runtime
+registers its static destructors before that. Registering ours later therefore
+makes it run first: before the HIP static destructors, after the plans (locals,
+destroyed when `computeField` returns) are gone, and while the HIP runtime is
+still alive.
+
+`std::call_once` registers exactly one handler per process. When it runs,
+alpakaVendor's own atexit hook still calls `rocfft_cleanup()` afterwards; that
+second call is assumed to be a no-op by librocfft. The idempotency of
+`rocfft_cleanup()` is the contract this workaround relies on. It is not
+documented by ROCm, so re-check it when the ROCm version changes.
 
 The block is compiled only with `ALPAKAV_DEP_ROCFFT`. It is absent from CPU and
 CUDA builds and has no effect there.
@@ -53,9 +61,9 @@ alpakaVendor pin (`33a4a4f401de2b157de195bb68e8ec61d7460cee`) has no public
 teardown entry point, and the process-global ordering cannot be expressed
 through plan RAII. The call is required until that entry point exists.
 
-## Why the guard cannot be removed
+## Why the handler cannot be removed
 
-Removing the guard reproduces the ROCm 7.2 segfault. T5b attempted the removal
+Removing the handler reproduces the ROCm 7.2 segfault. T5b attempted the removal
 and was reverted after the audit in T5c. The crash is in process-exit teardown,
 so a normal test run that checks only the field output does not catch it unless
 the process exit status is checked.
@@ -118,10 +126,13 @@ during static destruction. One exit-time crash keeps the workaround open.
 - Double cleanup relies on librocfft's own idempotency. The once flag in
   picBunch prevents a second call from this path, but the contract that a second
   `rocfft_cleanup()` is safe lives inside librocfft and is not documented here.
-- A plan created after `finalize()` recreates the stream pool, and the once flag
-  has already fired. That pool is not cleaned by `finalize()` again; only the
-  original `atexit` path remains and with it the original ordering risk. Treat
-  `finalize()` as the last FFT operation in the process.
-- The call is correct only while the queue and device are alive. A call from a
-  static destructor, or after the HIP runtime finalized, has the same defect as
-  the original bug.
+- A plan created after the handler has run recreates the stream pool, and the
+  once flag has already fired. That pool is not cleaned again by picBunch; only
+  the original alpakaVendor `atexit` path remains and with it the original
+  ordering risk. The handler therefore has to be the last FFT teardown in the
+  process, which holds because it is registered at process exit.
+- The second `rocfft_cleanup()` from alpakaVendor's atexit hook relies on
+  librocfft's idempotency. If a future ROCm release makes the call destructive
+  on a second use, the process would crash at exit even with this workaround.
+- A plan created after the handler runs recreates the stream pool and is not
+  cleaned by this once-guarded handler.
