@@ -16,6 +16,7 @@
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
 #include "picBunch/Readout.hpp"
+#include "picBunch/detail/FftPlanCache.hpp"
 #include "picBunch/detail/SpectrumNorm.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
@@ -35,6 +36,7 @@
 #include <cstdlib>
 #include <limits>
 #include <atomic>
+#include <list>
 #include <map>
 #include <mutex>
 #if defined(_OPENMP)
@@ -820,7 +822,7 @@ namespace picBunch
             return (tolerance < kPadding2ErrorBound) ? 3u : 2u;
         }
 
-        /*! Reuse one unified work buffer per (thread, type, slot).
+        /*! Reuse one unified work buffer per (thread, device, type, slot).
          *
          * A chunked CLI run and the benchmark's timed repeats call
          * ``computeField`` many times with the same padded FFT extents.  The
@@ -829,30 +831,311 @@ namespace picBunch
          * large extents.  Keeping the last buffer per slot turns that into one
          * allocation for the first call and none afterwards.
          *
-         * The slot count is fixed (three double slots, two complex slots), so
+         * Buffers are acquired lazily: the replicated full-grid arrays exist
+         * only while the velocity-moment block or the replicated branch runs.
+         * The distributed branch constructs its slab arrays first and then
+         * calls ``release`` so a process that falls back from the moment path
+         * does not keep a full-grid allocation alive next to the slab arrays.
+         *
+         * The slot count is fixed (one double slot, two complex slots), so
          * memory stays bounded: a new shape replaces the previous buffer of the
-         * same slot instead of accumulating one per distinct extent.  Slot
-         * identity is part of the key so two live buffers cannot alias.  The
-         * cache is intentionally leaked, which avoids a static destructor
+         * same slot instead of accumulating one per distinct extent.  Slot and
+         * device identity are part of the key so two live buffers cannot alias.
+         * The cache is intentionally leaked, which avoids a static destructor
          * calling a vendor free after the runtime has finalised.
          */
-        template<typename T_Type, typename T_Device>
-        auto& cachedUnifiedBuffer(T_Device& device, std::size_t count, int slot)
+        class UnifiedBufferCache
         {
-            using Buffer = decltype(alpaka::onHost::allocUnified<T_Type>(device, count));
-            using Key = std::pair<std::thread::id, int>;
-            static auto* cache = new std::map<Key, std::pair<std::size_t, Buffer>>{};
-            static auto* guard = new std::mutex{};
-            Key const key{std::this_thread::get_id(), slot};
-            std::lock_guard lock{*guard};
-            auto it = cache->find(key);
-            if(it == cache->end())
-                it = cache->emplace(key, std::make_pair(count, alpaka::onHost::allocUnified<T_Type>(device, count)))
-                         .first;
-            else if(it->second.first != count)
-                it->second = {count, alpaka::onHost::allocUnified<T_Type>(device, count)};
-            return it->second.second;
+        public:
+            template<typename T_Type, typename T_Device>
+            static auto& acquire(T_Device& device, std::size_t count, int slot)
+            {
+                auto& cache = Store<T_Type, T_Device>::cache();
+                auto& guard = Store<T_Type, T_Device>::guard();
+                auto const key = makeKey(device, slot);
+                std::lock_guard lock{guard};
+                auto it = cache.find(key);
+                if(it == cache.end())
+                    it = cache
+                             .emplace(
+                                 key,
+                                 std::make_pair(
+                                     count,
+                                     alpaka::onHost::allocUnified<T_Type>(device, count)))
+                             .first;
+                else if(it->second.first != count)
+                    it->second = {
+                        count,
+                        alpaka::onHost::allocUnified<T_Type>(device, count)};
+                return it->second.second;
+            }
+
+            template<typename T_Type, typename T_Device>
+            static void release(T_Device& device, int slot)
+            {
+                auto& cache = Store<T_Type, T_Device>::cache();
+                auto& guard = Store<T_Type, T_Device>::guard();
+                auto const key = makeKey(device, slot);
+                std::lock_guard lock{guard};
+                cache.erase(key);
+            }
+
+        private:
+            template<typename T_Type, typename T_Device>
+            struct Store
+            {
+                using Buffer = decltype(alpaka::onHost::allocUnified<T_Type>(
+                    std::declval<T_Device&>(),
+                    std::size_t{1u}));
+                using Key = std::tuple<std::thread::id, std::string, int>;
+                using Map = std::map<Key, std::pair<std::size_t, Buffer>>;
+
+                static Map& cache()
+                {
+                    static auto* instance = new Map{};
+                    return *instance;
+                }
+                static std::mutex& guard()
+                {
+                    static auto* instance = new std::mutex{};
+                    return *instance;
+                }
+            };
+
+            template<typename T_Device>
+            static auto makeKey(T_Device& device, int slot)
+            {
+                return std::make_tuple(
+                    std::this_thread::get_id(),
+                    detail::fftBackendIdentity(device),
+                    slot);
+            }
+        };
+
+        //! Identity of one cached kernel half-spectrum.
+        //!
+        //! The kernel spectrum depends on the padded box, the slab a
+        //! distributed rank owns, the component, the path (the local spectrum
+        //! of a distributed rank is x-slabbed and is not the replicated
+        //! spectrum), the deposit shape, the physical cell size and the
+        //! representative velocity.  The bin index itself is not part of the
+        //! key: two bins with the same representative u share the kernel.
+        struct KernelSpectrumKey
+        {
+            std::string backend;
+            int device = -1;
+            std::uint32_t Mx = 0u;
+            std::uint32_t My = 0u;
+            std::uint32_t Mz = 0u;
+            std::uint32_t nx = 0u;
+            std::uint32_t nz = 0u;
+            std::uint32_t x0 = 0u;
+            std::uint32_t z0 = 0u;
+            int ranks = 1;
+            int component = 0;
+            int path = 0; // 0 = replicated full grid, 1 = distributed slab
+            int shape = 0;
+            std::array<double, 3u> cell{};
+            std::array<double, 3u> u{};
+
+            bool operator==(KernelSpectrumKey const&) const = default;
+
+            bool operator<(KernelSpectrumKey const& other) const
+            {
+                return std::tie(
+                           backend,
+                           device,
+                           Mx,
+                           My,
+                           Mz,
+                           nx,
+                           nz,
+                           x0,
+                           z0,
+                           ranks,
+                           component,
+                           path,
+                           shape,
+                           cell,
+                           u)
+                    < std::tie(
+                           other.backend,
+                           other.device,
+                           other.Mx,
+                           other.My,
+                           other.Mz,
+                           other.nx,
+                           other.nz,
+                           other.x0,
+                           other.z0,
+                           other.ranks,
+                           other.component,
+                           other.path,
+                           other.shape,
+                           other.cell,
+                           other.u);
+            }
+        };
+
+        template<typename T_Device>
+        inline KernelSpectrumKey makeKernelSpectrumKey(
+            T_Device& device,
+            std::uint32_t Mx,
+            std::uint32_t My,
+            std::uint32_t Mz,
+            std::uint32_t nx,
+            std::uint32_t nz,
+            std::uint32_t x0,
+            std::uint32_t z0,
+            int ranks,
+            int component,
+            int path,
+            int shape,
+            std::array<double, 3u> const& cell,
+            std::array<double, 3u> const& u)
+        {
+            KernelSpectrumKey key;
+            key.backend = detail::fftBackendIdentity(device);
+            key.device = static_cast<int>(device.getNativeHandle());
+            key.Mx = Mx;
+            key.My = My;
+            key.Mz = Mz;
+            key.nx = nx;
+            key.nz = nz;
+            key.x0 = x0;
+            key.z0 = z0;
+            key.ranks = ranks;
+            key.component = component;
+            key.path = path;
+            key.shape = shape;
+            key.cell = cell;
+            key.u = u;
+            return key;
         }
+
+        /*! Process-lifetime, per-thread LRU cache for kernel half-spectra.
+         *
+         * The kernel build and its forward transform repeat for every bin and
+         * component on every call.  A benchmark repeat or a chunked run pays
+         * that cost for identical parameters, so a verified kernel spectrum is
+         * kept and copied back on later hits.  The copy is exact (the same
+         * doubles), never a recomputation, so a hit is bit-identical to a fresh
+         * build.
+         *
+         * An entry is stored only after its second miss: a one-off kernel (new
+         * bin or a short run) does not evict a reusable entry.  The hard cap
+         * bounds the whole process cache; entries are dropped least-recently
+         * used first.  A single entry larger than the cap disables caching for
+         * that shape instead of silently exceeding the budget.
+         */
+        template<typename T_Device>
+        class KernelSpectrumCache
+        {
+        public:
+            using Buffer = decltype(alpaka::onHost::allocUnified<Complex>(
+                std::declval<T_Device&>(),
+                std::size_t{1u}));
+
+            static constexpr std::size_t kCapBytes = 1536ull * 1024ull * 1024ull;
+
+            static Buffer const* find(T_Device& /*device*/, KernelSpectrumKey const& key)
+            {
+                std::lock_guard lock{guard()};
+                State& state = states()[std::this_thread::get_id()];
+                auto it = state.entries.find(key);
+                if(it == state.entries.end())
+                    return nullptr;
+                state.order.splice(state.order.begin(), state.order, it->second.lru);
+                return &it->second.buffer;
+            }
+
+            //! Count a miss; true means the caller should insert its result.
+            static bool noteMiss(T_Device& /*device*/, KernelSpectrumKey const& key, std::size_t count)
+            {
+                std::size_t const entryBytes = count * sizeof(Complex);
+                if(entryBytes > kCapBytes)
+                    return false;
+                std::lock_guard lock{guard()};
+                State& state = states()[std::this_thread::get_id()];
+                unsigned& misses = state.misses[key];
+                ++misses;
+                if(misses < 2u)
+                    return false;
+                state.misses.erase(key);
+                return true;
+            }
+
+            template<typename T_Queue, typename T_Source>
+            static void insert(
+                T_Device& device,
+                T_Queue& queue,
+                KernelSpectrumKey const& key,
+                std::size_t count,
+                T_Source const& source)
+            {
+                std::size_t const entryBytes = count * sizeof(Complex);
+                if(entryBytes > kCapBytes)
+                    return;
+                {
+                    std::lock_guard lock{guard()};
+                    State& state = states()[std::this_thread::get_id()];
+                    while(!state.entries.empty() && state.bytes + entryBytes > kCapBytes)
+                        evictOldest(state);
+                }
+                Buffer buffer = alpaka::onHost::allocUnified<Complex>(device, count);
+                alpaka::onHost::memcpy(queue, buffer, source);
+                alpaka::onHost::wait(queue);
+                {
+                    std::lock_guard lock{guard()};
+                    State& state = states()[std::this_thread::get_id()];
+                    state.order.push_front(key);
+                    state.entries.emplace(
+                        key,
+                        Entry{count, std::move(buffer), state.order.begin()});
+                    state.bytes += entryBytes;
+                }
+            }
+
+        private:
+            struct Entry
+            {
+                std::size_t count = 0u;
+                Buffer buffer;
+                typename std::list<KernelSpectrumKey>::iterator lru;
+            };
+
+            struct State
+            {
+                std::map<KernelSpectrumKey, Entry> entries;
+                std::list<KernelSpectrumKey> order;
+                std::map<KernelSpectrumKey, unsigned> misses;
+                std::size_t bytes = 0u;
+            };
+
+            static void evictOldest(State& state)
+            {
+                KernelSpectrumKey const victim = state.order.back();
+                state.order.pop_back();
+                auto it = state.entries.find(victim);
+                if(it != state.entries.end())
+                {
+                    state.bytes -= it->second.count * sizeof(Complex);
+                    state.entries.erase(it);
+                }
+            }
+
+            static std::mutex& guard()
+            {
+                static auto* instance = new std::mutex{};
+                return *instance;
+            }
+
+            static std::map<std::thread::id, State>& states()
+            {
+                static auto* instance = new std::map<std::thread::id, State>{};
+                return *instance;
+            }
+        };
     } // namespace
 
     std::array<double, 3> resolveCellSize(
@@ -1374,6 +1657,7 @@ namespace picBunch
             throw std::runtime_error("computeField: no device available for the compiled backend");
         auto device = selector.makeDevice(0);
         auto queue = device.makeQueue();
+        using KernelCache = KernelSpectrumCache<decltype(device)>;
 
         std::uint32_t const Mx = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
         std::uint32_t const My = static_cast<std::uint32_t>(grid.n[1] * grid.fftPadding);
@@ -1394,6 +1678,38 @@ namespace picBunch
 
         std::uint64_t const paddedNodes = static_cast<std::uint64_t>(Mx) * My * Mz;
         std::uint32_t const spectrumCount = Mz * My * CP;
+
+        // Resolve the FFT path before any FFT buffer or plan is acquired.  The
+        // distributed branch owns only slab-sized arrays; the full-grid real
+        // array and packed half-spectra are acquired lazily by the
+        // velocity-moment block and the replicated branch.  A mixed process
+        // (one call replicated, the next distributed) therefore never leaves a
+        // full-grid allocation alive next to the slab arrays.
+        //
+        // Component/bin parallelism.  Every rank deposits and transforms the
+        // same source spectrum, then owns a disjoint subset of the six output
+        // components.  The replicated path keeps the whole transform on each
+        // rank; the distributed path decomposes the padded box by z-slabs and
+        // uses alltoall transposes.  The six component arrays are summed after
+        // the replicated loop; the distributed path reduces each component as
+        // soon as its local z-slab has been read out.
+        ParallelContext const* par = options.parallel;
+        int const parSize = (par && par->distributed()) ? par->size : 1;
+        int const parRank = (par && par->distributed()) ? par->rank : 0;
+
+        // Auto uses the slab algorithm only above the configured padded-node
+        // threshold; the explicit mode also runs it on one rank so its written
+        // field can be compared with a multi-rank run.  The end-to-end field is
+        // covered by Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit.
+        // With MPI every rank must keep only its slab: auto uses the
+        // distributed transform for any multi-rank run.  Single-rank auto keeps
+        // the replicated path until the padded box exceeds the configured
+        // threshold, where the replicated buffers would be too large.
+        bool const distributedRequested = options.fftMode == FftMode::Distributed
+            || (options.fftMode == FftMode::Auto
+                && (parSize > 1 || paddedNodes > options.distributedFftMinNodes));
+        bool const useDistributed = distributedRequested && par != nullptr
+            && (parSize > 1 || options.fftMode == FftMode::Distributed);
         // Packed half-spectrum view: Complex is two adjacent doubles.  The last
         // MdSpan dimension is the fastest one, so the {count, 2} view with index
         // {l, 0} / {l, 1} lands on element 2*l / 2*l+1 (re / im).
@@ -1426,13 +1742,6 @@ namespace picBunch
         // (three M^3 arrays -> one) without changing any value.  The two
         // packed half-spectra must stay distinct because the product reads
         // both.  All buffers are reused across calls by shape.
-        auto& realWork = cachedUnifiedBuffer<double>(device, static_cast<std::size_t>(paddedNodes), 0);
-        auto& rhoSpec = cachedUnifiedBuffer<Complex>(device, static_cast<std::size_t>(spectrumCount), 1);
-        auto& kernelSpec = cachedUnifiedBuffer<Complex>(device, static_cast<std::size_t>(spectrumCount), 2);
-        auto& rhoReal = realWork;
-        auto& kernelReal = realWork;
-        auto& outReal = realWork;
-
         // Read-out geometry for the replicated path.  The c2r output stays
         // device-resident; a no-arithmetic gather copies the valid n^3 box into
         // a compact device buffer, one D2H copy moves it into pinned host
@@ -1896,55 +2205,83 @@ namespace picBunch
             alpaka::onHost::wait(queue);
         };
 
-        // ---------------------------------------------------------------- FFT
+        // ---------------------------------------------------------------- FFT plans
         // Plans are shapes-only objects (the vendor handle plus the layout), so
         // they are reused across computeField calls with the same padded
         // extents.  cuFFT/FFTW plan construction is a large share of the setup
         // time at M ~ 200-400; a chunked run or a repeated benchmark call paid
-        // it on every chunk.  Each thread keeps the plan pair for its last
-        // shape; a new shape rebuilds and drops the previous pair.
+        // it on every chunk.  The cache key carries the transform type, the
+        // complete batch/strides/distances layout, the placement, the value
+        // type, the device and the replicated-vs-distributed layout tag, so a
+        // plan is never reused across incompatible layouts.  A different key
+        // builds a new plan instead of failing.
         using R2cPlan = decltype(
             alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device));
         using C2rPlan = decltype(
             alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device));
-#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
-        // The rocFFT teardown guard below calls rocfft_cleanup() at the end of
-        // this call, so a cached plan would outlive the pool it belongs to.
-        auto r2cPlanOwned
-            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device);
-        auto c2rPlanOwned
-            = alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device);
-        R2cPlan* r2cPlan = &r2cPlanOwned;
-        C2rPlan* c2rPlan = &c2rPlanOwned;
-#else
-        struct PlanSlot
+        struct ReplicatedPlans
         {
-            std::array<std::uint32_t, 3> key{};
-            bool valid = false;
-            std::optional<R2cPlan> r2c;
-            std::optional<C2rPlan> c2r;
+            std::shared_ptr<R2cPlan> r2c;
+            std::shared_ptr<C2rPlan> c2r;
         };
-        static auto* planSlots = new std::map<std::thread::id, PlanSlot>{};
-        static auto* planGuard = new std::mutex{};
-        std::array<std::uint32_t, 3> const planKey{Mx, My, Mz};
-        PlanSlot* slot = nullptr;
-        {
-            std::lock_guard lock{*planGuard};
-            PlanSlot& entry = (*planSlots)[std::this_thread::get_id()];
-            if(!entry.valid || entry.key != planKey)
-            {
-                entry.r2c.emplace(
-                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.r2c().outOfPlace().build(device));
-                entry.c2r.emplace(
-                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}.c2r().outOfPlace().build(device));
-                entry.key = planKey;
-                entry.valid = true;
-            }
-            slot = &entry;
-        }
-        R2cPlan* r2cPlan = &*slot->r2c;
-        C2rPlan* c2rPlan = &*slot->c2r;
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+        // The rocFFT teardown guard below calls rocfft_cleanup() at process
+        // exit, so keep the per-call ownership that the HIP path had before
+        // plan caching and do not hand these plans to the process cache.
+        std::shared_ptr<R2cPlan> ownedR2c;
+        std::shared_ptr<C2rPlan> ownedC2r;
 #endif
+        auto replicatedPlans = [&]() -> ReplicatedPlans {
+#if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
+            if(!ownedR2c)
+                ownedR2c = std::make_shared<R2cPlan>(
+                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}
+                        .r2c()
+                        .outOfPlace()
+                        .build(device));
+            if(!ownedC2r)
+                ownedC2r = std::make_shared<C2rPlan>(
+                    alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}
+                        .c2r()
+                        .outOfPlace()
+                        .build(device));
+            return ReplicatedPlans{ownedR2c, ownedC2r};
+#else
+            std::array<std::uint32_t, 3u> const shape{Mx, My, Mz};
+            std::array<std::uint32_t, 4u> const slab{};
+            auto r2cKey = detail::makeFftPlanKey<double>(
+                device,
+                alpaka::fft::Transform::r2c,
+                realExt,
+                detail::FftLayoutKind::Replicated,
+                shape,
+                slab);
+            auto c2rKey = detail::makeFftPlanKey<double>(
+                device,
+                alpaka::fft::Transform::c2r,
+                realExt,
+                detail::FftLayoutKind::Replicated,
+                shape,
+                slab);
+            return ReplicatedPlans{
+                detail::FftPlanCache<R2cPlan>::acquire(
+                    r2cKey,
+                    [&] {
+                        return alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}
+                            .r2c()
+                            .outOfPlace()
+                            .build(device);
+                    }),
+                detail::FftPlanCache<C2rPlan>::acquire(
+                    c2rKey,
+                    [&] {
+                        return alpaka::fft::onHost::PlanBuilder<double, Extents3>{realExt}
+                            .c2r()
+                            .outOfPlace()
+                            .build(device);
+                    })};
+#endif
+        };
 #if defined(ALPAKAV_DEP_ROCFFT) && ALPAKAV_DEP_ROCFFT
         // Deviation from the pure-alpaka rule, kept on purpose.  This is the only
         // native vendor API call in the tree: the HIP-only rocfft_cleanup() from
@@ -1991,31 +2328,6 @@ namespace picBunch
             / (static_cast<double>(Mx) * static_cast<double>(My) * static_cast<double>(Mz));
         double const eFactor = kCoulombConstant;
         double const bFactor = kCoulombConstant / kSpeedOfLight;
-
-        // Component/bin parallelism.  Every rank deposits and transforms the
-        // same source spectrum, then owns a disjoint subset of the six output
-        // components.  The replicated path keeps the whole transform on each
-        // rank; the distributed path decomposes the padded box by z-slabs and
-        // uses alltoall transposes.  The six component arrays are summed after
-        // the replicated loop; the distributed path reduces each component as
-        // soon as its local z-slab has been read out.
-        ParallelContext const* par = options.parallel;
-        int const parSize = (par && par->distributed()) ? par->size : 1;
-        int const parRank = (par && par->distributed()) ? par->rank : 0;
-
-        // Auto uses the slab algorithm only above the configured padded-node
-        // threshold; the explicit mode also runs it on one rank so its written
-        // field can be compared with a multi-rank run.  The end-to-end field is
-        // covered by Fft.DistributedProductionMatchesReplicatedWithDeviceDeposit.
-        // With MPI every rank must keep only its slab: auto uses the
-        // distributed transform for any multi-rank run.  Single-rank auto keeps
-        // the replicated path until the padded box exceeds the configured
-        // threshold, where the replicated buffers would be too large.
-        bool const distributedRequested = options.fftMode == FftMode::Distributed
-            || (options.fftMode == FftMode::Auto
-                && (parSize > 1 || paddedNodes > options.distributedFftMinNodes));
-        bool const useDistributed = distributedRequested && par != nullptr
-            && (parSize > 1 || options.fftMode == FftMode::Distributed);
 
         // ---------------------------------------------------------- velocity moments
         // Opt-in (candidate C1): replace the per-velocity-box FFT chain with a
@@ -2081,6 +2393,28 @@ namespace picBunch
                 }
                 if(rep.feasible)
                 {
+                    // The moment path always runs the replicated full-grid
+                    // transform.  Acquire its arrays and plans here, not before
+                    // the path decision, so a distributed run never pays for
+                    // them.
+                    auto& realWork = UnifiedBufferCache::acquire<double>(
+                        device,
+                        static_cast<std::size_t>(paddedNodes),
+                        0);
+                    auto& rhoSpec = UnifiedBufferCache::acquire<Complex>(
+                        device,
+                        static_cast<std::size_t>(spectrumCount),
+                        1);
+                    auto& kernelSpec = UnifiedBufferCache::acquire<Complex>(
+                        device,
+                        static_cast<std::size_t>(spectrumCount),
+                        2);
+                    auto& rhoReal = realWork;
+                    auto& kernelReal = realWork;
+                    auto& outReal = realWork;
+                    (void) kernelReal;
+                    auto plans = replicatedPlans();
+
                     std::size_t const orderUsed
                         = (vm.mode == VelocityMomentsOptions::Mode::Explicit)
                             ? (std::min<std::size_t>(vm.order, 3u))
@@ -2212,7 +2546,7 @@ namespace picBunch
                         alpaka::onHost::memset(queue, rhoReal, std::uint8_t{0});
                         launchMomentDeposit(mi.a1, mi.a2, mi.a3);
                         alpaka::fft::onHost::executeForward(
-                            queue, *r2cPlan, rhoReal, momentBufs[static_cast<std::size_t>(mi.idx)]);
+                            queue, *plans.r2c, rhoReal, momentBufs[static_cast<std::size_t>(mi.idx)]);
                         alpaka::onHost::wait(queue);
                     }
                     times.depositMs += elapsedMs(depStart);
@@ -2272,7 +2606,7 @@ namespace picBunch
                                 continue;
                             alpaka::fft::onHost::executeForward(
                                 queue,
-                                *r2cPlan,
+                                *plans.r2c,
                                 planeView(static_cast<std::size_t>(mi.idx)),
                                 kernelSpec);
                             if(inFull)
@@ -2316,7 +2650,7 @@ namespace picBunch
                                 spectrumCount,
                                 probeAcc.data());
                         }
-                        alpaka::fft::onHost::executeBackward(queue, *c2rPlan, rhoSpec, outReal);
+                        alpaka::fft::onHost::executeBackward(queue, *plans.c2r, rhoSpec, outReal);
                         alpaka::onHost::wait(queue);
                         times.fftMs += elapsedMs(specStart);
 
@@ -2445,6 +2779,12 @@ namespace picBunch
         if(useDistributed)
         {
             detail::DistributedFft3D dfft{device, queue, Mx, My, Mz, par};
+            // Construct the slab arrays first, then drop the full-grid arrays
+            // that a velocity-moment fallback may have left in the cache.  The
+            // distributed work itself runs with slab-sized storage only.
+            UnifiedBufferCache::release<double>(device, 0);
+            UnifiedBufferCache::release<Complex>(device, 1);
+            UnifiedBufferCache::release<Complex>(device, 2);
             std::uint32_t const nz = dfft.zCount();
             std::uint32_t const zOffset = dfft.zOffset();
             auto* workReal = reinterpret_cast<double*>(dfft.work());
@@ -2464,6 +2804,13 @@ namespace picBunch
             using SlabWorkView = std::remove_cvref_t<decltype(slabWorkView)>;
             using SlabWorkViewExtents = typename MdSpanExtents<SlabWorkView>::type;
             static_assert(std::is_same_v<typename SlabWorkViewExtents::value_type, std::uint32_t>);
+            // The distributed kernel spectrum is the z-local (x-slabbed)
+            // spectrum of this rank.  The kernel cache stores and restores
+            // exactly this layout; the multidimensional shape fields in the
+            // key keep it apart from the replicated full-grid spectrum.
+            std::size_t const localSpectrumCount
+                = static_cast<std::size_t>(dfft.xCount()) * My * Mz;
+            auto& dfftKernelView = dfft.kernelSpectrumBuffer();
 
             // The inverse transform leaves a z-slab of the *padded* grid.  Only
             // the output planes [0, grid.n[2]) are written, and those padded
@@ -2656,31 +3003,66 @@ namespace picBunch
                 for(int c = 0; c < 6; ++c)
                 {
                     // -------------------------------------------------------- kernel
-                    auto const kernelStart = Clock::now();
-                    queue.enqueue(
-                        alpaka::onHost::FrameSpec{
-                            ceilDivVec(slabExt, slabFrame),
-                            slabFrame},
-                        KernelBuildKernel{},
-                        slabWorkView,
-                        zOffset,
-                        nz,
+                    KernelSpectrumKey const kernelKey = makeKernelSpectrumKey(
+                        device,
                         Mx,
                         My,
                         Mz,
+                        dfft.xCount(),
+                        nz,
+                        dfft.xOffset(),
+                        zOffset,
+                        parSize,
                         c,
-                        alpaka::Vec{
-                            kYeeOffset[c][0],
-                            kYeeOffset[c][1],
-                            kYeeOffset[c][2]},
-                        alpaka::Vec{cell[0], cell[1], cell[2]},
-                        kRefinement,
-                        alpaka::Vec{uRep[0], uRep[1], uRep[2]});
-                    alpaka::onHost::wait(queue);
-                    times.kernelMs += elapsedMs(kernelStart);
+                        1,
+                        static_cast<int>(grid.shape),
+                        cell,
+                        uRep);
+                    auto const kernelStart = Clock::now();
+                    KernelCache::Buffer const* cachedKernel
+                        = KernelCache::find(device, kernelKey);
+                    if(cachedKernel == nullptr)
+                    {
+                        queue.enqueue(
+                            alpaka::onHost::FrameSpec{
+                                ceilDivVec(slabExt, slabFrame),
+                                slabFrame},
+                            KernelBuildKernel{},
+                            slabWorkView,
+                            zOffset,
+                            nz,
+                            Mx,
+                            My,
+                            Mz,
+                            c,
+                            alpaka::Vec{
+                                kYeeOffset[c][0],
+                                kYeeOffset[c][1],
+                                kYeeOffset[c][2]},
+                            alpaka::Vec{cell[0], cell[1], cell[2]},
+                            kRefinement,
+                            alpaka::Vec{uRep[0], uRep[1], uRep[2]});
+                        alpaka::onHost::wait(queue);
+                        times.kernelMs += elapsedMs(kernelStart);
 
-                    // ------------------------------- kernel forward + product + inverse
-                    dfft.forwardWorkToKernelSpectrum();
+                        // --------------------------- kernel forward + product + inverse
+                        dfft.forwardWorkToKernelSpectrum();
+                        if(KernelCache::noteMiss(device, kernelKey, localSpectrumCount))
+                            KernelCache::insert(
+                                device,
+                                queue,
+                                kernelKey,
+                                localSpectrumCount,
+                                dfftKernelView);
+                    }
+                    else
+                    {
+                        // Exact copy of the rank-local kernel spectrum.
+                        auto const copyStart = Clock::now();
+                        alpaka::onHost::memcpy(queue, dfftKernelView, *cachedKernel);
+                        alpaka::onHost::wait(queue);
+                        times.fftMs += elapsedMs(copyStart);
+                    }
                     dfft.multiply();
                     dfft.inverseToWork();
 
@@ -2726,6 +3108,44 @@ namespace picBunch
         }
 
         // Replicated path: one whole FFT per rank, component-parallel across ranks.
+        //
+        // The replicated path keeps its FFT buffers as flat 1-D allocations.
+        // Every access in this path (deposit, kernel build, spectrum multiply,
+        // read-out) and the vendor plans (contiguous layout, inembed == extents)
+        // use the dense x-fastest layout.  A 3-D allocUnified instead pads each
+        // innermost row to the 128-byte boundary whenever Mx is not a multiple
+        // of 16; alpaka's pitched memset then leaves the padding bytes
+        // uncleared, and those bytes sit inside the flat prefix the FFT reads.
+        // Reused across the velocity bins below, the stale padding carried the
+        // previous bin's charge into the transform (characterised in
+        // tools/fft-size).
+        //
+        // One real array serves rho, the kernel and the inverse-transform
+        // output.  Their lifetimes do not overlap: rho is dead once its r2c
+        // transform has produced rhoSpec, and the kernel array is dead once its
+        // r2c transform has produced kernelSpec, before the c2r output is
+        // written.  Aliasing them halves the padded real-space footprint
+        // (three M^3 arrays -> one) without changing any value.  The two packed
+        // half-spectra must stay distinct because the product reads both.  All
+        // buffers are reused across calls by shape and released by the
+        // distributed branch, so a mixed process never holds both layouts.
+        auto& realWork = UnifiedBufferCache::acquire<double>(
+            device,
+            static_cast<std::size_t>(paddedNodes),
+            0);
+        auto& rhoSpec = UnifiedBufferCache::acquire<Complex>(
+            device,
+            static_cast<std::size_t>(spectrumCount),
+            1);
+        auto& kernelSpec = UnifiedBufferCache::acquire<Complex>(
+            device,
+            static_cast<std::size_t>(spectrumCount),
+            2);
+        auto& rhoReal = realWork;
+        auto& kernelReal = realWork;
+        auto& outReal = realWork;
+        auto plans = replicatedPlans();
+
         for(auto& component : field.data)
             component.assign(grid.size(), 0.0);
 
@@ -2782,7 +3202,7 @@ namespace picBunch
 
             // ------------------------------------------------------------- FFT
             auto const fftStart = Clock::now();
-            alpaka::fft::onHost::executeForward(queue, *r2cPlan, rhoReal, rhoSpec);
+            alpaka::fft::onHost::executeForward(queue, *plans.r2c, rhoReal, rhoSpec);
             alpaka::onHost::wait(queue);
             times.fftMs += elapsedMs(fftStart);
 
@@ -2806,33 +3226,68 @@ namespace picBunch
                 if(parSize > 1 && (c % parSize) != parRank)
                     continue; // another rank owns this component
                 // ------------------------------------------------------------ kernel
-                auto const kernelStart = Clock::now();
-                queue.enqueue(
-                    alpaka::onHost::FrameSpec{
-                        ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
-                        Extents3::fill(4u)},
-                    KernelBuildKernel{},
-                    kernelRealView,
-                    0u,
-                    Mz,
+                KernelSpectrumKey const kernelKey = makeKernelSpectrumKey(
+                    device,
                     Mx,
                     My,
                     Mz,
+                    Mx,
+                    Mz,
+                    0u,
+                    0u,
+                    parSize,
                     c,
-                    alpaka::Vec{
-                        kYeeOffset[c][0],
-                        kYeeOffset[c][1],
-                        kYeeOffset[c][2]},
-                    alpaka::Vec{cell[0], cell[1], cell[2]},
-                    kRefinement,
-                    alpaka::Vec{uRep[0], uRep[1], uRep[2]});
-                alpaka::onHost::wait(queue);
-                times.kernelMs += elapsedMs(kernelStart);
+                    0,
+                    static_cast<int>(grid.shape),
+                    cell,
+                    uRep);
+                auto const kernelStart = Clock::now();
+                KernelCache::Buffer const* cachedKernel
+                    = KernelCache::find(device, kernelKey);
+                if(cachedKernel == nullptr)
+                {
+                    queue.enqueue(
+                        alpaka::onHost::FrameSpec{
+                            ceilDivVec(Extents3{Mx, My, Mz}, Extents3::fill(4u)),
+                            Extents3::fill(4u)},
+                        KernelBuildKernel{},
+                        kernelRealView,
+                        0u,
+                        Mz,
+                        Mx,
+                        My,
+                        Mz,
+                        c,
+                        alpaka::Vec{
+                            kYeeOffset[c][0],
+                            kYeeOffset[c][1],
+                            kYeeOffset[c][2]},
+                        alpaka::Vec{cell[0], cell[1], cell[2]},
+                        kRefinement,
+                        alpaka::Vec{uRep[0], uRep[1], uRep[2]});
+                    alpaka::onHost::wait(queue);
+                    times.kernelMs += elapsedMs(kernelStart);
+                }
 
                 // --------------------------------------------------------- spectrum
                 auto const spectrumStart = Clock::now();
-                alpaka::fft::onHost::executeForward(queue, *r2cPlan, kernelReal, kernelSpec);
-                alpaka::onHost::wait(queue);
+                if(cachedKernel != nullptr)
+                {
+                    // Exact copy of the previously verified kernel spectrum.
+                    alpaka::onHost::memcpy(queue, kernelSpec, *cachedKernel);
+                    alpaka::onHost::wait(queue);
+                }
+                else
+                {
+                    alpaka::fft::onHost::executeForward(
+                        queue,
+                        *plans.r2c,
+                        kernelReal,
+                        kernelSpec);
+                    alpaka::onHost::wait(queue);
+                    if(KernelCache::noteMiss(device, kernelKey, spectrumCount))
+                        KernelCache::insert(device, queue, kernelKey, spectrumCount, kernelSpec);
+                }
                 // product of two packed half-spectra; Complex<double> is two adjacent doubles
                 static_assert(sizeof(Complex) == 2u * sizeof(double), "unexpected Complex layout");
                 queue.enqueue(
@@ -2842,7 +3297,7 @@ namespace picBunch
                     packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
                     spectrumCount);
                 alpaka::onHost::wait(queue);
-                alpaka::fft::onHost::executeBackward(queue, *c2rPlan, kernelSpec, outReal);
+                alpaka::fft::onHost::executeBackward(queue, *plans.c2r, kernelSpec, outReal);
                 alpaka::onHost::wait(queue);
                 times.fftMs += elapsedMs(spectrumStart);
 
