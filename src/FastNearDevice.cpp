@@ -1125,7 +1125,13 @@ namespace picBunch::pbfast
             B[2] = invVolume * B[2];
         }
 
-        ALPAKA_FN_ACC inline void dshapeField(
+        // Keep this helper and dmeshComp() inlined.  Once the batched and the
+        // per-tile kernels share this module, HIP clang outlines them at -O3
+        // and passes a reference into the kernel's by-value DeviceParams
+        // kernarg block through the call.  ROCm 7.2 does not materialise that
+        // reference in private memory, so the quadrature tables read garbage
+        // (CUDA and the host backend inline or handle the block correctly).
+        ALPAKA_FN_INLINE ALPAKA_FN_ACC void dshapeField(
             double const x_obs[3],
             double const x_src[3],
             double const u[3],
@@ -1336,7 +1342,7 @@ namespace picBunch::pbfast
         //! 27-point TSC mesh-near stencil contribution (one component) of one
         //! source.  R = (yee - delta) * cells with the integer support offset
         //! delta, so no grid origin is needed.
-        ALPAKA_FN_ACC inline double dmeshComp(
+        ALPAKA_FN_INLINE ALPAKA_FN_ACC double dmeshComp(
             double const xs[3],
             double const urep[3],
             double const cells[3],
