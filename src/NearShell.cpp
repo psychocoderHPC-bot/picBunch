@@ -56,7 +56,7 @@ namespace picBunch
             return s;
         }
 
-        Bunch selectSources(Bunch const& bunch, std::vector<std::size_t> const& index)
+        Bunch selectSources(Bunch const& bunch, std::vector<std::uint32_t> const& index)
         {
             Bunch out;
             out.resize(index.size());
@@ -465,40 +465,108 @@ namespace picBunch
         auto const& origin = grid.origin;
         auto const& spacing = grid.spacing;
 
-        // Uniform cell list over the sources.  One cell is `radius` PIC cells
-        // wide per axis, so a tile only visits the (up to) 3x3x3 neighbouring
-        // buckets instead of scanning all sources for every tile.  Sources are
-        // pushed in index order and the per-tile list is sorted afterwards, so
-        // the near set is identical to the former O(tiles x N) scan.
-        double cl[3];
-        double smin[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
-        double smax[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
-        for(int a = 0; a < 3; ++a)
-            cl[a] = std::max(radius * cells[a], 1e-300);
+        // Per-tile near-source lists.  Every source is visited once and
+        // inserted into each tile block whose node box lies within the shell
+        // radius.  This costs O(sources * neighbouring tiles) instead of the
+        // former O(tiles * bucket sources): on a large grid an empty tile now
+        // costs nothing, which removes the grid^3 per-tile scan that dominated
+        // compact clouds at 128^3.  Sources are appended in index order, so
+        // each list is already sorted and no per-tile sort is needed.
+        std::size_t const tileCount[3] = {
+            (n[0] + tile - 1u) / tile,
+            (n[1] + tile - 1u) / tile,
+            (n[2] + tile - 1u) / tile};
+        std::vector<std::vector<std::uint32_t>> tileSources(
+            tileCount[0] * tileCount[1] * tileCount[2]);
         for(std::size_t p = 0; p < bunch.size(); ++p)
         {
             double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+            long qLo[3];
+            long qHi[3];
             for(int a = 0; a < 3; ++a)
             {
-                smin[a] = std::min(smin[a], pos[a]);
-                smax[a] = std::max(smax[a], pos[a]);
+                double const reach = radius * cells[a];
+                double const sp = spacing[a];
+                double const tj = sp * static_cast<double>(tile);
+                long const lo = static_cast<long>(std::floor(
+                    (pos[a] - reach - static_cast<double>(tile - 1u) * sp) / tj));
+                long const hi
+                    = static_cast<long>(std::floor((pos[a] + reach) / tj));
+                // One guard tile each side absorbs floating-point rounding at
+                // the range boundary; the exact distance test below decides.
+                qLo[a] = std::clamp(lo - 1L, 0L, static_cast<long>(tileCount[a]) - 1L);
+                qHi[a] = std::clamp(hi + 1L, 0L, static_cast<long>(tileCount[a]) - 1L);
             }
+            for(long qk = qLo[2]; qk <= qHi[2]; ++qk)
+                for(long qj = qLo[1]; qj <= qHi[1]; ++qj)
+                    for(long qi = qLo[0]; qi <= qHi[0]; ++qi)
+                    {
+                        std::size_t const i0 = static_cast<std::size_t>(qi) * tile;
+                        std::size_t const j0 = static_cast<std::size_t>(qj) * tile;
+                        std::size_t const k0 = static_cast<std::size_t>(qk) * tile;
+                        std::size_t const i1 = std::min(n[0], i0 + tile);
+                        std::size_t const j1 = std::min(n[1], j0 + tile);
+                        std::size_t const k1 = std::min(n[2], k0 + tile);
+                        double const low[3] = {
+                            origin[0] + static_cast<double>(i0) * spacing[0],
+                            origin[1] + static_cast<double>(j0) * spacing[1],
+                            origin[2] + static_cast<double>(k0) * spacing[2]};
+                        double const high[3] = {
+                            origin[0] + static_cast<double>(i1 - 1u) * spacing[0],
+                            origin[1] + static_cast<double>(j1 - 1u) * spacing[1],
+                            origin[2] + static_cast<double>(k1 - 1u) * spacing[2]};
+                        double dist2 = 0.0;
+                        for(int a = 0; a < 3; ++a)
+                        {
+                            double const d
+                                = std::max({low[a] - pos[a], 0.0, pos[a] - high[a]});
+                            double const dn = d / cells[a];
+                            dist2 += dn * dn;
+                        }
+                        if(dist2 <= radius * radius)
+                            tileSources[static_cast<std::size_t>(qi)
+                                        + tileCount[0]
+                                            * (static_cast<std::size_t>(qj)
+                                               + tileCount[1] * static_cast<std::size_t>(qk))]
+                                .push_back(static_cast<std::uint32_t>(p));
+                    }
         }
-        long cn[3];
-        for(int a = 0; a < 3; ++a)
-            cn[a] = std::max<long>(1, static_cast<long>(std::ceil((smax[a] - smin[a]) / cl[a])) + 1);
-        std::vector<std::vector<std::size_t>> buckets(
-            static_cast<std::size_t>(cn[0] * cn[1] * cn[2]));
-        for(std::size_t p = 0; p < bunch.size(); ++p)
+
+        // The 27-point stencil path needs no per-tile FFT.  All of its tiles
+        // are collected and evaluated in one device launch, which removes the
+        // per-tile allocator and stream-synchronisation cost that dominated
+        // large grids (and lets small tiles be used without paying it).
+        bool const deviceStencil = useFastGpu
+            && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
+        if(deviceStencil && bunch.size() > 0xffffffffull)
+            throw std::runtime_error(
+                "near shell: the batched device path holds source indices in 32 bits");
+        std::vector<std::uint32_t> batchIndices;
+        std::vector<pbfast::BatchedTile> batchTiles;
+        std::vector<pbfast::DeviceParams> batchParams;
+        std::vector<double> batchRepU;
+        std::uint64_t batchOutSize = 0;
+        if(deviceStencil)
         {
-            double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
-            long ci[3];
-            for(int a = 0; a < 3; ++a)
+            // Binned representative velocity per full-bunch source, resolved
+            // once instead of once per tile.
+            VelocityBinning const& meshBin
+                = options.fixedBinning ? *options.fixedBinning : binning;
+            batchRepU.resize(3u * bunch.size());
+            for(std::size_t p = 0; p < bunch.size(); ++p)
             {
-                ci[a] = static_cast<long>(std::floor((pos[a] - smin[a]) / cl[a]));
-                ci[a] = std::clamp(ci[a], 0L, cn[a] - 1L);
+                double const coords[3] = {
+                    bunch.ux[p] * meshBin.basis[0][0] + bunch.uy[p] * meshBin.basis[0][1]
+                        + bunch.uz[p] * meshBin.basis[0][2],
+                    bunch.ux[p] * meshBin.basis[1][0] + bunch.uy[p] * meshBin.basis[1][1]
+                        + bunch.uz[p] * meshBin.basis[1][2],
+                    bunch.ux[p] * meshBin.basis[2][0] + bunch.uy[p] * meshBin.basis[2][1]
+                        + bunch.uz[p] * meshBin.basis[2][2]};
+                std::size_t const b = meshBin.boxIndex(coords[0], coords[1], coords[2]);
+                batchRepU[3u * p] = meshBin.representativeU[b][0];
+                batchRepU[3u * p + 1u] = meshBin.representativeU[b][1];
+                batchRepU[3u * p + 2u] = meshBin.representativeU[b][2];
             }
-            buckets[static_cast<std::size_t>(ci[0] + cn[0] * (ci[1] + cn[1] * ci[2]))].push_back(p);
         }
 
         // Stable in-support reference expects cells (dx,dy,dz); picBunch's
@@ -527,45 +595,13 @@ namespace picBunch
                         origin[1] + static_cast<double>(j1 - 1u) * spacing[1],
                         origin[2] + static_cast<double>(k1 - 1u) * spacing[2]};
 
-                    // Near set: every source within `radius` PIC cells of the
-                    // tile box, measured per axis in that axis's own cell unit.
-                    // All of them are then evaluated exactly, so the tile's
-                    // effective radius is `radius` plus at most half a tile.
-                    std::vector<std::size_t> nearIndex;
-                    long cLo[3];
-                    long cHi[3];
-                    for(int a = 0; a < 3; ++a)
-                    {
-                        double const reach = radius * cells[a];
-                        cLo[a] = static_cast<long>(std::floor((low[a] - reach - smin[a]) / cl[a]));
-                        cHi[a] = static_cast<long>(std::floor((high[a] + reach - smin[a]) / cl[a]));
-                        cLo[a] = std::clamp(cLo[a], 0L, cn[a] - 1L);
-                        cHi[a] = std::clamp(cHi[a], 0L, cn[a] - 1L);
-                    }
-                    for(long ck = cLo[2]; ck <= cHi[2]; ++ck)
-                        for(long cj = cLo[1]; cj <= cHi[1]; ++cj)
-                            for(long ci = cLo[0]; ci <= cHi[0]; ++ci)
-                            {
-                                auto const& bucket = buckets[static_cast<std::size_t>(
-                                    ci + cn[0] * (cj + cn[1] * ck))];
-                                for(std::size_t const p : bucket)
-                                {
-                                    double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
-                                    bool inside = true;
-                                    for(int a = 0; a < 3; ++a)
-                                    {
-                                        double const reach = radius * cells[a];
-                                        if(pos[a] < low[a] - reach || pos[a] > high[a] + reach)
-                                        {
-                                            inside = false;
-                                            break;
-                                        }
-                                    }
-                                    if(inside)
-                                        nearIndex.push_back(p);
-                                }
-                            }
-                    std::sort(nearIndex.begin(), nearIndex.end());
+                    // Near set from the per-source tile lists.  The lists
+                    // are already sorted in source index order.
+                    auto const& nearIndex = tileSources[
+                        static_cast<std::size_t>(i0 / tile)
+                        + tileCount[0]
+                            * (static_cast<std::size_t>(j0 / tile)
+                               + tileCount[1] * static_cast<std::size_t>(k0 / tile))];
                     if(nearIndex.empty())
                         continue;
 
@@ -672,8 +708,6 @@ namespace picBunch
                     // discrete convolution per (source, node) pair on the
                     // device, so the per-tile FFT (and its plan setup) is
                     // skipped by default.
-                    bool const deviceStencil = useFastGpu
-                        && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
                     Field local;
                     std::int64_t localLo[3] = {0, 0, 0};
                     std::size_t nLocalX = 0;
@@ -797,76 +831,77 @@ namespace picBunch
 
                     if(useFastGpu)
                     {
-                        // Same generic alpaka functor as CUDA/HIP; on a CPU build
-                        // the host device runs it with the host FrameSpec.
-                        Bunch meshB = near;
                         if(deviceStencil)
                         {
-                            VelocityBinning const& meshBin
-                                = options.fixedBinning ? *options.fixedBinning : binning;
-                            for(std::size_t q = 0; q < meshB.size(); ++q)
-                            {
-                                double const coords[3] = {
-                                    meshB.ux[q] * meshBin.basis[0][0]
-                                        + meshB.uy[q] * meshBin.basis[0][1]
-                                        + meshB.uz[q] * meshBin.basis[0][2],
-                                    meshB.ux[q] * meshBin.basis[1][0]
-                                        + meshB.uy[q] * meshBin.basis[1][1]
-                                        + meshB.uz[q] * meshBin.basis[1][2],
-                                    meshB.ux[q] * meshBin.basis[2][0]
-                                        + meshB.uy[q] * meshBin.basis[2][1]
-                                        + meshB.uz[q] * meshBin.basis[2][2]};
-                                std::size_t const b = meshBin.boxIndex(coords[0], coords[1], coords[2]);
-                                meshB.ux[q] = meshBin.representativeU[b][0];
-                                meshB.uy[q] = meshBin.representativeU[b][1];
-                                meshB.uz[q] = meshBin.representativeU[b][2];
-                            }
+                            // Record the tile; the whole batch runs in one
+                            // device launch after the tile loop.
+                            pbfast::BatchedTile bt;
+                            bt.i0 = static_cast<std::uint32_t>(i0);
+                            bt.j0 = static_cast<std::uint32_t>(j0);
+                            bt.k0 = static_cast<std::uint32_t>(k0);
+                            bt.nx = static_cast<std::uint32_t>(nx);
+                            bt.ny = static_cast<std::uint32_t>(ny);
+                            bt.nz = static_cast<std::uint32_t>(nz);
+                            bt.srcBegin = static_cast<std::uint32_t>(batchIndices.size());
+                            bt.srcCount = static_cast<std::uint32_t>(near.size());
+                            bt.outOffset = batchOutSize;
+                            for(std::size_t q = 0; q < near.size(); ++q)
+                                batchIndices.push_back(
+                                    static_cast<std::uint32_t>(nearIndex[q]));
+                            batchTiles.push_back(bt);
+                            batchParams.push_back(deviceParams);
+                            batchOutSize += static_cast<std::uint64_t>(6u * nx * ny * nz);
+                            pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
                         }
-                        std::vector<double> const dev = pbfast::evalFastNearDevice(
-                            near,
-                            meshB,
-                            deviceStencil,
-                            nx,
-                            ny,
-                            nz,
-                            origin[0] + static_cast<double>(i0) * spacing[0],
-                            origin[1] + static_cast<double>(j0) * spacing[1],
-                            origin[2] + static_cast<double>(k0) * spacing[2],
-                            spacing[0],
-                            spacing[1],
-                            spacing[2],
-                            cells[0],
-                            cells[1],
-                            cells[2],
-                            deviceParams);
-                        // Element-wise gather from the six device result arrays.
-                        // Each output slot has a single writer, so a plain loop
-                        // keeps the result deterministic; the expensive
-                        // per-(source, node) work is in the alpaka functor.
-                        for(int c = 0; c < 6; ++c)
-                            for(std::size_t kk = 0; kk < nz; ++kk)
-                                for(std::size_t jj = 0; jj < ny; ++jj)
-                                    for(std::size_t ii = 0; ii < nx; ++ii)
-                                    {
-                                        std::size_t const i = i0 + ii;
-                                        std::size_t const j = j0 + jj;
-                                        std::size_t const k = k0 + kk;
-                                        std::size_t const gidx = i + n[0] * (j + n[1] * k);
-                                        std::size_t const li = static_cast<std::size_t>(
-                                            static_cast<std::int64_t>(i) - localLo[0]);
-                                        std::size_t const lj = static_cast<std::size_t>(
-                                            static_cast<std::int64_t>(j) - localLo[1]);
-                                        std::size_t const lk = static_cast<std::size_t>(
-                                            static_cast<std::int64_t>(k) - localLo[2]);
-                                        std::size_t const lidx = li + nLocalX * (lj + nLocalY * lk);
-                                        std::size_t const didx = ii + nx * (jj + ny * kk);
-                                        correction.data[c][gidx]
-                                            = deviceStencil
-                                            ? dev[static_cast<std::size_t>(c) * nx * ny * nz + didx]
-                                            : -local.data[c][lidx]
-                                                + dev[static_cast<std::size_t>(c) * nx * ny * nz + didx];
-                                    }
-                        pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
+                        else
+                        {
+                            // Legacy path: per-tile local FFT plus device eval.
+                            // Same generic alpaka functor as CUDA/HIP; on a CPU
+                            // build the host device runs it with the host
+                            // FrameSpec.
+                            Bunch meshB = near;
+                            std::vector<double> const dev = pbfast::evalFastNearDevice(
+                                near,
+                                meshB,
+                                false,
+                                nx,
+                                ny,
+                                nz,
+                                origin[0] + static_cast<double>(i0) * spacing[0],
+                                origin[1] + static_cast<double>(j0) * spacing[1],
+                                origin[2] + static_cast<double>(k0) * spacing[2],
+                                spacing[0],
+                                spacing[1],
+                                spacing[2],
+                                cells[0],
+                                cells[1],
+                                cells[2],
+                                deviceParams);
+                            for(int c = 0; c < 6; ++c)
+                                for(std::size_t kk = 0; kk < nz; ++kk)
+                                    for(std::size_t jj = 0; jj < ny; ++jj)
+                                        for(std::size_t ii = 0; ii < nx; ++ii)
+                                        {
+                                            std::size_t const i = i0 + ii;
+                                            std::size_t const j = j0 + jj;
+                                            std::size_t const k = k0 + kk;
+                                            std::size_t const gidx = i + n[0] * (j + n[1] * k);
+                                            std::size_t const li = static_cast<std::size_t>(
+                                                static_cast<std::int64_t>(i) - localLo[0]);
+                                            std::size_t const lj = static_cast<std::size_t>(
+                                                static_cast<std::int64_t>(j) - localLo[1]);
+                                            std::size_t const lk = static_cast<std::size_t>(
+                                                static_cast<std::int64_t>(k) - localLo[2]);
+                                            std::size_t const lidx
+                                                = li + nLocalX * (lj + nLocalY * lk);
+                                            std::size_t const didx = ii + nx * (jj + ny * kk);
+                                            correction.data[c][gidx]
+                                                = -local.data[c][lidx]
+                                                + dev[static_cast<std::size_t>(c) * nx * ny * nz
+                                                      + didx];
+                                        }
+                            pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
+                        }
                     }
                     else
                     {
@@ -925,6 +960,52 @@ namespace picBunch
                         pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
                     }
                 }
+            }
+        }
+        if(deviceStencil && !batchTiles.empty())
+        {
+            std::vector<double> const dev = pbfast::evalFastNearDeviceBatched(
+                bunch,
+                batchIndices,
+                batchTiles,
+                batchParams,
+                batchRepU,
+                true,
+                n[0],
+                n[1],
+                n[2],
+                origin[0],
+                origin[1],
+                origin[2],
+                spacing[0],
+                spacing[1],
+                spacing[2],
+                cells[0],
+                cells[1],
+                cells[2]);
+            for(std::size_t t = 0; t < batchTiles.size(); ++t)
+            {
+                pbfast::BatchedTile const& bt = batchTiles[t];
+                std::size_t const nodes
+                    = static_cast<std::size_t>(bt.nx) * bt.ny * bt.nz;
+                for(int c = 0; c < 6; ++c)
+                    for(std::uint32_t kk = 0; kk < bt.nz; ++kk)
+                        for(std::uint32_t jj = 0; jj < bt.ny; ++jj)
+                            for(std::uint32_t ii = 0; ii < bt.nx; ++ii)
+                            {
+                                std::size_t const i = bt.i0 + ii;
+                                std::size_t const j = bt.j0 + jj;
+                                std::size_t const k = bt.k0 + kk;
+                                std::size_t const gidx = i + n[0] * (j + n[1] * k);
+                                std::size_t const didx
+                                    = static_cast<std::size_t>(ii)
+                                    + static_cast<std::size_t>(bt.nx)
+                                        * (static_cast<std::size_t>(jj)
+                                           + static_cast<std::size_t>(bt.ny) * kk);
+                                correction.data[c][gidx]
+                                    = dev[static_cast<std::size_t>(bt.outOffset)
+                                          + static_cast<std::size_t>(c) * nodes + didx];
+                            }
             }
         }
         if(parSize > 1)

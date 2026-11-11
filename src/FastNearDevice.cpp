@@ -1522,6 +1522,123 @@ namespace picBunch::pbfast
             }
         };
 
+        //! POD argument block of the batched, single-launch near-shell kernel.
+        struct BatchedArgs
+        {
+            double* out{};
+            double const* x{};
+            double const* y{};
+            double const* z{};
+            double const* ux{};
+            double const* uy{};
+            double const* uz{};
+            double const* wq{};
+            double const* rex{};
+            double const* rey{};
+            double const* rez{};
+            std::uint32_t const* indices{};
+            BatchedTile const* tiles{};
+            DeviceParams const* params{};
+            std::uint64_t const* workOffset{};
+            std::uint32_t numTiles{};
+            std::uint32_t n0{};
+            std::uint32_t n1{};
+            double origin[3]{};
+            double spacing[3]{};
+            double cells[3]{};
+            bool stencilMesh{};
+        };
+
+        //! Batched near-field accumulation over many output tiles in one launch.
+        //!
+        //! The global work index is decoded into (tile, component, node, source
+        //! chunk).  One thread sums its chunk of the tile's near sources for one
+        //! (component, node) and atomically adds the partial sum.  The atomic
+        //! combine order is the same pre-existing non-determinism as the former
+        //! per-tile kernel; the field is unchanged apart from last-bit rounding.
+        //! Running every tile in one launch removes the per-tile allocator and
+        //! stream-synchronisation traffic that previously dominated grids with
+        //! many small tiles.
+        struct FastNearBatchedKernel
+        {
+            template<typename TAcc>
+            ALPAKA_FN_ACC void operator()(TAcc const& acc, BatchedArgs const& a) const
+            {
+                std::uint64_t const total = a.workOffset[a.numTiles];
+                for(auto [idx] : alpaka::onAcc::makeIdxMap(
+                        acc,
+                        alpaka::onAcc::worker::threadsInGrid,
+                        alpaka::IdxRange{alpaka::Vec<std::uint64_t, 1u>{total}}))
+                {
+                    // Locate the tile whose [workOffset[t], workOffset[t+1])
+                    // range contains idx.  numTiles is small, so a linear scan
+                    // from a binary-search landing point is cheap; binary search
+                    // alone is used here to stay branch-simple on the device.
+                    std::uint32_t lo = 0u;
+                    std::uint32_t hi = a.numTiles;
+                    while(lo + 1u < hi)
+                    {
+                        std::uint32_t const mid = (lo + hi) / 2u;
+                        if(a.workOffset[mid] <= idx)
+                            lo = mid;
+                        else
+                            hi = mid;
+                    }
+                    std::uint32_t const tile = lo;
+                    BatchedTile const t = a.tiles[tile];
+                    DeviceParams const& prm = a.params[tile];
+                    std::uint32_t const nodes = t.nx * t.ny * t.nz;
+                    std::uint32_t const chunks
+                        = static_cast<std::uint32_t>((a.workOffset[tile + 1u] - a.workOffset[tile])
+                                                     / (6ull * nodes));
+                    std::uint64_t const rem = idx - a.workOffset[tile];
+                    std::uint32_t const perComp = nodes * chunks;
+                    int const c = static_cast<int>(rem / perComp);
+                    std::uint32_t const rem2 = static_cast<std::uint32_t>(rem % perComp);
+                    std::uint32_t const node = rem2 / chunks;
+                    std::uint32_t const chunk = rem2 % chunks;
+                    std::uint32_t const ii = node % t.nx;
+                    std::uint32_t const jj = (node / t.nx) % t.ny;
+                    std::uint32_t const kk = node / (t.nx * t.ny);
+
+                    double const nodeBaseArr[3] = {
+                        a.origin[0] + static_cast<double>(t.i0 + ii) * a.spacing[0],
+                        a.origin[1] + static_cast<double>(t.j0 + jj) * a.spacing[1],
+                        a.origin[2] + static_cast<double>(t.k0 + kk) * a.spacing[2]};
+                    double const x_obsArr[3] = {
+                        nodeBaseArr[0] + prm.delta[c][0] * a.cells[0],
+                        nodeBaseArr[1] + prm.delta[c][1] * a.cells[1],
+                        nodeBaseArr[2] + prm.delta[c][2] * a.cells[2]};
+                    double sum = 0.0;
+                    std::uint32_t const qEnd = t.srcBegin + t.srcCount;
+                    for(std::uint32_t k = t.srcBegin + chunk; k < qEnd; k += chunks)
+                    {
+                        std::uint32_t const q = a.indices[k];
+                        double const x_srcArr[3] = {a.x[q], a.y[q], a.z[q]};
+                        double const uArr[3] = {a.ux[q], a.uy[q], a.uz[q]};
+                        double const urepArr[3] = {a.rex[q], a.rey[q], a.rez[q]};
+                        double E[3], B[3];
+                        dshapeField(x_obsArr, x_srcArr, uArr, a.cells, prm, E, B);
+                        double comp = c < 3 ? E[c] : B[c - 3];
+                        if(a.stencilMesh)
+                            comp -= dmeshComp(
+                                x_srcArr,
+                                urepArr,
+                                a.cells,
+                                nodeBaseArr,
+                                a.spacing,
+                                prm.delta[c],
+                                c);
+                        double const unit = c < 3 ? prm.unitE : prm.unitB;
+                        sum += unit * a.wq[q] * comp;
+                    }
+                    std::uint64_t const dst
+                        = t.outOffset + static_cast<std::uint64_t>(c) * nodes + node;
+                    alpaka::onAcc::atomicAdd(acc, a.out + dst, sum);
+                }
+            }
+        };
+
         // ---- device context -------------------------------------------------
 
         // Backend tag selected at build time; mirrors src/Compute.cpp so the
@@ -1692,6 +1809,149 @@ namespace picBunch::pbfast
             total);
         alpaka::onHost::wait(ctx.queue);
         for(std::size_t i = 0; i < 6 * nodes; ++i)
+            out[i] = dout.data()[i];
+        return out;
+    }
+
+    std::vector<double> evalFastNearDeviceBatched(
+        Bunch const& all,
+        std::vector<std::uint32_t> const& indices,
+        std::vector<BatchedTile> const& tiles,
+        std::vector<DeviceParams> const& tileParams,
+        std::vector<double> const& repU,
+        bool stencilMesh,
+        std::size_t gridNx,
+        std::size_t gridNy,
+        std::size_t gridNz,
+        double originX,
+        double originY,
+        double originZ,
+        double spx,
+        double spy,
+        double spz,
+        double cx,
+        double cy,
+        double cz)
+    {
+        (void) gridNx;
+        (void) gridNy;
+        (void) gridNz;
+        std::size_t const ntiles = tiles.size();
+        std::uint64_t outSize = 0u;
+        for(BatchedTile const& t : tiles)
+            outSize += 6u * static_cast<std::uint64_t>(t.nx) * t.ny * t.nz;
+        std::vector<double> out(static_cast<std::size_t>(outSize), 0.0);
+        if(ntiles == 0u)
+            return out;
+
+        // Choose the per-thread source chunk so the total work stays inside the
+        // 32-bit work index while keeping enough parallelism on wide grids.
+        std::uint64_t totalPairs = 0u;
+        for(BatchedTile const& t : tiles)
+            totalPairs += 6u * static_cast<std::uint64_t>(t.nx) * t.ny * t.nz * t.srcCount;
+        std::uint64_t const maxWork = 2000000000ull;
+        std::uint32_t sourcesPerThread = 8u;
+        if(totalPairs > maxWork)
+            sourcesPerThread = static_cast<std::uint32_t>(
+                (totalPairs + maxWork - 1u) / maxWork);
+
+        std::vector<std::uint64_t> workOffset(ntiles + 1u, 0u);
+        std::vector<std::uint32_t> chunks(ntiles, 1u);
+        for(std::size_t t = 0; t < ntiles; ++t)
+        {
+            std::uint32_t const nodes = tiles[t].nx * tiles[t].ny * tiles[t].nz;
+            std::uint32_t const want = tiles[t].srcCount == 0u
+                ? 1u
+                : static_cast<std::uint32_t>(
+                      (tiles[t].srcCount + sourcesPerThread - 1u) / sourcesPerThread);
+            chunks[t] = std::max(1u, want);
+            workOffset[t + 1u] = workOffset[t]
+                + 6ull * static_cast<std::uint64_t>(nodes) * chunks[t];
+        }
+        std::uint64_t const work = workOffset[ntiles];
+        if(work == 0u)
+            return out;
+
+        Context& ctx = context();
+        std::size_t const n = all.size();
+        auto const allocD = [&](std::size_t count) {
+            return alloc1<double>(ctx, static_cast<std::uint32_t>(count));
+        };
+        auto dx = allocD(n);
+        auto dy = allocD(n);
+        auto dz = allocD(n);
+        auto dux = allocD(n);
+        auto duy = allocD(n);
+        auto duz = allocD(n);
+        auto dwq = allocD(n);
+        auto drex = allocD(n);
+        auto drey = allocD(n);
+        auto drez = allocD(n);
+        for(std::size_t i = 0; i < n; ++i)
+        {
+            dx.data()[i] = all.x[i];
+            dy.data()[i] = all.y[i];
+            dz.data()[i] = all.z[i];
+            dux.data()[i] = all.ux[i];
+            duy.data()[i] = all.uy[i];
+            duz.data()[i] = all.uz[i];
+            dwq.data()[i] = all.weight[i] * all.charge[i];
+            drex.data()[i] = repU.empty() ? all.ux[i] : repU[3u * i];
+            drey.data()[i] = repU.empty() ? all.uy[i] : repU[3u * i + 1u];
+            drez.data()[i] = repU.empty() ? all.uz[i] : repU[3u * i + 2u];
+        }
+        auto didx = alloc1<std::uint32_t>(ctx, static_cast<std::uint32_t>(indices.size()));
+        for(std::size_t i = 0; i < indices.size(); ++i)
+            didx.data()[i] = indices[i];
+        auto dtiles = alloc1<BatchedTile>(ctx, static_cast<std::uint32_t>(ntiles));
+        for(std::size_t i = 0; i < ntiles; ++i)
+            dtiles.data()[i] = tiles[i];
+        auto dparams = alloc1<DeviceParams>(ctx, static_cast<std::uint32_t>(ntiles));
+        for(std::size_t i = 0; i < ntiles; ++i)
+            dparams.data()[i] = tileParams[i];
+        auto dwork = alloc1<std::uint64_t>(ctx, static_cast<std::uint32_t>(ntiles + 1u));
+        for(std::size_t i = 0; i <= ntiles; ++i)
+            dwork.data()[i] = workOffset[i];
+        auto dout = allocD(static_cast<std::size_t>(outSize));
+
+        BatchedArgs args;
+        args.out = dout.data();
+        args.x = dx.data();
+        args.y = dy.data();
+        args.z = dz.data();
+        args.ux = dux.data();
+        args.uy = duy.data();
+        args.uz = duz.data();
+        args.wq = dwq.data();
+        args.rex = drex.data();
+        args.rey = drey.data();
+        args.rez = drez.data();
+        args.indices = didx.data();
+        args.tiles = dtiles.data();
+        args.params = dparams.data();
+        args.workOffset = dwork.data();
+        args.numTiles = static_cast<std::uint32_t>(ntiles);
+        args.n0 = static_cast<std::uint32_t>(gridNx);
+        args.n1 = static_cast<std::uint32_t>(gridNy);
+        args.origin[0] = originX;
+        args.origin[1] = originY;
+        args.origin[2] = originZ;
+        args.spacing[0] = spx;
+        args.spacing[1] = spy;
+        args.spacing[2] = spz;
+        args.cells[0] = cx;
+        args.cells[1] = cy;
+        args.cells[2] = cz;
+        args.stencilMesh = stencilMesh;
+
+        std::uint32_t const frame = 256u;
+        std::uint32_t const blocks = static_cast<std::uint32_t>((work + frame - 1u) / frame);
+        ctx.queue.enqueue(
+            alpaka::onHost::FrameSpec{blocks, frame},
+            FastNearBatchedKernel{},
+            args);
+        alpaka::onHost::wait(ctx.queue);
+        for(std::size_t i = 0; i < out.size(); ++i)
             out[i] = dout.data()[i];
         return out;
     }
