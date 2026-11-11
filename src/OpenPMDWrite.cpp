@@ -42,6 +42,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -343,7 +344,7 @@ namespace picBunch
             std::array<std::size_t, 3> const& globalN,
             std::size_t zBegin,
             std::size_t zEnd,
-            FarTail const* tail,
+            FarTailBatch const* tail,
             std::array<double, 3> const& globalOrigin)
         {
             std::size_t const nx = globalN[0];
@@ -452,6 +453,14 @@ namespace picBunch
         if(field.grid.size() == 0u)
             throw std::runtime_error("writeFieldToDomain: grid is empty");
         auto const base = globalBase(field.grid, globalGridSize, globalGridOrigin);
+
+        // Flatten the far-tail groups once, not per node and group: the
+        // per-group boost geometry is hoisted out of the node loop and the
+        // group constants become contiguous arrays.  The values are unchanged
+        // (see Margin.FarTailBatchMatchesRecursiveGroups).
+        std::optional<FarTailBatch> tailBatch;
+        if(tail != nullptr)
+            tailBatch.emplace(makeFarTailBatch(*tail));
 
         int const rank = mpiRank();
         int const size = mpiSize();
@@ -594,7 +603,7 @@ namespace picBunch
                                 globalGridSize,
                                 thisBegin,
                                 thisEnd,
-                                tail,
+                                tailBatch ? &*tailBatch : nullptr,
                                 globalGridOrigin);
                             openPMD::Extent const chunkExtent{
                                 static_cast<openPMD::Extent::value_type>(thisEnd - thisBegin),

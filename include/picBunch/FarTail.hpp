@@ -5,6 +5,7 @@
 #include "picBunch/Types.hpp"
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 namespace picBunch
@@ -54,6 +55,39 @@ namespace picBunch
         std::vector<FarTail> groups;
     };
 
+    /** Evaluation-ready, flattened form of a :cpp:struct:`FarTail`.
+     *
+     * The group multipoles are copied into contiguous structure-of-arrays
+     * storage and the boost geometry (``beta``, ``bhat``, ``1/gamma^2``,
+     * ``gamma - 1``) is precomputed once per group.  Evaluating a node then no
+     * longer recomputes those per-group constants, and the group loop runs over
+     * a handful of contiguous arrays, which lets the compiler vectorise it.
+     *
+     * The single-group field is unchanged: :cpp:func:`evaluateFarTailE` on a
+     * batch returns bit-identical values to the recursive group evaluation of
+     * the :cpp:struct:`FarTail` overload, because the same expressions are
+     * evaluated in the same order and the group sum keeps its order
+     * (``Margin.FarTailBatchMatchesRecursiveGroups`` pins this).
+     */
+    struct FarTailBatch
+    {
+        //! Centre of the flattened tail; only used for the ``r == 0`` test that
+        //! short-circuits the whole evaluation.
+        std::array<double, 3> centre{0.0, 0.0, 0.0};
+        //! Velocity used by the magnetic field, ``B = v x E / c^2``.
+        std::array<double, 3> meanVelocity{0.0, 0.0, 0.0};
+        //! Number of flattened groups.
+        std::size_t count = 0;
+        std::vector<double> centreX, centreY, centreZ;
+        std::vector<double> charge;
+        std::vector<double> dipoleX, dipoleY, dipoleZ;
+        std::array<std::vector<double>, 9> quadrupole;
+        std::vector<double> betaX, betaY, betaZ;
+        std::vector<double> bhatX, bhatY, bhatZ;
+        std::vector<double> invGamma2;
+        std::vector<double> gammaMinusOne;
+    };
+
     /** Moments and expansion switch radius of a bunch.
      *
      * ``switchFactor`` multiplies the support radius ``R`` (largest distance
@@ -66,6 +100,14 @@ namespace picBunch
         std::array<double, 3> const& cellSize = {0.0, 0.0, 0.0},
         int groupCells = 0);
 
+    /** Flatten a tail and its spatial groups into an evaluation-ready batch.
+     *
+     * @throws std::invalid_argument if a group carries groups itself.  The
+     *         writer's flattened path supports the single level that
+     *         :cpp:func:`deriveFarTail` produces.
+     */
+    FarTailBatch makeFarTailBatch(FarTail const& tail);
+
     //! Static multipole electric field of the tail at a physical position.
     std::array<double, 3> evaluateFarTailE(
         FarTail const& tail,
@@ -74,6 +116,20 @@ namespace picBunch
     //! Uniform-velocity magnetic field of the tail, ``v x E / c^2``.
     std::array<double, 3> evaluateFarTailB(
         FarTail const& tail,
+        std::array<double, 3> const& position);
+
+    /** Static multipole electric field of a flattened tail.
+     *
+     * Same value as the :cpp:struct:`FarTail` overload, without per-node
+     * per-group constant recomputation.
+     */
+    std::array<double, 3> evaluateFarTailE(
+        FarTailBatch const& tail,
+        std::array<double, 3> const& position);
+
+    //! Magnetic field of a flattened tail, ``v x E / c^2``.
+    std::array<double, 3> evaluateFarTailB(
+        FarTailBatch const& tail,
         std::array<double, 3> const& position);
 
 } // namespace picBunch
