@@ -23,6 +23,19 @@ gates, the near-source limitation and their provenance are recorded in
 - **Known limitations:** [docs/known-limitations.md](docs/known-limitations.md)
   records the open engineering items, their measured symptoms and the planned
   fixes.
+- **Near-shell scaling:** [docs/near-shell-scaling.md](docs/near-shell-scaling.md)
+  gives the V100 dense-cloud measurements, the tile 2/tile 4 cost, memory,
+  projections and the per-regime recommendation.
+- **ROCm FFT teardown:** [docs/rocm-fft-teardown.md](docs/rocm-fft-teardown.md)
+  records the ROCm 7.2 inliner defect, the once-guarded `atexit` workaround and
+  the retest policy.
+- **FFT finalize proposal:**
+  [docs/proposals/alpaka-fft-finalize.md](docs/proposals/alpaka-fft-finalize.md)
+  proposes the idempotent `alpaka::fft::onHost::finalize()` entry point for
+  alpakaVendor.
+- **CI:** [.github/workflows/ci.yml](.github/workflows/ci.yml) builds and tests
+  CPU, CUDA and HIP. The HIP job gates the near-field groups before the full
+  suite.
 
 ## Layout
 
