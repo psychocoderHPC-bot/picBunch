@@ -573,7 +573,14 @@ def draw_row(fig, fig_w_in, fig_h_in, y_bottom_in, bunch, computed, dataset,
     axm.set_ylim(computed["marg_floor"], computed["marg_peak"])
     axm.set_xlabel(r"position [$\mu$m]")
     axm.xaxis.set_major_locator(mticker.MaxNLocator(3, prune="both"))
-    axm.yaxis.set_major_locator(mticker.LogLocator(base=10.0, numticks=4))
+    # Label only the decade ticks that lie inside the plotted range.  The
+    # default LogLocator also emits off-scale decades just below the floor
+    # (10^{-18} under a 1.8e-17 floor); those labels are drawn outside the
+    # axes and collided with the x label at the larger mathtext script size.
+    e0 = int(np.ceil(np.log10(computed["marg_floor"])))
+    e1 = int(np.floor(np.log10(computed["marg_peak"])))
+    axm.yaxis.set_major_locator(
+        mticker.FixedLocator([10.0 ** e for e in range(e0, e1 + 1)]))
     axm.yaxis.set_minor_locator(mticker.NullLocator())
     axm.legend(loc="upper right", frameon=False, handlelength=1.0,
                borderpad=0.2, labelspacing=0.25)
