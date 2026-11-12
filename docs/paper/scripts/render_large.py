@@ -168,6 +168,7 @@ def build(outdir, case, plane, source):
         name, outdir, rows, horiz_c * US, vert_c * US,
         xlabel=xl, ylabel=yl, width_frac=1.0,
         compact=True, manifest=man,
+        panel_height_scale=fs.APPENDIX_PANEL_HEIGHT_SCALE,
         **render_bunch.layout_kwargs(row))
     signature = _signature(d, plane, source)
     if gamma == 10.0:

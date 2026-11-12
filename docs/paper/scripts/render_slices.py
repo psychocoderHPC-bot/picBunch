@@ -217,7 +217,7 @@ def _bunch_layout_kw(bunch):
     if bunch is None:
         return {}
     return {"bunch": bunch, "panel_scale": 1.0,
-            "panel_height_scale": 0.74, "top_in": 0.10,
+            "panel_height_scale": fs.APPENDIX_PANEL_HEIGHT_SCALE, "top_in": 0.10,
             "bottom_in": 0.58, "row_gap_in": 0.30}
 
 

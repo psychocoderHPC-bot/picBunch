@@ -211,6 +211,13 @@ FIELD_BOTTOM_NOTE_IN = 0.86  # per-gamma bottom note (omitted B error row)
 
 FIELD_NCOL = 4
 
+# Height-budget squeeze shared by the appendix slice plates (``val_*`` and
+# ``large_*``).  It scales only the panel height: the canvas width, the placed
+# ``\linewidth`` and every font/tick/colour-bar token stay fixed, so the
+# print size is unchanged.  It is what lets the tall plate plus its long
+# caption fit the 697.9 pt text block.
+APPENDIX_PANEL_HEIGHT_SCALE = 0.74
+
 
 def field_panel_width_frac():
     """Width of one of the four data panels, as a figure fraction."""
