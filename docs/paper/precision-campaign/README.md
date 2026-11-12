@@ -218,6 +218,32 @@ Production reference settings are coarser in the pilot; the per-case
 `est` values in `cases.json` are used for the production plan and are
 conservative. See `PILOT.md` for the measured table.
 
+## Scheduler and case validation (2026-11-12)
+
+Harness commit `65bc6c2`, binary build commit
+`00fb8f7fb22a53748636c70e32bbdb8dd85c23c4`, binary SHA-256
+`717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6`.
+
+* **Four-GPU probe** (`line-gamma`, `line-w4b`, `multivel`, `hires-g10`,
+  124 nvidia-smi samples at 5 Hz, 64.2 s): at most **4 distinct GPUs** were
+  active at the same time (35 samples with 4, 11 with 3, 3 with 2, 74 with 0).
+  Each GPU carried picBunch processes for 47-51 samples; the heavy 384^3
+  meshes reached 83 % SM utilisation. The utilisation is bursty because the
+  mesh kernel is short and the run is reference-bound; the old launcher never
+  exceeded two simultaneous processes. Samples:
+  `campaign-20261112-t5b/probe-final/gpu_samples.log`.
+* **multivel** (a5, b16/b64; e5, b64): Bz/By = 24887.7/1285.1,
+  24887.2/1286.4 and 23277.8/0.0 T against committed
+  24663.0/1296.7, 24664.3/1297.1 and 23205.0 T, within 1.1 % in every
+  component.
+* **bdata2-forward** with the near-shell flags: p99 error 0.025-0.074 against
+  committed 0.024-0.050, worst symmetric p99 ratio 1.52; max 0.10-0.26 against
+  0.09-0.31. The plain mesh reached max 11.2. Full case wall 253.6 s at
+  `OMP_NUM_THREADS=36`.
+
+These are validation runs, not the production campaign; the full set still has
+to be run into a fresh attempt directory.
+
 ## Out of scope
 
 No scaling/performance case is generated or run. The two excluded sources are
