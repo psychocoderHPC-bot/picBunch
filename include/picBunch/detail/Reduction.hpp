@@ -7,6 +7,11 @@
 // ``alpakaAtomicInvoke`` overload the alpaka reduction needs to write the block
 // result, and they reduce Simd packs directly so no ``ScalarFunc`` wrapper is
 // required.
+//
+// ``HostReductionExecutor::Serial`` and ``Default`` keep the historical
+// single-threaded ``cpuSerial`` fold.  ``Parallel`` selects alpaka's OpenMP
+// block executor so the reduction really runs on the host thread pool; when
+// alpaka is built without OpenMP it falls back to ``cpuSerial``.
 #pragma once
 
 #include "picBunch/detail/HostReduction.hpp"
@@ -107,23 +112,46 @@ namespace picBunch::detail
         return slot;
     }
 
+    //! Executor selected by ``HostReductionExecutor::Parallel``.
+    //!
+    //! The OpenMP block executor exists only when alpaka saw an OpenMP-enabled
+    //! compiler.  Without OpenMP the enum keeps its historical serial meaning so
+    //! this header still compiles and behaves correctly on a bare host build.
+#if ALPAKA_OMP
+    inline constexpr auto parallelHostReductionExecutor = alpaka::exec::cpuOmpBlocks;
+#else
+    inline constexpr auto parallelHostReductionExecutor = alpaka::exec::cpuSerial;
+#endif
+
+    //! Run a reduction callable with the executor selected by the override.
+    template<typename T_Fn>
+    void dispatchHostReductionExecutor(HostReductionExecutor executor, T_Fn&& fn)
+    {
+        switch(executor)
+        {
+        case HostReductionExecutor::Parallel:
+            fn(parallelHostReductionExecutor);
+            break;
+        case HostReductionExecutor::Serial:
+        case HostReductionExecutor::Default:
+        default:
+            fn(alpaka::exec::cpuSerial);
+            break;
+        }
+    }
+
     template<typename T_Value, typename T_Reduce, typename... TInputs>
     T_Value runReduce(T_Value neutral, T_Reduce const& reduceFn, TInputs const&... inputs)
     {
         auto& queue = reductionQueue();
         auto& device = reductionDeviceSlot<T_Value>();
         auto& host = reductionHostSlot<T_Value>();
-        switch(hostReductionExecutorOverride())
-        {
-        case HostReductionExecutor::Serial:
-            alpaka::onHost::reduce(queue, alpaka::exec::cpuSerial, neutral, device, reduceFn, inputs...);
-            break;
-        case HostReductionExecutor::Parallel:
-        case HostReductionExecutor::Default:
-        default:
-            alpaka::onHost::reduce(queue, alpaka::exec::cpuSerial, neutral, device, reduceFn, inputs...);
-            break;
-        }
+        dispatchHostReductionExecutor(
+            hostReductionExecutorOverride(),
+            [&](auto const executor)
+            {
+                alpaka::onHost::reduce(queue, executor, neutral, device, reduceFn, inputs...);
+            });
         alpaka::onHost::memcpy(queue, host, device);
         alpaka::onHost::wait(queue);
         return *host.data();
@@ -139,19 +167,13 @@ namespace picBunch::detail
         auto& queue = reductionQueue();
         auto& device = reductionDeviceSlot<T_Value>();
         auto& host = reductionHostSlot<T_Value>();
-        switch(hostReductionExecutorOverride())
-        {
-        case HostReductionExecutor::Serial:
-            alpaka::onHost::transformReduce(
-                queue, alpaka::exec::cpuSerial, neutral, device, reduceFn, transformFn, inputs...);
-            break;
-        case HostReductionExecutor::Parallel:
-        case HostReductionExecutor::Default:
-        default:
-            alpaka::onHost::transformReduce(
-                queue, alpaka::exec::cpuSerial, neutral, device, reduceFn, transformFn, inputs...);
-            break;
-        }
+        dispatchHostReductionExecutor(
+            hostReductionExecutorOverride(),
+            [&](auto const executor)
+            {
+                alpaka::onHost::transformReduce(
+                    queue, executor, neutral, device, reduceFn, transformFn, inputs...);
+            });
         alpaka::onHost::memcpy(queue, host, device);
         alpaka::onHost::wait(queue);
         return *host.data();
