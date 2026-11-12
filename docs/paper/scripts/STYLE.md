@@ -29,7 +29,7 @@ reviewer can diff two figures' resolved style without opening the PDF.
 
 | figure class | width | height | aspect |
 |---|---|---|---|
-| field family (`gp_*`, `val_*`, `large_*`) | `6.268 in` (`width_in(1.0)`) | solved by `field_layout(nrows)` | each data panel square, `1.0000` |
+| field family (`gp_*`, `val_*`, `large_*`) | `6.2677 in` (`width_in(1.0)`) | solved by `field_layout(nrows)` | each data panel square, `1.0000` |
 | two-panel line figures | `width_in(0.58)` | `5.35 in` | plot-driven |
 | single-panel line figures | `width_in(0.62 or 0.95)` | `3.35-4.15 in` | plot-driven |
 | `F_multivel_dist` | `width_in(0.98)` | `4.95 in` | plot-driven |

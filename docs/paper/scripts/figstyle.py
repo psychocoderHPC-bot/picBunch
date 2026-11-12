@@ -29,8 +29,11 @@ import matplotlib.ticker as mticker
 from matplotlib.patches import Patch
 import numpy as np
 
-# A4 (210 mm) minus 2 x 25.4 mm geometry margins.
-TEXT_BLOCK_IN = 6.268
+# A4 (210 mm) minus 2 x 25.4 mm geometry margins = 159.2 mm.  LaTeX reports
+# this text block as 452.9679 TeX pt; a TeX point is 1/72.27 in, not 1/72 in,
+# so the canvas is 452.9679 / 72.27 = 6.2677 in = 159.2 mm and matches the
+# \linewidth at which every figure is included (no hidden shrink factor).
+TEXT_BLOCK_IN = 452.9679 / 72.27
 
 # ---- Canonical font ladder ---------------------------------------------
 # One ladder for every figure family.  The body text is 10 pt; no figure text

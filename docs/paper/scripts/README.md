@@ -10,7 +10,8 @@ is the exception: it requires a campaign root through `--measurement-root` or
 
 All field figures (`gp_*`, `val_*`, `large_*`) use one geometry and one font
 ladder from `figstyle.py`. The canvas is the full text width
-(`6.268 in`), with four data panels per row, two colour bars per row, and
+(`6.2677 in`, the measured `\textwidth`), with four data panels per row,
+two colour bars per row, and
 fixed inch margins. `field_layout` solves the figure height from the row
 count so every data panel is the same physical square: `0.9245 in` wide and
 `0.9245 in` high, aspect ratio `1.0000`, independent of the number of rows

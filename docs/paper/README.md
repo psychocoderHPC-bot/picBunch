@@ -37,7 +37,7 @@ bibliography database is required. After the sources change, copy
 ## Figures
 
 Every figure PDF in `figs/` is rendered from the recorded measurement
-data at its print width (A4 text block, 6.268 in) so that the 9 pt fonts
+data at its print width (A4 text block, 6.2677 in) so that the 9 pt fonts
 print at 9 pt. The shared style module fixes the canvas width to the
 LaTeX inclusion width, uses Okabe-Ito hues for the gamma encoding, one
 colour bar per row with the quantity and SI unit (E in V/m, B in T, a
