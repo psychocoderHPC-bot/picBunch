@@ -89,9 +89,18 @@ def panels(plane_data, part, field_mode):
         rec = plane_data[c]
         f = rec["ref"] if field_mode == "ref" else rec["pic"]
         fields.append(f)
-        items.append({"arr": f, "err": rec["err"], "valid": valid,
-                      "title": rf"${c[0]}_{{{c[1]}}}$",
-                      "symbol": f"{c[0]}_{{{c[1]}}}"})
+        it = {"arr": f, "err": rec["err"], "valid": valid,
+              "title": rf"${c[0]}_{{{c[1]}}}$",
+              "symbol": f"{c[0]}_{{{c[1]}}}"}
+        if float(np.max(np.abs(rec["ref"]))) == 0.0:
+            # Identically zero reference component: keep the box in the grid
+            # and draw it as a neutral masked panel.
+            it["arr"] = np.zeros_like(np.asarray(f, float))
+            it["blank"] = True
+            it["blank_text"] = fs.zero_field_note(it["symbol"], "beam axis")
+            it["error_blank_text"] = fs.zero_error_note(it["symbol"],
+                                                        "beam axis")
+        items.append(it)
     f2 = sum(f * f for f in fields)
     r2 = sum(plane_data[c]["ref"] ** 2 for c in comps)
     arr = np.maximum(f2, 0.0)
@@ -100,8 +109,15 @@ def panels(plane_data, part, field_mode):
         err = np.abs(f2 - r2) / peak
     else:
         err = np.full_like(arr, np.nan)
-    items.append({"arr": arr, "err": err, "valid": valid,
-                  "title": rf"${part}^2$"})
+    sq = {"arr": arr, "err": err, "valid": valid,
+          "title": rf"${part}^2$"}
+    if peak == 0.0:
+        sq["arr"] = np.zeros_like(arr)
+        sq["blank"] = True
+        sq["blank_text"] = fs.zero_field_note(f"{part}^2", "stationary")
+        sq["error_blank_text"] = fs.zero_error_note(f"{part}^2",
+                                                    "stationary")
+    items.append(sq)
     return items
 
 
@@ -130,11 +146,18 @@ def _part_rows(plane_data, part, plane, sources, coord, has_error, use_ref):
                    else part + "2")
             if sym.startswith(part) and sym != part + "2" and float(
                     np.max(np.abs(plane_data[sym]["ref"]))) == 0.0:
-                # Identically-zero reference component: the relative error is
-                # undefined and the panel renders fully masked; annotate it.
-                e["annotation"] = (
-                    rf"$\mathbf{{{e['symbol']}}}\equiv0$"
-                    " (beam axis); relative error undefined")
+                # Identically-zero reference component: keep the box as a
+                # neutral masked panel and say why.
+                e["undefined"] = True
+                e["blank_text"] = fs.zero_error_note(e["symbol"],
+                                                     "beam axis")
+                e["annotation"] = e["blank_text"]
+            elif it.get("blank") and sym == part + "2":
+                e["undefined"] = True
+                e["blank_text"] = it.get(
+                    "error_blank_text",
+                    fs.zero_error_note(f"{part}^2", "stationary"))
+                e["annotation"] = e["blank_text"]
             err_items.append(e)
         rows.append({"kind": "error", "part": part, "items": err_items})
         smask = support_mask(plane, field_items[0]["arr"].shape, sources, coord)

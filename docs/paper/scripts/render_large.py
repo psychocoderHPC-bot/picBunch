@@ -13,8 +13,8 @@ Each dataset is one figure with two panels stacked in the electronic
 appendix: the x-y cut and the z-y cut.  Every panel carries the electric
 block first (field row, error row) and the magnetic block second (field row,
 error row), matching the per-gamma ``gp_*`` convention.  The stationary
-gamma=1 case shows the magnetic field row (identically zero, blank panels)
-and omits the magnetic error row, whose relative error is undefined.
+gamma=1 case keeps the magnetic error row as four fully masked boxes: the
+relative error of an identically zero reference is undefined.
 """
 import os
 import sys
@@ -56,15 +56,18 @@ def _items(d, plane, part, source, gamma, magnitude=True):
             "title": rf"${c[0]}_{{{c[-1]}}}$",
             "symbol": f"{c[0]}_{{{c[-1]}}}",
         }
-        if float(np.max(np.abs(ref))) == 0.0:
+        zero_ref = (part == "B" and gamma == 1.0) or \
+            float(np.max(np.abs(ref))) == 0.0
+        if zero_ref:
             # The measured array may hold round-off at the 1e-19 T level for a
-            # physically zero component.  Draw a blank panel, not that noise.
+            # physically zero component.  Keep the box and draw it as a
+            # neutral masked panel, never the noise.
             it["arr"] = np.zeros_like(arr)
             it["blank"] = True
-            it["blank_text"] = rf"${it['symbol']}\equiv0$"
-            it["annotation"] = (
-                rf"$\mathbf{{{it['symbol']}}}\equiv0$"
-                f" ({reason}); relative error undefined")
+            it["zero_reason"] = reason
+            it["blank_text"] = fs.zero_field_note(it["symbol"], reason)
+            it["error_blank_text"] = fs.zero_error_note(it["symbol"], reason)
+            it["annotation"] = it["error_blank_text"]
         items.append(it)
     if magnitude:
         pic2 = sum(axis.to_display(d[f"{plane}_{c}_pic"], DATASET, plane,
@@ -72,7 +75,8 @@ def _items(d, plane, part, source, gamma, magnitude=True):
         ref2 = sum(axis.to_display(d[f"{plane}_{c}_ref"], DATASET, plane,
                                    source) ** 2 for c in comps)
         arr = np.maximum(pic2, 0.0)
-        peak = float(np.max(ref2)) if np.max(ref2) > 0 else 0.0
+        peak = 0.0 if (part == "B" and gamma == 1.0) else (
+            float(np.max(ref2)) if np.max(ref2) > 0 else 0.0)
         if peak > 0:
             err = np.abs(pic2 - ref2) / peak
         else:
@@ -82,7 +86,9 @@ def _items(d, plane, part, source, gamma, magnitude=True):
         if peak == 0.0:
             sq["arr"] = np.zeros_like(arr)
             sq["blank"] = True
-            sq["blank_text"] = rf"${part}^2\equiv0$"
+            sq["blank_text"] = fs.zero_field_note(f"{part}^2", reason)
+            sq["error_blank_text"] = fs.zero_error_note(f"{part}^2", reason)
+            sq["annotation"] = sq["error_blank_text"]
         items.append(sq)
     return items
 
@@ -132,14 +138,17 @@ def build(outdir, case, plane, source):
     for part in ("E", "B"):
         items = _items(d, plane, part, source, gamma)
         rows.append({"kind": "field", "part": part, "items": items})
-        if part == "B" and gamma == 1.0:
-            # B is identically zero at beta=0, so the relative B error is
-            # undefined and the whole error row would be fully masked.  The
-            # per-gamma figures omit it for the same reason.
-            continue
         err_items = [dict(it) for it in items]
         for it in err_items:
             it["title"] = it["title"] + " err"
+            if it.get("blank"):
+                # Keep the box: the whole row is drawn as neutral masked
+                # panels with the reason, never omitted.
+                it["undefined"] = True
+                it["blank_text"] = it.get(
+                    "error_blank_text",
+                    fs.zero_error_note(it.get("symbol", part),
+                                       it.get("zero_reason", "beam axis")))
         rows.append({"kind": "error", "part": part, "items": err_items})
     name = f"large_s{plane}_{case}"
     xl, yl = axis.axis_labels(DATASET, plane, source)

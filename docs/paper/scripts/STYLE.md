@@ -34,8 +34,13 @@ reviewer can diff two figures' resolved style without opening the PDF.
 | single-panel line figures | `width_in(0.62 or 0.95)` | `3.35-4.15 in` | plot-driven |
 | `F_multivel_dist` | `width_in(0.98)` | `4.95 in` | plot-driven |
 
-`field_layout(nrows)` fixes four panels per row, two colour bars per row and
-the inch margins; it returns `panel_width_in == panel_height_in` independent of
+`field_layout(nrows)` fixes FOUR panels per row (three signed axis slices
+plus the squared-magnitude value), ONE shared colour bar per row, and the inch
+margins.  The single raster size is `RASTER_PANEL_MM = 27.80`; the density-row
+maps use the same constant (`BUNCH_MAP_MM`).  The row width is exactly the
+text block: `20 + 4*27.8 + 3*2.0 + 14 + 2 + 6 = 159.20 mm`; `field_layout()`
+asserts both that identity and the right edge.  It returns
+`panel_width_in == panel_height_in` independent of
 the row count. Only the canvas height grows with rows. Renderers must call
 `figure()` or `subplots()`; neither takes a raw `figsize`.
 
@@ -105,17 +110,25 @@ masks in those panels still use the one grey.
 |---|---|---|
 | signed component triad | `SymLogNorm(base=10)` | `[-vmax, +vmax]`, `linthresh = 1e-3 * vmax` |
 | squared magnitude, field rows | `LogNorm` | `peak * 1e-6 .. peak` (six decades) |
-| relative error | `LogNorm` | `ERROR_FLOOR = 1e-6 .. max(decade ceiling, 1e-3)` |
+| relative error | `LogNorm` | smallest finite positive error .. panel peak |
 
-`error_limits()` and `error_ticks()` are shared by every error panel. The
-lower floor is `1e-6`, the acceptance gate is `1e-3`, and the gate is always a
-tick and always drawn as a dash-dot contour (`GATE_STYLE`). A finite error
-below the floor is clamped to the floor colour; it is not silently promoted to
-a larger value. `sq_limits()` and `sq_ticks()` are the shared squared-magnitude
-helpers.
+`error_limits()` and `error_ticks()` are shared by every error panel. There is
+ONE data-driven policy, with no per-figure override: `vmin` is the smallest
+finite positive relative error over the valid cells of the row, clamped from
+below at `ERROR_FLOOR_MACHINE = eps/64` (~3.5e-18); `vmax` is the row peak.
+This resolves the roundoff regime that a fixed `1e-6` floor compressed into the
+darkest colour, so the machine-precision star is visible and the grey mask is
+distinguishable. A finite error below `vmin` is valid data and takes the
+colormap's darkest finite colour (`set_under(cmap(0.0))`), never the mask grey.
+The `1e-3` acceptance gate stays tick-marked when it lies in range and is
+always drawn as a dash-dot contour (`GATE_STYLE`). The error colormap has 1024
+entries, so one decade still spans more than 20 distinct levels across a
+~15-decade data range. `sq_limits()` and `sq_ticks()` are the shared
+squared-magnitude helpers.
 
-A row shares one normalisation across its component triad and one normalisation
-for its squared panel. The two bars per row are therefore always distinct.
+Every row shares one normalisation across the three signed components and one
+shared bar at the row's right edge. The fourth (squared-magnitude) panel keeps
+its own six-decade logarithmic scale; the caption states that scale.
 
 ## 6. Colour bars
 

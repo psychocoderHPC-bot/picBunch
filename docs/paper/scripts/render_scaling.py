@@ -364,14 +364,14 @@ def multivel(outdir):
     c_e = float(np.sum(m_e * y_e) / np.sum(m_e ** 2))
     c_a = float(np.sum(m_a * y_a) / np.sum(m_a ** 2))
     fs.apply_paper_style(kind="line")
-    fig_w_in = fs.width_in(0.98)
+    fig_w_in = fs.width_in(1.0)
     base_h = 4.95
     bunch = _multivel_bunch()
     row = render_bunch.build_row(bunch, "multivel", "F_multivel_dist", "xy",
                                  source=epath)
     row_geo = row.geometry(fig_w_in)
     fig_h = base_h + row_geo["reserve_in"]
-    fig = fs.figure(0.98, fig_h)
+    fig = fs.figure(1.0, fig_h)
     gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.92], hspace=0.62,
                           wspace=0.30, left=0.095, right=0.985,
                           top=(base_h * 0.965) / fig_h,
@@ -449,6 +449,7 @@ def multivel(outdir):
     row.draw(fig, fig_w_in, fig_h,
              base_h + row_geo["inter_gap_in"] + row_geo["label_in"])
     man = {"figure_id": "multivel",
+           "raster_panel_mm": fs.RASTER_PANEL_MM,
            "source_data": [os.path.relpath(p, cases.REPO_ROOT)
                            for p in (epath, apath, bpath)],
            "axis_limits": "panel c x 0.8..90, y 1.5e-4..3 (log-log)",

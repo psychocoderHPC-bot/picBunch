@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """RENDER5: final per-gamma single-particle figures from the HIRES series.
 
-One figure per velocity case.  In every field row the three signed components
-(E_x,E_y,E_z or B_x,B_y,B_z) share ONE symmetric-log scale and ONE colour bar;
-the squared magnitude (E^2 or B^2) has a DISTINCT linear scale and its own
-colour bar.  Error rows repeat the same split with logarithmic scales.
+One figure per velocity case.  Every field and error row is a uniform
+four-panel block: three signed components (E_x,E_y,E_z or B_x,B_y,B_z) plus
+the squared magnitude (E^2 or B^2), at one shared 27.8 mm square size with one
+shared colour bar.  The squared panel keeps its own six-decade logarithmic
+scale.  Error ranges are data-driven (smallest finite positive error to the
+panel peak); grey marks cells below the shared validity threshold.
 
 Data: the seven HIRES hi_*.npz 128^3/5e-8 m slices only.  Output names are
 gp_g<gamma> with "." replaced by "p" so the paper can include gp_g1p0.pdf ...
@@ -22,6 +24,7 @@ sys.path.insert(0, HERE)
 import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle  # noqa: E402
+import ingest_measurements as ingest  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.text as mtext  # noqa: E402
 
@@ -101,6 +104,12 @@ def load(path):
         e, v = error(d, plane, k)
         out["err"][k] = e
         out["valid"][k] = v
+    # ONE validity mask per field part, shared by the signed slices, the
+    # squared magnitude and the error panels, so the grey footprint is
+    # identical in all three (the operator's mask-consistency requirement).
+    for part in ("E", "B"):
+        refs = [out["ref"][part + c] for c in "xyz"]
+        out.setdefault("valid_part", {})[part] = ingest.part_valid(refs)
     # A reference component that is exactly zero everywhere (stationary
     # bunch: all B; beam along +y: By) has an undefined relative error: its
     # error panel renders fully masked and carries an in-panel annotation
@@ -138,35 +147,74 @@ def _display(case, arr, dtype=float):
 
 def _item(case, part, c, j, log):
     """One raster item in display orientation (the shared renderer draws it)."""
+    symbol = f"{part}_{{{'xyz'[j]}}}"
+    # The stationary magnetic reference is exactly zero by physics; the
+    # measured array can still carry 1e-18 roundoff, so the beta=0 case is
+    # forced rather than tested against an exact zero.
+    zero = (part == "B" and float(case["beta"]) == 0.0) or \
+        float(np.max(np.abs(case["ref"][c]))) == 0.0
+    reason = "stationary" if float(case["beta"]) == 0.0 else "beam axis"
+    v = _display(case, case["valid_part"][part].astype(float)).astype(bool)
     if log:
-        e = _display(case, case["err"][c])
-        v = _display(case, case["valid"][c].astype(float)).astype(bool)
+        # Recompute the relative error on the SHARED part mask so the panel
+        # carries no per-component NaN outside it: the grey footprint in the
+        # error panel is then identical to the signed-slice panel.
+        pic = _display(case, case["field"][c])
+        ref = _display(case, case["ref"][c])
+        peak = float(np.max(np.abs(ref))) if np.isfinite(ref).any() else 0.0
+        e = (np.abs(pic - ref) / peak if peak > 0 else np.zeros_like(pic))
         item = {"err": e, "valid": v,
-                "title": f"${part}_{{{'xyz'[j]}}}$",
-                "symbol": f"{part}_{{{'xyz'[j]}}}"}
-        if not np.any(v):
+                "title": f"${part}_{{{'xyz'[j]}}}$", "symbol": symbol}
+        if zero:
+            item["undefined"] = True
+            item["blank_text"] = figstyle.zero_error_note(symbol, reason)
+            item["annotation"] = item["blank_text"]
+        elif not np.any(v):
             item["annotation"] = case["undef"].get(c, "no valid pixels")
         return item
-    zero = float(np.max(np.abs(case["ref"][c]))) == 0.0
     arr = np.zeros_like(np.asarray(case["field"][c], float)) if zero \
         else _display(case, case["field"][c])
-    return {"arr": arr, "title": f"${part}_{{{'xyz'[j]}}}$",
-            "symbol": f"{part}_{{{'xyz'[j]}}}",
-            "note": (rf"${part}_{{{'xyz'[j]}}}\equiv0$" if zero else None)}
+    return {"arr": arr, "valid": v, "title": f"${part}_{{{'xyz'[j]}}}$",
+            "symbol": symbol,
+            "blank": zero,
+            "blank_text": (figstyle.zero_field_note(symbol, reason)
+                           if zero else None),
+            "error_blank_text": (figstyle.zero_error_note(symbol, reason)
+                                 if zero else None),
+            "note": (figstyle.zero_field_note(symbol, reason)
+                     if zero else None)}
 
 
 def _sq_item(case, part, log):
     key = part + "2"
+    zero = (part == "B" and float(case["beta"]) == 0.0) or \
+        float(np.max(np.abs(case["ref"][key]))) == 0.0
+    v = _display(case, case["valid_part"][part].astype(float)).astype(bool)
     if log:
-        e = _display(case, case["err"][key])
-        v = _display(case, case["valid"][key].astype(float)).astype(bool)
-        return {"err": e, "valid": v, "title": f"${part}^2$",
-                "annotation": "no valid pixels" if not np.any(v) else None}
-    zero = float(np.max(np.abs(case["ref"][key]))) == 0.0
+        pic = _display(case, case["field"][key])
+        ref = _display(case, case["ref"][key])
+        peak = float(np.max(np.abs(ref))) if np.isfinite(ref).any() else 0.0
+        e = (np.abs(pic - ref) / peak if peak > 0 else np.zeros_like(pic))
+        item = {"err": e, "valid": v, "title": f"${part}^2$"}
+        if zero:
+            item["undefined"] = True
+            item["blank_text"] = figstyle.zero_error_note(f"{part}^2",
+                                                          "stationary")
+            item["annotation"] = item["blank_text"]
+        elif not np.any(v):
+            item["annotation"] = "no valid pixels"
+        return item
     arr = np.zeros_like(np.asarray(case["field"][key], float)) if zero \
         else _display(case, case["field"][key])
-    return {"arr": arr, "title": f"${part}^2$",
-            "note": (rf"${part}^2\equiv0$" if zero else None)}
+    return {"arr": arr, "valid": v, "title": f"${part}^2$",
+            "blank": zero,
+            "blank_text": (figstyle.zero_field_note(f"{part}^2", "stationary")
+                           if zero else None),
+            "error_blank_text": (figstyle.zero_error_note(f"{part}^2",
+                                                          "stationary")
+                                 if zero else None),
+            "note": (figstyle.zero_field_note(f"{part}^2", "stationary")
+                     if zero else None)}
 
 
 def draw_case(case, outdir):
@@ -180,13 +228,13 @@ def draw_case(case, outdir):
             f"render_pergamma expects N==1 point charges, got N={n_particles} "
             f"for {case['case']}")
     figstyle.apply_paper_style(kind="field")
-    # The B error row is omitted only when all three reference magnetic
-    # components vanish (stationary bunch, beta=0).
+    # The B reference vanishes only for the stationary bunch (beta=0).  The
+    # error row is still drawn: four neutral masked boxes state why.
     bref = [float(np.max(np.abs(case["ref"][c]))) for c in ("Bx", "By", "Bz")]
-    berr_omitted = all(v == 0.0 for v in bref)
-    assert not berr_omitted or float(
+    b_zero = all(v == 0.0 for v in bref)
+    assert not b_zero or float(
         np.max(np.abs(case["ref"]["B2"]))) == 0.0, (
-        f"{case['case']}: B error row omitted but the reference B2 is nonzero")
+        f"{case['case']}: B reference zero but B2 is nonzero")
 
     rows = []
     for part in ("E", "B"):
@@ -194,21 +242,25 @@ def draw_case(case, outdir):
         fld = [_item(case, part, c, j, False) for j, c in enumerate(comps)]
         fld.append(_sq_item(case, part, False))
         rows.append({"kind": "field", "part": part, "items": fld})
-        if part == "B" and berr_omitted:
-            continue
         err = [_item(case, part, c, j, True) for j, c in enumerate(comps)]
         err.append(_sq_item(case, part, True))
+        if part == "B" and b_zero:
+            symbol = "B"
+            for it in err:
+                it["undefined"] = True
+                it["blank_text"] = figstyle.zero_error_note(symbol,
+                                                            "stationary")
+                it["annotation"] = it["blank_text"]
+            err[3]["blank_text"] = figstyle.zero_error_note(
+                f"{symbol}^2", "stationary")
+            err[3]["annotation"] = err[3]["blank_text"]
         rows.append({"kind": "error", "part": part, "items": err})
 
-    # One rotated row label per square row, in the reflowed order.
-    flat = figstyle._reflow_field_rows(rows)
+    # One rotated row label per row: every row is a four-panel block.
     labels = []
-    for r in flat:
-        g = float(case["gamma"])
-        head = (f"{r['part']} field" if r["role"] == "comp"
-                and r["kind"] == "field" else
-                f"{r['part']} error" if r["role"] == "comp" else
-                f"{r['part']}$^2$ value/err")
+    for r in rows:
+        head = f"{r['part']} field" if r["kind"] == "field" \
+            else f"{r['part']} error"
         labels.append(f"{head}\n"
                       rf"$\gamma$={case['gamma']:.4g}, "
                       rf"$\beta$={case['beta']:.4g}"
@@ -227,19 +279,19 @@ def draw_case(case, outdir):
            "data": os.path.relpath(case["path"], cases.REPO_ROOT),
            "raster_panel_mm": figstyle.RASTER_PANEL_MM}
     bottom_note = None
-    if berr_omitted:
-        bottom_note = ("B error row omitted: the reference B is identically "
-                       "zero at beta=0, so the relative B error is undefined")
+    if b_zero:
+        bottom_note = ("B error row: every panel is fully masked because the "
+                       "reference B is identically zero at beta = 0, so the "
+                       "relative B error is undefined")
     figstyle.render_split_field_rows(
         name, outdir, rows, case["y"], case["x"],
         xlabel=xlabel, ylabel=ylabel, width_frac=1.0,
         top_in=figstyle.FIELD_TOP_NOTE_IN,
-        bottom_in=(figstyle.FIELD_BOTTOM_NOTE_IN if berr_omitted
-                   else figstyle.FIELD_BOTTOM_ERR_IN),
+        bottom_in=figstyle.FIELD_BOTTOM_ERR_IN,
         fixed_ticks=([0, 2, 4, 6], [0, 2, 4, 6]),
         row_labels=labels,
-        top_note=("Error rows: grey = masked / no finite error; "
-                  "the colour ramp spans finite errors only"),
+        top_note=("Grey marks cells that are not evaluated because the "
+                  "reference field is below threshold"),
         bottom_note=bottom_note,
         peak_annotations=False,
         collect_rows=collected,
@@ -247,7 +299,8 @@ def draw_case(case, outdir):
 
     info["rows"] = collected
     info["checks"] = {
-        "bars_per_row": max(r["panels"] for r in collected),
+        "panels_per_row": figstyle.RASTER_NCOL,
+        "colorbars_per_row": 1,
         "min_font_pt": figstyle.TICK_PT,
         "masked_colour": figstyle.MASKED_COLOR,
     }
@@ -301,13 +354,14 @@ def main(outdir):
         c = d["checks"]
         lines.append(f"{d['figure']} ({d['case']}): "
                      f"rows={len(d['rows'])} "
-                     f"max_panels_per_row={c['bars_per_row']} "
+                     f"panels_per_row={c['panels_per_row']} "
                      f"min_font_pt={c['min_font_pt']} "
-                     f"panel_mm=32.0")
+                     f"panel_mm={figstyle.RASTER_PANEL_MM:.2f}")
         for r in d["rows"]:
             scales = ", ".join(f"[{lo:.6g}, {hi:.6g}]" for lo, hi in r["norms"])
-            lines.append(f"  {r['role']:3s} {r['part']} {r['kind']:9s} "
-                         f"panels={r['panels']} scales={scales}")
+            lines.append(f"  {r['kind']:9s} {r['part']} "
+                         f"panels={r['panels']} bars={r['colourbars']} "
+                         f"scales={scales}")
     text = "\n".join(lines) + "\n"
     with open(os.path.join(outdir, "assertions_render5.txt"), "w") as fh:
         fh.write(text)

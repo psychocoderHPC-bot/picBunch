@@ -142,10 +142,17 @@ BLANK_COLOR = MASKED_COLOR
 MASKED_LEGEND_EDGE = "0.4"
 
 # ---- Canonical norm / floor rules --------------------------------------
-# Error colourbars span [ERROR_FLOOR, decade ceiling] and always mark the
-# 1e-3 acceptance gate.  Squared magnitudes use a log scale floored at
-# SQ_FLOOR_RATIO times the panel peak (six decades).
-ERROR_FLOOR = 1e-6
+# Error panels use a DATA-DRIVEN range, not a fixed decimal floor.  The lower
+# colour limit is the smallest finite positive relative error in the row,
+# clamped from below at ERROR_FLOOR_MACHINE so a logarithmic norm always has
+# vmin > 0.  The upper limit is the row peak.  This resolves the roundoff
+# regime (which a fixed 1e-6 floor compressed into the darkest colour) and
+# keeps the validity mask visually distinct.  Below vmin the colormap's
+# darkest finite colour is used, never the mask grey: grey means "not
+# evaluated", not "small".
+ERROR_FLOOR_EPS_FACTOR = 1.0 / 64.0   # of float64 eps: ~3.5e-18
+ERROR_FLOOR_MACHINE = float(np.finfo(np.float64).eps) * ERROR_FLOOR_EPS_FACTOR
+ERROR_FLOOR = ERROR_FLOOR_MACHINE     # canonical name used by manifests
 ERROR_GATE = 1e-3
 SQ_FLOOR_RATIO = 1e-6
 SQ_LOG_DECADES = 6.0
@@ -187,64 +194,63 @@ def width_in(fraction):
 
 
 # ---- Shared field-figure geometry --------------------------------------
-# EVERY field raster panel (gp_*, val_*, large_*) prints at the density-row
-# map size.  One shared square constant, no per-figure override.
+# ONE square raster size for the whole paper: field, error and density-row
+# maps all print at RASTER_PANEL_MM.  Every row is identical: four panels
+# (three signed axis slices followed by the squared-magnitude value plot) and
+# one shared colour bar at the row's right edge.
 #
-# The old four-column grid (three components plus the squared magnitude on
-# one line) cannot hold four 32 mm squares and two vertical colour bars
-# inside the 159.2 mm text width.  A row now carries the three signed
-# components on one shared bar, and the squared-magnitude pair (the value and
-# its relative error, each with its own bar) on the next row.  That is the
-# same three-panels-plus-bar shape as the density row, and every panel is
-# square at the density-map size.
-RASTER_PANEL_MM = 32.0          # == BUNCH_MAP_MM: the density-row map size
+# The width is fixed by the 159.2 mm text block:
+#   LEFT 20 + 4*27.8 + 3*GAP 2.0 + BARGAP 14 + BAR 2 + LABEL 6 = 159.20 mm.
+# The assert in field_layout() enforces that identity and the right edge.
+RASTER_PANEL_MM = 27.80         # == BUNCH_MAP_MM: the density-row map size
 RASTER_PANEL_IN = RASTER_PANEL_MM / 25.4
 RASTER_LEFT_MM = 20.0           # y tick labels + rotated y label
 RASTER_GAP_MM = 2.0             # between component panels
 RASTER_BAR_GAP_MM = 14.0        # panel to colour bar (bar tick labels)
 RASTER_BAR_MM = 2.0             # colour-bar width
 RASTER_BAR_LABEL_MM = 6.0       # colour bar to its rotated quantity label
-RASTER_NCOL = 3
+RASTER_NCOL = 4
+RASTER_TEXT_WIDTH_MM = 159.20
 
 FIELD_TOP_IN = 0.30          # above the first row (panel titles)
 FIELD_BOTTOM_IN = 0.46       # below the last row (ticks + x label)
 FIELD_BOTTOM_ERR_IN = 0.66   # extra room for the shared "masked" legend
 FIELD_ROW_GAP_IN = 0.42      # title + ticks between two square rows
 FIELD_TOP_NOTE_IN = 0.55     # per-gamma top note
-FIELD_BOTTOM_NOTE_IN = 0.86  # per-gamma bottom note (omitted B error row)
+FIELD_BOTTOM_NOTE_IN = 0.86  # per-gamma bottom note
 
 FIELD_NCOL = RASTER_NCOL
 
 # Retained for callers that still pass the height-budget knob.  The paper
-# keeps square 32 mm panels; a panel that would not fit is split into a
+# keeps square 27.8 mm panels; a panel that would not fit is split into a
 # continued float instead of being squeezed.
 APPENDIX_PANEL_HEIGHT_SCALE = 1.0
 
 
 def field_panel_width_frac(width_frac=1.0):
-    """Square panel width as a figure fraction (the shared 32 mm constant)."""
+    """Square panel width as a figure fraction (the shared 27.8 mm constant)."""
     return RASTER_PANEL_IN / width_in(width_frac)
 
 
 def field_layout(row_panels, width_frac=1.0, top_in=FIELD_TOP_IN,
                  bottom_in=FIELD_BOTTOM_IN, row_gap_in=FIELD_ROW_GAP_IN,
                  panel_scale=1.0, panel_height_scale=1.0):
-    """Square 32 mm raster grid for a list of per-row panel counts.
+    """Uniform four-panel grid: four 27.8 mm squares and one shared bar.
 
-    ``row_panels`` has one entry per row: 3 for a component triad (three
-    signed components on one shared colour bar), 2 for a squared-magnitude
-    pair (value and its relative error, each with its own bar), or 1 for a
-    lone squared panel.  Every panel is ``RASTER_PANEL_MM`` square at the
-    default ``panel_height_scale == 1.0``; the canvas height is solved from
-    the row count, so only the height grows.
+    ``row_panels`` has one entry per row and every entry must be
+    ``RASTER_NCOL`` (four).  There is no 3-panel or 2-panel reflow: a row is
+    three signed components plus the squared-magnitude value, and every row
+    uses the same size, gaps and bar placement.  The canvas height is solved
+    from the row count, so only the height grows.
     """
     row_panels = [int(n) for n in row_panels]
     nrows = len(row_panels)
     if nrows < 1:
         raise ValueError("field_layout needs at least one row")
     for n in row_panels:
-        if n not in (1, 2, 3):
-            raise ValueError(f"unsupported panel count {n}")
+        if n != RASTER_NCOL:
+            raise ValueError(
+                f"a row must hold {RASTER_NCOL} panels, got {n}")
     panel_scale = float(panel_scale)
     if not (0.5 <= panel_scale <= 1.0):
         raise ValueError("panel_scale must be in [0.5, 1.0]")
@@ -267,31 +273,23 @@ def field_layout(row_panels, width_frac=1.0, top_in=FIELD_TOP_IN,
     bar_f = (RASTER_BAR_MM / 25.4) / fig_w_in
     label_f = (RASTER_BAR_LABEL_MM / 25.4) / fig_w_in
     xs = [left_f + i * (panel_f + gap_f) for i in range(RASTER_NCOL)]
+    bar = xs[-1] + panel_f + bar_gap_f
+    right = bar + bar_f + label_f
+    # The row arithmetic is the operator contract: one bar per row, exactly
+    # the 159.2 mm text width at the shared 27.8 mm panel size.
+    total_mm = (RASTER_LEFT_MM + RASTER_NCOL * RASTER_PANEL_MM
+                + (RASTER_NCOL - 1) * RASTER_GAP_MM
+                + RASTER_BAR_GAP_MM + RASTER_BAR_MM + RASTER_BAR_LABEL_MM)
+    if abs(total_mm - RASTER_TEXT_WIDTH_MM) > 1e-6:
+        raise AssertionError(
+            f"field_layout: row arithmetic {total_mm:.4f} mm != "
+            f"{RASTER_TEXT_WIDTH_MM:.2f} mm")
+    if right > 1.0 + 1e-9:
+        raise AssertionError(
+            f"field_layout: the row overruns the canvas (right={right:.6f})")
 
-    row_x, row_bars = [], []
-    for n in row_panels:
-        if n == 3:
-            px = xs[:3]
-            bars = [xs[2] + panel_f + bar_gap_f]
-        elif n == 2:
-            p1 = xs[0]
-            b1 = p1 + panel_f + bar_gap_f
-            p2 = b1 + bar_f + label_f
-            b2 = p2 + panel_f + bar_gap_f
-            px = [p1, p2]
-            bars = [b1, b2]
-        else:
-            p1 = xs[0]
-            px = [p1]
-            bars = [p1 + panel_f + bar_gap_f]
-        row_x.append(px)
-        row_bars.append(bars)
-    for px, bars in zip(row_x, row_bars):
-        right = max([x + panel_f for x in px]
-                    + [b + bar_f + label_f for b in bars])
-        if right > 1.0 - 1e-9:
-            raise AssertionError(
-                f"field_layout: a row overruns the canvas (right={right:.4f})")
+    row_x = [list(xs) for _ in range(nrows)]
+    row_bars = [[bar] for _ in range(nrows)]
 
     row_y = []
     yy = top - rh
@@ -339,7 +337,7 @@ def _layout_manifest(geo):
 # marginal axis absorbs the width left over after the maps, the two label
 # gaps, the bar and the outer margins, capped at the 38 mm design width.  The
 # planned 170 mm canvas yields the full 38 mm marginal; the repo's actual
-# A4 + 1 in-margin text width is 159.2 mm, where the row resolves to 32 mm
+# A4 + 1 in-margin text width is 159.2 mm, where the row resolves to the shared panel size
 # maps and a ~23 mm marginal with every 7.5 pt tick label unclipped.
 BUNCH_MAP_MM = RASTER_PANEL_MM     # one shared size with the field rasters
 BUNCH_MARGINAL_MM = 38.0
@@ -539,9 +537,11 @@ def cmap_for(quantity, zero_floor=False):
 
     ``quantity`` is one of ``signed_field``, ``squared_field``, ``error``,
     ``density`` or ``hist``.  Every true mask uses the one canonical grey.
-    ``zero_floor`` is for squared-magnitude panels where zero is a physical log
-    floor, not missing data: the bad/under colour becomes the colormap's own
-    lowest colour so zero is not confused with a mask.
+    ``zero_floor`` is for squared-magnitude panels where zero is a physical
+    log floor, not missing data: the *under* colour becomes the colormap's
+    own lowest colour.  The *bad* colour stays the one mask grey, so the
+    validity mask is visible in the squared panels exactly as in the slice
+    and error panels.
     """
     if quantity == "error":
         cmap = _truncated_cmap(CMAP_ERROR_BASE)
@@ -555,11 +555,14 @@ def cmap_for(quantity, zero_floor=False):
         cmap = plt.get_cmap(CMAP_HIST).copy()
     else:
         raise ValueError(f"unknown quantity class {quantity!r}")
-    if zero_floor:
-        cmap.set_bad(cmap(0.0))
+    cmap.set_bad(MASKED_COLOR)
+    # Values below vmin are valid data (a physical zero floor or
+    # roundoff-small errors), not missing cells: use the darkest finite
+    # colour, never the mask grey.
+    if zero_floor or quantity == "error":
         cmap.set_under(cmap(0.0))
     else:
-        cmap.set_bad(MASKED_COLOR)
+        cmap.set_under(MASKED_COLOR)
     return cmap
 
 
@@ -626,6 +629,21 @@ def panel_note(ax, text, x=0.5, y=0.5, ha="center", va="center"):
     """Draw an in-panel annotation on the canonical annotation ladder."""
     return ax.text(x, y, text, ha=ha, va=va, fontsize=ANNOT_PT,
                    color=ANNOT_COLOR, transform=ax.transAxes)
+
+
+def zero_field_note(symbol, reason):
+    """Two-line note for an identically-zero field box."""
+    return rf"${symbol}\equiv0$" "\n" f"({reason})"
+
+
+def zero_error_note(symbol, reason):
+    """Four-line 7 pt note for a fully masked undefined-error box.
+
+    The panel is 27.8 mm wide, so the sentence is broken into short lines to
+    stay inside it at the canonical 7 pt annotation size.
+    """
+    return (rf"${symbol}\equiv0$" "\n" f"({reason})"
+            "\nrelative error\nundefined")
 
 
 def panel_title(ax, letter, title, pad=PANEL_TITLE_PAD):
@@ -920,8 +938,13 @@ def fmt_sci(v):
 _fmt_sci = fmt_sci
 
 
-def _truncated_cmap(name, top=ERR_CMAP_TOP, n=256):
-    """Finite colormap truncated below its near-white top end."""
+def _truncated_cmap(name, top=ERR_CMAP_TOP, n=1024):
+    """Finite colormap truncated below its near-white top end.
+
+    1024 entries (not 256) so a data-driven logarithmic error range of ~18
+    decades still resolves >20 distinct levels in one decade; the roundoff
+    star is then visible instead of being quantised into a few blocks.
+    """
     base = plt.get_cmap(name)
     rgba = base(np.linspace(0.0, float(top), n))
     return mcolors.ListedColormap(rgba, name=f"{name}_trunc")
@@ -959,11 +982,15 @@ _assert_masked_distinct = assert_masked_distinct
 
 
 def error_limits(items):
-    """Canonical error range: floor at ERROR_FLOOR, decade ceiling, gate shown.
+    """Data-driven error range: smallest positive error .. row peak.
 
     ``items`` may be arrays or dictionaries with ``err``/``valid`` entries.
-    The range never drops below the acceptance gate, so the gate contour and
-    its tick are always representable.
+    The lower limit is the smallest finite positive relative error over the
+    valid cells of the whole row, clamped from below at
+    ``ERROR_FLOOR_MACHINE`` (a float64-epsilon-derived bound) so that a
+    ``LogNorm`` always has ``vmin > 0``.  The upper limit is the row peak.
+    One policy for every error panel, no per-figure override.  The 1e-3
+    acceptance gate stays tick-marked whenever it falls inside the range.
     """
     good = []
     for it in items:
@@ -976,12 +1003,13 @@ def error_limits(items):
             e = e[np.isfinite(e) & (e > 0)]
         if e.size:
             good.append(e)
-    hi = 1.0
-    if good:
-        cat = np.concatenate(good)
-        hi = 10.0 ** np.ceil(np.log10(float(cat.max())))
-    vmin = ERROR_FLOOR
-    vmax = max(float(hi), ERROR_GATE)
+    if not good:
+        return ERROR_FLOOR_MACHINE, max(1.0, ERROR_GATE)
+    cat = np.concatenate(good)
+    lo = float(cat.min())
+    hi = float(cat.max())
+    vmin = max(lo, ERROR_FLOOR_MACHINE)
+    vmax = max(hi, ERROR_GATE)
     if vmax <= vmin:
         vmax = vmin * 10.0
     return vmin, vmax
@@ -996,8 +1024,9 @@ def error_ticks(vmin, vmax):
     if float(vmin) <= ERROR_GATE <= float(vmax):
         ticks.add(float(ERROR_GATE))
     ticks = sorted(ticks)
-    labels = ["1e-3\ngate" if np.isclose(t, ERROR_GATE, rtol=1e-9, atol=0.0)
-              else fmt_sci(t) for t in ticks]
+    # Single-line labels: a two-line "gate" label collides with the next
+    # decade tick when the data-driven range puts the gate close to the peak.
+    labels = [fmt_sci(t) for t in ticks]
     return ticks, labels
 
 
@@ -1206,57 +1235,6 @@ def _bar_title(fig, cax, image, ticks, ticklabels, title):
                          ticklabels=ticklabels, label=title)
 
 
-def _reflow_field_rows(rows):
-    """Turn 4-item input rows into square 3-panel / magnitude rows.
-
-    Each input row is one block: three signed components plus the squared
-    magnitude.  The output keeps the three components on one row with one
-    shared bar, then puts the squared magnitude and (when the block has an
-    error row) the squared relative error on the next row with their own
-    bars.  The component error row follows.  Nothing is dropped; only the
-    grid changes.
-    """
-    out = []
-    i = 0
-    while i < len(rows):
-        r = rows[i]
-        items = r["items"]
-        if len(items) < 3:
-            raise ValueError("field rows need three signed components")
-        comps = items[:3]
-        sq = items[3] if len(items) > 3 else None
-        if r["kind"] == "field":
-            out.append({"kind": "field", "part": r["part"],
-                        "role": "comp", "items": comps})
-            partner = None
-            if (i + 1 < len(rows) and rows[i + 1]["kind"] == "error"
-                    and rows[i + 1]["part"] == r["part"]
-                    and len(rows[i + 1]["items"]) > 3):
-                partner = rows[i + 1]
-            mag = []
-            if sq is not None:
-                mag.append(("field", sq))
-            if partner is not None:
-                mag.append(("error", partner["items"][3]))
-            if mag:
-                out.append({"kind": "magnitude", "part": r["part"],
-                            "role": "mag", "items": mag})
-            if partner is not None:
-                out.append({"kind": "error", "part": r["part"],
-                            "role": "comp", "items": partner["items"][:3]})
-                i += 2
-                continue
-            i += 1
-            continue
-        out.append({"kind": "error", "part": r["part"],
-                    "role": "comp", "items": comps})
-        if sq is not None:
-            out.append({"kind": "magnitude", "part": r["part"],
-                        "role": "mag", "items": [("error", sq)]})
-        i += 1
-    return out
-
-
 def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             width_frac, support=None, suptitle=None,
                             manifest=None, compact=False,
@@ -1266,14 +1244,13 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             row_labels=None, top_note=None, bottom_note=None,
                             peak_annotations=True, collect_rows=None,
                             row_label_x=0.0315):
-    """Square field/error panels at the shared density-map size.
+    """Uniform four-panel rows at the shared density-map size.
 
-    Input ``rows`` keep the historical shape: three signed components plus
-    the squared magnitude.  They are reflowed by :func:`_reflow_field_rows`
-    into component rows (three panels on one shared bar) and
-    squared-magnitude rows (the value and its relative error, each on its own
-    bar).  Every panel is ``RASTER_PANEL_MM`` square, so the field families
-    print exactly the density-row map size.
+    Every input row already has four items: three signed components plus the
+    squared magnitude (for a field row) or three component errors plus the
+    squared-magnitude relative error (for an error row).  Each row prints at
+    once: four ``RASTER_PANEL_MM`` squares and one shared colour bar at the
+    right edge.  There is no 3-panel or 2-panel reflow.
 
     ``fixed_ticks`` overrides the automatic locators (per-gamma figures use
     it).  ``row_labels`` draws one rotated label per output row.
@@ -1281,12 +1258,16 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     receives the per-row normalisation record.
     """
     apply_paper_style(kind="field")
-    orows = _reflow_field_rows(rows)
-    nrow = len(orows)
+    nrow = len(rows)
+    for r in rows:
+        if len(r["items"]) != RASTER_NCOL:
+            raise ValueError(
+                f"{name}: every row needs {RASTER_NCOL} panels, "
+                f"row {r.get('part')} {r.get('kind')} has {len(r['items'])}")
     has_error = any(r["kind"] == "error" for r in rows)
     if bottom_in is None:
         bottom_in = FIELD_BOTTOM_ERR_IN if has_error else FIELD_BOTTOM_IN
-    geo = field_layout([len(r["items"]) for r in orows],
+    geo = field_layout([RASTER_NCOL] * nrow,
                        width_frac=width_frac, top_in=top_in,
                        bottom_in=bottom_in, row_gap_in=row_gap_in,
                        panel_scale=panel_scale,
@@ -1316,11 +1297,23 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     peak_texts = []
 
     def _draw_panel(ax, kind, it, norm, cmap, title, quantity):
-        if kind == "field":
+        if it.get("undefined"):
+            # Identically-zero reference: keep the box, draw it as a neutral
+            # masked panel with the canonical grey face and a 7 pt note.
+            blank_panel(ax, it.get("blank_text")
+                        or it.get("annotation") or "")
+        elif kind == "field":
             arr = np.asarray(it["arr"], float)
             if it.get("blank"):
-                blank_panel(ax, it.get("blank_text", ""))
+                blank_panel(ax, it.get("blank_text") or it.get("note") or "")
             else:
+                # The SAME validity mask as the squared and error panels, so
+                # the grey footprint marks exactly the cells that were not
+                # evaluated (reference field below the validity threshold).
+                v = it.get("valid")
+                if v is not None:
+                    arr = np.ma.masked_where(
+                        ~np.asarray(v, bool) | ~np.isfinite(arr), arr)
                 draw_raster_panel(ax, x, y, arr, quantity, norm=norm,
                                   cmap=cmap)
                 if it.get("note"):
@@ -1334,8 +1327,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                 note = it.get("annotation",
                               "fully masked: relative error undefined")
                 short = note.split(" (")[0]
-                note = short if len(short) <= 30 else "fully masked"
-                panel_note(ax, note)
+                panel_note(ax, short if len(short) <= 30 else "fully masked")
             try:
                 ax.contour(x, y, np.where(v & np.isfinite(e), e, np.nan),
                            levels=[ERROR_GATE],
@@ -1364,84 +1356,67 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             ax.xaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
             ax.yaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
 
-    for ri, r in enumerate(orows):
+    for ri, r in enumerate(rows):
         y0 = row_y[ri]
         px = geo["row_x"][ri]
         bars = geo["row_bars"][ri]
-        kind, part, role = r["kind"], r["part"], r["role"]
+        kind, part = r["kind"], r["part"]
         last = (ri == nrow - 1)
-        panel_specs = []          # (ax, item, norm, cmap, title, quantity)
+        comps = r["items"][:3]
+        sq = r["items"][3]
+        panel_specs = []          # (ax, kind, item, norm, cmap, quantity)
         bar_specs = []            # (norm, cmap, ticks, labels, label)
 
-        if role == "comp":
-            comps = r["items"]
-            if kind == "field":
-                cvmax = max(float(np.nanmax(np.abs(
-                    np.asarray(it["arr"], float)))) for it in comps)
-                if not np.isfinite(cvmax) or cvmax <= 0:
-                    cvmax = 1.0
-                cnorm = mcolors.SymLogNorm(
-                    linthresh=max(cvmax * SYMLOG_LINTHRESH_FRAC, 1e-30),
-                    vmin=-cvmax, vmax=cvmax, base=10)
-                ccmap = field_cmap
-                cticks = [-cvmax, 0.0, cvmax]
-                clabels = [fmt_sci(-cvmax), "0", fmt_sci(cvmax)]
-                clabel = (f"{part} ({UNITS[part]})" if compact
-                          else f"{part} ({UNITS[part]}) (symlog)")
-            else:
-                cvmin, cvmax = error_limits(comps)
-                cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax)
-                ccmap = err_cmap
-                cticks, clabels = error_ticks(cvmin, cvmax)
-                clabel = "rel. error" if compact else "relative error"
-                assert_masked_distinct(cnorm, ccmap,
-                                       f"{part} error components")
+        if kind == "field":
+            cvmax = 0.0
+            for it in comps:
+                if it.get("undefined") or it.get("blank"):
+                    continue
+                a = np.asarray(it["arr"], float)
+                if np.isfinite(a).any():
+                    cvmax = max(cvmax, float(np.nanmax(np.abs(a))))
+            if not np.isfinite(cvmax) or cvmax <= 0:
+                cvmax = 1.0
+            cnorm = mcolors.SymLogNorm(
+                linthresh=max(cvmax * SYMLOG_LINTHRESH_FRAC, 1e-30),
+                vmin=-cvmax, vmax=cvmax, base=10)
+            cticks = [-cvmax, 0.0, cvmax]
+            clabels = [fmt_sci(-cvmax), "0", fmt_sci(cvmax)]
+            clabel = (f"{part} ({UNITS[part]})" if compact
+                      else f"{part} ({UNITS[part]}) (symlog)")
             for j, it in enumerate(comps):
                 ax = fig.add_axes([px[j], y0, pw, rh])
-                panel_specs.append((ax, it, cnorm, ccmap,
-                                    it.get("title", ""),
-                                    "signed_field" if kind == "field"
-                                    else "squared_field"))
-            bar_specs.append((cnorm, ccmap, cticks, clabels, clabel))
+                panel_specs.append((ax, "field", it, cnorm, field_cmap,
+                                    "signed_field"))
+            # Fourth panel: squared-magnitude value plot on its own six-decade
+            # logarithmic scale.  The row carries ONE bar (the component bar);
+            # the squared scale is stated in the caption.
+            sarr = np.asarray(sq["arr"], float)
+            sfloor, svmax = sq_limits(sarr)
+            snorm = mcolors.LogNorm(vmin=sfloor, vmax=svmax)
+            ax = fig.add_axes([px[3], y0, pw, rh])
+            panel_specs.append((ax, "field", sq, snorm, sq_cmap,
+                                "squared_field"))
+            bar_specs.append((cnorm, field_cmap, cticks, clabels, clabel))
         else:
-            for (mkind, it) in r["items"]:
-                if mkind == "field":
-                    sfloor, svmax = sq_limits(np.asarray(it["arr"], float))
-                    snorm = mcolors.LogNorm(vmin=sfloor, vmax=svmax)
-                    scmap = sq_cmap
-                    if compact:
-                        sticks = [snorm.vmin,
-                                  float(np.sqrt(snorm.vmin * svmax)), svmax]
-                        slabels = [fmt_sci(t) for t in sticks]
-                    else:
-                        sticks, slabels = sq_ticks(svmax)
-                    unit2 = "V$^2$/m$^2$" if part == "E" else "T$^2$"
-                    slabel = (f"{part}$^2$ {unit2}" if compact
-                              else f"{part}$^2$ ({unit2}) (log)")
-                    stitle = it.get("title", "") + " (log)"
-                    quantity = "squared_field"
-                else:
-                    svmin, svmax = error_limits([it])
-                    snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax)
-                    scmap = err_cmap
-                    sticks, slabels = error_ticks(svmin, svmax)
-                    slabel = ("rel. error" if compact
-                              else "relative error")
-                    assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
-                    stitle = it.get("title", "")
-                    quantity = "squared_field"
-                ax = fig.add_axes([px[len(panel_specs)], y0, pw, rh])
-                panel_specs.append((ax, it, snorm, scmap, stitle,
-                                    "signed_field" if mkind == "field"
-                                    else "squared_field"))
-                bar_specs.append((snorm, scmap, sticks, slabels, slabel))
+            cvmin, cvmax = error_limits(r["items"])
+            cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax)
+            cticks, clabels = error_ticks(cvmin, cvmax)
+            clabel = "rel. error" if compact else "relative error"
+            assert_masked_distinct(cnorm, err_cmap,
+                                   f"{part} error row")
+            for j, it in enumerate(r["items"]):
+                ax = fig.add_axes([px[j], y0, pw, rh])
+                panel_specs.append((ax, "error", it, cnorm, err_cmap,
+                                    "squared_field" if j == 3
+                                    else "signed_field"))
+            bar_specs.append((cnorm, err_cmap, cticks, clabels, clabel))
 
-        for j, (ax, it, norm, cmap, title, quantity) in enumerate(panel_specs):
-            _draw_panel(ax, kind if role == "comp" else
-                        ("field" if r["items"][j][0] == "field" else "error"),
-                        it, norm, cmap, title, quantity)
-            if (role == "comp" and kind == "field" and peak_annotations
-                    and not it.get("blank")):
+        for j, (ax, pkind, it, norm, cmap, quantity) in enumerate(panel_specs):
+            _draw_panel(ax, pkind, it, norm, cmap, it.get("title", ""),
+                        quantity)
+            if (pkind == "field" and j < 3 and peak_annotations
+                    and not it.get("blank") and not it.get("undefined")):
                 arr_c = np.asarray(it["arr"], float)
                 peak_c = (float(np.nanmax(np.abs(arr_c)))
                           if np.isfinite(arr_c).any() else 0.0)
@@ -1465,8 +1440,8 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             im = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
             _bar_title(fig, cax, im, ticks, labels, label)
         bar_rows.append({
-            "row": kind, "part": part, "role": role,
-            "colourbars": len(bars),
+            "row": kind, "part": part,
+            "panels": len(panel_specs), "colourbars": len(bars),
             "labels": [b[4] for b in bar_specs],
             "ticks": [b[2] for b in bar_specs],
             "scales": [[float(b[0].vmin), float(b[0].vmax)]
@@ -1474,8 +1449,9 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         })
         if collect_rows is not None:
             collect_rows.append({
-                "role": role, "kind": kind, "part": part,
+                "kind": kind, "part": part,
                 "panels": len(panel_specs),
+                "colourbars": len(bars),
                 "norms": [[float(b[0].vmin), float(b[0].vmax)]
                           for b in bar_specs],
                 "labels": [b[4] for b in bar_specs],
@@ -1521,7 +1497,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
 
     # Split between the field parts (the E block and the B block) so the
     # caller can place two floats from one canvas without shrinking a panel.
-    parts = [r["part"] for r in orows]
+    parts = [r["part"] for r in rows]
     split_row = None
     for k, p in enumerate(parts):
         if p != parts[0]:
@@ -1535,10 +1511,13 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
 
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
-    man["layout"] = ("square 32 mm panels; component triad with one bar, "
-                     "squared-magnitude pair with its own bars")
-    man["row_roles"] = [r["role"] for r in orows]
-    man["panel_counts"] = [len(r["items"]) for r in orows]
+    man["layout"] = ("uniform 27.8 mm square panels; four per row "
+                     "(three signed components and the squared-magnitude "
+                     "value) with one shared colour bar")
+    man["row_roles"] = [r["kind"] for r in rows]
+    man["panel_counts"] = [len(r["items"]) for r in rows]
+    man["panels_per_row"] = RASTER_NCOL
+    man["colorbars_per_row_count"] = [len(r["items"]) and 1 for r in rows]
     man["raster_panel_mm"] = RASTER_PANEL_MM
     man["canvas_width_mm"] = round(fig.get_figwidth() * 25.4, 3)
     man["masked_color"] = MASKED_COLOR

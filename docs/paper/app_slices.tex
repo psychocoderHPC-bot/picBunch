@@ -22,19 +22,19 @@ is the beam axis; the vertical axis is $x$ in the x-y cut and $z$ in the z-y
 cut. The top row of each plate is a charge-density overview of the bunch, not
 a field map; its three panels are the coordinate planes and its transverse
 panels carry the ``beam axis (out of plane)'' note (see the caption of
-Fig.~\ref{fig:valforward}). Each figure shows
-$E_x,E_y,E_z$ (or $B_x,B_y,B_z$) on one shared scale and bar, with $E^2$ (or
-$B^2$) and its relative error on the next row, each on its own logarithmic
-scale from $10^{-6}$ of the panel peak to the peak and with its own unit
-label; the forward and $1$\,mrad figures carry a logarithmic error row for
-the components underneath, while the reference-only fluctuation figure shows
-the electric and magnetic field blocks alone. The three
-components share one symmetric-logarithmic colour scale
-and bar, and each component panel states its peak as a percentage of the
-shared maximum. The error row is
-logarithmic, floored at $10^{-6}$ and marked at the $10^{-3}$ gate. Pixels are
-masked in light grey where the local field magnitude is below $10^{-3}$ of
-the largest component peak on the plane. The forward case compares the mesh
+Fig.~\ref{fig:valforward}). Each field and error row is a uniform four-panel
+block at one shared $27.8$\,mm square panel size with one shared colour bar:
+$E_x,E_y,E_z$ (or $B_x,B_y,B_z$) followed by $E^2$ (or $B^2$). The squared
+panel uses a logarithmic scale spanning six decades below its panel peak; the
+forward and $1$\,mrad figures carry a logarithmic error row for the
+components and their squared magnitude underneath, while the reference-only
+fluctuation figure shows the electric and magnetic field blocks alone. The
+three components share one symmetric-logarithmic colour scale and bar, and
+each component panel states its peak as a percentage of the shared maximum.
+The error range is set by the data, from the smallest finite positive error to
+the panel peak, and is marked at the $10^{-3}$ gate. Grey marks cells that are
+not evaluated because the reference field is below threshold; the same grey
+appears in the slice, squared and error panels of a component. The forward case compares the mesh
 plus fast shell against an order-4 adaptive Gauss--Legendre driver. The Lorentz-contracted
 in-support quadrature of Section~\ref{sec:fastacc} is the present
 reference; it differs from that driver at the few-percent level at the
@@ -57,22 +57,25 @@ support. The measured plane errors at this radius are reported below.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth,trim=0 367.89 0 0,clip]{figs/val_forward_xy.pdf}
+\includegraphics[width=\linewidth,trim=0 231.77 0 0,clip]{figs/val_forward_xy.pdf}
 \caption{Forward-case validation ($N=200$, $Q=-100$\,pC,
 $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m; x-y plane
 at $z=3.2\,\si{\micro\metre}$, with $y$ horizontal, the beam axis).
-\densityrow{} Below the density row, the electric block comes first:
-$E_x,E_y,E_z$ on one shared symmetric-logarithmic scale and bar, and a
-second row with $E^2$ and its relative error, each on its own logarithmic
-scale and bar. Each component panel is labelled with its peak as a
+\densityrow{} Below the density row, the electric block comes first as a
+uniform four-panel row at the shared $27.8$\,mm square panel size:
+$E_x,E_y,E_z$ and $E^2$ on one shared symmetric-logarithmic scale and bar,
+with the squared panel on its own logarithmic scale spanning six decades
+below its peak. Each component panel is labelled with its peak as a
 percentage of the largest component peak on that plane (the shared colour
 scale): the panel that sets the maximum reads \texttt{max}, peaks below one
 percent use one significant figure (e.g.\ \texttt{.04\%}), and only an
 exactly zero peak reads $0\%$; a small percentage means the component is
-faint on that scale. The error rows are logarithmic, floored at $10^{-6}$
-and marked at the $10^{-3}$ gate, with light-grey pixels where the local
-field magnitude is below $10^{-3}$ of the largest component peak on the
-plane; the dark outline marks the TSC support. The magnetic block and the
+faint on that scale. The error rows are logarithmic, with the range set by
+the data from the smallest finite positive error to the panel peak, and are
+marked at the $10^{-3}$ gate. Grey marks cells that are not evaluated because
+the reference field is below threshold; the same grey appears in the slice,
+squared and error panels of a component. The dark outline marks the TSC
+support. The magnetic block and the
 z-y plane are continued in Fig.~\ref{fig:valforward}.}
 \label{fig:valforward}
 \end{figure}
@@ -80,13 +83,12 @@ z-y plane are continued in Fig.~\ref{fig:valforward}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 475.87,clip]{figs/val_forward_xy.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 327.85,clip]{figs/val_forward_xy.pdf}
 \caption{Forward-case validation (continued): the magnetic block
-$B_x,B_y,B_z$ and $B^2$ of the x-y plane, with the same layout and
-conventions as the electric block in Fig.~\ref{fig:valforward}. $B_y$ is
-identically zero: its field panel is blank and its error panel is fully
-masked, since the relative error of an identically zero component is
-undefined. The in-support fast-versus-arbiter error against the order-12
+$B_x,B_y,B_z$ and $B^2$ of the x-y plane, with the same uniform four-panel
+rows and conventions as the electric block in Fig.~\ref{fig:valforward}.
+$B_y$ is identically zero, so its panel is shown fully masked because the
+reference component is identically zero and its relative error is undefined. The in-support fast-versus-arbiter error against the order-12
 independent continuum reference is $1.6\%$ at the worst node. The magnetic
 field is about $3.3\!\times\!10^{-9}$ of the $E$-dominated local field at
 $\gamma=10$ (Section~\ref{sec:accuracy}).}
@@ -95,7 +97,7 @@ $\gamma=10$ (Section~\ref{sec:accuracy}).}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 367.89 0 0,clip]{figs/val_forward_zy.pdf}
+\includegraphics[width=\linewidth,trim=0 231.77 0 0,clip]{figs/val_forward_zy.pdf}
 \caption{Forward-case validation (continued): z-y plane at
 $x=3.2\,\si{\micro\metre}$, with the density row and electric block and the
 same colour scales, masks and error conventions as the x-y plane in
@@ -105,21 +107,21 @@ Fig.~\ref{fig:valforward}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 475.87,clip]{figs/val_forward_zy.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 327.85,clip]{figs/val_forward_zy.pdf}
 \caption{Forward-case validation (continued): magnetic block of the z-y
 plane, with the same conventions as Fig.~\ref{fig:valforward}.}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth,trim=0 255.58 0 0,clip]{figs/val_fluct_xy.pdf}
+\includegraphics[width=\linewidth,trim=0 131.36 0 0,clip]{figs/val_fluct_xy.pdf}
 \caption{Fluctuation-case reference with the same geometry and bunch as
 Fig.~\ref{fig:valforward} but a $1.046$\,mrad rms $x$-divergence.
-\densityrow{} Below the density row, the electric block comes first:
-$E_x,E_y,E_z$ on one shared symmetric-logarithmic scale and bar (peak in
-percent of the shared maximum), and a second row with $E^2$ and its
-relative error, each on its own logarithmic scale and bar, from the
-order-12 independent continuum reference. The magnetic block and the z-y
+\densityrow{} Below the density row, the electric block comes first as a
+uniform four-panel row at the shared $27.8$\,mm square panel size:
+$E_x,E_y,E_z$ and $E^2$ on one shared symmetric-logarithmic scale and bar
+(peak in percent of the shared maximum), with the squared panel on its own
+logarithmic scale, from the order-12 independent continuum reference. The magnetic block and the z-y
 plane are continued in Fig.~\ref{fig:valfluct}.}
 \label{fig:valfluct}
 \end{figure}
@@ -127,7 +129,7 @@ plane are continued in Fig.~\ref{fig:valfluct}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 363.57,clip]{figs/val_fluct_xy.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 227.45,clip]{figs/val_fluct_xy.pdf}
 \caption{Fluctuation-case reference (continued): the magnetic block
 $B_x,B_y,B_z$ and $B^2$ of the x-y plane, with the same conventions as the
 electric block in Fig.~\ref{fig:valfluct}; the $x$-divergence lifts $B_y$
@@ -139,7 +141,7 @@ picBunch output is reported in Appendix~\ref{app:multivel}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 255.58 0 0,clip]{figs/val_fluct_zy.pdf}
+\includegraphics[width=\linewidth,trim=0 131.36 0 0,clip]{figs/val_fluct_zy.pdf}
 \caption{Fluctuation-case reference (continued): z-y plane, with the same
 density row and electric block as the x-y plane in Fig.~\ref{fig:valfluct}.}
 \end{figure}
@@ -147,7 +149,7 @@ density row and electric block as the x-y plane in Fig.~\ref{fig:valfluct}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 363.57,clip]{figs/val_fluct_zy.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 227.45,clip]{figs/val_fluct_zy.pdf}
 \caption{Fluctuation-case reference (continued): magnetic block of the z-y
 plane, with the same conventions as Fig.~\ref{fig:valfluct}.}
 \end{figure}
@@ -160,12 +162,14 @@ seed-43 bunch, $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at
 $z=1.6\,\si{\micro\metre}$ ($z=8$ of the 16-cell $32\times32\times16$ grid),
 cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against
 the order-12 independent continuum reference. \densityrow{} The electric
-block shows $E_x,E_y,E_z$ on one shared scale and bar (peak in percent of
-the shared maximum) and a row with $E^2$ and its relative error, each on its
-own logarithmic scale and bar; $y$ is horizontal and is the beam axis.
-Error rows are logarithmic, floored at $10^{-6}$ and marked at the
-$10^{-3}$ gate, and grey pixels are masked where the local field magnitude
-is below $10^{-3}$ of the largest component peak on the plane. The dark
+block is a uniform four-panel row at the shared $27.8$\,mm square panel
+size: $E_x,E_y,E_z$ and $E^2$ on one shared scale and bar (peak in percent
+of the shared maximum), with the squared panel on its own logarithmic scale;
+$y$ is horizontal and is the beam axis. Error rows are logarithmic, with the
+range set by the data from the smallest finite positive error to the panel
+peak and marked at the $10^{-3}$ gate. Grey marks cells that are not
+evaluated because the reference field is below threshold; the same grey
+appears in the slice, squared and error panels of a component. The dark
 outline marks the TSC support. The magnetic block is continued in
 Fig.~\ref{fig:val1mrad}.}
 \label{fig:val1mrad}
@@ -300,7 +304,7 @@ the bunch, far above the $10^{-3}$ gate.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth,trim=0 385.89 0 0,clip]{figs/large_sxy_g10.pdf}
+\includegraphics[width=\linewidth,trim=0 242.57 0 0,clip]{figs/large_sxy_g10.pdf}
 \caption{Large-domain slices ($\gamma=10$, $128\times128\times64$, cell
 $2\times10^{-7}$\,m, $N=100$, JURECA H100), axial-$x$ geometry: the bunch
 moves along $+x$, so $B_x$, the component along the propagation axis, is
@@ -308,9 +312,11 @@ identically zero. In the x-y cut the beam axis $x$ is horizontal; the z-y
 cut is a transverse view with the beam axis $x$ perpendicular to the page,
 so the horizontal axis is the transverse $y$, not the propagation direction,
 and $z$ is vertical. \densityrow{} Below the density row, the electric block
-comes first: $E_x,E_y,E_z$ on one shared symmetric-logarithmic scale and bar
-(peak in percent of the shared maximum), and a second row with $E^2$ and its
-relative error, each on its own logarithmic scale and bar. $E_x$ is
+comes first as a uniform four-panel row at the shared $27.8$\,mm square
+panel size: $E_x,E_y,E_z$ and $E^2$ on one shared symmetric-logarithmic scale
+and bar (peak in percent of the shared maximum), with the squared panel on
+its own logarithmic scale. The component error row follows in the same
+four-panel grid. $E_x$ is
 suppressed but nonzero, peaking at $0.5475\%$ (x-y) and $0.1384\%$ (z-y) of
 the shared maximum. The magnetic block and the z-y plane are continued in
 Fig.~\ref{fig:large}.}
@@ -320,21 +326,22 @@ Fig.~\ref{fig:large}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 496.75,clip]{figs/large_sxy_g10.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 341.53,clip]{figs/large_sxy_g10.pdf}
 \caption{Large-domain slices (continued): the magnetic block
 $B_x,B_y,B_z$ and $B^2$ of the x-y plane, with the same layout and error
 convention as the electric block in Fig.~\ref{fig:large}. For uniform motion
 along $+x$ the field is purely transverse, so $B_x$ is identically zero: its
-field panel is blank and its error panel is fully masked, since the relative
-error of an identically zero component is undefined. The magnetic plane peak
-is $1.5\times10^{-4}$\,T (x-y) and $1.4\times10^{-4}$\,T (z-y). Grey pixels
-are masked.}
+panel is shown fully masked because the reference component is identically
+zero and its relative error is undefined. The magnetic plane peak is
+$1.5\times10^{-4}$\,T (x-y) and $1.4\times10^{-4}$\,T (z-y). Grey marks
+cells that are not evaluated because the reference field is below threshold;
+the same grey appears in the slice, squared and error panels.}
 \end{figure}
 
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 385.89 0 0,clip]{figs/large_szy_g10.pdf}
+\includegraphics[width=\linewidth,trim=0 242.57 0 0,clip]{figs/large_szy_g10.pdf}
 \caption{Large-domain slices (continued): z-y plane at $\gamma=10$, with the
 density row and electric block and the same colour scales, masks and error
 conventions as the x-y plane in Fig.~\ref{fig:large}.}
@@ -343,23 +350,24 @@ conventions as the x-y plane in Fig.~\ref{fig:large}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 496.75,clip]{figs/large_szy_g10.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 341.53,clip]{figs/large_szy_g10.pdf}
 \caption{Large-domain slices (continued): magnetic block of the z-y plane,
 with the same conventions as Fig.~\ref{fig:large}.}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth,trim=0 266.38 0 0,clip]{figs/large_sxy_g1.pdf}
+\includegraphics[width=\linewidth,trim=0 242.57 0 0,clip]{figs/large_sxy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch ($\gamma=1$), same
 domain and layout as Fig.~\ref{fig:large}. In the x-y cut $x$ is horizontal;
 the z-y cut is the same transverse view as in Fig.~\ref{fig:large}, with $x$
 perpendicular to the page, $y$ horizontal and $z$ vertical; the bunch is
 stationary, so it has no propagation direction. \densityrow{} Below the
-density row, the electric block comes first: $E_x,E_y,E_z$ on one shared
-symmetric-logarithmic bar (peak in percent of the shared maximum), and a
-second row with $E^2$ and its relative error, each on its own logarithmic
-scale and bar. The core error reaches $8.4\times10^{-1}$ (z-y $E_x$), far
+density row, the electric block comes first as a uniform four-panel row at the
+shared $27.8$\,mm square panel size: $E_x,E_y,E_z$ and $E^2$ on one shared
+symmetric-logarithmic bar (peak in percent of the shared maximum), with the
+squared panel on its own logarithmic scale. The component error row follows in
+the same grid. The core error reaches $8.4\times10^{-1}$ (z-y $E_x$), far
 above the $10^{-3}$ gate. The magnetic block and the z-y plane are continued
 in Fig.~\ref{fig:largeg1}.}
 \label{fig:largeg1}
@@ -368,19 +376,21 @@ in Fig.~\ref{fig:largeg1}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 496.75,clip]{figs/large_sxy_g1.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 341.53,clip]{figs/large_sxy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch (continued): the
 magnetic field row $B_x,B_y,B_z$ and $B^2$ of the x-y plane; the stationary
-reference magnetic field is identically zero, so every magnetic field panel
-is blank and the magnetic error row is omitted because the relative error of
-an identically zero component is undefined, as in the per-$\gamma$
-$\gamma=1$ figure. Grey pixels are masked.}
+reference magnetic field is identically zero, so every magnetic panel is shown
+fully masked because the reference component is identically zero and its
+relative error is undefined, as in the per-$\gamma$ $\gamma=1$ figure. The
+magnetic error row is kept as four masked boxes. Grey marks cells that are not
+evaluated because the reference field is below threshold; the same grey
+appears in the slice, squared and error panels.}
 \end{figure}
 
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 266.38 0 0,clip]{figs/large_szy_g1.pdf}
+\includegraphics[width=\linewidth,trim=0 242.57 0 0,clip]{figs/large_szy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch (continued): z-y
 plane, with the same density row and electric block as the x-y plane in
 Fig.~\ref{fig:largeg1}.}
@@ -389,7 +399,7 @@ Fig.~\ref{fig:largeg1}.}
 \begin{figure}[t]
 \ContinuedFloat
 \centering
-\includegraphics[width=\linewidth,trim=0 0 0 496.75,clip]{figs/large_szy_g1.pdf}
+\includegraphics[width=\linewidth,trim=0 0 0 341.53,clip]{figs/large_szy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch (continued): the blank
 magnetic field row of the z-y plane, with the same conventions as
 Fig.~\ref{fig:largeg1}.}
