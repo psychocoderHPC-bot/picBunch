@@ -622,8 +622,16 @@ def hist2d(ax, x, y, bins, norm=None, cmin=None):
 
 
 def blank_panel(ax, text):
-    """Draw a blank (identically zero) panel with the canonical grey and note."""
+    """Draw a blank/fully-masked panel with the canonical grey and note.
+
+    This is the ONLY path for a panel with no valid pixel.  Sending an
+    all-masked/NaN array to ``imshow`` can fall through to the under colour in
+    the PDF backend and print the panel near-black; the grey axes face cannot
+    be bypassed.  The frame uses the annotation grey so the box stays neutral.
+    """
     ax.set_facecolor(BLANK_COLOR)
+    for spine in ax.spines.values():
+        spine.set_color(ANNOT_COLOR)
     ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=ANNOT_PT,
             color=ANNOT_COLOR, transform=ax.transAxes)
 
@@ -1325,13 +1333,19 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                         or it.get("annotation") or "")
         elif kind == "field":
             arr = np.asarray(it["arr"], float)
+            v = it.get("valid")
             if it.get("blank"):
                 blank_panel(ax, it.get("blank_text") or it.get("note") or "")
+            elif v is not None and not bool(np.any(np.asarray(v, bool))):
+                # No evaluated pixel: use the grey blank-panel path.  An
+                # imshow of a fully masked/NaN array can fall through to the
+                # under colour in the PDF backend, which prints near-black.
+                blank_panel(ax, it.get("blank_text")
+                            or it.get("note") or "not evaluated")
             else:
                 # The SAME validity mask as the squared and error panels, so
                 # the grey footprint marks exactly the cells that were not
                 # evaluated (reference field below the validity threshold).
-                v = it.get("valid")
                 if v is not None:
                     arr = np.ma.masked_where(
                         ~np.asarray(v, bool) | ~np.isfinite(arr), arr)
@@ -1342,29 +1356,35 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         else:
             e = np.asarray(it["err"], float)
             v = np.asarray(it["valid"], bool)
-            z = np.ma.masked_where(~v | ~np.isfinite(e), e)
-            draw_raster_panel(ax, x, y, z, "error", norm=norm, cmap=cmap)
             if not bool(np.any(v & np.isfinite(e))):
-                note = it.get("annotation",
-                              "fully masked: relative error undefined")
-                short = note.split(" (")[0]
-                panel_note(ax, short if len(short) <= 30 else "fully masked")
-            try:
-                ax.contour(x, y, np.where(v & np.isfinite(e), e, np.nan),
-                           levels=[ERROR_GATE],
-                           colors=[GATE_STYLE["color"]],
-                           linewidths=GATE_STYLE["linewidth"],
-                           linestyles=GATE_STYLE["linestyle"])
-            except Exception:
-                pass
-            if support is not None:
+                # Fully invalid error panel: never imshow NaN data.  The
+                # grey blank_panel path is the one that is byte-correct in
+                # the PDF backend (set_bad is bypassed for an all-NaN image).
+                note = (it.get("blank_text") or it.get("annotation")
+                        or "fully masked: relative error undefined")
+                if not it.get("blank_text"):
+                    short = note.split(" (")[0]
+                    note = short if len(short) <= 30 else "fully masked"
+                blank_panel(ax, note)
+            else:
+                z = np.ma.masked_where(~v | ~np.isfinite(e), e)
+                draw_raster_panel(ax, x, y, z, "error", norm=norm, cmap=cmap)
                 try:
-                    ax.contour(x, y, support.astype(float), levels=[0.5],
-                               colors=[SUPPORT_STYLE["color"]],
-                               linewidths=SUPPORT_STYLE["linewidth"],
-                               linestyles=SUPPORT_STYLE["linestyle"])
+                    ax.contour(x, y, np.where(v & np.isfinite(e), e, np.nan),
+                               levels=[ERROR_GATE],
+                               colors=[GATE_STYLE["color"]],
+                               linewidths=GATE_STYLE["linewidth"],
+                               linestyles=GATE_STYLE["linestyle"])
                 except Exception:
                     pass
+                if support is not None:
+                    try:
+                        ax.contour(x, y, support.astype(float), levels=[0.5],
+                                   colors=[SUPPORT_STYLE["color"]],
+                                   linewidths=SUPPORT_STYLE["linewidth"],
+                                   linestyles=SUPPORT_STYLE["linestyle"])
+                    except Exception:
+                        pass
         ax.set_xlim(xlo, xhi)
         ax.set_ylim(ylo, yhi)
         ax.set_aspect("auto")
