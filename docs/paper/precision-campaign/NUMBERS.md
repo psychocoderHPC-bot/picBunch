@@ -83,15 +83,15 @@ Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `
 | sec_accuracy.tex:226-237 | tab_crossover | - | - | - | - | cells | - |
 | sec_accuracy.tex:245-250 | crossover_axial_d6 | 6 | - | - | - | cells | - |
 | sec_accuracy.tex:245-250 | crossover_d48_narrative | 0.00026 | - | - | - | relative error | - |
-| sec_accuracy.tex:267 | gamma_slope_p10 | 1.64 | 1.664 | 1.639 | +1.49% | exponent | F_gamma_err_dist |
-| sec_accuracy.tex:274 | gamma_tab_10_0p25_d8 | 0.00025 | 0.0002565 | 0.0002539 | +2.61% | peak-normalised absolute error | F_gamma_err_dist |
-| sec_accuracy.tex:274 | gamma_tab_10_1p0_d8 | 0.044 | 0.04673 | 0.04443 | +6.20% | peak-normalised absolute error | F_gamma_err_dist |
-| sec_accuracy.tex:275 | gamma_slope_p50 | 1.71 | 1.307 | 1.705 | -23.59% | exponent | F_gamma_err_dist |
-| sec_accuracy.tex:275 | gamma_tab_50_0p25_d8 | 0.074 | 0.07277 | 0.07359 | -1.66% | peak-normalised absolute error | F_gamma_err_dist |
-| sec_accuracy.tex:275 | gamma_tab_50_1p0_d8 | 1.05 | 0.388 | 1.052 | -63.04% | peak-normalised absolute error | F_gamma_err_dist |
-| sec_accuracy.tex:276 | gamma_slope_p100 | 2.06 | 1.23 | 2.064 | -40.27% | exponent | F_gamma_err_dist |
-| sec_accuracy.tex:276 | gamma_tab_100_0p25_d8 | 0.21 | 0.1838 | 0.2108 | -12.48% | peak-normalised absolute error | F_gamma_err_dist |
-| sec_accuracy.tex:276 | gamma_tab_100_1p0_d8 | 5.47 | 0.9322 | 5.472 | -82.96% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:267 | gamma_slope_p10 | 1.33 | 1.326 | 1.639 | -0.32% | exponent | F_gamma_err_dist |
+| sec_accuracy.tex:274 | gamma_tab_10_0p25_d8 | 0.0063 | 0.006307 | 0.0002539 | +0.12% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:274 | gamma_tab_10_1p0_d8 | 0.26 | 0.2554 | 0.04443 | -1.77% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:275 | gamma_slope_p50 | 1.12 | 1.115 | 1.705 | -0.48% | exponent | F_gamma_err_dist |
+| sec_accuracy.tex:275 | gamma_tab_50_0p25_d8 | 0.33 | 0.3273 | 0.07359 | -0.83% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:275 | gamma_tab_50_1p0_d8 | 2.3 | 2.301 | 1.052 | +0.04% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:276 | gamma_slope_p100 | 1.09 | 1.09 | 2.064 | -0.01% | exponent | F_gamma_err_dist |
+| sec_accuracy.tex:276 | gamma_tab_100_0p25_d8 | 0.90 | 0.896 | 0.2108 | -0.45% | peak-normalised absolute error | F_gamma_err_dist |
+| sec_accuracy.tex:276 | gamma_tab_100_1p0_d8 | 5.3 | 5.318 | 5.472 | +0.34% | peak-normalised absolute error | F_gamma_err_dist |
 | sec_accuracy.tex:361-368 | fast_closest_node | [0.0001, 0.001, 0.03, 0.016] | - | - | - | mixed | - |
 | sec_consistency.tex:11-15 | coulomb_elem | 2.28e-25 | - | - | - | absolute residual | - |
 | sec_consistency.tex:11-15 | coulomb_l2 | 2.29e-25 | - | - | - | absolute residual | - |
@@ -108,3 +108,5 @@ Note: `multivel_binning_rel_pct` now records the worst pointwise
 `|Bz16-Bz64|/max|Bz64|`, not the peak ratio; its published denominator was
 inconsistent with the raw field. The paper value column keeps the published
 percent-of-peak number for traceability.
+
+The `gamma_*` rows were corrected in T12d: the reducer normalised the peak over all rings instead of per ring, so the `d=8`/`d=48` errors were too small. Fresh values are the per-ring re-reduction (reducer `5343a97`); the slopes are the three-point fit over `h={4,1,1/4}`. The pre-correction published values are recorded in each row's `correction_note`.

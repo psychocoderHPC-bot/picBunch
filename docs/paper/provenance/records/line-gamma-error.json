@@ -13,7 +13,7 @@
   "data_sha256": [
     {
       "path": "docs/paper/data/line/gamma_err_dist.csv",
-      "sha256": "4a048c03721c8588cd9922fafde44b7423efa27de066507bc60df433ac16625a"
+      "sha256": "657bc01a7d0296eb9585ffcf9d5c7919dcd3c54da34932fc2864f03ead6f1484"
     }
   ],
   "end_utc": "2026-11-12T12:38:59Z",
@@ -23,7 +23,7 @@
   "generator": {
     "reducer": {
       "path": "docs/paper/precision-campaign/reduce_line.py",
-      "sha256": "6d5fce5e952fa154365ba71bf2f99fe10a9d064fc93a64a494f8c148fd9afacf"
+      "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
     }
   },
   "git_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
@@ -31,13 +31,13 @@
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
   "io_backend": "hdf5",
   "measurement_kind": "fresh-h100",
-  "notes": "Fresh campaign-20261112-t5b re-reduction on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0,2,3). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced data carry additive bunch_* keys taken from the actual run input that produced the fields. GPUs used: 4x NVIDIA H100 PCIe 80 GB; this case ran on CUDA_VISIBLE_DEVICES=0,2,3.",
+  "notes": "Fresh campaign-20261112-t5b re-reduction on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0,2,3). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced data carry additive bunch_* keys taken from the actual run input that produced the fields. GPUs used: 4x NVIDIA H100 PCIe 80 GB; this case ran on CUDA_VISIBLE_DEVICES=0,2,3. T12d correction: the same reduced CSV was rebuilt from the same raw line-gamma outputs with the per-ring peak normalisation (reducer 5343a97); docs/paper/precision-campaign/reduce_line.py now matches that reducer. This raises the d=8/d=48 errors that the pre-fix all-ring normalisation under-reported; d=2 rows are unchanged. Values cross-checked against the T4g GAMMA-CORRECTED table.",
   "openpmd_version": "0.17.1",
   "reference_only": false,
   "repeats": 1,
   "script_sha256": {
     "path": "docs/paper/precision-campaign/reduce_line.py",
-    "sha256": "6d5fce5e952fa154365ba71bf2f99fe10a9d064fc93a64a494f8c148fd9afacf"
+    "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
   },
   "seed": null,
   "start_utc": "2026-11-12T12:37:33Z",

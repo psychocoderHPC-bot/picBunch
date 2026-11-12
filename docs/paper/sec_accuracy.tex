@@ -282,17 +282,17 @@ absolute error per component at $d=8$ cells for the $h$-comparison.
 \caption{Single-particle mesh error at $d=8$ cells, $96$-cell box, cell
 $10^{-7}$\,m, aspect 1, axial, \texttt{jureca-h100}. Peak-normalised
 absolute error, worst per component, at $h=1$ and $h=1/4$. The
-$h$-refinement exponent $p$ (error $\sim h^p$, fitted from the $d=2$ band,
-node-unit kernel) rises from $1.64$ to $2.06$ as $\gamma$ goes from $10$ to
-$100$; refinement therefore pays off more at high $\gamma$.}
+$h$-refinement exponent $p$ (error $\sim h^p$) is a three-point fit over
+$h=4,1,1/4$ cells on the $d=2$ ring; it decreases from $1.33$ at
+$\gamma=10$ to $1.09$ at $\gamma=100$ ($R^2=0.979$--$0.995$).}
 \label{tab:gamma}
 \begin{tabular}{lrrrl}
 \toprule
 $\gamma$ & $h=1$ & $h=1/4$ & slope $p$ & note \\
 \midrule
-10  & $4.4\times10^{-2}$ & $2.5\times10^{-4}$ & $1.64$ & \\
-50  & $1.05$ & $7.4\times10^{-2}$ & $1.71$ & $h=1$ off by more than the peak \\
-100 & $5.47$ & $0.21$ & $2.06$ & $h=1$ off by more than the peak \\
+10  & $0.26$ & $6.3\times10^{-3}$ & $1.33$ & \\
+50  & $2.3$ & $0.33$ & $1.12$ & $h=1$ off by more than the peak \\
+100 & $5.3$ & $0.90$ & $1.09$ & $h=1$ off by more than the peak \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -308,15 +308,17 @@ peak field by $d=8$ cells for $\gamma=50$ and $\gamma=100$.}
 \label{fig:gamma-dist}
 \end{figure}
 
-The error grows steeply with $\gamma$: $4.4\times10^{-2}$ at $\gamma=10$,
-$1.05$ at $\gamma=50$, $5.47$ at $\gamma=100$, at $h=1$ and $d=8$ cells.
-Refining to $h=1/4$ brings these to $2.5\times10^{-4}$,
-$7.4\times10^{-2}$, and $0.21$. The controlling length is the beaming cone
+The error grows steeply with $\gamma$: $0.26$ at $\gamma=10$,
+$2.3$ at $\gamma=50$, $5.3$ at $\gamma=100$, at $h=1$ and $d=8$ cells.
+Refining to $h=1/4$ brings these to $6.3\times10^{-3}$,
+$0.33$, and $0.90$. The controlling length is the beaming cone
 width $d/\gamma$: for $\gamma\ge50$ the cone is sub-cell, so sub-cell
 resolution of the cone is the binding limit. In the node-unit kernel the
-$h$-refinement exponent $p$ (fitted from the $d=2$ band) rises from $1.64$
-at $\gamma=10$ to $2.06$ at $\gamma=100$, so refinement keeps paying off,
-most at high $\gamma$; at $d=8$, $\gamma=100$ the cone is
+$h$-refinement exponent $p$ (three-point fit over $h=4,1,1/4$ cells on the
+$d=2$ band) is $1.33$, $1.12$, and $1.09$ at $\gamma=10,50,100$
+($R^2=0.979$, $0.990$, $0.995$); it decreases mildly with $\gamma$, so
+refinement reduces the error across the range while the fitted order does
+not rise. At $d=8$, $\gamma=100$ the cone is
 $d/\gamma=0.08$ cells and a further $h\le$ that cone width is what
 $10^{-2}$ requires. These are measured limits of the mesh at a fixed
 distance in cells.

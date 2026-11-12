@@ -184,19 +184,26 @@ def mode_gamma(spec):
         scale_e = E_CHARGE / (4.0 * math.pi * EPS0 * float(cell[0]) ** 2)
         si = np.where(comp < 3, vals * scale_e, vals * scale_e / C_LIGHT)
         got, _ = sample_mesh(mesh, point_m, comp, cell)
-        peaks = np.asarray([np.max(np.abs(si[comp == c])) if np.any(comp == c) else 0.0
-                            for c in range(6)])
-        pmax = float(np.max(peaks))
         for ring in unit["rings"]:
             mask = np.isclose(d_cells, ring, atol=0.35)
+            # Per-ring peak normalisation: divide the deviation on a ring by
+            # the field peak on that same ring.  The global over-all-rings
+            # peak sits at d=2, so it underestimates the d=8/d=48 ratios by
+            # orders of magnitude.
+            ring_peaks = np.asarray([
+                np.max(np.abs(si[mask & (comp == c)]))
+                if np.any(mask & (comp == c)) else 0.0
+                for c in range(6)])
+            e_peaks = ring_peaks[:3]
+            ring_emax = float(np.max(e_peaks)) if np.any(e_peaks > 0.0) else 0.0
             worst = 0.0
             for c in range(6):
-                if peaks[c] <= 1e-9 * pmax:
+                if ring_emax <= 0.0 or ring_peaks[c] <= 1e-12 * ring_emax:
                     continue
                 sel = mask & (comp == c) & np.isfinite(got)
                 if not np.any(sel):
                     continue
-                worst = max(worst, float(np.max(np.abs(got[sel] - si[sel]) / peaks[c])))
+                worst = max(worst, float(np.max(np.abs(got[sel] - si[sel]) / ring_peaks[c])))
             rows.append((unit["gamma"], unit["h"], int(ring), worst))
     header = ["gamma", "h", "d", "peak_normalised_abs_error"]
     write_csv(spec["out"], header, rows)

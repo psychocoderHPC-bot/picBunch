@@ -461,16 +461,16 @@
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
       "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields. T12d correction: per-ring peak normalisation (reducer 5343a97); the d=8/d=48 errors replace the too-small all-ring values.",
       "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "n/a",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 615,
+          "bytes": 596,
           "path": "docs/paper/data/line/gamma_err_dist.csv",
-          "sha256": "4a048c03721c8588cd9922fafde44b7423efa27de066507bc60df433ac16625a"
+          "sha256": "657bc01a7d0296eb9585ffcf9d5c7919dcd3c54da34932fc2864f03ead6f1484"
         }
       ]
     },
