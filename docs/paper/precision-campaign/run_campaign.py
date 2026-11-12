@@ -488,6 +488,23 @@ def finalize_case(st, args, lock, host, picbunch):
            record["wall_s"]), flush=True)
 
 
+def _reference_points_cost(root, run, case):
+    """Sample-point x source count, used only to order the reference queue."""
+    ref = _ref_of(case, run)
+    if not ref:
+        return 0.0
+    n = [int(v) for v in run["mesh"]["grid"]]
+    if ref["mode"] == "rings":
+        points = len(ref["rings"]) * len(ref["axes"]) * 6
+    else:
+        points = sum(plane_size(p, n) for p in ref["planes"]) * 6
+    try:
+        sources = n_sources(os.path.join(root, "inputs", run["input"] + ".h5"))
+    except OSError:
+        sources = 1
+    return float(points) * sources
+
+
 def execute(cases, args, log_dir):
     """Run meshes on a four-GPU work queue while references run on a CPU pool.
 
@@ -505,8 +522,8 @@ def execute(cases, args, log_dir):
     lock = threading.Lock()
     states = {}
     run_lookup = {}
-    mesh_jobs = queue.Queue()
-    ref_jobs = queue.Queue()
+    mesh_pending = []
+    ref_pending = []
     for case in cases:
         state = {"case": case, "pending": 0, "mesh_paths": {}, "ref_paths": {},
                  "mesh_slots": set(), "commands": [], "failures": [],
@@ -515,11 +532,23 @@ def execute(cases, args, log_dir):
         for run in case["runs"]:
             run_lookup[(case["id"], run["name"])] = (case, run)
             state["pending"] += 1
-            mesh_jobs.put((case["id"], run["name"]))
+            n = [int(v) for v in run["mesh"]["grid"]]
+            mesh_pending.append(
+                (float(n[0]) * n[1] * n[2] * max(1, int(run["mesh"].get("bins", 1))),
+                 case["id"], run["name"]))
             if _ref_of(case, run):
                 state["pending"] += 1
-                ref_jobs.put((case["id"], run["name"]))
+                ref_pending.append(
+                    (_reference_points_cost(root, run, case), case["id"], run["name"]))
         states[case["id"]] = state
+    # Longest job first: the four heaviest meshes start together on the four
+    # GPUs and the critical-path references start before the cheap ones.
+    mesh_jobs = queue.Queue()
+    for _, case_id, run_name in sorted(mesh_pending, reverse=True):
+        mesh_jobs.put((case_id, run_name))
+    ref_jobs = queue.Queue()
+    for _, case_id, run_name in sorted(ref_pending, reverse=True):
+        ref_jobs.put((case_id, run_name))
     reduce_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
     reduce_futures = []
 

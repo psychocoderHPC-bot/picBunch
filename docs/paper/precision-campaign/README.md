@@ -106,10 +106,13 @@ prov/index.jsonl, prov/campaign_summary.json, logs/
 Execution is a two-pool pipeline, not a per-slot sequential loop. Four GPU
 workers each own one `CUDA_VISIBLE_DEVICES` slot and pull mesh jobs from a
 shared work queue, so every mesh that is ready starts as soon as a GPU is
-free. A separate pool (`--ref-workers`, default 8, `--ref-threads`, default
-16) evaluates references for different cases concurrently on the 144 cores.
-The reference has no dependency on the mesh, so both stages of the same case
-start together; a case is reduced once all its mesh and reference jobs finish.
+free. Jobs are queued longest-first, so the four heaviest meshes start on the
+four GPUs together. A separate pool (`--ref-workers`, default 8,
+`--ref-threads`, default 16) evaluates references for different cases
+concurrently on the 144 cores, again longest-first so the critical path
+starts early. The reference has no dependency on the mesh, so both stages of
+the same case start together; a case is reduced once all its mesh and
+reference jobs finish.
 
 This replaces the earlier LPT loop, which bound each case to one slot and ran
 that slot's mesh and reference sequentially: while a CPU-bound reference ran,
