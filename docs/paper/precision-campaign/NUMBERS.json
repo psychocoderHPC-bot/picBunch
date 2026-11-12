@@ -11,12 +11,12 @@
   "relative_change": "(fresh - paper_value) / paper_value",
   "committed": "value recomputed from the pre-T7a committed data; null when no committed data file backs the claim",
   "hires": "fresh is the worst component error with the 5x5 source neighbourhood excluded; fresh_including_source_neighbourhood is the literal full-plane maximum. The committed reference is wrong at the source node.",
-  "fresh_null": "fresh=null means no fresh data back the claim (external/archived data, structural value, or var1b)."
+  "fresh_null": "fresh=null means no fresh data back the claim (external/archived data or a structural value)."
  },
  "counts": {
-  "total": 96,
-  "fresh": 60,
-  "null": 36
+  "total": 97,
+  "fresh": 62,
+  "null": 35
  },
  "rows": [
   {
@@ -208,14 +208,42 @@
     23270.0,
     8.734
    ],
-   "fresh": null,
-   "committed": null,
+   "fresh": {
+    "Ex": 1294370.6489939413,
+    "Ey": 16322.16099434032,
+    "Ez": 1310222.2638611847,
+    "Bx": 0.00012639489872242737,
+    "By": 3.2972711415631227e-06,
+    "Bz": 0.0007978603069095896
+   },
+   "committed": {
+    "Ex": 1294370.6489939408,
+    "Ey": 16322.160994340331,
+    "Ez": 1310222.2638611838,
+    "Bx": 0.0001263948987224273,
+    "By": 3.297271141563123e-06,
+    "Bz": 0.0007978603069095895
+   },
    "relative_change": null,
    "relative_change_vs_committed": null,
    "unit": "mixed",
-   "figure": null,
-   "data_key": "external/not re-measured",
-   "reason": "Full 64^3 JURECA run; var1b family INVALID and its input is not reproducible from this repository."
+   "figure": "val_1mrad_xy_E/B",
+   "data_key": "var1b/slices_var1b.npz:max|xy_<comp>_pic| for Ex..Bz; paper values are the separate 64^3/1e-7 run",
+   "reason": "The paper values are the separate full 64^3, cell 1e-7 m, B=64 run. The fresh var1b reduced slice (32x32x16, cell 2e-7 m, B=2048) reproduces the committed slice peaks to <=7.1e-16; all six argmax nodes are identical. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes)."
+  },
+  {
+   "id": "var1b_slice_reproducibility",
+   "tex": "docs/paper/app_multivel.tex",
+   "line": "88-98",
+   "paper_value": null,
+   "fresh": 7.108126615639245e-16,
+   "committed": 0.0,
+   "relative_change": null,
+   "relative_change_vs_committed": null,
+   "unit": "relative peak difference",
+   "figure": "val_1mrad_xy_E",
+   "data_key": "var1b/slices_var1b.npz:max over six components of |peak_fresh-peak_committed|/peak_committed",
+   "reason": "Fresh vs committed reduced-slice peak agreement; the paper's 1.4% full-grid criterion is not measurable from the 32x32x16 slice."
   },
   {
    "id": "far_tail_margin",

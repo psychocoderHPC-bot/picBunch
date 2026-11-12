@@ -664,18 +664,18 @@
       ],
       "gpu_model": "NVIDIA H100 PCIe 80 GB",
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-      "io_backend": "adios2/BP5",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "RETAINED UNCHANGED. The 2026-11-12 campaign var1b case is INVALID: the harness input did not match the committed 1 mrad case (weight/seed/positions differ; peaks ~10^6 too high). Its input is not reproducible from this repository, so the committed reduced slice stays as-is and no fresh bunch data were ingested. Historical picbunch: experimental/multivel 02891fe6.",
-      "picbunch_version": "picBunch experimental/multivel 02891fe6bd9c34eea5479e91ecebbd54a44a47f7",
+      "note": "Fresh var1b re-run from the recovered authoritative input (bunch_1mrad_200.h5, sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c) on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7, case harness commit f27d3d3. The fresh reduced slice carries bunch_* keys and reproduces the committed peaks to <=7.1e-16 with identical argmax nodes. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": 43,
       "source_data": [
         {
-          "bytes": 153057,
+          "bytes": 174992,
           "path": "docs/paper/data/var1b/slices_var1b.npz",
-          "sha256": "d59ec32e524163f14cd0188552153cb734d86a879c351d5231556dc07ca2b08b"
+          "sha256": "bfb7ff92d6b6e9670fa1dd896b82ef3e4e629d35ee8fd84462f1d8a451527934"
         }
       ]
     }

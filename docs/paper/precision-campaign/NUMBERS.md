@@ -1,7 +1,7 @@
 # NUMBERS - fresh precision values
 
 Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `f8d7f2b`, binary `717212e`.
-`fresh=null` means no fresh backing (external/archived data, structural value, or var1b).
+`fresh=null` means no fresh backing (external/archived data or a structural value).
 `committed` is the pre-T7a data value where a data file exists; `rel` is `(fresh-paper)/paper`.
 
 | tex:line | id | paper | fresh | committed | rel | unit | figure |
@@ -18,7 +18,8 @@ Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `
 | app_multivel.tex:59 | multivel_ratio_By_Bz | 0.0522 | 0.05163 | 0.05258 | -1.08% | ratio | F_multivel_dist |
 | app_multivel.tex:71 | multivel_agree_By_pct | 0.056 | 0.1066 | 0.02886 | +90.30% | percent | F_multivel_dist |
 | app_multivel.tex:71 | multivel_agree_Bz_pct | 0.0043 | 0.002331 | 0.005176 | -45.79% | percent | F_multivel_dist |
-| app_multivel.tex:88-98 | var1b_peaks | [7.83, 2.33e+04, 7.76, 2.34e+04, 7.56, 7.52, 2.32e+04, 2.33e+04, 8.73] | - | - | - | mixed | - |
+| app_multivel.tex:88-98 | var1b_peaks | [7.83, 2.33e+04, 7.76, 2.34e+04, 7.56, 7.52, 2.32e+04, 2.33e+04, 8.73] | {Ex=1.294e+06, Ey=1.632e+04, Ez=1.31e+06, Bx=0.0001264, By=3.297e-06, Bz=0.0007979} | {Ex=1.294e+06, Ey=1.632e+04, Ez=1.31e+06, Bx=0.0001264, By=3.297e-06, Bz=0.0007979} | - | mixed | val_1mrad_xy_E/B |
+| app_multivel.tex:88-98 | var1b_slice_reproducibility | - | 7.108e-16 | 0 | - | relative peak difference | val_1mrad_xy_E |
 | app_multivel.tex:106-142 | far_tail_margin | - | - | - | - | mixed | - |
 | app_slices.tex:37-38 | insupport_16pct | 1.6 | - | - | - | percent | - |
 | app_slices.tex:156-175 | tab_slices | - | - | - | - | mixed | - |

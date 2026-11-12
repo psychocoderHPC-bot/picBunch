@@ -453,24 +453,24 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch --input in3/bunch_1mrad_200.h5 --cell-size 2e-7 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output out/1mrad_fig.bp (BP5), then BP5->HDF5; xy plane z=8",
+        "command": "CUDA_VISIBLE_DEVICES=0 /home/ubuntu/picbunch-work-20261112/pb/build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.h5 --cell-size 2e-07,2e-07,2e-07 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/run/var1b-1mrad/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/t4d-harness/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/work/var1b-1mrad/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.bin 0.001 2e-07 2e-07 2e-07 5 12",
         "config": {
           "sha256": "905168ac6ff52a950a10d6ceb36c7bb85bba88c8a83e7bfaa6f291a26d11c6d1"
         },
-        "cuda_version": "13.4.92",
-        "end_utc": null,
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T13:11:58Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-        "io_backend": "adios2/BP5",
-        "notes": "RETAHED UNCHANGED: the var1b family is INVALID for this campaign because the harness input did not match the committed 1 mrad case (weight/seed/positions differ; peaks ~10^6 too high). The committed reduced slice is retained because its input is not reproducible from this repository. No fresh data were ingested. Historical source root: valid3/out/1mrad_fig.h5.",
+        "io_backend": "hdf5",
+        "notes": "Fresh var1b re-run on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0) from the recovered authoritative input (bunch_1mrad_200.h5, sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, case harness commit f27d3d3dc020a64ad9ffd2055b0db49f066eb344, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced slice reproduces the committed peaks to <=7.1e-16 with identical argmax nodes. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T13:10:46Z",
         "statistic": "single-run"
       }
     }
@@ -689,53 +689,54 @@
     {
       "case_id": "var1b-1mrad",
       "source": {
-        "path": "valid3/out/1mrad_fig.h5",
-        "sha256": "c8b958675b1e4bce823e074d5d937318b44ea90c907be3c2dbdc91e98e998138"
+        "path": "reduced/var1b/slices_var1b.paper.npz",
+        "sha256": "bfb7ff92d6b6e9670fa1dd896b82ef3e4e629d35ee8fd84462f1d8a451527934"
       },
       "target": "var1b/slices_var1b.npz",
       "transform": {
-        "cell": [
-          2e-07,
-          2e-07,
-          2e-07
-        ],
-        "copy_metadata": [
-          "sources"
-        ],
-        "dataset": "var1b",
-        "kind": "field_h5",
-        "metadata": {
-          "case": "var1b",
-          "display": "xy only: rows=y cols=x; coords cell-centred",
-          "ix": 16,
-          "iy": 16,
-          "iz": 8,
-          "label": "1mrad"
+        "keys": {
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
+          "case": "case",
+          "cell": "cell",
+          "comp": "comp",
+          "display": "display",
+          "ix": "ix",
+          "iy": "iy",
+          "iz": "iz",
+          "label": "label",
+          "n": "n",
+          "origin": "origin",
+          "sources": "sources",
+          "xy_Bx_err": "xy_Bx_err",
+          "xy_Bx_pic": "xy_Bx_pic",
+          "xy_Bx_ref": "xy_Bx_ref",
+          "xy_Bx_valid": "xy_Bx_valid",
+          "xy_By_err": "xy_By_err",
+          "xy_By_pic": "xy_By_pic",
+          "xy_By_ref": "xy_By_ref",
+          "xy_By_valid": "xy_By_valid",
+          "xy_Bz_err": "xy_Bz_err",
+          "xy_Bz_pic": "xy_Bz_pic",
+          "xy_Bz_ref": "xy_Bz_ref",
+          "xy_Bz_valid": "xy_Bz_valid",
+          "xy_Ex_err": "xy_Ex_err",
+          "xy_Ex_pic": "xy_Ex_pic",
+          "xy_Ex_ref": "xy_Ex_ref",
+          "xy_Ex_valid": "xy_Ex_valid",
+          "xy_Ey_err": "xy_Ey_err",
+          "xy_Ey_pic": "xy_Ey_pic",
+          "xy_Ey_ref": "xy_Ey_ref",
+          "xy_Ey_valid": "xy_Ey_valid",
+          "xy_Ez_err": "xy_Ez_err",
+          "xy_Ez_pic": "xy_Ez_pic",
+          "xy_Ez_ref": "xy_Ez_ref",
+          "xy_Ez_valid": "xy_Ez_valid"
         },
-        "n": [
-          32,
-          32,
-          16
-        ],
-        "origin": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "plane_index": {
-          "xy": {
-            "axis": "z",
-            "index": 8
-          }
-        },
-        "planes": [
-          "xy"
-        ],
-        "reference": {
-          "kind": "npz",
-          "path": "valid3/refs/slices_var1b_ref.npz"
-        },
-        "style": "var1b"
+        "kind": "npz_copy"
       }
     },
     {
@@ -1430,6 +1431,9 @@
   "reduction": {
     "binary_sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6",
     "build_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
+    "case_harness_commits": {
+      "var1b-1mrad": "f27d3d3dc020a64ad9ffd2055b0db49f066eb344"
+    },
     "harness_commit": "f8d7f2befd103185f547342e3165485ad7062b96",
     "note": "Fresh re-reduction on jureca-h100 (4x H100 PCIe 80 GB) from the retained campaign HDF5/BP5 outputs; only additive bunch_* keys differ from the pre-bunch reduction."
   },

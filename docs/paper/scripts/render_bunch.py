@@ -86,7 +86,8 @@ def _cell_vector(cell):
     return cell.astype(float)
 
 
-def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2):
+def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2,
+                          field_n=None):
     """Whole-cell sub-range of the field lattice covering the padded bunch.
 
     The returned ``origin`` is ``field_origin + i0*field_cell`` and every
@@ -94,6 +95,11 @@ def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2):
     integer ``k`` in ``[i0, i1)``.  The cell size is the field cell size; the
     bounding box only selects which field cells are kept (snapped outward
     with floor/ceil, never sub-cell).
+
+    When ``field_n`` is given, the crop is clipped to the stored field window
+    ``[0, n)``.  This keeps a row whose padded bunch exceeds the stored grid
+    on the same lattice as the field panels instead of extending past them;
+    the clipped row records the fraction of charge that the window can hold.
     """
     field_origin = np.asarray(field_origin, dtype=float).reshape(3)
     field_cell = _cell_vector(field_cell)
@@ -102,9 +108,16 @@ def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2):
     i0 = np.floor((bbox_lo - field_origin) / field_cell).astype(int)
     i1 = np.ceil((bbox_hi - field_origin) / field_cell).astype(int)
     i1 = np.maximum(i1, i0 + 1)
+    clipped = False
+    if field_n is not None:
+        limit = np.asarray([int(v) for v in field_n], dtype=int)
+        clipped = bool(np.any(i0 < 0) or np.any(i1 > limit))
+        i0 = np.maximum(i0, 0)
+        i1 = np.minimum(i1, limit)
+        i1 = np.maximum(i1, i0 + 1)
     origin = field_origin + i0 * field_cell
     n = [int(v) for v in (i1 - i0)]
-    return origin, n, field_cell, bbox_lo, bbox_hi, i0, i1
+    return origin, n, field_cell, bbox_lo, bbox_hi, i0, i1, clipped
 
 
 # TSC support half-width is 1.5 cells, so 2 cells on every side guarantees
@@ -230,8 +243,10 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
                     else np.asarray(origin, dtype=float).reshape(3))
     field_n = None if n is None else [int(v) for v in n]
     (origin, n, cell, bbox_lo, bbox_hi, i0,
-     i1) = crop_to_field_lattice(bunch.pos_m, field_origin, field_cell,
-                                 margin_cells=pad_cells)
+     i1, clipped) = crop_to_field_lattice(bunch.pos_m, field_origin,
+                                          field_cell,
+                                          margin_cells=pad_cells,
+                                          field_n=field_n)
     rho = deposit_tsc(bunch, origin, n, cell)
     coords = _coords(origin, n, cell)
 
@@ -273,12 +288,12 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
     mfloor = max(mpeak * fs.SQ_FLOOR_RATIO, np.finfo(float).tiny)
 
     validation = _validate(bunch, maps, marginals, rho, cell, dataset,
-                           figure_name, origin, n)
+                           figure_name, origin, n, clipped)
 
     crop = _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
                         field_cell=field_cell, field_origin=field_origin,
                         field_n=field_n, i0=i0, i1=i1, bbox_lo=bbox_lo,
-                        bbox_hi=bbox_hi)
+                        bbox_hi=bbox_hi, clipped=clipped)
 
     return {
         "maps": maps, "marginals": marginals,
@@ -292,7 +307,7 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
 
 def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
                  field_cell, field_origin, field_n, i0, i1, bbox_lo,
-                 bbox_hi):
+                 bbox_hi, clipped=False):
     """Audit record: cropped box, field-lattice proof and panel fill."""
     names = ("x", "y", "z")
     box_lo = np.asarray(origin, dtype=float)
@@ -368,6 +383,7 @@ def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
             "cell_size_identical": cell_size_identical,
             "lattice_origin_m": [float(v) for v in field_origin],
             "stored_field_grid_cells": field_n,
+            "window_clipped_to_stored_grid": bool(clipped),
             "crop_cell_index_range": cell_idx,
             "cell_centres_match_field_lattice": centres_match,
         },
@@ -375,7 +391,7 @@ def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
 
 
 def _validate(bunch, maps, marginals, rho, cell, dataset, figure_name,
-              origin, n):
+              origin, n, clipped=False):
     qabs = np.abs(bunch.q_C)
     particle = {}
     for name in ("x", "y", "z"):
@@ -424,8 +440,17 @@ def _validate(bunch, maps, marginals, rho, cell, dataset, figure_name,
     sum_rho = float(np.sum(rho) * cell_vol)
     sum_q = float(np.sum(bunch.q_C))
     denom = max(abs(sum_q), np.finfo(float).tiny)
-    charge_rel = abs(sum_rho - sum_q) / denom
-    charge_ok = bool(charge_rel <= 1e-12)
+    deposited_fraction = (sum_rho / sum_q) if sum_q != 0.0 else 0.0
+    if clipped and sum_q != 0.0:
+        # The stored field window truncates the TSC support at its boundary,
+        # exactly as it truncates the field panels.  Exact charge
+        # conservation is impossible; record the fraction the window holds
+        # and reject only a gross loss.
+        charge_rel = abs(deposited_fraction - 1.0)
+        charge_ok = bool(0.90 <= deposited_fraction <= 1.0000001)
+    else:
+        charge_rel = abs(sum_rho - sum_q) / denom
+        charge_ok = bool(charge_rel <= 1e-12)
 
     axis_results = []
     for m in maps:
@@ -441,8 +466,9 @@ def _validate(bunch, maps, marginals, rho, cell, dataset, figure_name,
             f"{figure_name}: bunch-form moment check failed: {per_axis}")
     if not charge_ok:
         raise AssertionError(
-            f"{figure_name}: charge not conserved: sum(rho)*V={sum_rho!r} "
-            f"vs sum(q)={sum_q!r} (rel {charge_rel:.3e})")
+            f"{figure_name}: charge check failed: sum(rho)*V={sum_rho!r} "
+            f"vs sum(q)={sum_q!r} (deposited fraction "
+            f"{deposited_fraction:.6f}, clipped={clipped})")
     return {
         "sigma_tolerance_cell": _SIGMA_TOL_CELL,
         "centroid_tolerance_cell": _CENTROID_TOL_CELL,
@@ -451,6 +477,8 @@ def _validate(bunch, maps, marginals, rho, cell, dataset, figure_name,
         "per_axis": per_axis,
         "pass": True,
         "charge": {"sum_rho_C": sum_rho, "sum_q_C": sum_q,
+                   "deposited_fraction": deposited_fraction,
+                   "window_clipped_to_stored_grid": bool(clipped),
                    "relative_error": charge_rel, "pass": charge_ok},
         "axis_assertions": axis_results,
     }

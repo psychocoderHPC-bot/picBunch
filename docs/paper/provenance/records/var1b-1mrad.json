@@ -2,37 +2,45 @@
   "adios2_version": "2.12.1",
   "axis_rule": "y",
   "binary_sha256": {
-    "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+    "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
   },
   "case_id": "var1b-1mrad",
-  "command": "picBunch --input in3/bunch_1mrad_200.h5 --cell-size 2e-7 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output out/1mrad_fig.bp (BP5), then BP5->HDF5; xy plane z=8",
+  "command": "CUDA_VISIBLE_DEVICES=0 /home/ubuntu/picbunch-work-20261112/pb/build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.h5 --cell-size 2e-07,2e-07,2e-07 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/run/var1b-1mrad/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/t4d-harness/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/work/var1b-1mrad/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.bin 0.001 2e-07 2e-07 2e-07 5 12",
   "config_sha256": {
-    "sha256": "905168ac6ff52a950a10d6ceb36c7bb85bba88c8a83e7bfaa6f291a26d11c6d1"
+    "sha256": "350ea7c5849764bfc56c32acee0c640decba4daee29740836859e76ff21e39c7"
   },
-  "cuda_version": "13.4.92",
+  "cuda_version": "13.4.2",
   "data_sha256": [
     {
       "path": "docs/paper/data/var1b/slices_var1b.npz",
-      "sha256": "d59ec32e524163f14cd0188552153cb734d86a879c351d5231556dc07ca2b08b"
+      "sha256": "bfb7ff92d6b6e9670fa1dd896b82ef3e4e629d35ee8fd84462f1d8a451527934"
     }
   ],
-  "end_utc": null,
+  "end_utc": "2026-11-12T13:11:58Z",
   "figure_ids": [
     "val_1mrad_xy_E",
     "val_1mrad_xy_B"
   ],
-  "git_commit": null,
+  "generator": {
+    "reducer": {
+      "path": "docs/paper/precision-campaign/reduce_slices.py",
+      "sha256": "8add57aa3551c151c358428e76ae4a53bd7a579b6a9043afc1b9109da2092f3f"
+    }
+  },
+  "git_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
   "gpu_model": "NVIDIA H100 PCIe 80 GB",
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-  "io_backend": "adios2/BP5",
+  "io_backend": "hdf5",
   "measurement_kind": "fresh-h100",
-  "notes": "RETAINED UNCHANGED. This 2026-11-12 campaign var1b case is INVALID: the harness input did not match the committed 1 mrad case (weight/seed/positions differ; peaks ~10^6 too high). Its input is not reproducible from this repository, so the committed reduced slice is retained and no fresh data were ingested. The original measurement provenance is historical; no current campaign commit is claimed here.",
+  "notes": "Fresh var1b re-run on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0) from the recovered authoritative input bunch_1mrad_200.h5 (sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, case harness commit f27d3d3dc020a64ad9ffd2055b0db49f066eb344, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced slice reproduces the committed peaks to <=7.1e-16 with identical argmax nodes, and the bunch sources are stored in the archived 1e-7 m unit while bunch_pos_m carries metres. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
   "openpmd_version": "0.17.1",
+  "reference_only": false,
   "repeats": 1,
   "script_sha256": {
-    "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
+    "path": "docs/paper/precision-campaign/reduce_slices.py",
+    "sha256": "8add57aa3551c151c358428e76ae4a53bd7a579b6a9043afc1b9109da2092f3f"
   },
   "seed": 43,
-  "start_utc": null,
-  "statistic": "single-run"
+  "start_utc": "2026-11-12T13:10:46Z",
+  "statistic": "single"
 }

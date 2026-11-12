@@ -277,25 +277,34 @@ def run(outdir):
         }
     srcv = np.asarray(d["sources"], float)
     cellv = np.asarray(d["cell"], float)
+    if "bunch_pos_m" in d.files and "bunch_q_C" in d.files:
+        pos_m = np.asarray(d["bunch_pos_m"], float)
+        q_C = np.asarray(d["bunch_q_C"], float)
+        bunch_source = ("bunch_pos_m (metres) and bunch_q_C from the fresh "
+                        "reduced file")
+    else:
+        # Historical var1b sources are stored in the archived input's unit
+        # (unitSI = 1e-7 m), NOT in cell indices.  Convert to metres once.
+        pos_m = srcv * 1e-7
+        q_C = np.full(srcv.shape[0], -32.0e-18 / srcv.shape[0])
+        bunch_source = ("sources[:, :3] * 1e-7 m and -32 aC / N; the file "
+                        "carries no bunch_* keys")
+    # Cell indices for the support outline and the crop.  The density row is
+    # binned on the field lattice (cell = 2e-7 m), so the same metre positions
+    # must be divided by the field cell exactly once.
+    src_cells = pos_m / cellv
     bvar = render_bunch.Bunch(
-        np.asarray(srcv, float) * cellv,
-        np.full(srcv.shape[0], -32.0e-18 / srcv.shape[0]),
-        "y", float(cellv[0]), 10.0,
+        pos_m, q_C, "y", float(cellv[0]), 10.0,
         os.path.relpath(var_src, cases.REPO_ROOT),
-        "derived from slices_var1b.npz: positions sources[:, :3] (cell "
-        "indices) x cell (the grid is extended past the stored slice window "
-        "to keep every particle); charge -32 aC / 200 = -1.6e-19 C each; the "
-        "npz carries no bunch_* keys", pending_fresh_data=True)
-    # The VAR1b bunch sits at the upper edge of the 32-cell window, so its
-    # particle centroid is not inside the plotted y range; the axis proof for
-    # this case is the structural/field assertion, not the particle centroid.
+        "derived from slices_var1b.npz: %s; cell indices = pos_m / cell" %
+        bunch_source, pending_fresh_data=False)
     for part in ("E", "B"):
         row = render_bunch.build_row(
             bvar, "var1b", f"val_1mrad_xy_{part}", "xy",
             origin=d["origin"], n=d["n"], cell=d["cell"], source=var_src)
         results.append(make(
-            outdir, f"val_1mrad_xy_{part}", xy, part, "xy", srcv, 8.0, True,
-            "var1b", var_src, None, False, bunch=row))
+            outdir, f"val_1mrad_xy_{part}", xy, part, "xy", src_cells, 8.0,
+            True, "var1b", var_src, None, False, bunch=row))
     return results
 
 
