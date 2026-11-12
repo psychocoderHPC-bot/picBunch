@@ -17,6 +17,7 @@
 #include "picBunch/DistributedFft.hpp"
 #include "picBunch/Readout.hpp"
 #include "picBunch/detail/FftPlanCache.hpp"
+#include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/detail/SpectrumNorm.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
@@ -1013,6 +1014,68 @@ namespace picBunch
             return key;
         }
 
+        //! Process-wide control and counters of the kernel-spectrum cache.
+        struct FftSpectrumCacheControl
+        {
+            std::mutex mutex;
+            std::optional<std::size_t> overrideMiB;
+            std::atomic<std::size_t> bytes{0u};
+            std::atomic<std::size_t> entries{0u};
+            std::atomic<std::size_t> hits{0u};
+            std::atomic<std::size_t> misses{0u};
+        };
+
+        FftSpectrumCacheControl& fftSpectrumCacheControl()
+        {
+            static auto* instance = new FftSpectrumCacheControl{};
+            return *instance;
+        }
+
+        //! Parse ``PICBUNCH_FFT_SPECTRUM_CACHE_MB``; the caller resolves the default.
+        std::size_t envFftSpectrumCacheMiB()
+        {
+            char const* text = std::getenv(detail::kFftSpectrumCacheEnv);
+            if(text == nullptr)
+                return detail::kDefaultFftSpectrumCacheMiB;
+            std::size_t value = 0u;
+            if(*text == '\0')
+                throw std::invalid_argument(
+                    std::string(detail::kFftSpectrumCacheEnv)
+                    + " must be a non-negative decimal integer number of MiB");
+            for(char const* p = text; *p != '\0'; ++p)
+            {
+                if(*p < '0' || *p > '9')
+                    throw std::invalid_argument(
+                        std::string(detail::kFftSpectrumCacheEnv)
+                        + " must be a non-negative decimal integer number of MiB; got '" + text + "'");
+                std::size_t const digit = static_cast<std::size_t>(*p - '0');
+                if(value > (std::numeric_limits<std::size_t>::max() - digit) / 10u)
+                    throw std::invalid_argument(
+                        std::string(detail::kFftSpectrumCacheEnv) + " is out of range");
+                value = value * 10u + digit;
+            }
+            return value;
+        }
+
+        std::size_t resolveFftSpectrumCacheMiB()
+        {
+            FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+            std::lock_guard lock{control.mutex};
+            if(control.overrideMiB)
+                return *control.overrideMiB;
+            return envFftSpectrumCacheMiB();
+        }
+
+        std::size_t resolveFftSpectrumCacheBytes()
+        {
+            constexpr std::size_t mib = 1024u * 1024u;
+            std::size_t const value = resolveFftSpectrumCacheMiB();
+            if(value > std::numeric_limits<std::size_t>::max() / mib)
+                throw std::invalid_argument(
+                    std::string(detail::kFftSpectrumCacheEnv) + " is too large");
+            return value * mib;
+        }
+
         /*! Process-lifetime, per-thread LRU cache for kernel half-spectra.
          *
          * The kernel build and its forward transform repeat for every bin and
@@ -1036,27 +1099,36 @@ namespace picBunch
                 std::declval<T_Device&>(),
                 std::size_t{1u}));
 
-            static constexpr std::size_t kCapBytes = 1536ull * 1024ull * 1024ull;
-
             static Buffer const* find(T_Device& /*device*/, KernelSpectrumKey const& key)
             {
+                std::size_t const capBytes = resolveFftSpectrumCacheBytes();
                 std::lock_guard lock{guard()};
                 State& state = states()[std::this_thread::get_id()];
+                enforceLimit(state, capBytes);
+                if(capBytes == 0u)
+                    return nullptr;
                 auto it = state.entries.find(key);
                 if(it == state.entries.end())
                     return nullptr;
                 state.order.splice(state.order.begin(), state.order, it->second.lru);
+                fftSpectrumCacheControl().hits.fetch_add(1u, std::memory_order_relaxed);
                 return &it->second.buffer;
             }
 
             //! Count a miss; true means the caller should insert its result.
             static bool noteMiss(T_Device& /*device*/, KernelSpectrumKey const& key, std::size_t count)
             {
+                std::size_t const capBytes = resolveFftSpectrumCacheBytes();
                 std::size_t const entryBytes = count * sizeof(Complex);
-                if(entryBytes > kCapBytes)
-                    return false;
                 std::lock_guard lock{guard()};
                 State& state = states()[std::this_thread::get_id()];
+                enforceLimit(state, capBytes);
+                if(capBytes == 0u || entryBytes > capBytes)
+                {
+                    state.misses.erase(key);
+                    return false;
+                }
+                fftSpectrumCacheControl().misses.fetch_add(1u, std::memory_order_relaxed);
                 unsigned& misses = state.misses[key];
                 ++misses;
                 if(misses < 2u)
@@ -1074,26 +1146,25 @@ namespace picBunch
                 T_Source const& source)
             {
                 std::size_t const entryBytes = count * sizeof(Complex);
-                if(entryBytes > kCapBytes)
+                if(entryBytes > resolveFftSpectrumCacheBytes())
                     return;
-                {
-                    std::lock_guard lock{guard()};
-                    State& state = states()[std::this_thread::get_id()];
-                    while(!state.entries.empty() && state.bytes + entryBytes > kCapBytes)
-                        evictOldest(state);
-                }
                 Buffer buffer = alpaka::onHost::allocUnified<Complex>(device, count);
                 alpaka::onHost::memcpy(queue, buffer, source);
                 alpaka::onHost::wait(queue);
-                {
-                    std::lock_guard lock{guard()};
-                    State& state = states()[std::this_thread::get_id()];
-                    state.order.push_front(key);
-                    state.entries.emplace(
-                        key,
-                        Entry{count, std::move(buffer), state.order.begin()});
-                    state.bytes += entryBytes;
-                }
+                std::size_t const capBytes = resolveFftSpectrumCacheBytes();
+                std::lock_guard lock{guard()};
+                State& state = states()[std::this_thread::get_id()];
+                enforceLimit(state, capBytes);
+                if(capBytes == 0u || state.bytes + entryBytes > capBytes)
+                    return;
+                state.order.push_front(key);
+                state.entries.emplace(
+                    key,
+                    Entry{count, std::move(buffer), state.order.begin()});
+                state.bytes += entryBytes;
+                FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+                control.bytes.fetch_add(entryBytes, std::memory_order_relaxed);
+                control.entries.fetch_add(1u, std::memory_order_relaxed);
             }
 
         private:
@@ -1112,6 +1183,14 @@ namespace picBunch
                 std::size_t bytes = 0u;
             };
 
+            static void enforceLimit(State& state, std::size_t capBytes)
+            {
+                while(!state.entries.empty() && state.bytes > capBytes)
+                    evictOldest(state);
+                if(capBytes == 0u)
+                    state.misses.clear();
+            }
+
             static void evictOldest(State& state)
             {
                 KernelSpectrumKey const victim = state.order.back();
@@ -1119,8 +1198,12 @@ namespace picBunch
                 auto it = state.entries.find(victim);
                 if(it != state.entries.end())
                 {
-                    state.bytes -= it->second.count * sizeof(Complex);
+                    std::size_t const entryBytes = it->second.count * sizeof(Complex);
+                    state.bytes -= entryBytes;
                     state.entries.erase(it);
+                    FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+                    control.bytes.fetch_sub(entryBytes, std::memory_order_relaxed);
+                    control.entries.fetch_sub(1u, std::memory_order_relaxed);
                 }
             }
 
@@ -1137,6 +1220,44 @@ namespace picBunch
             }
         };
     } // namespace
+
+    namespace detail
+    {
+        std::size_t fftSpectrumCacheLimitMiB()
+        {
+            return resolveFftSpectrumCacheMiB();
+        }
+
+        std::size_t fftSpectrumCacheLimitBytes()
+        {
+            return resolveFftSpectrumCacheBytes();
+        }
+
+        void setFftSpectrumCacheLimitMiB(std::size_t mib)
+        {
+            FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+            std::lock_guard lock{control.mutex};
+            control.overrideMiB = mib;
+        }
+
+        void clearFftSpectrumCacheLimitOverride()
+        {
+            FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+            std::lock_guard lock{control.mutex};
+            control.overrideMiB.reset();
+        }
+
+        FftSpectrumCacheStats fftSpectrumCacheStats()
+        {
+            FftSpectrumCacheControl& control = fftSpectrumCacheControl();
+            FftSpectrumCacheStats result;
+            result.entries = control.entries.load(std::memory_order_relaxed);
+            result.bytes = control.bytes.load(std::memory_order_relaxed);
+            result.hits = control.hits.load(std::memory_order_relaxed);
+            result.misses = control.misses.load(std::memory_order_relaxed);
+            return result;
+        }
+    } // namespace detail
 
     Vec3 resolveCellSize(
         std::optional<Vec3> const& explicitCellSize,

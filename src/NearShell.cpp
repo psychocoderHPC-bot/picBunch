@@ -19,6 +19,7 @@
 #include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/NearTileEstimate.hpp"
 
 #include <alpaka/alpaka.hpp>
 
@@ -248,6 +249,45 @@ namespace picBunch
                 }
             }
         };
+
+        /*! Resolve the output tile edge, applying the automatic pair-count rule.
+         *
+         * An explicit positive ``tileNodes`` always wins.  Otherwise the
+         * estimator compares the pair count at tiles 2 and 4 and picks 2 only
+         * when its work reduction clearly exceeds tile 4's measured per-pair
+         * throughput advantage.  This is the measured rule: a cloud whose near
+         * set shrinks with the tile uses tile 2, while a cloud already covered
+         * by one tile-4 block (or a small grid where the two pair counts are
+         * close) keeps tile 4.
+         */
+        std::size_t resolveNearShellTile(
+            Bunch const& bunch,
+            Grid const& grid,
+            NearShellOptions const& nearShell,
+            Vec3 const& cellSize,
+            double radius)
+        {
+            if(nearShell.tileNodes > 0u)
+            {
+                if(nearShell.resolvedTileNodes)
+                    *nearShell.resolvedTileNodes = nearShell.tileNodes;
+                return nearShell.tileNodes;
+            }
+            detail::NearTileEstimate const estimate
+                = detail::estimateNearTile(bunch, grid, cellSize, radius);
+            if(nearShell.resolvedTileNodes)
+                *nearShell.resolvedTileNodes = estimate.tile;
+            std::fprintf(
+                stderr,
+                "near shell: automatic tile=%zu (%s; estimated pairs: tile 2 = %.3g, "
+                "tile 4 = %.3g)\n",
+                estimate.tile,
+                estimate.tile2Wins ? "tile 2 pair saving exceeds the tile 4 throughput gain"
+                                   : "pair counts near equal, keeping tile 4",
+                estimate.pairs2,
+                estimate.pairs4);
+            return estimate.tile;
+        }
     } // namespace
 
     double resolveNearShellRadius(ComputeOptions const& options, NearShellOptions const& nearShell)
@@ -383,7 +423,8 @@ namespace picBunch
         Grid const& grid = field.grid;
         double const radius = resolveNearShellRadius(options, nearShell);
         double const cells[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
-        std::size_t const tile = std::max<std::size_t>(1u, nearShell.tileNodes);
+        std::size_t const tile
+            = resolveNearShellTile(bunch, grid, nearShell, options.cellSize, radius);
         nbref::Settings const settings = exactSettings();
         std::uint64_t pairs = 0;
         std::size_t tileIndex = 0;

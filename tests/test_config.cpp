@@ -161,9 +161,11 @@ TEST(Config, DefaultsAreFloat32AndPlainMesh)
     };
     erase("precision = \"float64\"\n");
     erase("near_shell = \"exact\"\n");
+    erase("near_shell_tile = 8\n");
     auto const config = picBunch::loadConfig(fixture.write("defaults.toml", text));
     EXPECT_FALSE(config.picongpu.float64);
     EXPECT_EQ(config.accuracy.nearShell, "none");
+    EXPECT_EQ(config.accuracy.nearShellTile, 0u);
     EXPECT_DOUBLE_EQ(config.picongpu.baseMass, picBunch::kDeckElectronMass);
     EXPECT_DOUBLE_EQ(config.picongpu.baseCharge, picBunch::kDeckElectronCharge);
     EXPECT_DOUBLE_EQ(config.picongpu.speedOfLight, picBunch::kDeckSpeedOfLight);

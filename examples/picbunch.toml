@@ -53,4 +53,4 @@ patch = "bbox"
 tolerance = 1.0e-3
 near_shell = "none"
 near_shell_radius = 0.0
-near_shell_tile = 4
+near_shell_tile = 0  # 0 = automatic near-set pair-count rule

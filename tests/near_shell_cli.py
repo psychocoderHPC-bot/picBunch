@@ -11,6 +11,7 @@ exit 2 with ``unknown option '--near-shell'``, so this test fails there.
 """
 import argparse
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -156,6 +157,43 @@ def main():
         if result.returncode != 0:
             print(result.stderr)
             raise SystemExit(f"--near-shell-oblique-order {value} failed")
+    # The automatic tile rule samples the near-set pair count in grid
+    # coordinates.  With the non-zero origin above it must not collapse to zero
+    # and must select the measured-best tile 2 for this dense cloud.
+    auto_result = run(
+        args.app,
+        common + [
+            "--output", str(work / "near_auto.h5"),
+            "--near-shell", "exact",
+            "--near-shell-radius", "3",
+            "--near-shell-tile", "auto",
+        ],
+    )
+    if auto_result.returncode != 0:
+        print(auto_result.stderr)
+        raise SystemExit("--near-shell-tile auto failed")
+    auto_line = next(
+        (line for line in auto_result.stderr.splitlines() if "automatic tile=" in line),
+        None,
+    )
+    if auto_line is None:
+        raise SystemExit("automatic tile rule did not log its choice")
+    match = re.search(
+        r"automatic tile=(\d+).*tile 2 = ([0-9.eE+-]+), tile 4 = ([0-9.eE+-]+)",
+        auto_line,
+    )
+    if match is None:
+        raise SystemExit(f"cannot parse automatic tile line: {auto_line}")
+    chosen, pairs2, pairs4 = int(match.group(1)), float(match.group(2)), float(match.group(3))
+    if not (pairs2 > 0.0 and pairs4 > 0.0):
+        raise SystemExit(
+            f"near-set estimate collapsed with a non-zero origin: tile 2={pairs2}, "
+            f"tile 4={pairs4}"
+        )
+    if chosen != 2:
+        raise SystemExit(f"automatic rule chose tile {chosen}, measured best is 2")
+    print(auto_line)
+
     bad = run(
         args.app,
         common + ["--output", str(work / "near_bad.h5"), "--near-shell", "exact",

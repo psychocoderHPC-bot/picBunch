@@ -7,6 +7,8 @@
 // precision have separate budgets (README, "Accuracy and error budget").
 
 #include "picBunch/Compute.hpp"
+
+#include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/Config.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
@@ -103,6 +105,11 @@ namespace
             "                        (default: 0 = tolerance policy).  1 disables\n"
             "                        padding (diagnostic: wrapped images leak into\n"
             "                        the output); values above 3 only add cost\n"
+            "  --fft-spectrum-cache-mb <MiB>\n"
+            "                        cap the process-wide kernel-spectrum cache in\n"
+            "                        MiB (default: 1536; 0 disables).  Overrides\n"
+            "                        PICBUNCH_FFT_SPECTRUM_CACHE_MB; the cap is per\n"
+            "                        process and per MPI rank\n"
             "  --near-shell <mode>   none|exact|fast|fast-gpu (default: none).  exact\n"
             "                        replaces the mesh contribution of every source\n"
             "                        within the shell by the adaptive reference (a\n"
@@ -113,8 +120,12 @@ namespace
             "                        the host path when no device is present.\n"
             "  --near-shell-radius <cells>  shell radius in PIC cells (default: derived\n"
             "                        from --tolerance: 3 at 1e-3, +1 per decade, max 6)\n"
-            "  --near-shell-tile <n> tile edge in nodes for the local subtraction FFT\n"
-            "                        (default: 4)\n"
+            "  --near-shell-tile <auto|n>\n"
+            "                        tile edge in nodes for the local subtraction FFT.\n"
+            "                        auto (default) samples the near-set pair count\n"
+            "                        and picks 2 when its saving exceeds tile 4's\n"
+            "                        measured throughput gain, else 4; an explicit n\n"
+            "                        always wins\n"
             "  --near-shell-fast-order <n>  Gauss order of the fast remainder (default: 5)\n"
             "  --near-shell-oblique-order <auto|N>\n"
             "                        oblique singular-box order: auto (default) raises it\n"
@@ -185,9 +196,10 @@ namespace
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
         unsigned fftPadding = 0; //!< 0 = tolerance policy
+        std::optional<std::size_t> fftSpectrumCacheMiB; //!< unset = env/default
         std::string nearShell = "none";
         double nearShellRadius = 0.0;
-        std::size_t nearShellTile = 4;
+        std::size_t nearShellTile = 0; //!< 0 = automatic pair-count rule
         int nearShellFastOrder = 5;
         std::string nearShellObliqueOrder = "auto";
         int nearShellExactCells = -2;
@@ -380,14 +392,22 @@ namespace
                         "--fft-padding must be between 0 and 8 (0 selects the tolerance policy)");
                 args.fftPadding = static_cast<unsigned>(padding);
             }
+            else if(option == "--fft-spectrum-cache-mb")
+                args.fftSpectrumCacheMiB
+                    = parseIteration(value("--fft-spectrum-cache-mb"), "--fft-spectrum-cache-mb");
             else if(option == "--near-shell")
                 args.nearShell = value("--near-shell");
             else if(option == "--near-shell-radius")
                 args.nearShellRadius
                     = parseTripleDouble(value("--near-shell-radius"), "--near-shell-radius")[0];
             else if(option == "--near-shell-tile")
-                args.nearShellTile
-                    = parseIteration(value("--near-shell-tile"), "--near-shell-tile");
+            {
+                auto const text = value("--near-shell-tile");
+                if(text == "auto")
+                    args.nearShellTile = 0;
+                else
+                    args.nearShellTile = parseIteration(text, "--near-shell-tile");
+            }
             else if(option == "--near-shell-fast-order")
                 args.nearShellFastOrder
                     = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
@@ -506,8 +526,7 @@ namespace
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
-        if(args.nearShellTile == 0u)
-            throw std::invalid_argument("--near-shell-tile must be positive");
+        // 0 is the automatic rule; any explicit positive value is an override.
         if(args.nearShellExactCells < -2 || args.nearShellExactCells > 2)
             throw std::invalid_argument("--near-shell-exact-cells must be in [-2, 2]");
         if(args.nearShellFastOrder < 2 || args.nearShellFastOrder > 32)
@@ -1056,6 +1075,9 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    if(args.fftSpectrumCacheMiB)
+        picBunch::detail::setFftSpectrumCacheLimitMiB(*args.fftSpectrumCacheMiB);
+
     if(args.config)
     {
         try
@@ -1329,11 +1351,18 @@ int main(int argc, char** argv)
         auto const computeStart = Clock::now();
         if(root)
         {
-            std::printf(
-                "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
-                args.nearShell.c_str(),
-                picBunch::resolveNearShellRadius(options, options.nearShell),
-                options.nearShell.tileNodes);
+            if(options.nearShell.tileNodes == 0u)
+                std::printf(
+                    "near shell: mode=%s R=%.3g PIC cells tile=auto (the compute stage "
+                    "logs the chosen edge)\n",
+                    args.nearShell.c_str(),
+                    picBunch::resolveNearShellRadius(options, options.nearShell));
+            else
+                std::printf(
+                    "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
+                    args.nearShell.c_str(),
+                    picBunch::resolveNearShellRadius(options, options.nearShell),
+                    options.nearShell.tileNodes);
             // The near shell is an opt-in correction with a regime-dependent
             // accuracy envelope.  State it instead of letting --tolerance imply
             // an in-support guarantee it does not provide.

@@ -16,6 +16,7 @@
 #include "picBunch/VelocityBinning.hpp"
 #include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/HostReduction.hpp"
+#include "picBunch/detail/Reduction.hpp"
 
 #include <gtest/gtest.h>
 
@@ -23,10 +24,12 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <limits>
 #include <random>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 #if defined(_OPENMP)
@@ -166,6 +169,16 @@ namespace
         tail.switchDistance = switchFactor * tail.supportRadius;
         return tail;
     }
+
+    //! Squared magnitude transform for the direct helper test.
+    struct SquaredValue
+    {
+        template<typename T>
+        ALPAKA_FN_ACC constexpr auto operator()(T const& value) const
+        {
+            return value * value;
+        }
+    };
 
     void expectFarTailEqual(picBunch::FarTail const& a, picBunch::FarTail const& b)
     {
@@ -311,6 +324,110 @@ TEST(AlpakaReductions, BinningMatchesSerialReference)
     }
 }
 
+TEST(AlpakaReductions, ParallelUsesARealParallelHostExecutor)
+{
+    // A static check is the only reliable way to see the executor mapping: the
+    // two paths are numerically identical by design, so a result comparison
+    // alone cannot catch a silent aliasing back to the serial executor.
+#if ALPAKA_OMP
+    static_assert(std::same_as<
+                  std::remove_cvref_t<decltype(picBunch::detail::parallelHostReductionExecutor)>,
+                  alpaka::exec::CpuOmpBlocks>);
+#else
+    static_assert(std::same_as<
+                  std::remove_cvref_t<decltype(picBunch::detail::parallelHostReductionExecutor)>,
+                  alpaka::exec::CpuSerial>);
+    GTEST_SKIP() << "alpaka was built without OpenMP; Parallel keeps the serial fallback";
+#endif
+}
+
+TEST(AlpakaReductions, HelperSerialAndParallelAgreeBitForBit)
+{
+    // 1e6 elements span many OpenMP blocks, so the parallel path really
+    // partitions the input instead of fitting in a single chunk.
+    constexpr std::size_t count = 1'000'000u;
+    std::vector<double> values(count);
+    std::mt19937 gen(0xc0ffeeu);
+    std::uniform_real_distribution<double> dist(-1.0e6, 1.0e6);
+    for(std::size_t i = 0; i < count; ++i)
+        values[i] = dist(gen);
+    // Place both extrema where different partitions meet.
+    values[0] = -1.0e12;
+    values[count / 3u] = 1.0e12;
+    values[count - 1u] = -1.0e12;
+
+    auto const span = alpaka::makeMdSpan(values.data(), alpaka::Vec<std::size_t, 1u>{count});
+    auto const run = [&] {
+        return std::array<double, 4>{
+            picBunch::detail::reduceMin(span, std::numeric_limits<double>::max()),
+            picBunch::detail::reduceMax(span, -std::numeric_limits<double>::max()),
+            picBunch::detail::transformReduceMin(0.0, SquaredValue{}, span),
+            picBunch::detail::transformReduceMax(0.0, SquaredValue{}, span)};
+    };
+    auto const bits = [](double v) { return std::bit_cast<std::uint64_t>(v); };
+
+    using picBunch::detail::HostReductionExecutor;
+    auto& executorOverride = picBunch::detail::hostReductionExecutorOverride();
+    executorOverride = HostReductionExecutor::Serial;
+    auto const serial = run();
+    executorOverride = HostReductionExecutor::Parallel;
+    auto const parallel = run();
+
+    // min/max are order insensitive, so both executors must return identical
+    // bits.  This helper exposes no sum reduction; ordered sums stay in the
+    // host loops and are not dispatched here.
+    for(std::size_t i = 0; i < serial.size(); ++i)
+        EXPECT_EQ(bits(serial[i]), bits(parallel[i])) << "result " << i;
+
+#if defined(_OPENMP)
+    // omp_set_num_threads only changes the calling thread's ICV.  The reduction
+    // queue is non-blocking and runs kernels on its worker thread, so set the
+    // team size there and read it back to prove the thread count really changed.
+    auto& queue = picBunch::detail::reductionQueue();
+    int workerThreads = 0;
+    int appliedSingle = 0;
+    int appliedMany = 0;
+    queue.enqueueHostFn(
+        [&]
+        {
+            workerThreads = omp_get_max_threads();
+            omp_set_num_threads(1);
+            appliedSingle = omp_get_max_threads();
+        });
+    alpaka::onHost::wait(queue);
+    auto const single = run();
+
+    int const manyThreads = std::max(2, workerThreads);
+    queue.enqueueHostFn(
+        [&]
+        {
+            omp_set_num_threads(manyThreads);
+            appliedMany = omp_get_max_threads();
+        });
+    alpaka::onHost::wait(queue);
+    auto const many = run();
+
+    queue.enqueueHostFn([&] { omp_set_num_threads(workerThreads); });
+    alpaka::onHost::wait(queue);
+
+    ASSERT_EQ(appliedSingle, 1);
+    ASSERT_GE(appliedMany, 1);
+    if(workerThreads > 1)
+        EXPECT_EQ(appliedMany, manyThreads);
+    for(std::size_t i = 0; i < parallel.size(); ++i)
+    {
+        EXPECT_EQ(bits(parallel[i]), bits(single[i])) << "single thread result " << i;
+        EXPECT_EQ(bits(parallel[i]), bits(many[i])) << "many thread result " << i;
+    }
+#else
+    auto const single = run();
+    for(std::size_t i = 0; i < parallel.size(); ++i)
+        EXPECT_EQ(bits(parallel[i]), bits(single[i])) << "result " << i;
+#endif
+
+    executorOverride = HostReductionExecutor::Default;
+}
+
 TEST(AlpakaReductions, ResultsAreThreadCountIndependent)
 {
     Bunch const bunch = mixedBunch(1500u, 0x77u);
@@ -339,17 +456,45 @@ TEST(AlpakaReductions, ResultsAreThreadCountIndependent)
     executorOverride = HostReductionExecutor::Default;
     expectReductionResultsEqual(serialExecutor, parallelExecutor);
 
-    // The production default must also not follow the OpenMP thread count.
+    // The parallel executor must also not follow the OpenMP thread count.  Set
+    // the team size on the reduction queue's worker thread, where the kernels
+    // actually run, and verify the worker saw the requested value.
+    executorOverride = HostReductionExecutor::Parallel;
 #if defined(_OPENMP)
-    int const savedThreads = omp_get_max_threads();
-    omp_set_num_threads(1);
+    auto& queue = picBunch::detail::reductionQueue();
+    int workerThreads = 0;
+    int appliedSingle = 0;
+    int appliedMany = 0;
+    queue.enqueueHostFn(
+        [&]
+        {
+            workerThreads = omp_get_max_threads();
+            omp_set_num_threads(1);
+            appliedSingle = omp_get_max_threads();
+        });
+    alpaka::onHost::wait(queue);
     auto const single = run();
-    omp_set_num_threads(std::max(2, savedThreads));
+
+    int const manyThreads = std::max(2, workerThreads);
+    queue.enqueueHostFn(
+        [&]
+        {
+            omp_set_num_threads(manyThreads);
+            appliedMany = omp_get_max_threads();
+        });
+    alpaka::onHost::wait(queue);
     auto const many = run();
-    omp_set_num_threads(savedThreads);
+
+    queue.enqueueHostFn([&] { omp_set_num_threads(workerThreads); });
+    alpaka::onHost::wait(queue);
+    ASSERT_EQ(appliedSingle, 1);
+    ASSERT_GE(appliedMany, 1);
+    if(workerThreads > 1)
+        EXPECT_EQ(appliedMany, manyThreads);
 #else
     auto const single = run();
     auto const many = run();
 #endif
+    executorOverride = HostReductionExecutor::Default;
     expectReductionResultsEqual(single, many);
 }

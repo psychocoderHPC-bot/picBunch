@@ -146,7 +146,7 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
          [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
          [--near-shell none|exact|fast] [--near-shell-radius <cells>] \
-         [--near-shell-tile <nodes>] [--near-shell-fast-order <n>]
+         [--near-shell-tile <auto|nodes>] [--near-shell-fast-order <n>]
          [--near-shell-oblique-order <auto|N>] \
          [--near-shell-exact-cells <-2|-1|0|1|2>] \
          [--fft-padding <N>]
@@ -219,7 +219,14 @@ cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
 that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
 the effective radius exceeds the nominal one by at most half a tile. The three
 flags are parsed by the shipped binary and the run summary prints
-`near shell: mode=... R=... PIC cells tile=... nodes`. The measured worst-case
+`near shell: mode=... R=... PIC cells tile=... nodes` (or `tile=auto`). The
+tile edge defaults to `auto`: a strided sample of up to 4096 sources estimates
+the near-set pair count at tiles 2 and 4 with the same membership test used to
+build the near set, and tile 2 is used only when its pair saving exceeds tile
+4's measured 1.25x per-pair throughput advantage plus a 5% margin. Every other
+case keeps tile 4. `--near-shell-tile N` always overrides the rule, and the
+compute stage logs the chosen edge as
+`near shell: automatic tile=...` with both estimates. The measured worst-case
 envelope is `1e-3` or better for gamma ~ 1, aspect 1 at R >= 3 PIC cells, and for
 gamma ~ 10, aspect 1, oblique velocity at R >= 4; gamma 1 at aspect 4 needs about
 32 cells and is outside the shell's reach. The exact evaluator costs about
@@ -699,6 +706,52 @@ covers both the explicit and the auto-selected path with the device deposit.
 The previous mismatch was a device TSC deposit that ignored `rhoStride`, so the
 distributed complex buffer received the source at half its index; the host
 deterministic path was unaffected.
+
+#### Kernel-spectrum cache cap
+
+Both FFT paths cache each verified kernel half-spectrum and copy it back on a
+later hit. The copy is exact, so a hit is bit-identical to a fresh build. The
+cache is process-wide and per-thread with an LRU bound. Its budget is tunable:
+
+* `PICBUNCH_FFT_SPECTRUM_CACHE_MB` sets the cap in MiB (default `1536`).
+* `--fft-spectrum-cache-mb <MiB>` overrides the environment for that process.
+* `0` disables the cache. The cap is per process and per MPI rank, not an
+  aggregate over ranks.
+
+An entry larger than the cap is skipped, so that shape rebuilds every call
+instead of exceeding the budget; existing entries are evicted least-recently
+used until they fit. Disabling the cache changes memory and time only, never a
+field value.
+
+The six-component, single-velocity set is about `492 MiB` at `M = 220` and
+about `3.4 GiB` at `M = 420`, because an entry is one packed half-spectrum of
+`M_x M_y (M_x/2+1)` complex values. The default therefore holds the full set at
+`M = 220` and only two components at `M = 420`. Measured on `fwk394`
+(`RTX 2080 Ti`, CUDA 12.5, `sm_70` build), `2e6` particles, gamma 10, spacing 1,
+padding 2, median of 9 repeats after 2 warm-ups (shared node, so treat the
+absolute times as indicative):
+
+| L | M | cache MiB | total median ms | setup (plan) ms | device peak MiB | VmPeak MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100 | 220 | 1536 (default) | 133.3 | 8.4 | 1241 | 7317 |
+| 100 | 220 | 256 | 166.1 | 8.6 | 1147 | 7029 |
+| 100 | 220 | 0 (off) | 188.0 | 9.2 | 841 | 6741 |
+| 200 | 420 | 1536 (default) | 594.6 | 171.6 | 5243 | 11311 |
+| 200 | 420 | 256 | 728.2 | 174.3 | 3665 | 9647 |
+| 200 | 420 | 0 (off) | 732.4 | 173.0 | 3615 | 9647 |
+| 200 | 420 | 3456 | 328.2 | 175.0 | 7067 | 13103 |
+
+At `M = 220` the default cap removes the per-bin kernel rebuild and cuts the
+total by 29% against the disabled run for about `400 MiB` more device memory.
+At `M = 420` the default still beats disabling by 19%, but it holds only two of
+the six components and evicts them between calls. Raise the cap to at least the
+six-component working set (about `3456 MiB` at `M = 420`) when the device has
+the memory: that removes the kernel rebuild entirely and halves the total. Keep
+the default `1536` for boxes up to `M = 220`; set `0` only on a device that is
+memory-tight and cannot spare the cache. `VmHWM` stays at the field buffers
+(`492 MiB` at `M = 220`, `799 MiB` at `M = 420`) because the unified cache pages
+are resident on the device, so read `VmPeak` or the device peak for the cache
+cost.
 
 Timing, `256^3` output (`512^3` padded), 128 particles, grid-only run (no writer),
 `rosi_v100` with idle GPUs (medians of 3 runs at 2 ranks and 2 runs at 4 ranks):
