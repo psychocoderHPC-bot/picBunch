@@ -201,19 +201,27 @@ def field_panel_width_frac():
 
 
 def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
-                 bottom_in=FIELD_BOTTOM_IN, row_gap_in=FIELD_ROW_GAP_IN):
+                 bottom_in=FIELD_BOTTOM_IN, row_gap_in=FIELD_ROW_GAP_IN,
+                 panel_scale=1.0):
     """Unified square-panel layout for a field figure.
 
     Returns a dict with the canvas size, the four panel x positions, the
     panel width/height (both in figure fractions and in inches), the colour
     bar positions and the y origin of every row.  ``panel_width_in`` equals
     ``panel_height_in`` by construction, independent of ``nrows``.
+
+    ``panel_scale`` shrinks every square panel by that factor and re-centres
+    the block horizontally.  It is a height-budget knob; at the default 1.0
+    the layout is byte-identical to the canonical field grid.
     """
     nrows = int(nrows)
     if nrows < 1:
         raise ValueError("field_layout needs at least one row")
+    panel_scale = float(panel_scale)
+    if not (0.5 <= panel_scale <= 1.0):
+        raise ValueError("panel_scale must be in [0.5, 1.0]")
     fig_w_in = width_in(width_frac)
-    pw = field_panel_width_frac()
+    pw = field_panel_width_frac() * panel_scale
     panel_in = pw * fig_w_in
     fig_h_in = (float(top_in) + nrows * panel_in
                 + (nrows - 1) * float(row_gap_in) + float(bottom_in))
@@ -228,8 +236,20 @@ def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
     cb1 = xs[-1] + pw + FIELD_BAR_GAP
     p4 = cb1 + FIELD_BAR_WIDTH + FIELD_BAR_LABEL_GAP
     cb2 = p4 + pw + FIELD_BAR_GAP
-    if cb2 + FIELD_BAR_WIDTH + FIELD_EDGE_GAP > FIELD_RIGHT + 1e-9:
+    right_edge = cb2 + FIELD_BAR_WIDTH
+    # The canonical layout leaves FIELD_EDGE_GAP at the right edge; at
+    # panel_scale == 1.0 this makes shift exactly zero (byte-identical output
+    # for every figure that does not request a shrink).
+    avail = (FIELD_RIGHT - FIELD_EDGE_GAP) - FIELD_LEFT
+    block_w = right_edge - FIELD_LEFT
+    if block_w > avail + 1e-9:
         raise AssertionError("field_layout: colour bars overrun the canvas")
+    shift = (avail - block_w) / 2.0
+    if shift > 1e-12:
+        xs = [x + shift for x in xs]
+        cb1 += shift
+        p4 += shift
+        cb2 += shift
     panel_x = [xs[0], xs[1], xs[2], p4]
 
     row_y = []
@@ -245,7 +265,7 @@ def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
         "panel_aspect": (rh * fig_h_in) / panel_in,
         "cb1": cb1, "cb2": cb2, "bar_width": FIELD_BAR_WIDTH,
         "row_y": row_y, "top": top, "bottom": bottom, "row_gap": gap,
-        "nrows": nrows,
+        "nrows": nrows, "panel_scale": panel_scale,
     }
 
 
@@ -260,6 +280,70 @@ def _layout_manifest(geo):
             "title": TITLE_PT, "tick": TICK_PT, "annotation": ANNOT_PT,
             "legend": LEGEND_PT, "body_text": BODY_TEXT_PT,
         },
+    }
+
+
+# ---- Bunch-form first row ----------------------------------------------
+# One compact row above an existing field figure: three square |rho|
+# projection maps, one marginal-profile axis and one shared colour bar.  The
+# sizes are in millimetres, so they are physical at the print scale.  The
+# marginal axis absorbs the width left over after the maps, the two label
+# gaps, the bar and the outer margins, capped at the 38 mm design width.  The
+# planned 170 mm canvas yields the full 38 mm marginal; the repo's actual
+# A4 + 1 in-margin text width is 159.2 mm, where the row resolves to 32 mm
+# maps and a ~23 mm marginal with every 7.5 pt tick label unclipped.
+BUNCH_MAP_MM = 32.0
+BUNCH_MARGINAL_MM = 38.0
+BUNCH_MARGINAL_MIN_MM = 18.0
+BUNCH_BAR_MM = 3.0
+BUNCH_GAP_MM = 1.6          # between the maps
+BUNCH_MARGINAL_GAP_MM = 9.5  # before the marginal axis (its y tick labels)
+BUNCH_BAR_GAP_MM = 9.2       # before the bar (its decade tick labels)
+BUNCH_LEFT_MM = 10.5        # first map y ticks + rotated y label
+BUNCH_RIGHT_MM = 5.0        # rotated colour-bar label
+BUNCH_TITLE_IN = 0.16       # panel title above the maps
+BUNCH_LABEL_IN = 0.34       # x tick labels + axis label below the maps
+BUNCH_INTER_GAP_IN = 0.10   # between the bunch labels and the field titles
+_MM_IN = 1.0 / 25.4
+
+
+def bunch_row_geometry(fig_w_in):
+    """Axis x positions and vertical reserve (inches) for the bunch row.
+
+    Three maps and the marginal axis are square panel height; the colour bar
+    shares that height.  The marginal width absorbs the leftover canvas width
+    so the row always fits the actual canvas, and it widens towards the 38 mm
+    design value on a wider (170 mm) text block.
+    """
+    fig_w_in = float(fig_w_in)
+    map_in = BUNCH_MAP_MM * _MM_IN
+    bar_in = BUNCH_BAR_MM * _MM_IN
+    gap_in = BUNCH_GAP_MM * _MM_IN
+    marg_gap_in = BUNCH_MARGINAL_GAP_MM * _MM_IN
+    bar_gap_in = BUNCH_BAR_GAP_MM * _MM_IN
+    left_in = BUNCH_LEFT_MM * _MM_IN
+    right_in = BUNCH_RIGHT_MM * _MM_IN
+    gaps = (2.0 * gap_in + marg_gap_in + bar_gap_in)
+    avail = (fig_w_in - left_in - right_in - 3.0 * map_in - bar_in - gaps)
+    marg_in = min(BUNCH_MARGINAL_MM * _MM_IN,
+                  max(BUNCH_MARGINAL_MIN_MM * _MM_IN, avail))
+    x = [left_in]
+    x.append(x[-1] + map_in + gap_in)
+    x.append(x[-1] + map_in + gap_in)
+    x.append(x[-1] + map_in + marg_gap_in)   # marginal axis
+    x.append(x[-1] + marg_in + bar_gap_in)   # colour bar
+    x_frac = [v / fig_w_in for v in x]
+    w_frac = [map_in / fig_w_in] * 3 + [marg_in / fig_w_in,
+                                        bar_in / fig_w_in]
+    reserve_in = (BUNCH_INTER_GAP_IN + BUNCH_LABEL_IN + map_in
+                  + BUNCH_TITLE_IN)
+    return {
+        "x": x_frac, "width": w_frac,
+        "map_in": map_in, "marg_in": marg_in, "bar_in": bar_in,
+        "gap_in": gap_in, "marg_gap_in": marg_gap_in,
+        "bar_gap_in": bar_gap_in, "left_in": left_in, "right_in": right_in,
+        "title_in": BUNCH_TITLE_IN, "label_in": BUNCH_LABEL_IN,
+        "inter_gap_in": BUNCH_INTER_GAP_IN, "reserve_in": reserve_in,
     }
 
 
@@ -1043,7 +1127,8 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             width_frac,
                             support=None, suptitle=None, manifest=None,
                             compact=False, row_gap_in=FIELD_ROW_GAP_IN,
-                            bottom_in=None):
+                            bottom_in=None, bunch=None, panel_scale=1.0,
+                            top_in=FIELD_TOP_IN):
     """Field/error rows with a component triad and a separate squared panel.
 
     Every row has four items: three signed components sharing one colour bar,
@@ -1054,19 +1139,37 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     log ticks.  ``row_gap_in`` and ``bottom_in`` are inches.  ``x`` and ``y``
     are pixel **centres** shared by every field family; the raster policy is
     fixed by :func:`draw_raster_panel`.
+
+    ``bunch`` is an optional pre-built bunch-form row (see
+    :mod:`render_bunch`).  It is drawn as the FIRST row of this same figure:
+    the field block keeps its physical size and position at the bottom, the
+    canvas grows by the row's reserve, and ``panel_scale`` shrinks the square
+    field panels when the height budget needs it.
     """
     apply_paper_style(kind="field")
     nrow = len(rows)
     has_error = any(r["kind"] == "error" for r in rows)
     if bottom_in is None:
         bottom_in = FIELD_BOTTOM_ERR_IN if has_error else FIELD_BOTTOM_IN
-    geo = field_layout(nrow, width_frac=width_frac, top_in=FIELD_TOP_IN,
-                       bottom_in=bottom_in, row_gap_in=row_gap_in)
-    fig = figure(width_frac, geo["fig_h_in"])
+    geo = field_layout(nrow, width_frac=width_frac, top_in=top_in,
+                       bottom_in=bottom_in, row_gap_in=row_gap_in,
+                       panel_scale=panel_scale)
+    bunch_geo = (bunch.geometry(geo["fig_w_in"])
+                 if bunch is not None else None)
+    fig_h_in = geo["fig_h_in"] + (bunch_geo["reserve_in"]
+                                  if bunch_geo is not None else 0.0)
+    fig = figure(width_frac, fig_h_in)
     panel_x = geo["panel_x"]
-    pw, rh, bw = geo["pw"], geo["rh"], geo["bar_width"]
+    pw = geo["pw"]
+    rh = geo["panel_width_in"] / fig_h_in
+    bw = geo["bar_width"]
     cb1, cb2 = geo["cb1"], geo["cb2"]
-    row_y = geo["row_y"]
+    if bunch_geo is None:
+        row_y = geo["row_y"]
+    else:
+        # The field block is anchored to the bottom; the extra reserve is
+        # added above it for the bunch row.
+        row_y = [ry * geo["fig_h_in"] / fig_h_in for ry in geo["row_y"]]
 
     xlo, xhi = _cell_edges(x, "x")
     ylo, yhi = _cell_edges(y, "y")
@@ -1235,6 +1338,10 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                          "scales": [[float(cnorm.vmin), float(cnorm.vmax)],
                                     [float(snorm.vmin), float(snorm.vmax)]]})
 
+    if bunch is not None:
+        y_bottom_in = (geo["fig_h_in"] + bunch_geo["inter_gap_in"]
+                       + bunch_geo["label_in"])
+        bunch.draw(fig, geo["fig_w_in"], fig_h_in, y_bottom_in)
     if suptitle:
         fig.text(0.5, 0.975, suptitle, ha="center", va="top",
                  fontsize=TITLE_PT)
@@ -1274,4 +1381,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     man["error_floor"] = ERROR_FLOOR
     man["error_gate_tick"] = ERROR_GATE
     man.update(_layout_manifest(geo))
+    man["figure_height_mm"] = round(fig_h_in * 25.4, 2)
+    if bunch is not None:
+        man["bunch_form"] = bunch.manifest(geo["fig_w_in"])
     return save(fig, outdir, name, man, tight=False)

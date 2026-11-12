@@ -21,6 +21,7 @@ import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
 import ingest_measurements as ingest  # noqa: E402
+import render_bunch  # noqa: E402
 
 US = 1e6
 COMP = {"E": ["Ex", "Ey", "Ez"], "B": ["Bx", "By", "Bz"]}
@@ -151,7 +152,7 @@ def _assert_axis(name, plane_data, dataset, plane, source, beam_centroid,
 
 
 def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
-         dataset, source, beam_centroid, use_ref):
+         dataset, source, beam_centroid, use_ref, bunch=None):
     rows, smask = _part_rows(plane_data, part, plane, sources, coord,
                              has_error, use_ref)
     xl, yl = axis.axis_labels(dataset, plane, source)
@@ -159,16 +160,17 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
            "dataset": dataset, "plane": plane, "part": part,
            "has_error": has_error, "includegraphics_width": 0.92,
            "axis_convention": horizontal_axis_record(dataset, plane, source)}
+    extra = _bunch_layout_kw(bunch)
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=1.0, support=smask, manifest=man)
+        width_frac=1.0, support=smask, manifest=man, **extra)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
 
 
 def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
-                  dataset, source, beam_centroid, use_ref):
+                  dataset, source, beam_centroid, use_ref, bunch=None):
     """One figure per plane with the electric block first, magnetic second.
 
     ``val_forward`` carries both error rows (E field, E error, B field,
@@ -193,13 +195,22 @@ def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
            "block_order": block_order, "has_error": has_error,
            "includegraphics_width": 1.0,
            "axis_convention": horizontal_axis_record(dataset, plane, source)}
+    extra = _bunch_layout_kw(bunch)
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
         width_frac=1.0, compact=True,
-        support=smask, manifest=man)
+        support=smask, manifest=man, **extra)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
+
+
+def _bunch_layout_kw(bunch):
+    """Compact field layout used only when the bunch row is present."""
+    if bunch is None:
+        return {}
+    return {"bunch": bunch, "panel_scale": 1.0, "top_in": 0.14,
+            "bottom_in": 0.58, "row_gap_in": 0.40}
 
 
 def _beam_centroid_um(sources_cells, cell):
@@ -214,18 +225,36 @@ def run(outdir):
     fwd_src = os.path.join(src_dir, "forward_slice.npz")
     flc_src = os.path.join(src_dir, "fluctuation_slice.npz")
     fwd_d, fwd = load_bdata(fwd_src)
-    _, flc = load_bdata(flc_src)
+    flc_d, flc = load_bdata(flc_src)
     src = sources_bdata(os.path.join(src_dir, "forward_sources.npz"))
     cell = np.asarray(fwd_d["cell"], float)
+    sources_path = os.path.join(src_dir, "forward_sources.npz")
+    src_full = np.load(sources_path, allow_pickle=False)["sources"]
+    bdata = render_bunch.Bunch(
+        np.asarray(src_full[:, :3], float) * cell,
+        -np.asarray(src_full[:, 6], float) * render_bunch.E_CHARGE,
+        "y", float(cell[0]), 10.0,
+        os.path.relpath(sources_path, cases.REPO_ROOT),
+        "derived from forward_sources.npz: positions sources[:, :3] (cell "
+        "indices) x cell; charge -sources[:,6]*e = -5e-13 C each; the npz "
+        "carries no bunch_* keys", pending_fresh_data=True)
 
     for plane in ("xy", "zy"):
         bc = _beam_centroid_um(src, cell)
+        fwd_row = render_bunch.build_row(
+            bdata, "bdata2", f"val_forward_{plane}", plane,
+            origin=fwd_d["origin"], n=fwd_d["n"], cell=fwd_d["cell"],
+            source=fwd_src)
+        flc_row = render_bunch.build_row(
+            bdata, "bdata2", f"val_fluct_{plane}", plane,
+            origin=flc_d["origin"], n=flc_d["n"], cell=flc_d["cell"],
+            source=flc_src)
         results.append(make_combined(
             outdir, f"val_forward_{plane}", fwd[plane], plane, src, 32.0,
-            True, "bdata2", fwd_src, bc, False))
+            True, "bdata2", fwd_src, bc, False, bunch=fwd_row))
         results.append(make_combined(
             outdir, f"val_fluct_{plane}", flc[plane], plane, src, 32.0,
-            False, "bdata2", flc_src, bc, True))
+            False, "bdata2", flc_src, bc, True, bunch=flc_row))
 
     var_src = cases.data("var1b", "slices_var1b.npz")
     d = np.load(var_src, allow_pickle=False)
@@ -247,13 +276,26 @@ def run(outdir):
                                      var_src).astype(bool),
         }
     srcv = np.asarray(d["sources"], float)
+    cellv = np.asarray(d["cell"], float)
+    bvar = render_bunch.Bunch(
+        np.asarray(srcv, float) * cellv,
+        np.full(srcv.shape[0], -32.0e-18 / srcv.shape[0]),
+        "y", float(cellv[0]), 10.0,
+        os.path.relpath(var_src, cases.REPO_ROOT),
+        "derived from slices_var1b.npz: positions sources[:, :3] (cell "
+        "indices) x cell (the grid is extended past the stored slice window "
+        "to keep every particle); charge -32 aC / 200 = -1.6e-19 C each; the "
+        "npz carries no bunch_* keys", pending_fresh_data=True)
     # The VAR1b bunch sits at the upper edge of the 32-cell window, so its
     # particle centroid is not inside the plotted y range; the axis proof for
     # this case is the structural/field assertion, not the particle centroid.
     for part in ("E", "B"):
+        row = render_bunch.build_row(
+            bvar, "var1b", f"val_1mrad_xy_{part}", "xy",
+            origin=d["origin"], n=d["n"], cell=d["cell"], source=var_src)
         results.append(make(
             outdir, f"val_1mrad_xy_{part}", xy, part, "xy", srcv, 8.0, True,
-            "var1b", var_src, None, False))
+            "var1b", var_src, None, False, bunch=row))
     return results
 
 

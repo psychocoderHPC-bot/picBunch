@@ -133,6 +133,15 @@ def add_cbar(fig, cax, image, ticks, labels, title):
 
 
 def draw_case(case, outdir):
+    # N==1 guard: the HIRES cases are single point charges.  A charge-density
+    # "bunch form" row is physically meaningless for one particle, so this
+    # family never draws it and its output stays byte-identical.  (The
+    # distribution families add the row through render_bunch instead.)
+    n_particles = int(np.asarray(case["pos_m"]).reshape(-1, 3).shape[0])
+    if n_particles != 1:
+        raise ValueError(
+            f"render_pergamma expects N==1 point charges, got N={n_particles} "
+            f"for {case['case']}")
     figstyle.apply_paper_style(kind="field")
     # The B error row is omitted only when all three reference magnetic
     # components vanish (stationary bunch, beta=0).  A moving bunch keeps

@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
+import render_bunch  # noqa: E402
 
 STAGES = ["deposit", "kernel", "fft", "readout"]
 STAGE_STYLE = {
@@ -61,9 +62,9 @@ def select(rows, **eq):
     return [r for r in rows if ok(r)]
 
 
-def _save(fig, outdir, name, man):
+def _save(fig, outdir, name, man, tight=True):
     man.update({"style_module": "docs/paper/scripts/figstyle.py"})
-    fs.save(fig, outdir, name, man)
+    fs.save(fig, outdir, name, man, tight=tight)
 
 
 # ---------------------------------------------------------------- F_a / F_b
@@ -320,6 +321,21 @@ def gamma(outdir):
 
 
 # ------------------------------------------------------------------ multivel
+def _multivel_bunch():
+    """512 sampled multi-velocity particles: positions (m) and charge (C)."""
+    epath = cases.data("line", "multivel_energy.npz")
+    fpath = cases.data("line", "multivel_fields_e5_b16.npz")
+    p = np.load(epath)["particles"]
+    cell = float(np.load(fpath)["cell_m"])
+    return render_bunch.Bunch(
+        p[:, :3], p[:, 6] * p[:, 7], "y", cell, 10.0,
+        os.path.relpath(epath, cases.REPO_ROOT),
+        "derived from multivel_energy.npz particles[:, :3] (m); charge "
+        "q = particles[:,6]*particles[:,7] = -e each; deposit cell = "
+        "cell_m read from multivel_fields_e5_b16.npz; the npz carries no "
+        "bunch_* keys", pending_fresh_data=True)
+
+
 def multivel(outdir):
     epath = cases.data("line", "multivel_energy.npz")
     apath = cases.data("line", "multivel_angular.npz")
@@ -348,10 +364,18 @@ def multivel(outdir):
     c_e = float(np.sum(m_e * y_e) / np.sum(m_e ** 2))
     c_a = float(np.sum(m_a * y_a) / np.sum(m_a ** 2))
     fs.apply_paper_style(kind="line")
-    fig = fs.figure(0.98, 4.95)
+    fig_w_in = fs.width_in(0.98)
+    base_h = 4.95
+    bunch = _multivel_bunch()
+    row = render_bunch.build_row(bunch, "multivel", "F_multivel_dist", "xy",
+                                 source=epath)
+    row_geo = row.geometry(fig_w_in)
+    fig_h = base_h + row_geo["reserve_in"]
+    fig = fs.figure(0.98, fig_h)
     gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.92], hspace=0.62,
                           wspace=0.30, left=0.095, right=0.985,
-                          top=0.965, bottom=0.115)
+                          top=(base_h * 0.965) / fig_h,
+                          bottom=(base_h * 0.115) / fig_h)
     axa = fig.add_subplot(gs[0, 0])
     axa.hist(Eg, bins=45, color=fs.GAMMA_COLORS[10], alpha=0.35,
              edgecolor=fs.GAMMA_COLORS[10], linewidth=0.5)
@@ -409,12 +433,16 @@ def multivel(outdir):
     fs.panel_title(axc, "c", "measured binning error and model, both cases")
     axc.legend(loc="upper right", framealpha=0.95, handlelength=1.6,
                borderpad=0.3)
-    _save(fig, outdir, "F_multivel_dist",
-          {"figure_id": "multivel",
+    row.draw(fig, fig_w_in, fig_h,
+             base_h + row_geo["inter_gap_in"] + row_geo["label_in"])
+    man = {"figure_id": "multivel",
            "source_data": [os.path.relpath(p, cases.REPO_ROOT)
                            for p in (epath, apath, bpath)],
            "axis_limits": "panel c x 0.8..90, y 1.5e-4..3 (log-log)",
-           "reference_lines": "dark grey, dashed sigma / dotted median"})
+           "reference_lines": "dark grey, dashed sigma / dotted median",
+           "figure_height_mm": round(fig_h * 25.4, 2),
+           "bunch_form": row.manifest(fig_w_in)}
+    _save(fig, outdir, "F_multivel_dist", man, tight=False)
 
 
 # -------------------------------------------------------------- H100 MPI

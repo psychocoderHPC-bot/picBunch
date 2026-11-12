@@ -27,6 +27,7 @@ import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
 import ingest_measurements as ingest  # noqa: E402
+import render_bunch  # noqa: E402
 
 US = 1e6
 DATASET = "large1"
@@ -100,6 +101,25 @@ def _magnitude(d, plane, source):
     return np.sqrt(np.maximum(e2, 0.0))
 
 
+def _large_bunch(case, cell):
+    """The recorded LARGE1 generator: seed 42, 100 particles, sigma 6 cells."""
+    cell = np.asarray(cell, dtype=float)
+    rng = np.random.default_rng(42)
+    centre = np.array([64.0, 64.0, 32.0]) * cell
+    pos = centre + 6.0 * cell * rng.standard_normal((100, 3))
+    gamma = 10.0 if case == "g10" else 1.0
+    beam = "x" if case == "g10" else "stationary"
+    q = np.full(pos.shape[0], -render_bunch.E_CHARGE)
+    return render_bunch.Bunch(
+        pos, q, beam, float(cell[0]), gamma,
+        f"large1/slices_{case}.npz",
+        f"regenerated 100 positions for {case}: default_rng(42), cell 2e-7, "
+        "centre [64,64,32]*cell, pos = centre + 6*cell*N(0,1) "
+        "(campaign gen_inputs.py large(); matches the recorded N=100 input); "
+        "charge -e each; the npz carries no bunch_* keys",
+        pending_fresh_data=True)
+
+
 def build(outdir, case, plane, source):
     d = np.load(source, allow_pickle=True)
     n = [int(v) for v in d["n"]]
@@ -140,10 +160,15 @@ def build(outdir, case, plane, source):
                                    DATASET, plane, source)),
                                "display_axes": list(axis.display_axes(
                                    DATASET, plane, source))}}
+    bunch = _large_bunch(case, cell)
+    row = render_bunch.build_row(
+        bunch, DATASET, name, plane, origin=d["origin"], n=d["n"],
+        cell=d["cell"], source=source)
     fs.render_split_field_rows(
         name, outdir, rows, horiz_c * US, vert_c * US,
         xlabel=xl, ylabel=yl, width_frac=1.0,
-        compact=True, manifest=man)
+        compact=True, manifest=man,
+        **render_bunch.layout_kwargs(row))
     signature = _signature(d, plane, source)
     if gamma == 10.0:
         if not (signature["Bx_max"] == 0.0 and signature["By_max"] > 0.0
