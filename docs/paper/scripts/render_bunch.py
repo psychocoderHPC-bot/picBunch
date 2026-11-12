@@ -8,11 +8,14 @@ and the panel letters a-d in reading order.  It is drawn on the canonical
 calls and the audit numbers.
 
 Data are particle positions (m) and signed charges (C).  The row shows ONLY
-the bunch: the deposit grid is the particle bounding box per axis plus
-``BUNCH_PAD_CELLS = 2`` cells on each side (the TSC support half-width is 1.5
-cells), at the native field cell size.  The field panels below keep their
-full simulation grid; only this row is cropped.  The 3-D density is projected
-onto the three planes and validated:
+the bunch, but on the FIELD-PANEL LATTICE: the cell size and cell centres are
+exactly those of the field panels, and the crop is the whole-cell sub-range
+of that lattice covering the particle bounding box plus
+``BUNCH_PAD_CELLS = 2`` cells per axis (the TSC support half-width is 1.5
+cells).  If the bounding box falls between cell edges it is snapped outward
+with floor/ceil to whole cells; the cell size is never subdivided or
+coarsened.  The field panels below keep their full grid.  The 3-D density is
+projected onto the three planes and validated:
 
 * projected sigma vs particle sigma within 0.75 cell on every axis,
 * projected centroid vs particle centroid within 0.5 cell,
@@ -83,13 +86,25 @@ def _cell_vector(cell):
     return cell.astype(float)
 
 
-def grid_from_particles(pos_m, cell, margin_cells=2):
-    """Cell-centred grid covering every particle plus a TSC margin."""
-    cell = _cell_vector(cell)
-    lo = pos_m.min(axis=0) - margin_cells * cell
-    hi = pos_m.max(axis=0) + margin_cells * cell
-    n = np.maximum(np.ceil((hi - lo) / cell).astype(int), 1)
-    return lo, [int(v) for v in n], cell
+def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2):
+    """Whole-cell sub-range of the field lattice covering the padded bunch.
+
+    The returned ``origin`` is ``field_origin + i0*field_cell`` and every
+    returned cell centre is ``field_origin + (k+0.5)*field_cell`` for an
+    integer ``k`` in ``[i0, i1)``.  The cell size is the field cell size; the
+    bounding box only selects which field cells are kept (snapped outward
+    with floor/ceil, never sub-cell).
+    """
+    field_origin = np.asarray(field_origin, dtype=float).reshape(3)
+    field_cell = _cell_vector(field_cell)
+    bbox_lo = pos_m.min(axis=0) - margin_cells * field_cell
+    bbox_hi = pos_m.max(axis=0) + margin_cells * field_cell
+    i0 = np.floor((bbox_lo - field_origin) / field_cell).astype(int)
+    i1 = np.ceil((bbox_hi - field_origin) / field_cell).astype(int)
+    i1 = np.maximum(i1, i0 + 1)
+    origin = field_origin + i0 * field_cell
+    n = [int(v) for v in (i1 - i0)]
+    return origin, n, field_cell, bbox_lo, bbox_hi, i0, i1
 
 
 # TSC support half-width is 1.5 cells, so 2 cells on every side guarantees
@@ -202,17 +217,21 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
             cell=None, source="", pad_cells=BUNCH_PAD_CELLS):
     """Deposit, project, draw order and validate one cropped bunch-form row.
 
-    The deposit grid is the particle bounding box per axis plus
-    ``pad_cells`` cells on each side, at the native cell size.  ``origin`` and
-    ``n`` are accepted for API compatibility but are deliberately ignored:
-    the row must not be binned over the full simulation domain.  Only
-    ``cell`` (the field-grid cell size) is used.
+    The row is binned on the FIELD-PANEL LATTICE: ``cell`` is the field cell
+    size and ``origin`` the field lattice origin.  The crop keeps the whole
+    cells of that lattice that cover the particle bounding box plus
+    ``pad_cells`` TSC cells; it never subdivides, coarsens or re-origins the
+    grid.  ``n`` is the stored field extent and is recorded for the audit.
+    When called without a field grid (the multi-velocity distribution figure)
+    the documented field-cube lattice is origin 0 and ``bunch.cell_m``.
     """
-    if cell is None:
-        cell = bunch.cell_m
-    cell = _cell_vector(cell)
-    origin, n, cell = grid_from_particles(bunch.pos_m, cell,
-                                          margin_cells=pad_cells)
+    field_cell = _cell_vector(bunch.cell_m if cell is None else cell)
+    field_origin = (np.zeros(3) if origin is None
+                    else np.asarray(origin, dtype=float).reshape(3))
+    field_n = None if n is None else [int(v) for v in n]
+    (origin, n, cell, bbox_lo, bbox_hi, i0,
+     i1) = crop_to_field_lattice(bunch.pos_m, field_origin, field_cell,
+                                 margin_cells=pad_cells)
     rho = deposit_tsc(bunch, origin, n, cell)
     coords = _coords(origin, n, cell)
 
@@ -256,7 +275,10 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
     validation = _validate(bunch, maps, marginals, rho, cell, dataset,
                            figure_name, origin, n)
 
-    crop = _crop_record(bunch, maps, n, cell, origin, pad_cells, validation)
+    crop = _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
+                        field_cell=field_cell, field_origin=field_origin,
+                        field_n=field_n, i0=i0, i1=i1, bbox_lo=bbox_lo,
+                        bbox_hi=bbox_hi)
 
     return {
         "maps": maps, "marginals": marginals,
@@ -268,15 +290,41 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
     }
 
 
-def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation):
-    """Audit record for the cropped density box and panel fill fractions."""
+def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
+                 field_cell, field_origin, field_n, i0, i1, bbox_lo,
+                 bbox_hi):
+    """Audit record: cropped box, field-lattice proof and panel fill."""
     names = ("x", "y", "z")
     box_lo = np.asarray(origin, dtype=float)
     box_hi = box_lo + np.asarray(n, dtype=float) * np.asarray(cell, float)
     box_um = {name: [float(box_lo[_IDX[name]] * US),
                      float(box_hi[_IDX[name]] * US)] for name in names}
+    bbox_um = {name: [float(bbox_lo[_IDX[name]] * US),
+                      float(bbox_hi[_IDX[name]] * US)] for name in names}
     box_cells = {name: int(n[_IDX[name]]) for name in names}
     cell_um = {name: float(cell[_IDX[name]] * US) for name in names}
+    cell_idx = {name: [int(i0[_IDX[name]]), int(i1[_IDX[name]] - 1)]
+                for name in names}
+    margin_cells = {}
+    for name in names:
+        d = _IDX[name]
+        low = (bunch.pos_m[:, d].min() - box_lo[d]) / cell[d]
+        high = (box_hi[d] - bunch.pos_m[:, d].max()) / cell[d]
+        margin_cells[name] = [float(low), float(high)]
+
+    # Proof that the crop is a whole-cell sub-range of the field lattice:
+    # every retained cell centre equals field_origin + (k+0.5)*field_cell.
+    coords = _coords(origin, n, cell)
+    centres_match = True
+    for name in names:
+        d = _IDX[name]
+        k = i0[d] + np.arange(int(n[d]))
+        expected = field_origin[d] + (k + 0.5) * field_cell[d]
+        centres_match &= bool(np.allclose(coords[d], expected,
+                                          rtol=0.0, atol=1e-15))
+    cell_size_identical = bool(np.array_equal(np.asarray(cell, float),
+                                              np.asarray(field_cell, float)))
+
     fill_axes = {}
     for name in names:
         sigma_um = validation["particle"][name].get("sigma_um") or 0.0
@@ -299,13 +347,30 @@ def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation):
     return {
         "pad_cells": int(pad_cells),
         "box_um": box_um,
+        "raw_bbox_um": bbox_um,
         "box_cells": box_cells,
         "cell_um": cell_um,
+        "particle_margin_cells": {
+            k: [round(a, 4), round(b, 4)]
+            for k, (a, b) in margin_cells.items()},
         "pixels_per_map": pixels,
         "fill_fraction_axes_pm3sigma": {
             k: round(v, 4) for k, v in fill_axes.items()},
         "fill_fraction_map_pm3sigma": {
             k: round(v, 4) for k, v in fill_maps.items()},
+        "grid_proof": {
+            "grid_definition": (
+                "field-panel lattice origin + k*cell; the density row uses "
+                "the same cell size and cell centres and keeps the whole-cell "
+                "index range shown, snapped outward with floor/ceil"),
+            "field_cell_m": [float(v) for v in field_cell],
+            "density_cell_m": [float(v) for v in cell],
+            "cell_size_identical": cell_size_identical,
+            "lattice_origin_m": [float(v) for v in field_origin],
+            "stored_field_grid_cells": field_n,
+            "crop_cell_index_range": cell_idx,
+            "cell_centres_match_field_lattice": centres_match,
+        },
     }
 
 
