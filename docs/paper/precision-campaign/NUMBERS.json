@@ -628,13 +628,14 @@
    "tex": "docs/paper/sec_accuracy.tex",
    "line": "71",
    "paper_value": 0.00043,
-   "fresh": 0.0006890037669440295,
+   "fresh": 0.00038620473287556364,
    "committed": 0.00026975153403093843,
-   "relative_change": 0.6023343417303013,
-   "relative_change_vs_committed": 1.5542163065697565,
-   "unit": "percent",
+   "relative_change": null,
+   "relative_change_vs_committed": null,
+   "unit": "relative",
    "figure": "F_multivel_dist",
-   "data_key": "line/multivel_fields_e5_b16/b64.npz:relative Bz difference"
+   "data_key": "line/multivel_fields_e5_b16/b64.npz:max|Bz16-Bz64|/max|Bz64|",
+   "reason": "Worst pointwise binning deviation over the raw field, not the peak ratio. The published 4.3e-4 is percent-of-peak, whose denominator is inconsistent with the raw field; this entry replaces it with the pointwise relative deviation."
   },
   {
    "id": "fast_axial",

@@ -8,16 +8,22 @@ the mid-$z$ x-y plane. The seven velocities are $\gamma=1.0$, $1.1$, $1.5$,
 $2$, $10$, $50$ and $100$. Each figure is one velocity case, with $y$
 horizontal and increasing left to right, and its rows are labelled with
 $\gamma$, $\beta$ and the particle count $N=1$. Table~\ref{tab:gpvalid}
-lists the measured worst relative errors: $3.474\times10^{-3}$,
-$3.669\times10^{-3}$, $3.719\times10^{-3}$, $5.098\times10^{-3}$,
-$1.197\times10^{-1}$, $1.426$ and $3.213$ in velocity order. The error
-grows with $\gamma$ because the field is compressed into a fraction of a
-cell: at $\gamma=50$ and $\gamma=100$ the Lorentz pancake is thinner than
+lists the measured worst relative errors over the plane with the $5\times5$
+nodes around the source excluded: $3.779\times10^{-3}$,
+$3.747\times10^{-3}$, $2.578\times10^{-3}$, $7.078\times10^{-3}$,
+$3.505\times10^{-1}$, $1.590$ and $3.490$ in velocity order. The
+corresponding full-plane values that include the source-coincident node are
+$7.010\times10^{-2}$, $6.745\times10^{-2}$, $7.726\times10^{-2}$,
+$9.569\times10^{-2}$, $0.6740$, $7.095$ and $4.263$; that node is a
+singular point of the legacy reference (Section~\ref{sec:accuracy}), so the
+full-plane column bounds the old reference, not the accuracy of the mesh. The
+error grows with $\gamma$ because the field is compressed into a fraction of
+a cell: at $\gamma=50$ and $\gamma=100$ the Lorentz pancake is thinner than
 the mesh spacing, so those cases show the geometric sub-cell limit of the
 mesh, not a solver error. Raising the resolution from $64^3$ to $128^3$ at
 the same physical domain left the relative errors unchanged, so the growth
 with $\gamma$ is the field compression rather than a discretization that
-finer cells remove. The $\sim3.5\times10^{-3}$ floor at low $\gamma$ is the
+finer cells remove. The few-times-$10^{-3}$ floor at low $\gamma$ is the
 reference/quadrature floor at the settings used, not the solver's limit.
 The peak squared fields scale as $1/\text{cell}^2$ compared with the
 $64^3$ series (a factor $16$ for the halved cell), a consistency check on
@@ -29,19 +35,21 @@ the two campaigns.
 \caption{Seven-velocity single-particle validation on the final $128^3$
 grid, cell $5\times10^{-8}$\,m, $6.4\,\mu$m domain, against the order-12
 continuum reference. Worst is the maximum relative error over the six
-components on the mid-$z$ x-y plane.}
+components on the mid-$z$ x-y plane with the $5\times5$ source neighbourhood
+excluded; the last column includes the source-coincident node. The committed
+\texttt{indfield.py} reference is not used at that node.}
 \label{tab:gpvalid}
-\begin{tabular}{rrr}
+\begin{tabular}{rrrr}
 \toprule
-$\gamma$ & $\beta$ & worst relative error \\
+$\gamma$ & $\beta$ & worst, $5\times5$ excluded & full plane \\
 \midrule
-1.0   & 0       & $3.474\times10^{-3}$ \\
-1.1   & 0.4166  & $3.669\times10^{-3}$ \\
-1.5   & 0.7454  & $3.719\times10^{-3}$ \\
-2.0   & 0.8660  & $5.098\times10^{-3}$ \\
-10    & 0.9950  & $1.197\times10^{-1}$ \\
-50    & 0.99980 & $1.426$ \\
-100   & 0.99995 & $3.213$ \\
+1.0   & 0       & $3.779\times10^{-3}$ & $7.010\times10^{-2}$ \\
+1.1   & 0.4166  & $3.747\times10^{-3}$ & $6.745\times10^{-2}$ \\
+1.5   & 0.7454  & $2.578\times10^{-3}$ & $7.726\times10^{-2}$ \\
+2.0   & 0.8660  & $7.078\times10^{-3}$ & $9.569\times10^{-2}$ \\
+10    & 0.9950  & $3.505\times10^{-1}$ & $0.6740$ \\
+50    & 0.99980 & $1.590$ & $7.095$ \\
+100   & 0.99995 & $3.490$ & $4.263$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -63,7 +71,8 @@ undefined. At $\gamma=1.0$ the $B$ error row is omitted entirely, since all
 three reference magnetic components (and $B^2$) are identically zero at
 $\beta=0$ and the relative magnetic error is therefore undefined. The $B$
 field panels are blank for the same reason; the worst component error is
-$3.474\times10^{-3}$.}
+$3.779\times10^{-3}$ with the $5\times5$ source neighbourhood excluded
+($7.010\times10^{-2}$ including the source node).}
 \label{fig:gp1}
 \end{figure}
 
@@ -76,7 +85,7 @@ $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The $B_y$ error panel is fully masked in every
 figure of this series, since $B_y\equiv0$ for $+y$ motion and the relative
 error of a zero reference is undefined. The worst component error is
-$3.669\times10^{-3}$.}
+$3.747\times10^{-3}$ ($6.745\times10^{-2}$ including the source node).}
 \label{fig:gp1p1}
 \end{figure}
 
@@ -87,7 +96,7 @@ $3.669\times10^{-3}$.}
 $\beta=0.7454$ ($\gamma=1.5$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
-$3.719\times10^{-3}$.}
+$2.578\times10^{-3}$ ($7.726\times10^{-2}$ including the source node).}
 \label{fig:gp1p5}
 \end{figure}
 
@@ -98,7 +107,7 @@ $3.719\times10^{-3}$.}
 $\beta=0.8660$ ($\gamma=2.0$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
-$5.098\times10^{-3}$.}
+$7.078\times10^{-3}$ ($9.569\times10^{-2}$ including the source node).}
 \label{fig:gp2}
 \end{figure}
 
@@ -109,7 +118,7 @@ $5.098\times10^{-3}$.}
 $\beta=0.9950$ ($\gamma=10$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
-$1.197\times10^{-1}$.}
+$3.505\times10^{-1}$ ($0.6740$ including the source node).}
 \label{fig:gp10}
 \end{figure}
 
@@ -120,7 +129,7 @@ $1.197\times10^{-1}$.}
 $\beta=0.99980$ ($\gamma=50$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
-$1.426$.}
+$1.590$ ($7.095$ including the source node).}
 \label{fig:gp50}
 \end{figure}
 
@@ -131,7 +140,7 @@ $1.426$.}
 $\beta=0.99995$ ($\gamma=100$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1} (grey pixels are masked). The worst component error is
-$3.213$.}
+$3.490$ ($4.263$ including the source node).}
 \label{fig:gp100}
 \end{figure}
 

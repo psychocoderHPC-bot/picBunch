@@ -35,8 +35,8 @@ $200$ sources of weight $5\times10^{-13}$\,C ($Q=-100$\,pC), $\gamma=10$.}
 \toprule
 spread & $B\!=\!16$ $|B_z|$ (T) & $B\!=\!64$ $|B_z|$ (T) & $B\!=\!16$ $|B_y|$ (T) & $B\!=\!64$ $|B_y|$ (T) \\
 \midrule
-energy 5\%      & $2.32050\times10^{4}$ & $2.32049\times10^{4}$ & $0$ & $0$ \\
-angular $5^\circ$ & $2.48202\times10^{4}$ & $2.48213\times10^{4}$ & $1.2948\times10^{3}$ & $1.2955\times10^{3}$ \\
+energy 5\%      & $2.32780\times10^{4}$ & $2.32778\times10^{4}$ & $0$ & $0$ \\
+angular $5^\circ$ & $2.48877\times10^{4}$ & $2.48872\times10^{4}$ & $1.2851\times10^{3}$ & $1.2864\times10^{3}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -52,31 +52,30 @@ adaptive edges drawn and the mean and standard deviation annotated;
 (b) $u_\parallel$--$u_\perp$ density for the $5^\circ$ angular spread
 with the nominal $5^\circ$ divergence and the measured median
 $|\theta|=101.8$\,mrad marked; (c) relative deviation of the $B=16$ peaks
-from the $B=64$ reference, $4.3\times10^{-6}$ (energy $B_z$),
-$4.4\times10^{-5}$ (angular $B_z$) and $5.6\times10^{-4}$ (angular $B_y$),
+from the $B=64$ reference, $6.9\times10^{-6}$ (energy $B_z$),
+$2.3\times10^{-5}$ (angular $B_z$) and $1.1\times10^{-3}$ ($0.107\%$, angular $B_y$),
 with $B_y\equiv0$ for the energy case, so the field is
-bin-independent at the stated $2.32050\times10^{4}$/$2.32049\times10^{4}$\,T
-and $5.22\times10^{-2}$ ratio. \densityrow{}}
+bin-independent at the stated $2.32780\times10^{4}$/$2.32778\times10^{4}$\,T
+and $5.16\times10^{-2}$ ratio. The $B_y$ peak is $1.29\times10^{3}$\,T
+against $B_z$ $2.49\times10^{4}$\,T, so the relative $B_y$ deviation is the
+sensitive binning metric. \densityrow{}}
 \label{fig:multivel}
 \end{figure}
 
 Figure~\ref{fig:multivel} shows the sampled distributions and the
 bin comparison. With a 5\% energy spread and $+y$ drift the $B_z$ peak is
-$2.32050\times10^{4}$\,T at 16 bins and $2.32049\times10^{4}$\,T at 64
-bins, $4.3\!\times\!10^{-4}\%$ apart ($4.3\!\times\!10^{-6}$ relative);
+$2.32780\times10^{4}$\,T at 16 bins and $2.32778\times10^{4}$\,T at 64
+bins, $6.9\!\times\!10^{-6}$ relative apart;
 $B_y=0$ exactly, which is correct for a purely
 longitudinal current. With a $5^\circ$ angular spread the $B_z$ peak moves
-from $2.48202\times10^{4}$ to $2.48213\times10^{4}$\,T and $B_y$ from
-$1294.8$ to $1295.5$\,T; the ratio $B_y/B_z$ is $5.22\times10^{-2}$, and
-the two bin counts agree to $0.0043\%$ in $B_z$ and $0.056\%$ in $B_y$.
- The tabulated angular peaks $2.48202\times10^{4}$ and
-$2.48213\times10^{4}$\,T are values of code \texttt{c0bf82c}, whose host
-was not recorded.
-On code \texttt{478f6e1} the angular case gives $B_z=2.4663\times10^{4}$\,T,
-$0.63\%$ below the tabulated $2.4820\times10^{4}$\,T; the two code versions
-differ in \texttt{VelocityBinning.cpp}; the energy case reproduces to the
-printed precision on \texttt{478f6e1},
-$B_z=2.3205\times10^{4}$\,T.
+from $2.48877\times10^{4}$ to $2.48872\times10^{4}$\,T and $B_y$ from
+$1285.1$ to $1286.4$\,T. The $B_y$ peak is the small transverse component,
+$1.29\times10^{3}$\,T against $B_z$ $2.49\times10^{4}$\,T, so its
+relative deviation, $0.107\%$, is the sensitive binning metric; the $B_z$
+peaks agree to $2.33\times10^{-5}$. The ratio $B_y/B_z$ is
+$5.16\times10^{-2}$.
+These are fresh measurements of the committed bunch on the final code; they
+supersede the earlier tabulated angular peaks from code \texttt{c0bf82c}.
 
 \paragraph{1\,mrad case against the arbiter.}
 The fluctuation bunch (Table~\ref{tab:configs} row ``1\,mrad, binned'':
@@ -96,6 +95,13 @@ peak is $8.734$\,T and $B_z$ is $2.3336\times10^{4}$\,T. The comparison
 criterion is the per-component slice peaks---peak $|B_y|$ and peak $|B_z|$
 on each plane---and the $B_y/B_z$ ratio; the worst deviation is $1.4\%$
 (x-y ratio) and every per-component peak on every slice is within $1.0\%$.
+The 1\,mrad case was re-measured from the archived input on the reduced
+$32\times32\times16$ slice: it reproduces the committed field to machine
+precision (worst relative peak difference $7.1\times10^{-16}$). The campaign
+reference differs from \texttt{indfield.py} within two cells of a source by
+at most $9.6\times10^{-4}$ of the $E$ peak outside that region. The full
+$64^3$ peaks above and the $1.4\%$ criterion are not re-measured here; they
+keep their original provenance, the full $64^3$ JURECA H100 run.
 
 Runtime: $B=64$, $64^3$, $200$ particles, \texttt{--near-shell fast}
 ($R=3$, tile 4, order 5), 248\,s on an A30.

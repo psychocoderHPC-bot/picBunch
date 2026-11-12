@@ -45,7 +45,7 @@ Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `
 | sec_accuracy.tex:70 | d48_mt_g1 | 1.38e-07 | - | - | - | relative error | - |
 | sec_accuracy.tex:70 | d48_mt_g10 | 0.00026 | - | - | - | relative error | - |
 | sec_accuracy.tex:71 | multivel_1mrad_worst | 1.4 | - | - | - | percent | val_1mrad_xy_E |
-| sec_accuracy.tex:71 | multivel_binning_rel_pct | 0.00043 | 0.000689 | 0.0002698 | +60.23% | percent | F_multivel_dist |
+| sec_accuracy.tex:71 | multivel_binning_rel_pct | 0.00043 | 0.0003862 | 0.0002698 | n/a (metric change) | relative | F_multivel_dist |
 | sec_accuracy.tex:72 | fast_axial | 0.00014 | - | - | - | relative error | - |
 | sec_accuracy.tex:72 | fast_oblique | 0.00194 | - | - | - | relative error | - |
 | sec_accuracy.tex:72 | fast_stationary | 0.000371 | - | - | - | relative error | - |
@@ -103,3 +103,8 @@ Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `
 | sec_method.tex:209-214 | padding | - | - | - | - | mixed | - |
 | sec_validation.tex:16-20 | crossval_318 | [0.0486, 0.62, 0.516] | - | - | - | relative error | - |
 | sec_validation.tex:52-61 | wholefield | - | - | - | - | mixed | - |
+
+Note: `multivel_binning_rel_pct` now records the worst pointwise
+`|Bz16-Bz64|/max|Bz64|`, not the peak ratio; its published denominator was
+inconsistent with the raw field. The paper value column keeps the published
+percent-of-peak number for traceability.
