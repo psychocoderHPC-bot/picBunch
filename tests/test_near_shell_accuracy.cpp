@@ -12,6 +12,7 @@
 #include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/NearTileEstimate.hpp"
 
 #include <gtest/gtest.h>
 
@@ -768,4 +769,87 @@ TEST(NearShellAccuracy, DefaultMatchesBaseGolden)
                       std::max(std::abs(c.base[i]), 1.0e-300) * 1.0e-14)
                 << "component " << i;
     }
+}
+
+namespace
+{
+    //! Uniform lattice filling a ``cells``-wide cube, starting at ``offset``.
+    picBunch::Bunch latticeCloud(
+        picBunch::Vec3 const& origin,
+        std::size_t offset,
+        std::size_t cells,
+        double spacing)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(cells * cells * cells);
+        std::size_t p = 0;
+        for(std::size_t k = 0; k < cells; ++k)
+            for(std::size_t j = 0; j < cells; ++j)
+                for(std::size_t i = 0; i < cells; ++i, ++p)
+                {
+                    bunch.x[p] = origin[0] + (static_cast<double>(offset + i) + 0.5) * spacing;
+                    bunch.y[p] = origin[1] + (static_cast<double>(offset + j) + 0.5) * spacing;
+                    bunch.z[p] = origin[2] + (static_cast<double>(offset + k) + 0.5) * spacing;
+                }
+        return bunch;
+    }
+} // namespace
+
+// The auto rule samples the near-set pair count.  A dense cloud that shrinks
+// its per-tile near set as the tile edge grows is the measured tile-2 case.
+// The estimate must be identical when the whole problem is translated, because
+// source positions and the tile boxes share the same grid origin.
+TEST(NearShellAccuracy, AutoTileDenseCloudPicksTileTwoWithNonZeroOrigin)
+{
+    picBunch::Grid grid;
+    grid.n = {32u, 32u, 32u};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    picBunch::Vec3 const cell{1.0, 1.0, 1.0};
+
+    picBunch::Bunch const base = latticeCloud(grid.origin, 10u, 12u, 1.0);
+    picBunch::detail::NearTileEstimate const zero
+        = picBunch::detail::estimateNearTile(base, grid, cell, 3.0);
+    ASSERT_GT(zero.pairs2, 0.0);
+    ASSERT_GT(zero.pairs4, 0.0);
+    ASSERT_EQ(zero.tile, 2u) << "dense zero-origin cloud must keep the measured tile-2 choice";
+
+    // Same physical cloud, shifted origin: the near-set geometry is unchanged,
+    // so the estimate must not collapse to zero or lose the tile-2 choice.
+    grid.origin = {1000.0, -2000.0, 500.0};
+    picBunch::Bunch const shifted = latticeCloud(grid.origin, 10u, 12u, 1.0);
+    picBunch::detail::NearTileEstimate const moved
+        = picBunch::detail::estimateNearTile(shifted, grid, cell, 3.0);
+    ASSERT_GT(moved.pairs2, 0.0);
+    ASSERT_GT(moved.pairs4, 0.0);
+    EXPECT_NEAR(moved.pairs2, zero.pairs2, zero.pairs2 * 1.0e-12);
+    EXPECT_NEAR(moved.pairs4, zero.pairs4, zero.pairs4 * 1.0e-12);
+    EXPECT_EQ(moved.tile, 2u);
+}
+
+// A small grid whose near set is the whole cloud has equal pair counts at both
+// edges, so the throughput margin keeps tile 4.  This is the unchanged
+// zero-origin branch and must also hold after a translation.
+TEST(NearShellAccuracy, AutoTileSmallGridKeepsTileFourWithNonZeroOrigin)
+{
+    picBunch::Grid grid;
+    grid.n = {4u, 4u, 4u};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    picBunch::Vec3 const cell{1.0, 1.0, 1.0};
+
+    picBunch::Bunch const base = latticeCloud(grid.origin, 0u, 4u, 1.0);
+    picBunch::detail::NearTileEstimate const zero
+        = picBunch::detail::estimateNearTile(base, grid, cell, 3.0);
+    ASSERT_GT(zero.pairs2, 0.0);
+    ASSERT_EQ(zero.tile, 4u) << "small zero-origin grid must keep tile 4";
+
+    grid.origin = {-8.0, 4.0, 12.0};
+    picBunch::Bunch const shifted = latticeCloud(grid.origin, 0u, 4u, 1.0);
+    picBunch::detail::NearTileEstimate const moved
+        = picBunch::detail::estimateNearTile(shifted, grid, cell, 3.0);
+    ASSERT_GT(moved.pairs2, 0.0);
+    EXPECT_NEAR(moved.pairs2, zero.pairs2, zero.pairs2 * 1.0e-12);
+    EXPECT_NEAR(moved.pairs4, zero.pairs4, zero.pairs4 * 1.0e-12);
+    EXPECT_EQ(moved.tile, 4u);
 }
