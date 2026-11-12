@@ -55,6 +55,11 @@ namespace picBunch::pbfast
         double tolerance = 1e-3;
         //! Exact routing cell reach; mirrors Settings::exactCellReach.
         int exactCellReach = 0;
+        //! Components the batched kernel must evaluate for this tile: 6, or 3
+        //! when every source is stationary and the magnetic field is exactly
+        //! zero.  The packed output always keeps six component slots; the
+        //! unused B slots stay at their initialized zero.
+        int activeComponents = 6;
     };
 
     static_assert(

@@ -77,6 +77,23 @@ namespace picBunch
             return out;
         }
 
+        //! Spread the low 10 bits of one coordinate over every third bit.
+        inline std::uint32_t mortonExpand(std::uint32_t x)
+        {
+            x &= 0x3ffu;
+            x = (x | (x << 16u)) & 0x030000ffu;
+            x = (x | (x << 8u)) & 0x0300f00fu;
+            x = (x | (x << 4u)) & 0x030c30c3u;
+            x = (x | (x << 2u)) & 0x09249249u;
+            return x;
+        }
+
+        //! 30-bit Morton code of a 10-bit-per-axis cell coordinate.
+        inline std::uint32_t mortonCode(std::uint32_t x, std::uint32_t y, std::uint32_t z)
+        {
+            return mortonExpand(x) | (mortonExpand(y) << 1u) | (mortonExpand(z) << 2u);
+        }
+
         /*! Host queue for the per-tile exact near-field kernel.
          *
          * The near shell works on host ``std::vector`` field storage even when
@@ -162,6 +179,8 @@ namespace picBunch
             LocalOffsetVec localLo{};
             std::size_t nLocalX{};
             std::size_t nLocalY{};
+            //! 6, or 3 when the tile is stationary and B is exactly zero.
+            std::size_t activeComponents{6u};
             alpaka::Vec<double, 3u> origin{};
             alpaka::Vec<double, 3u> spacing{};
             alpaka::Vec<double, 3u> cells{};
@@ -187,7 +206,7 @@ namespace picBunch
                 for(auto [idx] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
-                        alpaka::IdxRange{6u * nodes}))
+                        alpaka::IdxRange{args.activeComponents * nodes}))
                 {
                     int const c = static_cast<int>(idx / nodes);
                     std::size_t const node = idx - static_cast<std::size_t>(c) * nodes;
@@ -219,6 +238,11 @@ namespace picBunch
                                                 : kCoulombConstant / kSpeedOfLight;
                     for(std::size_t q = 0; q < args.nsrc; ++q)
                     {
+                        // beta = 0 gives B = 0 exactly; skip those sources in a
+                        // mixed tile's B sums.
+                        if(c >= 3 && args.ux[q] == 0.0 && args.uy[q] == 0.0
+                           && args.uz[q] == 0.0)
+                            continue;
                         nbref::Vec3 E, B;
                         if(args.useFast)
                             pbfast::shape_field(
@@ -506,12 +530,58 @@ namespace picBunch
         auto const& origin = grid.origin;
         auto const& spacing = grid.spacing;
 
+        // Spatial (Morton) order of the sources.  The per-tile lists below
+        // then contain near-contiguous runs of the source arrays instead of
+        // indices scattered over the whole bunch, so a tile's inner loop reads
+        // a compact block from cache and the device can coalesce the loads.
+        // The permutation changes the floating-point summation order of the
+        // near correction only; the base mesh is still built from the caller's
+        // bunch.  Sources are reordered once per near-shell call.
+        Bunch nearBunch;
+        if(bunch.size() > 1u && bunch.size() <= 0xffffffffull)
+        {
+            double lo[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
+            double hi[3] = {bunch.x[0], bunch.y[0], bunch.z[0]};
+            for(std::size_t p = 1; p < bunch.size(); ++p)
+            {
+                double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                for(int a = 0; a < 3; ++a)
+                {
+                    lo[a] = std::min(lo[a], pos[a]);
+                    hi[a] = std::max(hi[a], pos[a]);
+                }
+            }
+            std::vector<std::uint64_t> keys(bunch.size());
+            for(std::size_t p = 0; p < bunch.size(); ++p)
+            {
+                double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                std::uint32_t code[3];
+                for(int a = 0; a < 3; ++a)
+                {
+                    double const extent = hi[a] - lo[a];
+                    double const t = extent > 0.0 ? (pos[a] - lo[a]) / extent : 0.0;
+                    code[a] = static_cast<std::uint32_t>(
+                        std::clamp(t * 1023.0 + 0.5, 0.0, 1023.0));
+                }
+                keys[p] = (static_cast<std::uint64_t>(mortonCode(code[0], code[1], code[2]))
+                           << 32u)
+                    | static_cast<std::uint64_t>(p);
+            }
+            std::sort(keys.begin(), keys.end());
+            std::vector<std::uint32_t> order(bunch.size());
+            for(std::size_t i = 0; i < keys.size(); ++i)
+                order[i] = static_cast<std::uint32_t>(keys[i]);
+            nearBunch = selectSources(bunch, order);
+        }
+        else
+            nearBunch = bunch;
+
         // Per-tile near-source lists.  Every source is visited once and
         // inserted into each tile block whose node box lies within the shell
         // radius.  This costs O(sources * neighbouring tiles) instead of the
         // former O(tiles * bucket sources): on a large grid an empty tile now
         // costs nothing, which removes the grid^3 per-tile scan that dominated
-        // compact clouds at 128^3.  Sources are appended in index order, so
+        // compact clouds at 128^3.  Sources are appended in spatial order, so
         // each list is already sorted and no per-tile sort is needed.
         std::size_t const tileCount[3] = {
             (n[0] + tile - 1u) / tile,
@@ -519,9 +589,9 @@ namespace picBunch
             (n[2] + tile - 1u) / tile};
         std::vector<std::vector<std::uint32_t>> tileSources(
             tileCount[0] * tileCount[1] * tileCount[2]);
-        for(std::size_t p = 0; p < bunch.size(); ++p)
+        for(std::size_t p = 0; p < nearBunch.size(); ++p)
         {
-            double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+            double const pos[3] = {nearBunch.x[p], nearBunch.y[p], nearBunch.z[p]};
             long qLo[3];
             long qHi[3];
             for(int a = 0; a < 3; ++a)
@@ -579,7 +649,7 @@ namespace picBunch
         // large grids (and lets small tiles be used without paying it).
         bool const deviceStencil = useFastGpu
             && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
-        if(deviceStencil && bunch.size() > 0xffffffffull)
+        if(deviceStencil && nearBunch.size() > 0xffffffffull)
             throw std::runtime_error(
                 "near shell: the batched device path holds source indices in 32 bits");
         std::vector<std::uint32_t> batchIndices;
@@ -593,16 +663,19 @@ namespace picBunch
             // once instead of once per tile.
             VelocityBinning const& meshBin
                 = options.fixedBinning ? *options.fixedBinning : binning;
-            batchRepU.resize(3u * bunch.size());
-            for(std::size_t p = 0; p < bunch.size(); ++p)
+            batchRepU.resize(3u * nearBunch.size());
+            for(std::size_t p = 0; p < nearBunch.size(); ++p)
             {
                 double const coords[3] = {
-                    bunch.ux[p] * meshBin.basis[0][0] + bunch.uy[p] * meshBin.basis[0][1]
-                        + bunch.uz[p] * meshBin.basis[0][2],
-                    bunch.ux[p] * meshBin.basis[1][0] + bunch.uy[p] * meshBin.basis[1][1]
-                        + bunch.uz[p] * meshBin.basis[1][2],
-                    bunch.ux[p] * meshBin.basis[2][0] + bunch.uy[p] * meshBin.basis[2][1]
-                        + bunch.uz[p] * meshBin.basis[2][2]};
+                    nearBunch.ux[p] * meshBin.basis[0][0]
+                        + nearBunch.uy[p] * meshBin.basis[0][1]
+                        + nearBunch.uz[p] * meshBin.basis[0][2],
+                    nearBunch.ux[p] * meshBin.basis[1][0]
+                        + nearBunch.uy[p] * meshBin.basis[1][1]
+                        + nearBunch.uz[p] * meshBin.basis[1][2],
+                    nearBunch.ux[p] * meshBin.basis[2][0]
+                        + nearBunch.uy[p] * meshBin.basis[2][1]
+                        + nearBunch.uz[p] * meshBin.basis[2][2]};
                 std::size_t const b = meshBin.boxIndex(coords[0], coords[1], coords[2]);
                 batchRepU[3u * p] = meshBin.representativeU[b][0];
                 batchRepU[3u * p + 1u] = meshBin.representativeU[b][1];
@@ -646,7 +719,7 @@ namespace picBunch
                     if(nearIndex.empty())
                         continue;
 
-                    Bunch const near = selectSources(bunch, nearIndex);
+                    Bunch const near = selectSources(nearBunch, nearIndex);
 
                     // One coherent oblique-box order per output tile.  Under
                     // `auto`, raise it only for oblique sources whose TSC
@@ -662,14 +735,21 @@ namespace picBunch
                     // whose requirement exceeds the cap are routed to the
                     // exact evaluator per (source, node) pair.
                     double tileMaxGamma = 1.0;
+                    double tileMaxU2 = 0.0;
                     for(std::size_t q = 0; q < near.size(); ++q)
                     {
                         double const uq2 = near.ux[q] * near.ux[q]
                             + near.uy[q] * near.uy[q] + near.uz[q] * near.uz[q];
+                        tileMaxU2 = std::max(tileMaxU2, uq2);
                         if(uq2 > 0.0)
                             tileMaxGamma
                                 = std::max(tileMaxGamma, std::sqrt(1.0 + uq2));
                     }
+                    // beta = 0 gives B = beta x E = 0 exactly.  A stationary
+                    // tile therefore needs only the three electric components;
+                    // the device kernel skips the three B slots (left at zero)
+                    // and the pair counter reports the reduced component work.
+                    int const activeComponents = (tileMaxU2 == 0.0) ? 3 : 6;
                     int const exactReach = pbfast::resolveExactCellReach(
                         nearShell.exactCellReach, options.tolerance, tileMaxGamma);
                     int const tileRemainderOrder = std::min(
@@ -726,6 +806,7 @@ namespace picBunch
                         = std::min(tileRemainderOrder, pbfast::DeviceParams::kMaxOrder);
                     deviceParams.order = deviceOrder;
                     deviceParams.exactCellReach = exactReach;
+                    deviceParams.activeComponents = activeComponents;
                     {
                         auto const& tx = pbfast::detail::rule(deviceOrder).x;
                         auto const& tw = pbfast::detail::rule(deviceOrder).w;
@@ -892,7 +973,9 @@ namespace picBunch
                             batchTiles.push_back(bt);
                             batchParams.push_back(deviceParams);
                             batchOutSize += static_cast<std::uint64_t>(6u * nx * ny * nz);
-                            pairs += static_cast<std::uint64_t>(6u * nx * ny * nz * near.size());
+                            pairs += static_cast<std::uint64_t>(
+                                static_cast<std::uint64_t>(activeComponents) * nx * ny * nz
+                                * near.size());
                         }
                         else
                         {
@@ -991,14 +1074,17 @@ namespace picBunch
                         exactArgs.cells = alpaka::Vec<double, 3u>{cells[0], cells[1], cells[2]};
                         exactArgs.nLocalX = nLocalX;
                         exactArgs.nLocalY = nLocalY;
+                        exactArgs.activeComponents = static_cast<std::size_t>(activeComponents);
                         exactArgs.useFast = useFast;
                         exactArgs.fastSettings = tileFastSettings;
                         exactArgs.settings = settings;
                         runNearShellHostKernel(
-                            6u * nx * ny * nz,
+                            static_cast<std::size_t>(activeComponents) * nx * ny * nz,
                             ExactNearHostKernel{},
                             exactArgs);
-                        pairs += static_cast<std::uint64_t>(nx * ny * nz * near.size());
+                        pairs += static_cast<std::uint64_t>(
+                            static_cast<std::uint64_t>(activeComponents) * nx * ny * nz
+                            * near.size());
                     }
                 }
             }
@@ -1006,7 +1092,7 @@ namespace picBunch
         if(deviceStencil && !batchTiles.empty())
         {
             std::vector<double> const dev = pbfast::evalFastNearDeviceBatched(
-                bunch,
+                nearBunch,
                 batchIndices,
                 batchTiles,
                 batchParams,
