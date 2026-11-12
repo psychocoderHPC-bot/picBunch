@@ -22,6 +22,7 @@ import textwrap
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib._mathtext as _matplotlib_mathtext
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.text as mtext
@@ -47,6 +48,23 @@ TICK_PT = 7.5           # axis and colour-bar tick labels
 ANNOT_PT = 7.0          # in-panel annotations (peak labels, blank notes)
 LEGEND_PT = 7.5
 FONT_FAMILY = "DejaVu Sans"
+
+# ---- Mathtext script scale ---------------------------------------------
+# Matplotlib draws sub/superscripts at 0.7x the base size (its private
+# ``SHRINK_FACTOR``).  The font ladder is correct, but at the smallest tokens a
+# 0.7x script falls under the 6 pt legibility floor: a 7 pt annotation in a
+# figure placed at 0.98x prints at 4.8 pt, and a 7.5 pt log-tick exponent in
+# the 0.951x F_multivel canvas prints at 5.0 pt.  A 0.9 script scale lifts the
+# worst case to 7.0 * 0.98 * 0.9 = 6.17 pt while every non-script token keeps
+# its declared ladder size, so the canvas and the layout budget are unchanged.
+# Matplotlib has no rcParam for this; the module constant is read at draw time.
+# Fail loudly if the hook ever disappears instead of silently regressing.
+MATH_SCRIPT_SCALE = 0.9
+if not hasattr(_matplotlib_mathtext, "SHRINK_FACTOR"):
+    raise RuntimeError(
+        "matplotlib._mathtext.SHRINK_FACTOR is missing: the paper's 6 pt "
+        "script floor cannot be enforced")
+_matplotlib_mathtext.SHRINK_FACTOR = MATH_SCRIPT_SCALE
 
 # ---- Canonical line/axis tokens ----------------------------------------
 LINEWIDTH = 0.8
@@ -456,6 +474,7 @@ def style_tokens(kind=None):
                     "tick": TICK_PT, "annotation": ANNOT_PT,
                     "legend": LEGEND_PT, "cbar_tick": CBAR_TICK_PT,
                     "cbar_label": CBAR_LABEL_PT},
+        "math_script_scale": MATH_SCRIPT_SCALE,
         "linewidth_pt": LINEWIDTH,
         "tick": {"direction": TICK_DIRECTION, "length_pt": TICK_LENGTH,
                  "width_pt": TICK_WIDTH, "pad_pt": TICK_PAD},

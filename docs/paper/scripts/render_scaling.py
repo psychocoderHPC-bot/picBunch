@@ -405,16 +405,24 @@ def multivel(outdir):
              color=fs.REF_COLOR, lw=1.1, ls=":")
     axb.set_xlabel(r"$u_\parallel$ ($m_ec$)")
     axb.set_ylabel(r"$u_\perp$ ($m_ec$)")
+    # The median reference is almost horizontal and would otherwise sit on the
+    # bottom spine and merge with its ticks.  Give the panel bottom headroom so
+    # the line stays visibly inside the axes.  This changes no data and no line
+    # style, only the displayed y range.
+    ylo_b, yhi_b = axb.get_ylim()
+    axb.set_ylim(ylo_b - 0.08 * (yhi_b - ylo_b), yhi_b)
     # The fresh distributions put a tick exactly at an axis corner; pruning
     # both ends keeps the corner tick labels off the neighbouring axes.
     for ax in (axa, axb):
         ax.xaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
         ax.yaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
     fs.panel_title(axb, "b", r"angular spread 5$^\circ$, seed 103")
-    axb.text(0.03, 0.04,
+    # The label lives in the empty upper-left corner: the two reference lines
+    # hug the bottom of the panel, so this box cannot occlude them.
+    axb.text(0.03, 0.97,
              rf"$\sigma_\theta=5^\circ$ (dashed)" + "\n" +
              rf"median $|\theta|={theta_med:.1f}$ mrad (dotted)",
-             transform=axb.transAxes, va="bottom", ha="left",
+             transform=axb.transAxes, va="top", ha="left",
              color=fs.TEXT_COLOR,
              bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none",
                        alpha=0.85))

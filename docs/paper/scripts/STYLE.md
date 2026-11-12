@@ -159,6 +159,17 @@ No figure text may exceed the 10 pt body text. Axis labels come from
 name. Tick locators are chosen per panel geometry, but tick font, length,
 width and padding come from the ladder.
 
+### Mathtext sub/superscripts
+
+Matplotlib's default script scale is `0.7x`, which put the smallest scripted
+tokens below the 6 pt legibility floor (a 7 pt blank-panel note in a 0.98x
+figure printed at 4.8 pt, a 7.5 pt log-tick exponent in the 0.951x
+`F_multivel` canvas at 5.0 pt). `figstyle.MATH_SCRIPT_SCALE = 0.9` raises the
+private `matplotlib._mathtext.SHRINK_FACTOR` so the worst placed script is
+`7.0 * 0.98 * 0.9 = 6.17 pt`. The non-script ladder sizes are unchanged, so
+the canvas and height budget do not move. The factor is recorded in every
+audit's `style_tokens()["math_script_scale"]`.
+
 ## 8. Panel letters
 
 `panel_title(ax, "a", title)` writes `(a) title`, left aligned at
