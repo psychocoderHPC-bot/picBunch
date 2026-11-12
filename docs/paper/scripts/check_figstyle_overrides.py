@@ -38,7 +38,7 @@ FORBIDDEN = (
     ("local mask constant", re.compile(r"\bMASKED_[A-Z_]+\s*=")),
     ("local colormap constant", re.compile(r"\bCMAP_[A-Z_]+\s*=")),
     ("local norm-floor constant",
-     re.compile(r"\b(?:ERROR_FLOOR|ERR_FLOOR|SQ_FLOOR_RATIO)\s*=")),
+     re.compile(r"\b(?:ERROR_FLOOR(?:_MAX|_MIN)?|ERR_FLOOR|SQ_FLOOR_RATIO)\s*=")),
     ("raw rcParams write",
      re.compile(r"\brcParams\s*(?:\[[^\]]*\]\s*=|\.update\s*\()")),
     ("raw face colour", re.compile(r"\bset_facecolor\s*\(")),

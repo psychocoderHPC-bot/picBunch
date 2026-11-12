@@ -156,14 +156,13 @@ def _item(case, part, c, j, log):
     reason = "stationary" if float(case["beta"]) == 0.0 else "beam axis"
     v = _display(case, case["valid_part"][part].astype(float)).astype(bool)
     if log:
-        # Recompute the relative error on the SHARED part mask so the panel
-        # carries no per-component NaN outside it: the grey footprint in the
-        # error panel is then identical to the signed-slice panel.
-        pic = _display(case, case["field"][c])
-        ref = _display(case, case["ref"][c])
-        peak = float(np.max(np.abs(ref))) if np.isfinite(ref).any() else 0.0
-        e = (np.abs(pic - ref) / peak if peak > 0 else np.zeros_like(pic))
+        # The stored error array is the measured data and its min is the
+        # value the floor rule must see.  It is finite on every shared-mask
+        # cell for the three components (only the squared key is recomputed
+        # below), so the grey footprint stays identical to the slice panel.
+        e = _display(case, case["err"][c])
         item = {"err": e, "valid": v,
+                "floor_valid": _display(case, case["valid"][c].astype(float)).astype(bool),
                 "title": f"${part}_{{{'xyz'[j]}}}$", "symbol": symbol}
         if zero:
             item["undefined"] = True
@@ -195,7 +194,12 @@ def _sq_item(case, part, log):
         ref = _display(case, case["ref"][key])
         peak = float(np.max(np.abs(ref))) if np.isfinite(ref).any() else 0.0
         e = (np.abs(pic - ref) / peak if peak > 0 else np.zeros_like(pic))
-        item = {"err": e, "valid": v, "title": f"${part}^2$"}
+        # The stored measured array is what the floor diagnosis used; keep it
+        # for the floor rule while the shared-mask recomputation drives the
+        # panel's grey footprint.  Components use their stored array directly.
+        item = {"err": e, "valid": v, "title": f"${part}^2$",
+                "floor_err": _display(case, case["err"][key]),
+                "floor_valid": _display(case, case["valid"][key].astype(float)).astype(bool)}
         if zero:
             item["undefined"] = True
             item["blank_text"] = figstyle.zero_error_note(f"{part}^2",

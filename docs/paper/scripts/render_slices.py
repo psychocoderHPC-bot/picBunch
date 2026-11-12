@@ -90,6 +90,7 @@ def panels(plane_data, part, field_mode):
         f = rec["ref"] if field_mode == "ref" else rec["pic"]
         fields.append(f)
         it = {"arr": f, "err": rec["err"], "valid": valid,
+              "floor_valid": rec["valid"],
               "title": rf"${c[0]}_{{{c[1]}}}$",
               "symbol": f"{c[0]}_{{{c[1]}}}"}
         if float(np.max(np.abs(rec["ref"]))) == 0.0:
@@ -109,7 +110,7 @@ def panels(plane_data, part, field_mode):
         err = np.abs(f2 - r2) / peak
     else:
         err = np.full_like(arr, np.nan)
-    sq = {"arr": arr, "err": err, "valid": valid,
+    sq = {"arr": arr, "err": err, "valid": valid, "floor_valid": valid,
           "title": rf"${part}^2$"}
     if peak == 0.0:
         sq["arr"] = np.zeros_like(arr)

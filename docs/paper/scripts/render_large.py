@@ -53,6 +53,7 @@ def _items(d, plane, part, source, gamma, magnitude=True):
             "err": np.abs(axis.to_display(d[f"{plane}_{c}_err"], DATASET,
                                           plane, source)),
             "valid": valid,
+            "floor_valid": np.asarray(d[f"{plane}_{c}_valid"], dtype=bool),
             "title": rf"${c[0]}_{{{c[-1]}}}$",
             "symbol": f"{c[0]}_{{{c[-1]}}}",
         }
@@ -81,7 +82,7 @@ def _items(d, plane, part, source, gamma, magnitude=True):
             err = np.abs(pic2 - ref2) / peak
         else:
             err = np.full_like(arr, np.nan)
-        sq = {"arr": arr, "err": err, "valid": valid,
+        sq = {"arr": arr, "err": err, "valid": valid, "floor_valid": valid,
               "title": rf"${part}^2$"}
         if peak == 0.0:
             sq["arr"] = np.zeros_like(arr)

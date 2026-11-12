@@ -110,21 +110,26 @@ masks in those panels still use the one grey.
 |---|---|---|
 | signed component triad | `SymLogNorm(base=10)` | `[-vmax, +vmax]`, `linthresh = 1e-3 * vmax` |
 | squared magnitude, field rows | `LogNorm` | `peak * 1e-6 .. peak` (six decades) |
-| relative error | `LogNorm` | smallest finite positive error .. panel peak |
+| relative error | `LogNorm` | clamp(round_down_2sf(smallest positive error), `1e-14`, `1e-6`) .. panel peak |
 
 `error_limits()` and `error_ticks()` are shared by every error panel. There is
-ONE data-driven policy, with no per-figure override: `vmin` is the smallest
-finite positive relative error over the valid cells of the row, clamped from
-below at `ERROR_FLOOR_MACHINE = eps/64` (~3.5e-18); `vmax` is the row peak.
-This resolves the roundoff regime that a fixed `1e-6` floor compressed into the
-darkest colour, so the machine-precision star is visible and the grey mask is
-distinguishable. A finite error below `vmin` is valid data and takes the
+ONE data-driven policy, with no per-figure override:
+
+    vmin = clamp(round_down_2sf(smallest positive finite error),
+                 ERROR_FLOOR_MAX = 1e-6, ERROR_FLOOR_MIN = 1e-14)
+    vmax = row peak (the 1e-3 gate is always representable)
+
+A panel whose smallest error is `6.3e-14` therefore gets `vmin = 6.3e-14`, not
+the old fixed `1e-6`; a panel whose smallest error is `2.9e-8` gets `2.9e-8`;
+anything below `1e-14` is clamped to `1e-14` and anything above `1e-6` to
+`1e-6`. This resolves the roundoff star (the old floor clamped 7-10 decades
+onto one colour). A finite error below `vmin` is valid data and takes the
 colormap's darkest finite colour (`set_under(cmap(0.0))`), never the mask grey.
 The `1e-3` acceptance gate stays tick-marked when it lies in range and is
 always drawn as a dash-dot contour (`GATE_STYLE`). The error colormap has 1024
-entries, so one decade still spans more than 20 distinct levels across a
-~15-decade data range. `sq_limits()` and `sq_ticks()` are the shared
-squared-magnitude helpers.
+entries, so the lowest decade of a typical error panel resolves ~70 distinct
+levels. `sq_limits()` and `sq_ticks()` are the shared squared-magnitude
+helpers.
 
 Every row shares one normalisation across the three signed components and one
 shared bar at the row's right edge. The fourth (squared-magnitude) panel keeps

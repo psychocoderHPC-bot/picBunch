@@ -142,17 +142,19 @@ BLANK_COLOR = MASKED_COLOR
 MASKED_LEGEND_EDGE = "0.4"
 
 # ---- Canonical norm / floor rules --------------------------------------
-# Error panels use a DATA-DRIVEN range, not a fixed decimal floor.  The lower
-# colour limit is the smallest finite positive relative error in the row,
-# clamped from below at ERROR_FLOOR_MACHINE so a logarithmic norm always has
-# vmin > 0.  The upper limit is the row peak.  This resolves the roundoff
-# regime (which a fixed 1e-6 floor compressed into the darkest colour) and
-# keeps the validity mask visually distinct.  Below vmin the colormap's
-# darkest finite colour is used, never the mask grey: grey means "not
-# evaluated", not "small".
-ERROR_FLOOR_EPS_FACTOR = 1.0 / 64.0   # of float64 eps: ~3.5e-18
-ERROR_FLOOR_MACHINE = float(np.finfo(np.float64).eps) * ERROR_FLOOR_EPS_FACTOR
-ERROR_FLOOR = ERROR_FLOOR_MACHINE     # canonical name used by manifests
+# Error panels use a DATA-DRIVEN lower limit, not a fixed decimal floor.
+# The diagnosis of the vanished roundoff star: the fixed 1e-6 floor clamped
+# every error below it onto the darkest colour (93 % of valid pixels in the
+# gp/val/large slices, 7-10 decades collapsed).  The single policy is now
+#     vmin = clamp(round_down_2sf(smallest positive finite error),
+#                  ERROR_FLOOR_MIN, ERROR_FLOOR_MAX)
+# so a panel whose smallest error is 6.3e-14 gets vmin = 6.3e-14, while the
+# floor can never exceed 1e-6 and never drops below 1e-14.  vmax stays the
+# row peak (with the 1e-3 gate always representable).  Below vmin is valid
+# data and takes the colormap's darkest finite colour; grey is only a mask.
+ERROR_FLOOR_MAX = 1e-6
+ERROR_FLOOR_MIN = 1e-14
+ERROR_FLOOR = ERROR_FLOOR_MAX          # upper bound, kept for manifests
 ERROR_GATE = 1e-3
 SQ_FLOOR_RATIO = 1e-6
 SQ_LOG_DECADES = 6.0
@@ -520,7 +522,8 @@ def style_tokens(kind=None):
                       "error": f"{CMAP_ERROR_BASE} (top {ERR_CMAP_TOP})",
                       "density": CMAP_DENSITY, "hist": CMAP_HIST},
         "masked_color": MASKED_COLOR,
-        "error_floor": ERROR_FLOOR,
+        "error_floor_max": ERROR_FLOOR_MAX,
+        "error_floor_min": ERROR_FLOOR_MIN,
         "error_gate": ERROR_GATE,
         "sq_floor_ratio": SQ_FLOOR_RATIO,
         "colorbar": {"tick_side": "left (field cax) / right (attached)",
@@ -981,35 +984,53 @@ def assert_masked_distinct(norm, cmap, label="error"):
 _assert_masked_distinct = assert_masked_distinct
 
 
+def _round_down_2sf(value):
+    """Largest number with two significant figures <= ``value``."""
+    v = float(value)
+    if not np.isfinite(v) or v <= 0.0:
+        return ERROR_FLOOR_MIN
+    exp = int(np.floor(np.log10(v)))
+    step = 10.0 ** (exp - 1)
+    return float(np.floor(v / step) * step)
+
+
+def error_floor(data_min):
+    """The one documented error-floor rule."""
+    return min(ERROR_FLOOR_MAX,
+               max(ERROR_FLOOR_MIN, _round_down_2sf(data_min)))
+
+
 def error_limits(items):
-    """Data-driven error range: smallest positive error .. row peak.
+    """Data-driven error range: clamped smallest positive error .. row peak.
 
     ``items`` may be arrays or dictionaries with ``err``/``valid`` entries.
-    The lower limit is the smallest finite positive relative error over the
-    valid cells of the whole row, clamped from below at
-    ``ERROR_FLOOR_MACHINE`` (a float64-epsilon-derived bound) so that a
-    ``LogNorm`` always has ``vmin > 0``.  The upper limit is the row peak.
-    One policy for every error panel, no per-figure override.  The 1e-3
-    acceptance gate stays tick-marked whenever it falls inside the range.
+    ``vmin = clamp(round_down_2sf(smallest finite positive relative error),
+    ERROR_FLOOR_MIN, ERROR_FLOOR_MAX)``; ``vmax`` is the row peak.  The
+    floor uses ``floor_err``/``floor_valid`` when present: the stored measured
+    error and the per-component validity mask that the diagnosis used.  One
+    policy for every error panel, no per-figure override.  The 1e-3
+    acceptance gate stays tick-marked and drawn as a dash-dot contour.
     """
-    good = []
+    floor_cells, peak_cells = [], []
     for it in items:
         if isinstance(it, dict):
-            e = np.asarray(it["err"], float)
             v = np.asarray(it["valid"], bool)
-            e = e[v & np.isfinite(e) & (e > 0)]
+            e = np.asarray(it["err"], float)
+            peak_cells.append(e[v & np.isfinite(e) & (e > 0)])
+            fv = np.asarray(it.get("floor_valid", v), bool)
+            fe = np.asarray(it.get("floor_err", it["err"]), float)
+            floor_cells.append(fe[fv & np.isfinite(fe) & (fe > 0)])
         else:
             e = np.asarray(it, float)
             e = e[np.isfinite(e) & (e > 0)]
-        if e.size:
-            good.append(e)
-    if not good:
-        return ERROR_FLOOR_MACHINE, max(1.0, ERROR_GATE)
-    cat = np.concatenate(good)
-    lo = float(cat.min())
-    hi = float(cat.max())
-    vmin = max(lo, ERROR_FLOOR_MACHINE)
-    vmax = max(hi, ERROR_GATE)
+            floor_cells.append(e)
+            peak_cells.append(e)
+    peak_cells = [e for e in peak_cells if e.size]
+    floor_cells = [e for e in floor_cells if e.size]
+    if not peak_cells or not floor_cells:
+        return ERROR_FLOOR_MAX, max(1.0, ERROR_GATE)
+    vmin = error_floor(float(np.concatenate(floor_cells).min()))
+    vmax = max(float(np.concatenate(peak_cells).max()), ERROR_GATE)
     if vmax <= vmin:
         vmax = vmin * 10.0
     return vmin, vmax
@@ -1521,7 +1542,8 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     man["raster_panel_mm"] = RASTER_PANEL_MM
     man["canvas_width_mm"] = round(fig.get_figwidth() * 25.4, 3)
     man["masked_color"] = MASKED_COLOR
-    man["error_floor"] = ERROR_FLOOR
+    man["error_floor_max"] = ERROR_FLOOR_MAX
+    man["error_floor_min"] = ERROR_FLOOR_MIN
     man["error_gate_tick"] = ERROR_GATE
     man["peak_annotation_font_pt"] = PEAK_ANNOT_PT
     man["peak_annotation_max_panel_frac"] = (
