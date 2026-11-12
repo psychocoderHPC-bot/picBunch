@@ -318,7 +318,10 @@ BUNCH_MARGINAL_MM = 38.0
 BUNCH_MARGINAL_MIN_MM = 18.0
 BUNCH_BAR_MM = 3.0
 BUNCH_GAP_MM = 1.6          # between the maps
-BUNCH_MARGINAL_GAP_MM = 9.5  # before the marginal axis (its y tick labels)
+# Room for the marginal axis's log y tick labels.  The mathtext script scale
+# (MATH_SCRIPT_SCALE) widened the longest ``10^{-16}`` label; 11.0 mm keeps its
+# left edge clear of the third map panel at every bunch-figure width.
+BUNCH_MARGINAL_GAP_MM = 11.0  # before the marginal axis (its y tick labels)
 BUNCH_BAR_GAP_MM = 9.2       # before the bar (its decade tick labels)
 BUNCH_LEFT_MM = 10.5        # first map y ticks + rotated y label
 BUNCH_RIGHT_MM = 5.0        # rotated colour-bar label
