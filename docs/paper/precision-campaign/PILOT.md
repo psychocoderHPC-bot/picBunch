@@ -103,7 +103,10 @@ work is the out-of-scope scaling/performance block.
   56/18 rows. The direction lattice was widened from axis-only to axis +
   face-diagonal + cube-diagonal, so `d=48` is covered (the axis-only lattice
   fell off the 96-node grid); `gamma=10,h=0.25,d=48` now reproduces the
-  committed `6.77651668e-4` to six digits.
+  committed `6.77651668e-4` to six digits. The `w4b` gamma=1 rows reproduce
+  the committed CSV through d=12 (`d=2` 0.11650316569 vs 0.1165031662); the
+  larger-d rows differ because the widened direction set samples different
+  worst-case nodes than the legacy ER1 lattice.
 * One provenance record was written for each pilot case, with git commit,
   configuration hash, full commands, GPU slot, UTC times, exit code and
   output SHA-256.

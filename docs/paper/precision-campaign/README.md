@@ -160,8 +160,11 @@ Every pilot output loaded with numpy, had the expected key set and the
 expected shapes (`128x128` for `hires`, `32x32` for `var1b`, `128x128`/`64x128`
 for `large1`, `64x64` for `bdata2`, `64^3` fields plus `(512, 8)` panels for
 `multivel`, 56 rows for `w4b`, 18 for `gamma`). The gamma=1 `w4b` rows
-reproduce the committed CSV to the printed precision, and the `large1-g1`
-centroid matches the committed case registry exactly.
+reproduce the committed CSV through `d=12`, and the `large1-g1` centroid
+matches the committed case registry exactly. The larger-`d` `w4b` rows differ
+because the widened direction lattice samples different worst-case nodes than
+the legacy ER1 lattice; the harness reports the fresh measurement, not a
+replay of the committed digits.
 
 Production reference settings are coarser in the pilot; the per-case
 `est` values in `cases.json` are used for the production plan and are
