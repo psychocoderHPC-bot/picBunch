@@ -7,10 +7,12 @@ and the panel letters a-d in reading order.  It is drawn on the canonical
 :mod:`figstyle` ladder; this module only supplies data, geometry-free drawing
 calls and the audit numbers.
 
-Data are particle positions (m) and signed charges (C).  The renderer bins
-them with a TSC deposit onto the same cell-centred grid as the field panels
-(extended only when a recorded bunch reaches past the stored slice window),
-projects the 3-D density onto the three planes and validates the result:
+Data are particle positions (m) and signed charges (C).  The row shows ONLY
+the bunch: the deposit grid is the particle bounding box per axis plus
+``BUNCH_PAD_CELLS = 2`` cells on each side (the TSC support half-width is 1.5
+cells), at the native field cell size.  The field panels below keep their
+full simulation grid; only this row is cropped.  The 3-D density is projected
+onto the three planes and validated:
 
 * projected sigma vs particle sigma within 0.75 cell on every axis,
 * projected centroid vs particle centroid within 0.5 cell,
@@ -90,17 +92,10 @@ def grid_from_particles(pos_m, cell, margin_cells=2):
     return lo, [int(v) for v in n], cell
 
 
-def grid_from_field(pos_m, origin, n, cell, margin_cells=2):
-    """Recorded field grid, extended only when the bunch reaches past it."""
-    origin = np.asarray(origin, dtype=float)
-    n = np.asarray(n, dtype=int)
-    cell = _cell_vector(cell)
-    lo = origin.copy()
-    hi = origin + n * cell
-    lo = np.minimum(lo, pos_m.min(axis=0) - margin_cells * cell)
-    hi = np.maximum(hi, pos_m.max(axis=0) + margin_cells * cell)
-    n = np.maximum(np.ceil((hi - lo) / cell).astype(int), 1)
-    return lo, [int(v) for v in n], cell
+# TSC support half-width is 1.5 cells, so 2 cells on every side guarantees
+# the outermost charge is not clipped and the density rolls off to zero
+# inside the cropped box.
+BUNCH_PAD_CELLS = 2
 
 
 def _tsc_weights(f):
@@ -204,13 +199,20 @@ def _ordered_views(views, figure_plane):
 
 # ------------------------------------------------------------------ compute
 def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
-            cell=None, source=""):
-    """Deposit, project, draw order and validate one bunch-form row."""
-    if origin is None or n is None:
-        origin, n, cell = grid_from_particles(bunch.pos_m, bunch.cell_m)
-    else:
-        origin, n, cell = grid_from_field(bunch.pos_m, origin, n, cell)
-    cell = np.asarray(cell, dtype=float)
+            cell=None, source="", pad_cells=BUNCH_PAD_CELLS):
+    """Deposit, project, draw order and validate one cropped bunch-form row.
+
+    The deposit grid is the particle bounding box per axis plus
+    ``pad_cells`` cells on each side, at the native cell size.  ``origin`` and
+    ``n`` are accepted for API compatibility but are deliberately ignored:
+    the row must not be binned over the full simulation domain.  Only
+    ``cell`` (the field-grid cell size) is used.
+    """
+    if cell is None:
+        cell = bunch.cell_m
+    cell = _cell_vector(cell)
+    origin, n, cell = grid_from_particles(bunch.pos_m, cell,
+                                          margin_cells=pad_cells)
     rho = deposit_tsc(bunch, origin, n, cell)
     coords = _coords(origin, n, cell)
 
@@ -254,13 +256,56 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
     validation = _validate(bunch, maps, marginals, rho, cell, dataset,
                            figure_name, origin, n)
 
+    crop = _crop_record(bunch, maps, n, cell, origin, pad_cells, validation)
+
     return {
         "maps": maps, "marginals": marginals,
         "norm": density_norm, "cmap": density_cmap,
         "map_peak": peak, "map_floor": floor,
         "marg_peak": mpeak, "marg_floor": mfloor,
         "validation": validation, "n": n, "origin": list(origin),
-        "cell": list(cell), "source": source,
+        "cell": list(cell), "source": source, "crop": crop,
+    }
+
+
+def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation):
+    """Audit record for the cropped density box and panel fill fractions."""
+    names = ("x", "y", "z")
+    box_lo = np.asarray(origin, dtype=float)
+    box_hi = box_lo + np.asarray(n, dtype=float) * np.asarray(cell, float)
+    box_um = {name: [float(box_lo[_IDX[name]] * US),
+                     float(box_hi[_IDX[name]] * US)] for name in names}
+    box_cells = {name: int(n[_IDX[name]]) for name in names}
+    cell_um = {name: float(cell[_IDX[name]] * US) for name in names}
+    fill_axes = {}
+    for name in names:
+        sigma_um = validation["particle"][name].get("sigma_um") or 0.0
+        extent_um = box_um[name][1] - box_um[name][0]
+        fill_axes[name] = (min(1.0, 6.0 * abs(sigma_um) / extent_um)
+                           if extent_um > 0.0 else 0.0)
+    fill_maps = {}
+    pixels = {}
+    for m in maps:
+        h = _IDX[m["horiz_name"]]
+        v = _IDX[m["vert_name"]]
+        fill_maps[m["plane"]] = min(
+            1.0, fill_axes[m["horiz_name"]] * fill_axes[m["vert_name"]])
+        pixels[m["plane"]] = {
+            "height_px": int(m["arr"].shape[0]),
+            "width_px": int(m["arr"].shape[1]),
+            "horizontal_axis": m["horiz_name"],
+            "vertical_axis": m["vert_name"],
+        }
+    return {
+        "pad_cells": int(pad_cells),
+        "box_um": box_um,
+        "box_cells": box_cells,
+        "cell_um": cell_um,
+        "pixels_per_map": pixels,
+        "fill_fraction_axes_pm3sigma": {
+            k: round(v, 4) for k, v in fill_axes.items()},
+        "fill_fraction_map_pm3sigma": {
+            k: round(v, 4) for k, v in fill_maps.items()},
     }
 
 
@@ -444,6 +489,7 @@ def manifest(bunch, computed, geo):
             "map_peak": computed["map_peak"],
             "marginal_floor": computed["marg_floor"],
             "marginal_peak": computed["marg_peak"],
+            "crop": computed["crop"],
         },
         "bunch_validation": v,
     }
