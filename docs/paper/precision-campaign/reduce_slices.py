@@ -28,11 +28,20 @@ import argparse
 import json
 import math
 import os
+import sys
 
 import h5py
 import numpy as np
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS = os.path.join(os.path.dirname(HERE), "scripts")
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+import axis as axis_convention  # noqa: E402
+
 COMP = ["Ex", "Ey", "Ez", "Bx", "By", "Bz"]
+BUNCH_KEYS = ("bunch_pos_m", "bunch_q_C", "bunch_axis",
+              "bunch_rho_cell_m", "bunch_gamma")
 E_CHARGE = 1.602176634e-19
 EPS0 = 8.8541878128e-12
 C_LIGHT = 299792458.0
@@ -74,6 +83,55 @@ def load_sources(path, cell_m, columns):
             return np.column_stack([pos / np.asarray(cell_m)[None, :],
                                     np.stack(mom, axis=1), w])
     return pos / np.asarray(cell_m)[None, :]
+
+
+def load_bunch(path):
+    """Return the stored-order particle states of the run input.
+
+    ``pos_m`` is ``(N, 3)`` float64 in metres and ``q_C`` is ``(N,)`` float64
+    signed charge in coulomb.  The order is the on-disk order of the
+    generated openPMD input, so the arrays are index aligned and unsorted.
+    """
+    with h5py.File(path, "r") as handle:
+        species = handle["data/0/particles/e"]
+        pos = []
+        for axis in "xyz":
+            node = species["position"][axis]
+            pos.append(np.asarray(node[:], dtype=np.float64)
+                       * float(node.attrs.get("unitSI", 1.0)))
+        weight = species["weighting"]["value"]
+        w = np.asarray(weight[:], dtype=np.float64) * float(
+            weight.attrs.get("unitSI", 1.0))
+        charge = species["charge"]["value"]
+        c = np.asarray(charge[:], dtype=np.float64) * float(
+            charge.attrs.get("unitSI", 1.0))
+    pos = np.stack(pos, axis=1).astype(np.float64)
+    q = np.asarray(w * c, dtype=np.float64)
+    if pos.shape[0] != q.shape[0]:
+        raise ValueError("%s: %d positions but %d charges"
+                         % (path, pos.shape[0], q.shape[0]))
+    return pos, q
+
+
+def bunch_block(spec, dataset, gamma, cell):
+    """Additive bunch-form keys for the particles that produced the field.
+
+    ``bunch_rho_cell_m`` must be the field-grid cell size, so the helper
+    refuses a non-cubic cell vector instead of guessing.
+    """
+    cell = np.asarray(cell, dtype=float)
+    if cell.size != 3 or not np.allclose(cell, cell[0], rtol=0.0, atol=0.0):
+        raise ValueError("%s: bunch keys need a cubic field cell, got %s"
+                         % (spec.get("case"), list(cell)))
+    pos, q = load_bunch(spec["input_h5"])
+    return {
+        "bunch_pos_m": pos,
+        "bunch_q_C": q,
+        "bunch_axis": np.asarray(
+            axis_convention.propagation_axis(dataset, gamma)),
+        "bunch_rho_cell_m": np.asarray(float(cell[0])),
+        "bunch_gamma": np.asarray(float(gamma)),
+    }
 
 
 def reference_cube(ref_npz, n, cell, origin):
@@ -266,6 +324,11 @@ def build(spec):
         ingest["sources"] = out["sources"]
     elif style == "large1" and spec.get("centre") is None:
         pass
+
+    gamma = float(spec.get("gamma", 10.0))
+    block = bunch_block(spec, style, gamma, cell)
+    out.update(block)
+    ingest.update(block)
 
     _savez(spec["out"], out)
     if spec.get("ingest"):

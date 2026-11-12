@@ -24,11 +24,20 @@ import csv
 import json
 import math
 import os
+import sys
 
 import h5py
 import numpy as np
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS = os.path.join(os.path.dirname(HERE), "scripts")
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+import axis as axis_convention  # noqa: E402
+
 COMP = ["Ex", "Ey", "Ez", "Bx", "By", "Bz"]
+BUNCH_KEYS = ("bunch_pos_m", "bunch_q_C", "bunch_axis",
+              "bunch_rho_cell_m", "bunch_gamma")
 E_CHARGE = 1.602176634e-19
 EPS0 = 8.8541878128e-12
 C_LIGHT = 299792458.0
@@ -56,6 +65,46 @@ def load_ref(path):
             np.asarray(data["d_cells"], dtype=float),
             np.asarray(data["vals"], dtype=float),
             int(data["order"]) if "order" in data.files else -1)
+
+
+def load_bunch(path):
+    """Stored-order particle positions (m) and signed charges (C)."""
+    with h5py.File(path, "r") as handle:
+        species = handle["data/0/particles/e"]
+        pos = []
+        for axis in "xyz":
+            node = species["position"][axis]
+            pos.append(np.asarray(node[:], dtype=np.float64)
+                       * float(node.attrs.get("unitSI", 1.0)))
+        weight = species["weighting"]["value"]
+        w = np.asarray(weight[:], dtype=np.float64) * float(
+            weight.attrs.get("unitSI", 1.0))
+        charge = species["charge"]["value"]
+        c = np.asarray(charge[:], dtype=np.float64) * float(
+            charge.attrs.get("unitSI", 1.0))
+    pos = np.stack(pos, axis=1).astype(np.float64)
+    q = np.asarray(w * c, dtype=np.float64)
+    if pos.shape[0] != q.shape[0]:
+        raise ValueError("%s: %d positions but %d charges"
+                         % (path, pos.shape[0], q.shape[0]))
+    return pos, q
+
+
+def bunch_block(input_h5, dataset, gamma, cell):
+    """Additive bunch keys for the particles that produced the field."""
+    cell = np.asarray(cell, dtype=float)
+    if cell.size != 3 or not np.allclose(cell, cell[0], rtol=0.0, atol=0.0):
+        raise ValueError("bunch keys need a cubic field cell, got %s"
+                         % list(cell))
+    pos, q = load_bunch(input_h5)
+    return {
+        "bunch_pos_m": pos,
+        "bunch_q_C": q,
+        "bunch_axis": np.asarray(
+            axis_convention.propagation_axis(dataset, gamma)),
+        "bunch_rho_cell_m": np.asarray(float(cell[0])),
+        "bunch_gamma": np.asarray(float(gamma)),
+    }
 
 
 def sample_mesh(mesh, point_m, comp, cell):
@@ -87,7 +136,7 @@ def ref_si(vals, comp):
 def write_csv(path, header, rows):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", newline="") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(header)
         writer.writerows(rows)
 
@@ -187,6 +236,11 @@ def mode_multivel(spec):
     }
     stats = {"e5": bunch_stats(spec["input_e5"]),
              "a5": bunch_stats(spec["input_a5"])}
+    gamma = float(spec.get("gamma", 10.0))
+    cell_vec = np.full(3, float(spec["cell_m"]))
+    bunch = {case: bunch_block(spec["input_" + case], "multivel", gamma,
+                               cell_vec)
+             for case in ("e5", "a5")}
     peaks = {}
     y = {}
     for case in ("e5", "a5"):
@@ -212,7 +266,8 @@ def mode_multivel(spec):
                     array_axes="z,y,x", cell_m=float(spec["cell_m"]),
                     grid=np.asarray(spec["grid"]), case=case, bins=int(b),
                     charge_C=stats[case]["total_charge_C"], beam_axis="+y",
-                    metric="field B vs B=256 peak-normalised")
+                    metric="field B vs B=256 peak-normalised",
+                    **bunch[case])
     rows = []
     for b in spec["bins"]:
         rows.append((b,
@@ -240,7 +295,8 @@ def mode_multivel(spec):
                    spec["panel_out_" + case]]
         for target in targets:
             os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
-            np.savez(target, particles=data["particles"])
+            np.savez(target, particles=data["particles"],
+                     cell_m=float(spec["cell_m"]), **bunch[case])
     return {"rows": len(rows), "panels": 2}
 
 

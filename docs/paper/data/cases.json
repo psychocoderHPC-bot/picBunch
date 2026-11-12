@@ -17,24 +17,25 @@
         "val_fluct_xy",
         "val_fluct_zy"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the exact TSC-convolved reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 1144501,
+          "bytes": 1254536,
           "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
-          "sha256": "a47e3aeb9aa92e6b8cb52d7e2c702fe3515462641c28227b6ad6d82f7ae18505"
+          "sha256": "5ebaca8c1e18a84a68d49b8bfc4c832446dd8020f8f4f672188665d9942607ba"
         },
         {
-          "bytes": 4830,
+          "bytes": 2301,
           "path": "docs/paper/data/bdata2/forward_sources.npz",
-          "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+          "sha256": "51d70af46ff968eee54ada490accabc047718197e6e2e770ad3b0f95572ca5a9"
         }
       ]
     },
@@ -55,24 +56,25 @@
         "val_forward_xy",
         "val_forward_zy"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the exact TSC-convolved reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 959982,
+          "bytes": 1254508,
           "path": "docs/paper/data/bdata2/forward_slice.npz",
-          "sha256": "bb70ea5c6b605120d4ce0f0b29b57a1b271282dbd1a1d27d4290d105f78889af"
+          "sha256": "7deb979d90f780031864719f6a071d7a00eec26579a0f0865486fe325a741e2c"
         },
         {
-          "bytes": 4830,
+          "bytes": 2301,
           "path": "docs/paper/data/bdata2/forward_sources.npz",
-          "sha256": "4a07244c8616f9843ed5ab7f52b07bef409294778fa695d7478382269f8a2b0a"
+          "sha256": "51d70af46ff968eee54ada490accabc047718197e6e2e770ad3b0f95572ca5a9"
         }
       ]
     },
@@ -103,7 +105,7 @@
       "seed": null,
       "source_data": [
         {
-          "bytes": null,
+          "bytes": 599,
           "path": "docs/paper/data/line/h100_mpi_scaling.csv",
           "sha256": "e8640495e754091c4fada2770cea8a546cba763aca691ace886ff88c267cee99"
         }
@@ -130,19 +132,20 @@
       "figures": [
         "gp_g10"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1940492,
+          "bytes": 2999364,
           "path": "docs/paper/data/hires/hi_g10.npz",
-          "sha256": "539dec170c54015c823c6fbe4729e9afca19ec46e01534f08adbf88985a042fe"
+          "sha256": "0c82545c94ae600e414e71a1baf673b743bce443373f93dca63af98cbf122b3f"
         }
       ]
     },
@@ -166,19 +169,20 @@
       "figures": [
         "gp_g100"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1893609,
+          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g100.npz",
-          "sha256": "02f833de2021c5a88113a6070b21d7098d69456f2dd919d5687bdd912c9e5dd1"
+          "sha256": "a8231c2a7d7f16c5b498d560f3ad0c91c9af3041969579435b15e7d7ffaa0e31"
         }
       ]
     },
@@ -202,19 +206,20 @@
       "figures": [
         "gp_g1p0"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1082344,
+          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p0.npz",
-          "sha256": "c028ca557f0aab78e5c6c327caa5ebfaa8afa638ea4525c2e9d5888aaf129d94"
+          "sha256": "c9b2127a231342401ecb58fa002e69cfae3d091f12c070463bf532bbcca14188"
         }
       ]
     },
@@ -238,19 +243,20 @@
       "figures": [
         "gp_g1p1"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1939731,
+          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p1.npz",
-          "sha256": "516bde3bb3c0974567bc1c3f4eb3dcaf91bf743dfbebb159bc9e9400d768d755"
+          "sha256": "35a904eb59a7e96870b984fc45354c4c3af5fc77d7b29c39b68e34dee1de07c3"
         }
       ]
     },
@@ -274,19 +280,20 @@
       "figures": [
         "gp_g1p5"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1938624,
+          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p5.npz",
-          "sha256": "995a57d6aed3a86820366a9540dd5305889bfa189d04de4ac56caae4918e9f32"
+          "sha256": "f58121209aca76b28170a43d4e21e8f6111d3c6c07c0d315e0686a85fcf44dc7"
         }
       ]
     },
@@ -310,19 +317,20 @@
       "figures": [
         "gp_g2p0"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1934658,
+          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g2p0.npz",
-          "sha256": "649e2613342fa7055b0bf4c15586161526ae3e3df8179b0b41f73d0a4311346f"
+          "sha256": "09de7cd21d46d2c37fcf0e3256f61a4909cebbd077720f149e5d401034e59b40"
         }
       ]
     },
@@ -346,19 +354,20 @@
       "figures": [
         "gp_g50"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact); the independent order-12 reference slices are unchanged, only the picBunch field and derived errors were recomputed",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 1911512,
+          "bytes": 2999364,
           "path": "docs/paper/data/hires/hi_g50.npz",
-          "sha256": "b9244c54409553971666fd85f898ee4bb906e4312b44ed6e8dd1d00f76fdd531"
+          "sha256": "f4fb880464d33829f72c38137de2a208d602d04a9c80b3d3e95adcf33140f00d"
         }
       ]
     },
@@ -380,18 +389,18 @@
       ],
       "gpu_model": "NVIDIA H100 PCIe 80 GB",
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-      "io_backend": "adios2/BP5",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",
-      "picbunch_version": "picBunch v0.8.0 (ae10ab29)",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "stationary",
       "provenance": "fresh-h100",
-      "seed": null,
+      "seed": 42,
       "source_data": [
         {
-          "bytes": 2068252,
+          "bytes": 3706140,
           "path": "docs/paper/data/large1/slices_g1.npz",
-          "sha256": "935f598cfb6c9465091f76f349d16ec0c58e53e4ae850d3538057ef4586410c8"
+          "sha256": "54d7942561bb6cdc61680771c9db01eb8e36fbdfa312fe9137e40b53cac2a9e9"
         }
       ]
     },
@@ -413,18 +422,18 @@
       ],
       "gpu_model": "NVIDIA H100 PCIe 80 GB",
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-      "io_backend": "adios2/BP5",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "axial-x data set: Bx==0, By/Bz nonzero, Ex suppressed (g10); all B==0, mean gamma 1 (g1). array_axes recorded in the reduced npz: xy=[y,x], zy=[z,y]",
-      "picbunch_version": "picBunch v0.8.0 (ae10ab29)",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "x",
       "provenance": "fresh-h100",
-      "seed": null,
+      "seed": 42,
       "source_data": [
         {
-          "bytes": 2828305,
+          "bytes": 3706108,
           "path": "docs/paper/data/large1/slices_g10.npz",
-          "sha256": "397ec7ae4ef7fb9d2a7513c809a53367c9d1973687b5ba2e1badd2880abeb976"
+          "sha256": "8f501a9d93d4fe700d72fffd44b1e39543f1d75c7584cad68bccb4129862ea4a"
         }
       ]
     },
@@ -450,17 +459,18 @@
       ],
       "gpu_model": "NVIDIA H100 PCIe 80 GB",
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh 2026-11-09 jureca-h100 BP5 campaign; h=1 rows reproduce the 96^3 line-gamma values, h=1/4 rows are the current-model standard refined mesh (cell 2.5e-8 m, 384^3), not the legacy v0.5.0 kRefinement=0.25 values 0.188/6.86e-5/7.11e-4",
-      "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "n/a",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 580,
+          "bytes": 615,
           "path": "docs/paper/data/line/gamma_err_dist.csv",
-          "sha256": "f909a558df2db459e4722ba8d6f826d362ef8f898661db1b875c01d87cb7fbea"
+          "sha256": "4a048c03721c8588cd9922fafde44b7423efa27de066507bc60df433ac16625a"
         }
       ]
     },
@@ -509,11 +519,12 @@
       "figures": [
         "F_multivel_dist"
       ],
-      "gpu_model": "Tesla V100-SXM2-32GB",
-      "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+      "gpu_model": "NVIDIA H100 PCIe 80 GB",
+      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77). Ten runs (E5/A5 x B=1/4/16/64/256) at 64^3, cell 1e-7 m; the default reproduces the pre-hybrid peak values, so the reduced peaks and binning tables are unchanged.",
-      "picbunch_version": "picBunch git 69bfd77d03493a10e0da4c8fdad25c6480c0582a",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "n/a",
       "provenance": "fresh-h100",
       "seed": [
@@ -522,19 +533,19 @@
       ],
       "source_data": [
         {
-          "bytes": 16469,
+          "bytes": 40986,
           "path": "docs/paper/data/line/multivel_energy.npz",
-          "sha256": "a7e8afab8e2fbf39ae4d23f4643b350b1348be107fe9b976999d4b32611a15ec"
+          "sha256": "eb6e35546606b79d2ea3b8917f0538263173ca431443c782131d8543ad15212c"
         },
         {
-          "bytes": 24041,
+          "bytes": 40986,
           "path": "docs/paper/data/line/multivel_angular.npz",
-          "sha256": "3e7ff34ee05de02d6073d302113de17a3514937031b20a0be7fa445004990930"
+          "sha256": "7a9be45833dad3fdb2e766ad483ba00b790254269fe984b64677fdf503cfceb4"
         },
         {
-          "bytes": 390,
+          "bytes": 384,
           "path": "docs/paper/data/line/multivel_binning.csv",
-          "sha256": "38efae1cd17d750344ad2c8dc1b688a236c6bddaba366b75a7f2bac8d46a6a30"
+          "sha256": "388c539fc4ed25f50f8866e63670fc646ba563b9d350c6192126dab0c1e60813"
         },
         {
           "bytes": 617,
@@ -542,24 +553,24 @@
           "sha256": "4fdf502c1a5d5599f67ece2e52866254c33bbfff349bd1701295fe8207db1f4e"
         },
         {
-          "bytes": 10041732,
+          "bytes": 10041978,
           "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
-          "sha256": "f56d16a4fcafad0e818617ab69d97efa95250358a2929bdb5cea69ae5a6fcbf3"
+          "sha256": "21467ebdad4bd99a29788db0ec41935e1d9f159a78498fdffa9d771e551f82c0"
         },
         {
-          "bytes": 10041262,
+          "bytes": 10042252,
           "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
-          "sha256": "da5d204ad3b6ca016c9f0039e1f7e94f8cd69fe6ae5caf48a70971d9399c4f5c"
+          "sha256": "322d9cbc7390441a2b2f927aa2ebc0972f4f65ac53467e7eb08141e93b7e658f"
         },
         {
-          "bytes": 12063430,
+          "bytes": 12061637,
           "path": "docs/paper/data/line/multivel_fields_a5_b16.npz",
-          "sha256": "9f7d795c13430504ca728ac62b8bd99e23504d4fbecee1a449d2ca5e619355e3"
+          "sha256": "fac874df0a3cd692a154a2dad89336319e4fa61786d485e198790dce5711e7cd"
         },
         {
-          "bytes": 12071447,
+          "bytes": 12071682,
           "path": "docs/paper/data/line/multivel_fields_a5_b64.npz",
-          "sha256": "4b6963a495c2cb9991564984ab235f60db1e64a8f51f4521400a73651ddf81e7"
+          "sha256": "b27a2f4e130c4a7ecfb5f2e53c826d1cf3cff30149c5999fbfe4f6fde71e67c7"
         }
       ]
     },
@@ -593,17 +604,18 @@
       ],
       "gpu_model": "NVIDIA H100 PCIe 80 GB",
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "fresh 2026-11-09 jureca-h100 BP5 campaign plus the fresh gamma=1 runs; w4b_paper_metric.csv uses the corrected paper metric (|ref-mesh|/max denominator, electric Ex/Ey/Ez, per-component floor) and all four gammas; aspect 4 coincides with aspect 1 to machine precision at padding 1",
-      "picbunch_version": "picBunch git e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
+      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "n/a",
       "provenance": "fresh-h100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 15653,
+          "bytes": 7522,
           "path": "docs/paper/data/line/w4b_rel_error.csv",
-          "sha256": "0082217a7fe55ee3af7b53c191e04eb7d864e14ce24bd42086b3a07170a1996f"
+          "sha256": "15daa5c743cfd51853887e3fd6fc70b8b96421e3d1f526c101fedeecd43ba8b1"
         }
       ]
     },
@@ -654,7 +666,7 @@
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
       "io_backend": "adios2/BP5",
       "measurement_kind": "fresh-h100",
-      "note": "first 200 rows of the VAR1 1000-particle bunch; angles from default_rng(43)",
+      "note": "RETAINED UNCHANGED. The 2026-11-12 campaign var1b case is INVALID: the harness input did not match the committed 1 mrad case (weight/seed/positions differ; peaks ~10^6 too high). Its input is not reproducible from this repository, so the committed reduced slice stays as-is and no fresh bunch data were ingested. Historical picbunch: experimental/multivel 02891fe6.",
       "picbunch_version": "picBunch experimental/multivel 02891fe6bd9c34eea5479e91ecebbd54a44a47f7",
       "propagation_axis": "y",
       "provenance": "fresh-h100",
