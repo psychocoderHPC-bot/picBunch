@@ -327,7 +327,10 @@ BUNCH_LEFT_MM = 10.5        # first map y ticks + rotated y label
 BUNCH_RIGHT_MM = 5.0        # rotated colour-bar label
 BUNCH_TITLE_IN = 0.16       # panel title above the maps
 BUNCH_LABEL_IN = 0.34       # x tick labels + axis label below the maps
-BUNCH_INTER_GAP_IN = 0.10   # between the bunch labels and the field titles
+# Between the bunch labels and the field titles.  The larger mathtext scripts
+# made the marginal axis's bottom log tick label overlap the squared-panel
+# title; 0.22 in lifts the bunch row clear of it at every placed scale.
+BUNCH_INTER_GAP_IN = 0.22   # between the bunch labels and the field titles
 _MM_IN = 1.0 / 25.4
 
 
