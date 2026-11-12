@@ -586,7 +586,13 @@ def draw_raster_panel(ax, x, y, arr, quantity, norm=None, cmap=None):
     shared edges, which is seam-free at 300 dpi and introduces no interpolation
     artefacts.  This is the only raster path in the paper.
     """
-    arr = np.asarray(arr)
+    # Keep the mask: np.asarray() strips it, so a masked error raster would be
+    # drawn from the underlying data and its invalid far field would fall
+    # through to the colormap's under colour (near-black) instead of the
+    # canonical mask grey.  np.ma.asarray() preserves the mask all the way to
+    # imshow, where ``set_bad(MASKED_COLOR)`` is applied in memory and the
+    # grey reaches the PDF palette as a real image colour.
+    arr = np.ma.asarray(arr)
     if arr.ndim != 2:
         raise ValueError("draw_raster_panel needs a 2-D array")
     xlo, xhi = _cell_edges(x, "x")
