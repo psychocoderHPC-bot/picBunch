@@ -16,9 +16,13 @@ of Table~\ref{tab:configs}, $Q=-32$\,aC) propagates along $+y$ and is
 different from the seed-42 mono-energetic bunch that moves along $+x$ in
 the $\gamma=10$ case of Table~\ref{tab:slices}. It is binned on the
 $32\times32\times16$ grid of cell $2\times10^{-7}$\,m and sliced at its
-mid-plane (Fig.~\ref{fig:val1mrad}). In every panel $y$ is horizontal and increases
-left to right, so the bunch moves rightwards and $y$ is the beam axis; the
-vertical axis is $x$ in the x-y cut and $z$ in the z-y cut. Each figure has
+mid-plane (Fig.~\ref{fig:val1mrad}). In every panel of these $+y$ figures, $y$ is
+horizontal and increases left to right, so the bunch moves rightwards and $y$
+is the beam axis; the vertical axis is $x$ in the x-y cut and $z$ in the z-y
+cut. The top row of each plate is a charge-density overview of the bunch, not
+a field map; its three panels are the coordinate planes and its transverse
+panels carry the ``beam axis (out of plane)'' note (see the caption of
+Fig.~\ref{fig:valforward}). Each figure has
 a field row with four columns ($E_x,E_y,E_z,E^2$); the forward and
 $1$\,mrad figures carry an error row underneath, while the reference-only
 fluctuation figure shows the electric and magnetic field rows alone. The three
@@ -49,15 +53,15 @@ on an $h=1$ grid the shell covers 3 mesh nodes; the TSC support extends
 $\pm1.5$ cells from each source, so the shell covers a fraction of the full
 support. The measured plane errors at this radius are reported below.
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/val_forward_xy.pdf}
 \caption{Forward-case validation ($N=200$, $Q=-100$\,pC,
 $\gamma=10$ along $+y$, $64\times64$ planes, cell $10^{-7}$\,m; x-y plane
 at $z=3.2\,\si{\micro\metre}$, with $y$ horizontal, the beam axis; the
 z-y plane at $x=3.2\,\si{\micro\metre}$ is continued in
-Fig.~\ref{fig:valforward}.
-Each image carries the electric block first and the magnetic block second.
+Fig.~\ref{fig:valforward}. \densityrow{} Below the density row, each image
+carries the electric block first and the magnetic block second.
 The electric block shows four columns $E_x,E_y,E_z,E^2$: the three components
 share one symmetric-logarithmic scale and bar, while $E^2$ has its own
 logarithmic scale from $10^{-6}$ of the panel peak to the peak and its own unit
@@ -79,7 +83,7 @@ field at $\gamma=10$ (Section~\ref{sec:accuracy}).}
 \label{fig:valforward}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \ContinuedFloat
 \centering
 \includegraphics[width=\linewidth]{figs/val_forward_zy.pdf}
@@ -89,12 +93,13 @@ colour scales, masks and error conventions as the x-y plane in
 Fig.~\ref{fig:valforward}.}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/val_fluct_xy.pdf}\\[2pt]
 \includegraphics[width=\linewidth]{figs/val_fluct_zy.pdf}
 \caption{Fluctuation-case reference with the same geometry and bunch as
-Fig.~\ref{fig:valforward} but a $1.046$\,mrad rms $x$-divergence. Each image
+Fig.~\ref{fig:valforward} but a $1.046$\,mrad rms $x$-divergence.
+\densityrow{} Below the density row, each image
 carries the electric field row first and the magnetic field row second; the
 upper and lower images are the x-y and z-y planes, with $y$ horizontal and the
 beam axis. The electric row shows four columns $E_x,E_y,E_z,E^2$ from the
@@ -109,7 +114,7 @@ Appendix~\ref{app:multivel}.}
 \label{fig:valfluct}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
 \includegraphics[width=\linewidth]{figs/val_1mrad_xy_B.pdf}
@@ -118,7 +123,7 @@ seed-43 bunch, $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at
 $z=1.6\,\si{\micro\metre}$ ($z=8$ of the 16-cell $32\times32\times16$ grid),
 cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against
 the
-order-12 independent continuum reference. The upper image is electric and
+order-12 independent continuum reference. \densityrow{} The upper image is electric and
 the lower magnetic, each with four columns: three components on one shared
 scale and bar (peak in percent of the shared maximum), and $E^2$ or $B^2$ on
 its own logarithmic scale and bar; $y$
@@ -236,23 +241,29 @@ electric block comes first and the magnetic block second in the same
 figure, as in the per-$\gamma$ presentation. Fig.~\ref{fig:largeg1} is the
 stationary-bunch case, with the electric block and the identically zero
 magnetic field row. Figs.~\ref{fig:large}--\ref{fig:largeg1} use the
-axial-$x$ geometry (beam along $+x$, so $B_x$ is identically zero), unlike
-the $+y$ slice figures; the beam axis $x$ is horizontal in
-the x-y cut, while in the z-y cut the beam points out of the plane, so $y$
-is horizontal and $z$ vertical, as in the z-y cuts of the $+y$ figures. The
+axial-$x$ geometry: the bunch moves along $+x$, so $B_x$, the field component
+along the propagation axis, is identically zero. The x-y cut is longitudinal,
+with the beam axis $x$ horizontal. The z-y cut is a transverse view of the
+bunch: the beam axis $x$ is perpendicular to the page, so the horizontal
+coordinate there is the transverse $y$, not the propagation direction, and
+$z$ is vertical. This keeps the same horizontal $y$ and vertical $z$ as the
+z-y cuts of the $+y$ figures, where the out-of-plane transverse axis is $x$. The
 colour scale is set by the bunch, so the far decay is visible inside the
 frame; the core error is the method error of the mesh where the planes cut
 the bunch, far above the $10^{-3}$ gate.
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/large_sxy_g10.pdf}
 \caption{Large-domain slices ($\gamma=10$, $128\times128\times64$, cell
-$2\times10^{-7}$\,m, $N=100$, JURECA H100), axial-$x$ geometry (beam along
-+$x$): $x$ is horizontal in the x-y cut and is the beam axis there, while
-$y$ is horizontal in the z-y cut (beam out of plane) and $z$ vertical. The
-x-y plane is shown; the z-y plane is continued in Fig.~\ref{fig:large}.
-Each image carries the electric block first and the magnetic block second.
+$2\times10^{-7}$\,m, $N=100$, JURECA H100), axial-$x$ geometry: the bunch
+moves along $+x$, so $B_x$, the component along the propagation axis, is
+identically zero. In the x-y cut the beam axis $x$ is horizontal; the z-y
+cut is a transverse view with the beam axis $x$ perpendicular to the page,
+so the horizontal axis is the transverse $y$, not the propagation direction,
+and $z$ is vertical. The x-y plane is shown; the z-y plane is continued in
+Fig.~\ref{fig:large}. \densityrow{} Below the density row, each image
+carries the electric block first and the magnetic block second.
 The electric block shows four columns $E_x,E_y,E_z,E^2$: the three
 components share one symmetric-logarithmic scale and bar (peak in percent of
 the shared maximum), $E^2$ has its own logarithmic scale and unit label, and
@@ -268,7 +279,7 @@ magnetic plane peak is $1.5\times10^{-4}$\,T (x-y) and $1.4\times10^{-4}$\,T
 \label{fig:large}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \ContinuedFloat
 \centering
 \includegraphics[width=\linewidth]{figs/large_szy_g10.pdf}
@@ -277,14 +288,16 @@ $\gamma=10$, with the same electric/magnetic blocks, colour scales, masks
 and error conventions as the x-y plane in Fig.~\ref{fig:large}.}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/large_sxy_g1.pdf}
 \caption{Large-domain slices for the stationary bunch ($\gamma=1$), same
-domain and layout as Fig.~\ref{fig:large}; $x$ is horizontal in the x-y cut
-and $y$ is horizontal in the z-y cut (the bunch is stationary; out-of-plane
-convention), $z$ vertical. The x-y plane is shown; the z-y plane is
-continued in Fig.~\ref{fig:largeg1}. Each image has the electric block first
+domain and layout as Fig.~\ref{fig:large}. In the x-y cut $x$ is horizontal;
+the z-y cut is the same transverse view as in Fig.~\ref{fig:large}, with $x$
+perpendicular to the page, $y$ horizontal and $z$ vertical; the bunch is
+stationary, so it has no propagation direction. \densityrow{} The x-y plane
+is shown; the z-y plane is continued in Fig.~\ref{fig:largeg1}. Below the
+density row, each image has the electric block first
 and the magnetic field row second. The electric block shows four columns $E_x,E_y,E_z,E^2$: the three
 components share one symmetric-logarithmic bar (peak in percent of the
 shared maximum), $E^2$ has its own logarithmic scale and unit label, and a
@@ -298,7 +311,7 @@ figure. Grey pixels are masked.}
 \label{fig:largeg1}
 \end{figure}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \ContinuedFloat
 \centering
 \includegraphics[width=\linewidth]{figs/large_szy_g1.pdf}

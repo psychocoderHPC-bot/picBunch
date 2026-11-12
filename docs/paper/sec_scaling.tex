@@ -91,6 +91,7 @@ particles, 20-cell box).
 \begin{table}[t]
 \centering
 \small
+\setlength{\tabcolsep}{4pt}
 \caption{Per-stage medians (ms) and device allocation (MiB), padding 2,
 double, JURECA H100 (jureca-h100) GPU 0, CUDA 13.4. ``box'' is the
 source-box size in cells; $M$ is the padded FFT array per axis. Stage
@@ -171,7 +172,8 @@ its output z-slab.  The measurements below force the same path at one rank so
 all three rows are comparable.  At $N=2\times10^{6}$, $256^3$, with the
 ADIOS2/BP5 checkpoint, the total is $18.19$, $10.08$ and $7.23$\,s at $1$,
 $2$ and $4$ ranks; the FFT is $2.31$, $1.15$ and $0.62$\,s and the
-distributed BP5 writer $0.71$, $0.65$ and $0.55$\,s.  The distributed FFT
+distributed BP5 writer $0.71$, $0.65$ and $0.55$\,s.  Fig.~\ref{fig:h100mpiscaling}
+plots these three rows.  The distributed FFT
 scales to $3.73\times$ at four ranks and the total to $2.52\times$; the
 writer scales sub-linearly, to $1.30\times$ at four ranks, the remaining
 many-rank bottleneck, not the field calculation.
@@ -211,7 +213,7 @@ contention on the shared series. The raw per-rank CSV of this campaign is
 not in this repository. The BP5 rows above are the plotted result.
 \end{table}
 
-\begin{figure}[H]
+\begin{figure}[t]
 \centering
 \includegraphics[width=0.58\linewidth]{figs/F_mpi_rank_scaling_h100.pdf}
 \caption{Distributed-mode strong scaling on JURECA H100 (4$\times$ H100
