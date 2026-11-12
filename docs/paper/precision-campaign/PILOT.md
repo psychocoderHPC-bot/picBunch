@@ -3,7 +3,8 @@
 Run: 2026-11-12 on `jureca-h100` (`jrc0880`), exclusive 4x NVIDIA H100 PCIe
 80 GB, 144 cores, CUDA 13.4.92, gcc 13.3.0, openPMD 0.17.1 (HDF5 + ADIOS2
 2.12.1). Repo `psychocoderHPC-bot/picBunch` at
-`00fb8f7fb22a53748636c70e32bbdb8dd85c23c4`.
+`00fb8f7fb22a53748636c70e32bbdb8dd85c23c4` (build commit; the harness commit
+is a separate field in every production record).
 
 * picBunch binary SHA-256 `717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6`
 * exact reference driver SHA-256 `a0d08be28b075fdb5e094e5a99800af2022826698e770e58d36fce9b16fa5f0e`
@@ -107,9 +108,9 @@ work is the out-of-scope scaling/performance block.
   the committed CSV through d=12 (`d=2` 0.11650316569 vs 0.1165031662); the
   larger-d rows differ because the widened direction set samples different
   worst-case nodes than the legacy ER1 lattice.
-* One provenance record was written for each pilot case, with git commit,
-  configuration hash, full commands, GPU slot, UTC times, exit code and
-  output SHA-256.
+* One provenance record was written for each pilot case, with both the
+  harness and build commits, the binary SHA-256, configuration hash, full
+  commands, GPU slot, UTC times, exit code and output SHA-256.
 
 ## Not run
 

@@ -79,9 +79,14 @@ docs/paper/precision-campaign/reference/build_reference.sh \
 ./run_campaign.py --root ... --bin ... --pilot \
   --only line-w4b,hires-g10,var1b-1mrad,multivel
 
-# full precision campaign
-./run_campaign.py --root ... --bin ...
+# full precision campaign (both commits are written into every record)
+./run_campaign.py --root ... --bin ... \
+  --harness-commit <harness-sha> \
+  --build-commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4
 ```
+
+Write each run into a **new** attempt directory. The campaign roots are
+append-only: do not reuse a root whose `prov/index.jsonl` already holds a run.
 
 The driver writes a private tree under `--root`:
 
@@ -98,25 +103,65 @@ prov/index.jsonl, prov/campaign_summary.json, logs/
 
 ### GPU scheduling
 
-`run_campaign.py` uses longest-processing-time-first (LPT) bin packing over
-four identical slots. It sorts the cases by `mesh_s + ref_s + reduce_s` and
-assigns each to the currently lightest slot; the load estimate for references
-is `sample_points x sources x --ref-rate` (a conservative upper bound).
-Each slot runs its cases sequentially in one thread; four slots run
-concurrently. A case process is pinned with `CUDA_VISIBLE_DEVICES=<slot>`;
-picBunch has no `--device` flag, so the process sees exactly one GPU as device
-0. References run inside the same slot with `OMP_NUM_THREADS=36` so four
-concurrent slots do not oversubscribe the 144 cores.
+Execution is a two-pool pipeline, not a per-slot sequential loop. Four GPU
+workers each own one `CUDA_VISIBLE_DEVICES` slot and pull mesh jobs from a
+shared work queue, so every mesh that is ready starts as soon as a GPU is
+free. A separate pool (`--ref-workers`, default 8, `--ref-threads`, default
+16) evaluates references for different cases concurrently on the 144 cores.
+The reference has no dependency on the mesh, so both stages of the same case
+start together; a case is reduced once all its mesh and reference jobs finish.
 
-The full set produces a balanced split; the `--estimate` output prints the
-assignment and the per-slot wall. The pilot ran one case per slot.
+This replaces the earlier LPT loop, which bound each case to one slot and ran
+that slot's mesh and reference sequentially: while a CPU-bound reference ran,
+its GPU idled and the next case's mesh waited. The old run showed at most two
+simultaneous picBunch processes despite four slots. `--estimate` still prints
+the LPT cost table; it is a planning aid only and no longer drives execution.
+
+`probe_gpu_parallelism.py` is the short four-case check. It samples
+`nvidia-smi` at 5 Hz while `line-gamma`, `line-w4b`, `multivel` and
+`hires-g10` run in a fresh attempt directory and writes
+`gpu_parallelism.json` (simultaneous-GPU histogram, per-GPU peak/mean
+utilisation, per-case slot and wall):
+
+```bash
+./probe_gpu_parallelism.py --root <new-attempt-dir> --bin build/paper/picBunch \
+  --driver <campaign>/bin/exact_field_driver --harness-commit <sha>
+```
+
+## Fixed case semantics
+
+* **bdata2 near shell and source.** `bdata2-forward` and
+  `bdata2-fluctuation` run with `--near-shell fast --near-shell-radius 3
+  --near-shell-tile 4 --near-shell-fast-order 5`, the flags the committed
+  slices recorded. Without them the plain mesh reaches errors of order 1-10.
+  Both sources also use the committed diagonal-line geometry
+  (`stratified_line`: per-axis sigma 6 cells at centroid (32,32,32)), not a
+  three-dimensional cloud. The committed `forward.bunch.h5` and
+  `forward_sources.npz` are that line; a three-dimensional cloud of the same
+  width leaves the slice errors 1.3-3.6x above the committed ones.
+* **multivel source and panel.** `gen_multivel` writes two different
+  artefacts. The field run (`mv-e5`, `mv-a5`) reproduces the archived paper
+  bunch: N=200, macro weight 5e-13 C, +y drift, and a stratified normal
+  `t ~ N(32, 6)` cells along the cube diagonal (`pos = (t, t, t)`), which
+  is the per-axis sigma=6, centroid (32,32,32) line present in the committed
+  `mvpaper_{e5,a5}.h5`. The 512-source figure panel (`mvpanel-*`) is a
+  three-dimensional Gaussian of sigma 3e-6 m at 2.4e-5 m with +z parallel
+  momentum and unit weight, matching the committed
+  `multivel_{energy,angular}.npz`. The panel is a figure-only sample and is
+  not the field source; a three-dimensional sigma=6 cloud at the field grid
+  gives about 5.5 kT instead of the committed 24.7 kT.
 
 ## Provenance
 
-One `prov/records/<case>.json` per case records the git commit, a SHA-256 of
-the case configuration, every mesh and reference command (full argv and
-environment), the GPU slot, host, UTC start/end, exit status and the SHA-256
-of every produced file. `prov/index.jsonl` summarises the run.
+One `prov/records/<case>.json` per case records **both** the harness commit
+(`harness_commit`, also kept as `git_commit`) and the commit the binary was
+built from (`build_commit`, default `00fb8f7fb22a53748636c70e32bbdb8dd85c23c4`),
+plus the binary path and SHA-256. It also records a SHA-256 of the case
+configuration, every mesh and reference command (full argv and environment),
+the GPU slot(s) each mesh used, host, UTC start/end, exit status and the
+SHA-256 of every produced file. `prov/index.jsonl` and
+`prov/campaign_summary.json` summarise the run and repeat both commits and the
+binary hash.
 
 ## Schema and additive keys
 

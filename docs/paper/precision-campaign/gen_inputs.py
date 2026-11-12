@@ -143,12 +143,35 @@ def gen_single(outdir, name, gamma, centre_cells, cell_m, axis):
     _emit(outdir, name, pos, u, 1.0, cell_m)
 
 
+def stratified_line(count, centre_cells, sigma_cells):
+    """Stratified normal sample along the cube diagonal ``(t, t, t)``.
+
+    The archived paper bunches of the committed multivel fields and of the
+    bdata2 forward/fluctuation slices are a line along the diagonal, not a
+    three-dimensional cloud: their per-axis width is ``sigma_cells`` but all
+    three coordinates of a particle carry the same value.  A deterministic
+    quantile sample keeps the per-axis width without the realisation noise of
+    a 200-particle draw.  The bdata2 and multivel field sources must use this
+    geometry; the var1b and large1 sources are genuine three-dimensional
+    clouds and use :func:`gen_cloud` with ``line_cells=None``.
+    """
+    from statistics import NormalDist
+    normal = NormalDist()
+    centre = float(np.asarray(centre_cells, dtype=float)[0])
+    t = np.asarray([centre + float(sigma_cells)
+                    * normal.inv_cdf((i + 0.5) / count) for i in range(count)])
+    return np.repeat(t[:, None], 3, axis=1)
+
+
 def gen_cloud(outdir, name, gamma, count, seed, centre_cells, sigma_cells,
               cell_m, axis="y", divergence_rad=0.0, weight=1.0,
-              clip_cells=None):
+              clip_cells=None, line_cells=None):
     rng = np.random.default_rng(seed)
     centre = np.asarray(centre_cells, dtype=float) * cell_m
-    pos = centre[None, :] + sigma_cells * cell_m * rng.standard_normal((count, 3))
+    if line_cells is not None:
+        pos = stratified_line(count, centre_cells, line_cells) * cell_m
+    else:
+        pos = centre[None, :] + sigma_cells * cell_m * rng.standard_normal((count, 3))
     if clip_cells is not None:
         # The current reader rejects particles outside the output grid.  A
         # validation bunch whose 3-sigma tail crosses the grid boundary is
@@ -165,28 +188,63 @@ def gen_cloud(outdir, name, gamma, count, seed, centre_cells, sigma_cells,
     _emit(outdir, name, pos, u, weight, cell_m)
 
 
-def gen_multivel(outdir, name, case, seed, count=200, cell_m=1e-7):
+def gen_multivel(outdir, name, case, seed, count=200, cell_m=1e-7,
+                 panel=False):
     """The E5% / A5deg multivel bunch used by F_multivel_dist.
 
-    Positions are uniform in a 3-cell cube around the 64-cell box centre.  E5
-    spreads the parallel momentum by 5 %; A5 draws a 5 deg cone.
+    Two artefacts are generated from the same velocity law:
+
+    ``panel=False`` (field run, ``mv-e5``/``mv-a5``)
+        The source of the committed field peaks.  The archived paper bunch
+        (``mvpaper_{e5,a5}.h5``, N=200, macro weight 5e-13 C, +y drift) walks
+        a stratified normal along the cube diagonal: every particle sits at
+        ``(t, t, t)`` with ``t`` a 200-point stratified sample of
+        ``N(32, 6)`` cells.  The per-axis width is the paper's sigma=6 cells
+        and the centroid is (32, 32, 32); the diagonal correlation of the
+        archived input is what makes the committed peaks reproducible (a
+        three-dimensional ``N(32, 6)`` cloud of the same per-axis width gives
+        about 5.5 kT instead of 24.7 kT because the line concentrates the
+        charge).  E5 spreads the parallel momentum by 5 %; A5 draws a 5 deg
+        Rayleigh cone, normalised so ``|u|`` is constant.
+
+    ``panel=True`` (``mvpanel-e5``/``mvpanel-a5``)
+        The 512-source figure sample: a three-dimensional Gaussian cloud of
+        sigma 3e-6 m at 2.4e-5 m (the committed panel's ~18-cell cloud at
+        24 cells in 1e-6 m units), parallel momentum along +z, unit weight.
+        The renderers read ``u`` only, but positions and weight are kept
+        identical to the committed ``multivel_{energy,angular}.npz``.
     """
     rng = np.random.default_rng(seed)
-    lo = 64.0 / 2.0 - 1.5
-    pos = (lo + 3.0 * rng.random((count, 3))) * cell_m
-    gamma = 10.0
-    u_abs = gamma_to_u(gamma)
+    u_abs = gamma_to_u(10.0)
+    if panel:
+        pos = (2.4e-5 + 3.0e-6 * rng.standard_normal((count, 3)))
+        if case == "e5":
+            u_parallel = u_abs * (1.0 + 0.05 * rng.standard_normal(count))
+            u = np.column_stack([np.zeros(count), np.zeros(count), u_parallel])
+        else:
+            sig = np.tan(np.deg2rad(5.0))
+            gx = rng.normal(0.0, sig, count)
+            gy = rng.normal(0.0, sig, count)
+            norm = np.sqrt(1.0 + gx * gx + gy * gy)
+            u = np.column_stack([u_abs * gx / norm,
+                                 u_abs * gy / norm,
+                                 u_abs / norm])
+        _emit(outdir, name, pos, u, 1.0, cell_m, panel=name)
+        return
+
+    pos = stratified_line(count, [32.0, 32.0, 32.0], 6.0) * cell_m
     if case == "e5":
-        gamma_p = gamma * (1.0 + 0.05 * rng.standard_normal(count))
-        u_parallel = np.sqrt(np.maximum(0.0, gamma_p * gamma_p - 1.0))
+        u_parallel = u_abs * (1.0 + 0.05 * rng.standard_normal(count))
         u = np.column_stack([np.zeros(count), u_parallel, np.zeros(count)])
     else:
-        theta = np.deg2rad(5.0) * np.sqrt(rng.random(count))
-        phi = rng.random(count) * 2.0 * np.pi
-        u = np.column_stack([u_abs * np.sin(theta) * np.cos(phi),
-                             u_abs * np.cos(theta),
-                             u_abs * np.sin(theta) * np.sin(phi)])
-    _emit(outdir, name, pos, u, WEIGHT_PAPER, cell_m, panel=name)
+        sig = np.tan(np.deg2rad(5.0))
+        gx = rng.normal(0.0, sig, count)
+        gz = rng.normal(0.0, sig, count)
+        norm = np.sqrt(1.0 + gx * gx + gz * gz)
+        u = np.column_stack([u_abs * gx / norm,
+                             u_abs / norm,
+                             u_abs * gz / norm])
+    _emit(outdir, name, pos, u, WEIGHT_PAPER, cell_m)
 
 
 CASES = {}
@@ -218,10 +276,11 @@ def _build_registry():
 
     _register("bdata2-forward", lambda o: gen_cloud(
         o, "bdata2-forward", 10.0, 200, 42, [32, 32, 32], 6.0, 1e-7,
-        axis="y", weight=WEIGHT_PAPER))
+        axis="y", weight=WEIGHT_PAPER, line_cells=6.0))
     _register("bdata2-fluctuation", lambda o: gen_cloud(
         o, "bdata2-fluctuation", 10.0, 200, 42, [32, 32, 32], 6.0, 1e-7,
-        axis="y", divergence_rad=1.046e-3, weight=WEIGHT_PAPER))
+        axis="y", divergence_rad=1.046e-3, weight=WEIGHT_PAPER,
+        line_cells=6.0))
     _register("var1b-1mrad", lambda o: gen_cloud(
         o, "var1b-1mrad", 10.0, 200, 42, [16, 16, 8], 3.0, 2e-7,
         axis="y", divergence_rad=1.046e-3, weight=WEIGHT_PAPER,
@@ -236,9 +295,9 @@ def _build_registry():
     _register("mv-a5", lambda o: gen_multivel(o, "mv-a5", "a5", 103))
     # 512-particle particle panels for F_multivel_dist (a)/(b)
     _register("mvpanel-e5", lambda o: gen_multivel(o, "mvpanel-e5", "e5",
-                                                   100, count=512))
+                                                   100, count=512, panel=True))
     _register("mvpanel-a5", lambda o: gen_multivel(o, "mvpanel-a5", "a5",
-                                                   103, count=512))
+                                                   103, count=512, panel=True))
 
 
 def main():

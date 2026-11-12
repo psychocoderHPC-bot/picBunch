@@ -10,7 +10,8 @@
    "F_a/F_b scaling-cost (docs/measurements/matrix.csv)",
    "F_mpi_rank_scaling_h100 (docs/paper/data/line/h100_mpi_scaling.csv)"
   ],
-  "balance": "LPT (longest processing time first) over the four GPU slots using the estimated wall of every case"
+  "balance": "two-pool scheduler: four GPU mesh workers with one CUDA_VISIBLE_DEVICES slot each pull from a shared work queue; references run concurrently in a separate CPU pool; LPT is used only for --estimate",
+  "reference_pool": "--ref-workers 8 x --ref-threads 16 (128 of 144 cores)"
  },
  "reference_driver": "reference/exact_field_driver",
  "cases": [
@@ -1494,7 +1495,13 @@
        0.0
       ],
       "bins": 1,
-      "extra": []
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
      },
      "reference": {
       "mode": "planes",
@@ -1556,7 +1563,13 @@
        0.0
       ],
       "bins": 64,
-      "extra": []
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
      },
      "reference": {
       "mode": "planes",

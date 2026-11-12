@@ -5,9 +5,18 @@
 
 The driver enumerates every precision case in ``cases.json`` (w4b, gamma-error
 distribution, hires gp sweep, validation slices, large-domain slices and
-multivel; the scaling/performance figures are deliberately absent), splits the
-cases across the four GPU slots with LPT scheduling, and records one
-provenance record per case.
+multivel; the scaling/performance figures are deliberately absent) and records
+one provenance record per case.
+
+Execution uses two independent pools.  Four GPU workers each own one
+``CUDA_VISIBLE_DEVICES`` slot and pull mesh jobs from a shared work queue, so
+every mesh that is ready runs as soon as a GPU is free.  A separate pool runs
+the CPU (OpenMP) reference jobs for different cases concurrently; references
+and meshes of the same case start together, because the reference has no
+dependency on the mesh.  A case is reduced once all of its mesh and reference
+jobs have finished.  The old launcher bound one case at a time to each slot and
+ran that slot's mesh and reference sequentially, which left the GPU idle for
+the whole reference.
 
 Usage on the H100 node::
 
@@ -16,11 +25,10 @@ Usage on the H100 node::
     ./run_campaign.py --root ... --bin ... --pilot --only var1b-1mrad,hires-g10
     ./run_campaign.py --root ... --bin ...              # full campaign
 
-Every case runs its mesh stage in one process pinned with
-``CUDA_VISIBLE_DEVICES=<slot>`` (picBunch has no ``--device`` flag; the CUDA
-runtime then exposes exactly one device per process).  References are CPU
-(OpenMP) jobs; ``OMP_NUM_THREADS`` is capped at ``144/gpu_count`` so four
-concurrent slots do not oversubscribe the node.
+Every mesh runs in one process pinned with ``CUDA_VISIBLE_DEVICES=<slot>``
+(picBunch has no ``--device`` flag; the CUDA runtime then exposes exactly one
+device per process).  The default reference pool is 8 jobs x 16 OpenMP threads
+(128 of the 144 cores), which leaves headroom for the mesh processes.
 
 A case's estimated wall is ``mesh_s + ref_s + reduce_s`` from ``cases.json``.
 The reference estimate is recalibrated from ``--ref-rate`` (seconds per
@@ -34,10 +42,12 @@ import hashlib
 import json
 import math
 import os
+import queue
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -223,7 +233,7 @@ def ensure_driver(path):
     return path
 
 
-def build_reference(root, case, run, driver, order, max_level, tol):
+def build_reference(root, case, run, driver, order, max_level, tol, threads):
     input_h5 = os.path.join(root, "inputs", run["input"] + ".h5")
     sources_bin = os.path.join(root, "inputs", run["input"] + ".sources.bin")
     cell = [float(v) for v in run["mesh"]["cell"]]
@@ -240,7 +250,7 @@ def build_reference(root, case, run, driver, order, max_level, tol):
     cmd = [driver, "--samples", sources_bin, points_bin, out_bin,
            str(tol), str(cell[0]), str(cell[1]), str(cell[2]),
            str(max_level), str(order)]
-    env = dict(os.environ, OMP_NUM_THREADS=str(os.environ.get("REF_THREADS", "36")))
+    env = dict(os.environ, OMP_NUM_THREADS=str(threads))
     subprocess.run(cmd, check=True, env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     import numpy as np
@@ -254,7 +264,7 @@ def build_reference(root, case, run, driver, order, max_level, tol):
              ijk=np.asarray(ijk, dtype=np.int64),
              vals=vals, order=np.asarray(order), n=np.asarray(run["mesh"]["grid"]),
              cell=np.asarray(cell))
-    return stage + ".npz"
+    return stage + ".npz", cmd
 
 
 def mesh_command(binary, root, run, out_path):
@@ -353,131 +363,266 @@ def line_reduce_spec(case, root, run_paths, refs):
     return spec
 
 
-def run_case(case, slot, args, log_dir):
-    root = args.root
-    case_dir = os.path.join(root, "work", case["id"])
-    os.makedirs(case_dir, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
-    start = utcnow()
-    commands = []
-    outputs = []
-    failures = []
-    run_paths = {}
-    refs = {}
-    host = socket.gethostname()
-    picbunch = "%s (sha256 %s)" % (args.bin, sha256_file(args.bin))
-    ref_order = args.pilot_order if args.pilot else None
-    for run in case["runs"]:
-        out_h5 = os.path.join(root, "run", case["id"], run["name"] + ".h5")
-        os.makedirs(os.path.dirname(out_h5), exist_ok=True)
-        cmd = mesh_command(args.bin, root, run, out_h5)
-        commands.append({"stage": "mesh:" + run["name"], "argv": cmd,
-                         "env": {"CUDA_VISIBLE_DEVICES": str(slot)}})
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(slot))
-        lib = args.lib_path
-        if lib:
-            env["LD_LIBRARY_PATH"] = lib + (":" + env["LD_LIBRARY_PATH"]
-                                            if env.get("LD_LIBRARY_PATH") else "")
-        with open(os.path.join(log_dir, case["id"] + "__" + run["name"] + ".mesh.log"),
-                  "w") as log:
-            procedure = subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
-        if procedure.returncode != 0:
-            failures.append({"stage": "mesh:" + run["name"],
-                             "exit": procedure.returncode})
-        run_paths[run["name"]] = out_h5
-        outputs.append(out_h5)
+def _ref_of(case, run):
+    return run.get("reference") or case.get("reference")
 
-        ref = run.get("reference") or case.get("reference")
-        if ref:
-            order = ref_order or int(ref["order"])
-            level = args.pilot_level if (args.pilot and args.pilot_level) else int(ref["max_level"])
-            tol = args.pilot_tol if (args.pilot and args.pilot_tol) else float(ref["tol"])
-            try:
-                ref_npz = build_reference(root, case, run, args.driver,
-                                          order, level, tol)
-                refs[run["name"]] = ref_npz
-                outputs.append(ref_npz)
-            except (OSError, subprocess.CalledProcessError) as exc:
-                failures.append({"stage": "reference:" + run["name"],
-                                 "error": str(exc)})
-                ref_npz = None
-            commands.append({"stage": "reference:" + run["name"],
-                             "argv": [args.driver, "--samples",
-                                      os.path.join(root, "inputs", run["input"] + ".sources.bin"),
-                                      ref_npz.replace(".npz", ".points.bin"),
-                                      ref_npz.replace(".npz", ".bin"),
-                                      str(tol), "cells", "max_level=%d" % level,
-                                      "order=%d" % order],
-                             "env": {"OMP_NUM_THREADS": "36"}})
 
-    reduce_script = os.path.join(HERE, case["reduce"]["script"])
-    if case["reduce"]["script"] == "reduce_slices.py":
-        run = case["runs"][0]
-        spec = slice_reduce_spec(case, root, run, run_paths[run["name"]],
-                                 refs[run["name"]], host, picbunch)
+def _mesh_env(args, slot):
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(slot))
+    lib = args.lib_path
+    if lib:
+        env["LD_LIBRARY_PATH"] = lib + (":" + env["LD_LIBRARY_PATH"]
+                                        if env.get("LD_LIBRARY_PATH") else "")
+    return env
+
+
+def _case_record(st, args, host, picbunch, spec, outputs, reduce_command):
+    case = st["case"]
+    slots = sorted(st["mesh_slots"])
+    if len(slots) == 1:
+        slot_field = slots[0]
+        binding = "CUDA_VISIBLE_DEVICES=%d" % slots[0]
     else:
-        spec = line_reduce_spec(case, root, run_paths, refs)
-    spec_path = os.path.join(case_dir, "reduce_spec.json")
-    with open(spec_path, "w") as handle:
-        json.dump(spec, handle, indent=1)
-    cmd = [sys.executable, reduce_script, "--spec", spec_path]
-    commands.append({"stage": "reduce", "argv": cmd, "env": {}})
-    if any(item["stage"].startswith("reference") for item in failures):
-        failures.append({"stage": "reduce", "exit": 1,
-                         "reason": "skipped after reference failure"})
-    else:
-        try:
-            with open(os.path.join(log_dir, case["id"] + ".reduce.log"), "w") as log:
-                procedure = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
-            if procedure.returncode != 0:
-                failures.append({"stage": "reduce", "exit": procedure.returncode})
-        except OSError as exc:
-            failures.append({"stage": "reduce", "error": str(exc)})
-    for key in ("out", "ingest"):
-        path = spec.get(key)
-        if path and os.path.isfile(path):
-            outputs.append(path)
-    if case["reduce"]["script"] == "reduce_line.py" and case["reduce"]["mode"] == "multivel":
-        for key in ("panel_out_e5", "panel_out_a5"):
-            path = spec.get(key)
-            if path and os.path.isfile(path):
-                outputs.append(path)
-        for b in (16, 64):
-            for cs in ("e5", "a5"):
-                path = os.path.join(spec["fields_out"], "multivel_fields_%s_b%d.npz" % (cs, b))
-                if os.path.isfile(path):
-                    outputs.append(path)
-
-    end = utcnow()
-    record = {
+        slot_field = slots
+        binding = "CUDA_VISIBLE_DEVICES=%s" % ",".join(str(s) for s in slots)
+    commands = sorted(st["commands"] + ([reduce_command] if reduce_command else []),
+                      key=lambda item: item["stage"])
+    refs = st["ref_paths"]
+    return {
         "case_id": case["id"], "family": case["family"],
-        "status": "failed" if failures else "done",
+        "status": "failed" if st["failures"] else "done",
+        # Both commits are recorded so the binary and the harness can be
+        # rebuilt independently; ``git_commit`` is kept as the harness alias.
+        "harness_commit": args.git_commit,
+        "build_commit": args.build_commit,
         "git_commit": args.git_commit,
+        "binary": {"path": args.bin, "sha256": sha256_file(args.bin)},
         "config_sha256": json_sha(case),
-        "host": host, "gpu_slot": slot,
-        "gpu_binding": "CUDA_VISIBLE_DEVICES=%d" % slot,
-        "start_utc": start, "end_utc": end,
-        "exit_code": 0 if not failures else 1,
-        "failures": failures,
+        "host": host, "gpu_slot": slot_field, "gpu_binding": binding,
+        "start_utc": st["start_utc"], "end_utc": utcnow(),
+        "wall_s": time.time() - st["start_mono"],
+        "exit_code": 0 if not st["failures"] else 1,
+        "failures": st["failures"],
         "commands": commands,
-        "outputs": [{"path": os.path.relpath(p, root), "sha256": sha256_file(p)}
+        "outputs": [{"path": os.path.relpath(p, args.root), "sha256": sha256_file(p)}
                     for p in outputs if os.path.isfile(p)],
         "reference": None if not refs else {
             "driver": args.driver,
             "driver_sha256": sha256_file(args.driver),
-            "mode": (case["runs"][0].get("reference")
-                     or case.get("reference") or {}).get("mode"),
+            "mode": (_ref_of(case, case["runs"][0]) or {}).get("mode"),
             "pilot": bool(args.pilot)},
         "versions": args.versions,
     }
+
+
+def finalize_case(st, args, lock, host, picbunch):
+    """Run the reduction once every mesh and reference job of a case is done."""
+    case = st["case"]
+    root = args.root
+    case_dir = os.path.join(root, "work", case["id"])
+    os.makedirs(case_dir, exist_ok=True)
+    outputs = [st["mesh_paths"][run["name"]] for run in case["runs"]
+               if run["name"] in st["mesh_paths"]]
+    outputs += [st["ref_paths"][run["name"]] for run in case["runs"]
+                if run["name"] in st["ref_paths"]]
+    spec = None
+    reduce_command = None
+    if st["failures"]:
+        st["failures"].append({"stage": "reduce", "exit": 1,
+                               "reason": "skipped after mesh/reference failure"})
+    else:
+        try:
+            run_paths = {run["name"]: st["mesh_paths"][run["name"]]
+                         for run in case["runs"]}
+            refs = {run["name"]: st["ref_paths"][run["name"]]
+                    for run in case["runs"] if run["name"] in st["ref_paths"]}
+            if case["reduce"]["script"] == "reduce_slices.py":
+                run = case["runs"][0]
+                spec = slice_reduce_spec(case, root, run, run_paths[run["name"]],
+                                         refs[run["name"]], host, picbunch)
+            else:
+                spec = line_reduce_spec(case, root, run_paths, refs)
+            spec_path = os.path.join(case_dir, "reduce_spec.json")
+            with open(spec_path, "w") as handle:
+                json.dump(spec, handle, indent=1)
+            cmd = [sys.executable, os.path.join(HERE, case["reduce"]["script"]),
+                   "--spec", spec_path]
+            reduce_command = {"stage": "reduce", "argv": cmd, "env": {}}
+            with open(os.path.join(args.root, "logs", case["id"] + ".reduce.log"),
+                      "w") as log:
+                procedure = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+            if procedure.returncode != 0:
+                st["failures"].append({"stage": "reduce",
+                                       "exit": procedure.returncode})
+        except (OSError, KeyError, subprocess.SubprocessError) as exc:
+            st["failures"].append({"stage": "reduce", "error": str(exc)})
+    if spec is not None:
+        for key in ("out", "ingest"):
+            path = spec.get(key)
+            if path and os.path.isfile(path):
+                outputs.append(path)
+        if case["reduce"]["script"] == "reduce_line.py" and case["reduce"]["mode"] == "multivel":
+            for key in ("panel_out_e5", "panel_out_a5"):
+                path = spec.get(key)
+                if path and os.path.isfile(path):
+                    outputs.append(path)
+            for b in (16, 64):
+                for cs in ("e5", "a5"):
+                    path = os.path.join(spec["fields_out"],
+                                        "multivel_fields_%s_b%d.npz" % (cs, b))
+                    if os.path.isfile(path):
+                        outputs.append(path)
+    record = _case_record(st, args, host, picbunch, spec, outputs, reduce_command)
     os.makedirs(os.path.join(root, "prov", "records"), exist_ok=True)
     record_path = os.path.join(root, "prov", "records", case["id"] + ".json")
     with open(record_path, "w") as handle:
         json.dump(record, handle, indent=1)
-    with open(os.path.join(root, "prov", "index.jsonl"), "a") as handle:
-        handle.write(json.dumps({"case_id": case["id"], "status": record["status"],
-                                 "record": record_path}) + "\n")
-    return record
+    with lock:
+        with open(os.path.join(root, "prov", "index.jsonl"), "a") as handle:
+            handle.write(json.dumps({"case_id": case["id"],
+                                     "status": record["status"],
+                                     "record": record_path}) + "\n")
+    st["record"] = record
+    print("[complete] %-20s %s %s %.1fs" %
+          (case["id"], record["status"], record["gpu_binding"],
+           record["wall_s"]), flush=True)
+
+
+def execute(cases, args, log_dir):
+    """Run meshes on a four-GPU work queue while references run on a CPU pool.
+
+    The previous launcher bound each case to one slot and ran that slot's mesh
+    and reference sequentially, so a GPU idled for every reference.  Here the
+    mesh and reference jobs of every case are independent queue items: four GPU
+    workers each own one ``CUDA_VISIBLE_DEVICES`` slot and pull the next mesh,
+    while a separate pool evaluates references for different cases in parallel.
+    A case is reduced once all of its meshes and references have finished.
+    """
+    root = args.root
+    os.makedirs(log_dir, exist_ok=True)
+    host = socket.gethostname()
+    picbunch = "%s (sha256 %s)" % (args.bin, sha256_file(args.bin))
+    lock = threading.Lock()
+    states = {}
+    run_lookup = {}
+    mesh_jobs = queue.Queue()
+    ref_jobs = queue.Queue()
+    for case in cases:
+        state = {"case": case, "pending": 0, "mesh_paths": {}, "ref_paths": {},
+                 "mesh_slots": set(), "commands": [], "failures": [],
+                 "start_utc": None, "start_mono": None,
+                 "reduce_started": False, "record": None}
+        for run in case["runs"]:
+            run_lookup[(case["id"], run["name"])] = (case, run)
+            state["pending"] += 1
+            mesh_jobs.put((case["id"], run["name"]))
+            if _ref_of(case, run):
+                state["pending"] += 1
+                ref_jobs.put((case["id"], run["name"]))
+        states[case["id"]] = state
+    reduce_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    reduce_futures = []
+
+    def note_start(state, start_utc, start_mono):
+        if state["start_mono"] is None or start_mono < state["start_mono"]:
+            state["start_utc"] = start_utc
+            state["start_mono"] = start_mono
+
+    def maybe_reduce(case_id):
+        state = states[case_id]
+        if state["pending"] == 0 and not state["reduce_started"]:
+            state["reduce_started"] = True
+            reduce_futures.append(reduce_pool.submit(
+                finalize_case, state, args, lock, host, picbunch))
+
+    def finish(case_id, kind, run_name, path, slot, start_utc, start_mono,
+               error, command):
+        with lock:
+            state = states[case_id]
+            note_start(state, start_utc, start_mono)
+            state["commands"].append(command)
+            if slot is not None:
+                state["mesh_slots"].add(slot)
+            if kind == "mesh":
+                state["mesh_paths"][run_name] = path
+            else:
+                state["ref_paths"][run_name] = path
+            if error is not None:
+                state["failures"].append(error)
+            state["pending"] -= 1
+            maybe_reduce(case_id)
+
+    def gpu_worker(slot):
+        while True:
+            item = mesh_jobs.get()
+            if item is None:
+                return
+            case_id, run_name = item
+            case, run = run_lookup[(case_id, run_name)]
+            start_utc, start_mono = utcnow(), time.time()
+            out_h5 = os.path.join(root, "run", case_id, run_name + ".h5")
+            os.makedirs(os.path.dirname(out_h5), exist_ok=True)
+            cmd = mesh_command(args.bin, root, run, out_h5)
+            error = None
+            try:
+                with open(os.path.join(log_dir, case_id + "__" + run_name + ".mesh.log"),
+                          "w") as log:
+                    procedure = subprocess.run(cmd, env=_mesh_env(args, slot),
+                                               stdout=log, stderr=subprocess.STDOUT)
+                if procedure.returncode != 0:
+                    error = {"stage": "mesh:" + run_name,
+                             "exit": procedure.returncode}
+            except OSError as exc:
+                error = {"stage": "mesh:" + run_name, "error": str(exc)}
+            finish(case_id, "mesh", run_name, out_h5, slot, start_utc, start_mono,
+                   error, {"stage": "mesh:" + run_name, "argv": cmd,
+                           "env": {"CUDA_VISIBLE_DEVICES": str(slot)}})
+
+    def ref_worker():
+        while True:
+            item = ref_jobs.get()
+            if item is None:
+                return
+            case_id, run_name = item
+            case, run = run_lookup[(case_id, run_name)]
+            ref = _ref_of(case, run)
+            start_utc, start_mono = utcnow(), time.time()
+            order = (args.pilot_order if args.pilot else None) or int(ref["order"])
+            level = (args.pilot_level if (args.pilot and args.pilot_level)
+                     else int(ref["max_level"]))
+            tol = (args.pilot_tol if (args.pilot and args.pilot_tol)
+                   else float(ref["tol"]))
+            ref_npz = None
+            cmd = []
+            error = None
+            try:
+                ref_npz, cmd = build_reference(root, case, run, args.driver,
+                                               order, level, tol, args.ref_threads)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                error = {"stage": "reference:" + run_name, "error": str(exc)}
+            finish(case_id, "reference", run_name, ref_npz, None, start_utc,
+                   start_mono, error,
+                   {"stage": "reference:" + run_name, "argv": cmd,
+                    "env": {"OMP_NUM_THREADS": str(args.ref_threads)}})
+
+    gpu_threads = [threading.Thread(target=gpu_worker, args=(slot,), daemon=True)
+                   for slot in range(args.gpus)]
+    ref_threads = [threading.Thread(target=ref_worker, daemon=True)
+                   for _ in range(args.ref_workers)]
+    for thread in gpu_threads + ref_threads:
+        thread.start()
+    for _ in gpu_threads:
+        mesh_jobs.put(None)
+    for _ in ref_threads:
+        ref_jobs.put(None)
+    for thread in gpu_threads:
+        thread.join()
+    for thread in ref_threads:
+        thread.join()
+    reduce_pool.shutdown(wait=True)
+    for future in reduce_futures:
+        future.result()
+    return [state["record"] for state in states.values() if state["record"]]
 
 
 def main():
@@ -494,10 +639,19 @@ def main():
     parser.add_argument("--ref-rate", type=float, default=2e-5,
                         help="reference seconds per sample-point x source")
     parser.add_argument("--gpus", type=int, default=4)
+    parser.add_argument("--ref-workers", type=int, default=8,
+                        help="concurrent reference jobs (different cases overlap)")
+    parser.add_argument("--ref-threads", type=int, default=16,
+                        help="OMP_NUM_THREADS per reference job; "
+                             "8x16 leaves headroom on the 144-core node")
     parser.add_argument("--lib-path",
                         default="/home/ubuntu/opt/openPMD-0.17.1-adios2-2.12.1-r2/lib:"
                                 "/home/ubuntu/build-adios2-2.12.1/lib")
-    parser.add_argument("--git-commit", default="")
+    parser.add_argument("--git-commit", "--harness-commit", dest="git_commit",
+                        default="",
+                        help="harness source commit (recorded as harness_commit)")
+    parser.add_argument("--build-commit", default="00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
+                        help="commit the picBunch binary was built from")
     args = parser.parse_args()
 
     doc = load_cases()
@@ -509,12 +663,12 @@ def main():
         if missing:
             raise SystemExit("unknown case(s): " + ", ".join(sorted(missing)))
     if args.pilot and not args.only:
-        args.only = "line-w4b,var1b-1mrad,hires-g10,multivel-e5"
+        args.only = "line-w4b,var1b-1mrad,hires-g10,multivel"
         wanted = set(args.only.split(","))
         cases = [c for c in doc["cases"] if c["id"] in wanted]
 
-    slots, loads = schedule(cases, args.root, args.ref_rate, args.gpus)
     if args.estimate:
+        slots, loads = schedule(cases, args.root, args.ref_rate, args.gpus)
         print("%-20s %-10s %8s %8s %8s %8s  slot" %
               ("case", "family", "mesh_s", "ref_s", "reduce_s", "total_s"))
         for index, slot in enumerate(slots):
@@ -565,26 +719,17 @@ def main():
 
     started = time.time()
     log_dir = os.path.join(args.root, "logs")
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.gpus) as pool:
-        futures = []
-        for slot, slot_cases in enumerate(slots):
-            def worker(slot=slot, slot_cases=slot_cases):
-                out = []
-                for case in slot_cases:
-                    t0 = time.time()
-                    record = run_case(case, slot, args, log_dir)
-                    record["wall_s"] = time.time() - t0
-                    out.append(record)
-                    print("[slot %d] %-20s %s %.1fs" %
-                          (slot, case["id"], record["status"], record["wall_s"]),
-                          flush=True)
-                return out
-            futures.append(pool.submit(worker))
-        for future in concurrent.futures.as_completed(futures):
-            results.extend(future.result())
+    results = execute(cases, args, log_dir)
     wall = time.time() - started
-    summary = {"wall_s": wall, "slots": [[c["id"] for c in s] for s in slots],
+    summary = {"wall_s": wall,
+               "scheduler": "GPU mesh work queue (one CUDA_VISIBLE_DEVICES slot "
+                            "per worker) + concurrent reference pool",
+               "gpus": args.gpus, "ref_workers": args.ref_workers,
+               "ref_threads": args.ref_threads,
+               "harness_commit": args.git_commit,
+               "build_commit": args.build_commit,
+               "binary_sha256": sha256_file(args.bin),
+               "case_slots": {r["case_id"]: r["gpu_slot"] for r in results},
                "cases": {r["case_id"]: {"status": r["status"],
                                         "wall_s": r["wall_s"]}
                          for r in results},
