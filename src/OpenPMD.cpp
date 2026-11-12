@@ -8,12 +8,14 @@
 #include "picBunch/OpenPMD.hpp"
 
 #include <openPMD/openPMD.hpp>
+#include <openPMD/config.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <stdexcept>
@@ -35,6 +37,41 @@ namespace picBunch
         [[noreturn]] void fail(std::string const& message)
         {
             throw std::runtime_error("picBunch openPMD reader: " + message);
+        }
+
+        /*! Open a series for reading, selecting the backend explicitly for a
+         *  BP5/BP directory.
+         *
+         * openPMD's extension rule selects HDF5 for ``.h5`` and ADIOS2/BP5 for
+         * ``.bp``.  A BP5 directory does not have to end in ``.bp`` (the
+         * reference input is ``particles_000000.bp5``), and openPMD only
+         * accepts such a directory when the backend is named explicitly.  The
+         * HDF5 path is unchanged.
+         */
+        Series openReadSeries(std::string const& fileName)
+        {
+            namespace fs = std::filesystem;
+            std::error_code ignored;
+            if(fs::is_directory(fileName, ignored))
+            {
+                std::string const extension = fs::path(fileName).extension().string();
+                if(extension == ".bp" || extension == ".bp5")
+                {
+#if defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2
+                    return Series(
+                        fileName,
+                        openPMD::Access::READ_ONLY,
+                        "{\"backend\":\"ADIOS2\"}");
+#else
+                    fail(
+                        "input '" + fileName
+                        + "' is an ADIOS2 BP5/BP directory, but openPMD-api was built "
+                          "without the ADIOS2 backend; rebuild openPMD with ADIOS2 or "
+                          "convert the input to HDF5");
+#endif
+                }
+            }
+            return Series(fileName, openPMD::Access::READ_ONLY);
         }
 
         void requireRecord(Record& record, std::string const& name, std::string const& where)
@@ -309,7 +346,7 @@ namespace picBunch
             std::size_t count,
             BunchData& result)
         {
-        Series series(fileName, openPMD::Access::READ_ONLY);
+        Series series = openReadSeries(fileName);
         auto [iteration, iterationIndex] = selectIteration(series, selection.iteration);
         result.iteration = iterationIndex;
         try
@@ -525,7 +562,7 @@ namespace picBunch
 
     std::size_t readParticleCount(std::string const& fileName, BunchSelection const& selection)
     {
-        Series series(fileName, openPMD::Access::READ_ONLY);
+        Series series = openReadSeries(fileName);
         auto [iteration, iterationIndex] = selectIteration(series, selection.iteration);
         (void)iterationIndex;
         auto& particles = iteration.particles;
@@ -586,7 +623,7 @@ namespace picBunch
         std::optional<std::uint64_t> iterationIndex)
     {
         MeshGeometry geometry;
-        Series series(fileName, openPMD::Access::READ_ONLY);
+        Series series = openReadSeries(fileName);
         auto [iteration, iterationIndexResolved] = selectIteration(series, iterationIndex);
         geometry.iteration = iterationIndexResolved;
         try

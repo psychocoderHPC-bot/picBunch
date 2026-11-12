@@ -98,6 +98,24 @@ namespace picBunch
             return result;
         }
 
+        //! A string or an array of non-empty strings, in declaration order.
+        std::vector<std::string> asStringList(toml::node const& node, std::string const& key)
+        {
+            std::vector<std::string> values;
+            if(node.is_string())
+            {
+                values.push_back(asString(node, key));
+                return values;
+            }
+            auto const* array = node.as_array();
+            if(array == nullptr)
+                fail(key, "expected a string or an array of strings");
+            values.reserve(array->size());
+            for(std::size_t i = 0; i < array->size(); ++i)
+                values.push_back(asString((*array)[i], key));
+            return values;
+        }
+
         void warnUnknown(
             toml::table const& table,
             std::string const& prefix,
@@ -190,7 +208,39 @@ namespace picBunch
             config.picongpu.speedOfLight = asDouble(*node, "picongpu.speed_of_light");
 
         auto const step = asInteger(require(picongpu, "step"), "picongpu.step");
-        config.picongpu.species = asString(require(picongpu, "species"), "picongpu.species");
+        // ``species`` accepts the historical scalar string and an ordered
+        // array.  A scalar is the one-entry list, so every existing TOML keeps
+        // its meaning.
+        config.picongpu.species
+            = asStringList(require(picongpu, "species"), "picongpu.species");
+        if(config.picongpu.species.empty())
+            fail("picongpu.species", "at least one species is required");
+        {
+            std::set<std::string> seen;
+            for(auto const& name : config.picongpu.species)
+                if(!seen.insert(name).second)
+                    fail(
+                        "picongpu.species",
+                        "duplicate species '" + name + "'; each entry is read and written once");
+        }
+        if(auto const* node = picongpu.get("output_species"))
+        {
+            config.picongpu.outputSpecies = asStringList(*node, "picongpu.output_species");
+            if(config.picongpu.outputSpecies.size() != config.picongpu.species.size())
+                fail(
+                    "picongpu.output_species",
+                    "must have one entry per picongpu.species entry ("
+                        + std::to_string(config.picongpu.species.size()) + " expected, "
+                        + std::to_string(config.picongpu.outputSpecies.size()) + " given)");
+            std::set<std::string> seen;
+            for(auto const& name : config.picongpu.outputSpecies)
+                if(!seen.insert(name).second)
+                    fail(
+                        "picongpu.output_species",
+                        "duplicate output species '" + name + "'; group names must be unique");
+        }
+        if(auto const* node = picongpu.get("empty_species"))
+            config.picongpu.emptySpecies = asStringList(*node, "picongpu.empty_species");
 
         if(auto const* node = picongpu.get("precision"))
         {
@@ -240,20 +290,54 @@ namespace picBunch
         if(auto const* node = domain.get("origin"))
             config.domain.origin = asTriple(*node, "domain.origin");
 
+        // placement.center selects the placement mode.  "centroid" is the
+        // historical behaviour: position/offset_unit place the charge-weighted
+        // centroid.  "none" keeps the absolute input coordinates and ignores
+        // position/offset_unit, so both keys become optional.
+        if(auto const* node = placement.get("center"))
+        {
+            std::string const centre = asString(*node, "placement.center");
+            if(centre == "centroid")
+                config.placement.centre = Config::Placement::Centre::Centroid;
+            else if(centre == "none")
+                config.placement.centre = Config::Placement::Centre::None;
+            else
+                fail("placement.center", "expected \"centroid\" or \"none\"");
+        }
+        bool const keepAbsolute
+            = config.placement.centre == Config::Placement::Centre::None;
         // placement.position = [x, y, z], ordered x, y, z (PIConGPU
         // notation): the offset from the domain origin to the bunch centroid,
         // in the unit selected by placement.offset_unit.
         if(auto const* positionNode = placement.get("position"))
+        {
             config.placement.offset = asTriple(*positionNode, "placement.position");
-        else
+            if(keepAbsolute)
+            {
+                bool nonZero = false;
+                for(std::size_t a = 0; a < 3; ++a)
+                    if(config.placement.offset[a] != 0.0)
+                        nonZero = true;
+                if(nonZero)
+                    config.warnings.push_back(
+                        "configuration key 'placement.position' is ignored when "
+                        "placement.center = \"none\"; the input coordinates are kept");
+            }
+        }
+        else if(!keepAbsolute)
             fail("placement.position", "required key is missing");
-        std::string const unit = asString(require(placement, "offset_unit"), "placement.offset_unit");
-        if(unit == "fraction")
-            config.placement.fraction = true;
-        else if(unit == "metres")
-            config.placement.fraction = false;
-        else
-            fail("placement.offset_unit", "expected \"fraction\" or \"metres\"");
+        if(auto const* unitNode = placement.get("offset_unit"))
+        {
+            std::string const unit = asString(*unitNode, "placement.offset_unit");
+            if(unit == "fraction")
+                config.placement.fraction = true;
+            else if(unit == "metres")
+                config.placement.fraction = false;
+            else
+                fail("placement.offset_unit", "expected \"fraction\" or \"metres\"");
+        }
+        else if(!keepAbsolute)
+            fail("placement.offset_unit", "required key is missing");
         if(auto const* node = placement.get("patch"))
         {
             std::string const patch = asString(*node, "placement.patch");
@@ -374,10 +458,32 @@ namespace picBunch
             if(!std::isfinite(config.placement.offset[a]))
                 fail("placement.position", "must be finite");
         }
-        if(config.placement.fraction)
+        if(config.placement.fraction && config.placement.centre == Config::Placement::Centre::Centroid)
             for(std::size_t a = 0; a < 3; ++a)
                 if(config.placement.offset[a] < 0.0 || config.placement.offset[a] > 1.0)
                     fail("placement.position", "fractional offsets must be in [0, 1]");
+        // A name cannot be both filled and empty: the generated species is
+        // read from the input, the empty one never is.
+        {
+            std::set<std::string> generated(config.picongpu.species.begin(), config.picongpu.species.end());
+            if(!config.picongpu.outputSpecies.empty())
+                generated.insert(
+                    config.picongpu.outputSpecies.begin(), config.picongpu.outputSpecies.end());
+            std::set<std::string> emptySeen;
+            for(auto const& name : config.picongpu.emptySpecies)
+            {
+                if(!emptySeen.insert(name).second)
+                    fail(
+                        "picongpu.empty_species",
+                        "duplicate species '" + name + "'");
+                if(generated.count(name) != 0u)
+                    fail(
+                        "picongpu.empty_species",
+                        "'" + name
+                            + "' is also a generated species; a species is either read from "
+                              "the input or written empty, never both");
+            }
+        }
         positive(config.accuracy.tolerance, "accuracy.tolerance");
         if(config.accuracy.nearShell != "none" && config.accuracy.nearShell != "exact"
            && config.accuracy.nearShell != "fast" && config.accuracy.nearShell != "fast-gpu")
@@ -407,7 +513,9 @@ namespace picBunch
              "picongpu.unit_speed",
              "picongpu.step",
              "picongpu.precision",
-             "picongpu.species"},
+             "picongpu.species",
+             "picongpu.output_species",
+             "picongpu.empty_species"},
             config.warnings);
         warnUnknown(
             domain,
@@ -419,6 +527,7 @@ namespace picBunch
             "placement",
             {"placement.position",
              "placement.offset_unit",
+             "placement.center",
              "placement.patch",
              "placement.patch_count"},
             config.warnings);

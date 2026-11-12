@@ -121,7 +121,19 @@ namespace picBunch
      */
     struct GeneratedParticles
     {
+        //! Output particle group name written into the checkpoint.
         std::string species;
+        //! Input group name this entry is reconstructed from.  Empty means
+        //! ``species`` (the historical single-species behaviour).  Ignored when
+        //! ``empty`` is set.
+        std::string inputSpecies;
+        /*! Write a checkpoint-only group with zero particles.
+         *
+         * The entry is never read from the input file and ``bunch`` stays empty.
+         * It carries the six standard records as empty datasets and one
+         * domain-covering ``particlePatches`` row with ``numParticles = 0``.
+         */
+        bool empty = false;
         Bunch bunch; //!< positions already shifted to the placement
         Vec3 domainOrigin{0.0, 0.0, 0.0}; //!< SI metres
         Vec3 cellSize{1.0, 1.0, 1.0}; //!< SI metres
@@ -155,11 +167,13 @@ namespace picBunch
         std::string inputFile;
         //! Iteration index used to locate the source particle group.
         std::uint64_t inputIteration = 0;
-        /*! Particle species group name to require in the input iteration.
-         * Empty disables the check.  Every species present is copied; a
-         * multi-species checkpoint needs all of them for a PIConGPU restart.
+        /*! Input particle species groups that must exist in the input
+         * iteration.  Empty disables the check.  Every other species present is
+         * copied; a multi-species checkpoint needs all of them for a PIConGPU
+         * restart.  A generated species consumes its ``inputSpecies`` group
+         * instead of copying it.
          */
-        std::string species;
+        std::vector<std::string> requiredInputSpecies;
         double time = 0.0;
         double timeUnitSI = 1.0;
         //! Stored ``dt`` attribute in units of ``timeUnitSI`` (not converted).
@@ -185,9 +199,13 @@ namespace picBunch
         //! stores at least the total number of particles copied across all
         //! species, so it is never written smaller.
         std::uint64_t nextId = 0;
-        //! When set, this species is reconstructed from particles instead of
-        //! copied raw.  Every other input species is still copied.
-        std::optional<GeneratedParticles> generatedParticles;
+        /*! Species reconstructed from particles instead of copied raw.
+         *
+         * Entries with ``inputSpecies`` set consume that input group (it is not
+         * copied).  Entries with ``empty`` set are checkpoint-only.  Every
+         * other input species is still copied.
+         */
+        std::vector<GeneratedParticles> generatedSpecies;
         /*! Write every field component and every particle property record in
          *  float64 instead of the default float32.  ``positionOffset`` stays
          *  int32 and ``id`` stays uint64.  A stock PIConGPU cannot load double
@@ -215,7 +233,11 @@ namespace picBunch
      *    ``nextId >= total particles`` over all copied species;
      *  - ``particles/<species>`` for every species in the input iteration,
      *    copied from its input group and normalized to the configured precision,
-     *    including ``particlePatches`` when present.
+     *    including ``particlePatches`` when present;
+     *  - every ``generatedSpecies`` entry as its own group.  Generated ids are
+     *    disjoint across the list and never overlap the copied range
+     *    ``[0, copiedCount)``.  An ``empty`` entry is a valid zero-particle
+     *    group.
 
      * Record attributes survive the copy; the numeric datasets are rewritten
      * to the configured precision so a checkpoint never mixes dtypes.  Missing

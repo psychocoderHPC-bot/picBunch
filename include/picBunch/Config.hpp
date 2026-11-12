@@ -58,7 +58,15 @@ namespace picBunch
             double dt = 0.0; //!< stored dt, equal to ``deltaT`` (seconds)
             std::uint64_t step = 0;
             bool float64 = false;
-            std::string species;
+            //! Ordered input species names read from ``--input``.  The scalar
+            //! TOML form (a single string) parses to a one-entry list.
+            std::vector<std::string> species;
+            //! Optional explicit output group name per ``species`` entry,
+            //! positionally aligned.  Empty means "same as the input name".
+            std::vector<std::string> outputSpecies;
+            //! Deck species that must exist in the checkpoint with zero
+            //! particles.  They are never read from the input file.
+            std::vector<std::string> emptySpecies;
         } picongpu;
 
         struct Domain
@@ -76,6 +84,16 @@ namespace picBunch
                 BoundingBox, //!< cover the shifted bunch bounding box only
                 Domain //!< cover the full PIConGPU domain
             };
+
+            //! How the bunch is positioned in the domain.
+            enum class Centre
+            {
+                Centroid, //!< shift the charge-weighted centroid to ``position``
+                None //!< keep the absolute input coordinates, no shift
+            };
+
+            //! ``Centroid`` (default, historical behaviour) or ``None``.
+            Centre centre = Centre::Centroid;
 
             //! Offset from the PIConGPU domain origin to the bunch centroid,
             //! ordered x, y, z, in metres or as a fraction of the domain

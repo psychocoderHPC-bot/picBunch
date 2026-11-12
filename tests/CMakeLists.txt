@@ -163,6 +163,16 @@ if(Python3_Interpreter_FOUND)
                 --writer $<TARGET_FILE:picBunchWriteRestartSample>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
         )
+        # End-to-end species list: two species summed, a checkpoint-only empty
+        # species, and disjoint generated ids through the real config path.
+        add_test(
+            NAME picBunch.SpeciesCli
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/species_cli.py
+                --app $<TARGET_FILE:picBunchApp>
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}/species-cli
+        )
         # End-to-end exercise of the shipped binary: --near-shell exact must be
         # accepted by the parser and must change the field inside the shell.
         add_test(

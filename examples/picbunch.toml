@@ -28,8 +28,16 @@ step = 0
 # particle property record. float64 is only usable with a PIConGPU that can
 # convert checkpoint dtypes; stock PIConGPU aborts on double particle records.
 precision = "float32"
-# Species to read from --input and write into the checkpoint.
+# Species to read from --input and write into the checkpoint.  A string is the
+# one-entry historical form.  An array is an ordered input list: each entry is
+# read, placed and field-computed, and the six field components are summed.
 species = "electrons"
+# Optional positional rename: entry i of output_species names the checkpoint
+# group for entry i of species.  Its length must equal species.
+# output_species = ["electrons"]
+# Optional checkpoint-only deck species with zero particles.  They are never
+# read from --input.  A name may not also appear in species/output_species.
+# empty_species = ["ions"]
 
 [domain]
 # PIConGPU domain cell counts (one patch per axis).
@@ -38,6 +46,12 @@ cells = [64, 64, 64]
 origin = [0.0, 0.0, 0.0]
 
 [placement]
+# "centroid" (default) shifts the charge-weighted centroid to `position`.
+# "none" keeps the absolute input coordinates and applies no shift; a
+# non-centred bunch then stays where the input puts it.  `position` and
+# `offset_unit` are optional in "none" mode and a non-zero position warns that
+# it is ignored.  Domain containment is checked in both modes.
+center = "centroid"
 # Offset from the domain origin to the bunch centroid, given as a vector.
 # The first component is x, then y, then z (PIConGPU notation).
 #   offset_unit = "metres"   -> position is metres from the domain origin.

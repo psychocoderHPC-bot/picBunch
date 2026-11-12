@@ -328,12 +328,12 @@ TEST(OpenPmdWait, ParticleSlotFillIsBitIdenticalToReference)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
     options.float64 = true;
-    options.generatedParticles = generated;
+    options.generatedSpecies = {generated};
     picBunch::writePicOnGPUCheckpoint(makeField(), options);
 
     std::size_t const count = generated.bunch.size();

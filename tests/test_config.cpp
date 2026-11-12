@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -84,7 +85,9 @@ TEST(Config, ParsesEveryRequiredKey)
     EXPECT_DOUBLE_EQ(config.picongpu.dt, 1.0e-15);
     EXPECT_EQ(config.picongpu.step, 42u);
     EXPECT_TRUE(config.picongpu.float64);
-    EXPECT_EQ(config.picongpu.species, "electrons");
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"electrons"}));
+    EXPECT_TRUE(config.picongpu.outputSpecies.empty());
+    EXPECT_TRUE(config.picongpu.emptySpecies.empty());
     EXPECT_EQ(config.domain.cells, (picBunch::Idx3{32, 24, 16}));
     EXPECT_DOUBLE_EQ(config.domain.cellSize[0], 1.0e-7);
     EXPECT_DOUBLE_EQ(config.domain.origin[0], 1.0e-6);
@@ -503,4 +506,128 @@ TEST(Config, PositionDrivesTargetCentreFromDomainOrigin)
         EXPECT_NEAR(placed.centroid[a], target[a], 1e-18);
         EXPECT_NEAR(placed.shift[a], 0.0, 1e-18);
     }
+}
+
+TEST(Config, SpeciesListIsOrderedAndOutputNamesOptional)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\", \"ions\"]\noutput_species = [\"e\", \"i\"]");
+    auto const config = picBunch::loadConfig(fixture.write("species-list.toml", text));
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"b", "ions"}));
+    EXPECT_EQ(config.picongpu.outputSpecies, (std::vector<std::string>{"e", "i"}));
+    EXPECT_TRUE(config.picongpu.emptySpecies.empty());
+}
+
+TEST(Config, EmptySpeciesParsesAndIsNeverAGeneratedName)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\nempty_species = [\"e\", \"protons\"]");
+    auto const config = picBunch::loadConfig(fixture.write("empty-species.toml", text));
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"b"}));
+    EXPECT_EQ(config.picongpu.emptySpecies, (std::vector<std::string>{"e", "protons"}));
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, RejectsSpeciesThatIsBothFilledAndEmpty)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\nempty_species = [\"b\"]");
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("overlap.toml", text));
+        FAIL() << "expected a validation error";
+    }
+    catch(std::runtime_error const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("empty_species"), std::string::npos) << message;
+        EXPECT_NE(message.find("'b'"), std::string::npos) << message;
+    }
+}
+
+TEST(Config, RejectsOutputSpeciesLengthMismatch)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\noutput_species = [\"e\", \"f\"]");
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("output-mismatch.toml", text));
+        FAIL() << "expected a validation error";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("output_species"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(Config, RejectsDuplicateSpecies)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\", \"b\"]");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("duplicate.toml", text)),
+        std::runtime_error);
+}
+
+TEST(Config, PlacementCenterNoneMakesPositionOptional)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]\n", "");
+    replaceOnce(text, "offset_unit = \"fraction\"\n", "");
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"none\"");
+    auto const config = picBunch::loadConfig(fixture.write("center-none.toml", text));
+    EXPECT_EQ(
+        static_cast<int>(config.placement.centre),
+        static_cast<int>(picBunch::Config::Placement::Centre::None));
+    // position/offset_unit are optional in this mode; nothing is reported.
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, PlacementCenterNoneWarnsThatPositionIsIgnored)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"none\"");
+    auto const config = picBunch::loadConfig(fixture.write("center-none-pos.toml", text));
+    ASSERT_EQ(config.warnings.size(), 1u);
+    EXPECT_NE(config.warnings[0].find("placement.position"), std::string::npos);
+    EXPECT_NE(config.warnings[0].find("ignored"), std::string::npos);
+}
+
+TEST(Config, PlacementCenterDefaultIsCentroid)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write("center-default.toml", fullConfig));
+    EXPECT_EQ(
+        static_cast<int>(config.placement.centre),
+        static_cast<int>(picBunch::Config::Placement::Centre::Centroid));
+}
+
+TEST(Config, RejectsUnknownPlacementCenter)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"middle\"");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("center-bad.toml", text)),
+        std::runtime_error);
+}
+
+TEST(Config, StrictAcceptsSpeciesListAndCenterKeys)
+{
+    ConfigTest fixture;
+    std::string text = std::string("strict = true\n") + fullConfig;
+    replaceOnce(
+        text,
+        "species = \"electrons\"",
+        "species = [\"b\", \"ions\"]\noutput_species = [\"e\", \"i\"]\nempty_species = [\"protons\"]");
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"centroid\"");
+    EXPECT_NO_THROW((void)picBunch::loadConfig(fixture.write("strict-new-keys.toml", text)));
 }

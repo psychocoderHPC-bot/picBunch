@@ -471,7 +471,7 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.time = 2.5e-13;
     options.timeUnitSI = 1.0;
     options.dt = 1.0e-15;
@@ -636,7 +636,7 @@ TEST(Restart, IterationUnitAttributesMatchDerivedUnits)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.time = 2.5e-13;
     options.timeUnitSI = 1.0;
     options.dt = deck.dt;
@@ -694,7 +694,7 @@ TEST(Restart, WriterCopiesEverySpeciesAndUsesGlobalIdRange)
     options.inputFile = input.string();
     options.inputIteration = 0;
     // Selecting one species must not drop the other one.
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -754,7 +754,7 @@ TEST(Restart, WriterRejectsMissingRequestedSpecies)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "ions";
+    options.requiredInputSpecies = {"ions"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -785,7 +785,7 @@ TEST(Restart, WriterReportsMissingParticlePatches)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -828,7 +828,7 @@ TEST(Restart, WriterCopiesPmlRecordsVerbatim)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.time = 2.5e-13;
     options.timeUnitSI = 1.0;
     options.dt = 1.0e-15;
@@ -908,7 +908,7 @@ TEST(Restart, WriterEmitsOnePatchPerRankOverlapWithDisjointOffsets)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.timeUnitSI = 1.0;
     options.unitLength = 1.0;
     options.unitEField = 1.0;
@@ -930,7 +930,7 @@ TEST(Restart, WriterEmitsOnePatchPerRankOverlapWithDisjointOffsets)
     generated.patches = {
         {{0, 0, 0}, {5, 5, 3}},
         {{0, 0, 2}, {5, 5, 2}}};
-    options.generatedParticles = generated;
+    options.generatedSpecies = {generated};
     picBunch::writePicOnGPUCheckpoint(makeField(), options);
 
     auto const path = directory / "checkpoint_000007.h5";
@@ -975,7 +975,7 @@ TEST(Restart, WriterPinsFloat32ParticleDtypes)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -1035,7 +1035,7 @@ TEST(Restart, GeneratedMomentumUsesPIConGPUMacroWeighting)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -1064,7 +1064,7 @@ TEST(Restart, GeneratedMomentumUsesPIConGPUMacroWeighting)
     generated.unitCharge = picBunch::kElementaryCharge;
     generated.unitMass = mass;
     generated.fallbackMass = mass;
-    options.generatedParticles = generated;
+    options.generatedSpecies = {generated};
     picBunch::writePicOnGPUCheckpoint(makeField(), options);
 
     auto const path = directory / "checkpoint_000004.h5";
@@ -1114,7 +1114,7 @@ TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.unitLength = 1.0;
     options.unitEField = 1.0;
     options.unitBField = 1.0;
@@ -1142,7 +1142,7 @@ TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
     generated.patches = {
         {{0, 0, 0}, {5, 5, 2}},
         {{0, 0, 2}, {5, 5, 2}}};
-    options.generatedParticles = generated;
+    options.generatedSpecies = {generated};
     picBunch::writePicOnGPUCheckpoint(makeField(), options);
 
     auto const path = directory / "checkpoint_000005.h5";
@@ -1183,5 +1183,200 @@ TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
     // values prove that every input particle appears exactly once.
     EXPECT_EQ(cellZ, (std::vector<std::int32_t>{0, 0, 2, 2}));
     EXPECT_EQ(cellY, (std::vector<std::int32_t>{0, 2, 1, 3}));
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+namespace
+{
+    //! A small generated bunch with distinct positions per particle.
+    picBunch::GeneratedParticles generatedBunch(std::string name, std::size_t count, double offset)
+    {
+        picBunch::GeneratedParticles generated;
+        generated.species = std::move(name);
+        generated.bunch.resize(count);
+        for(std::size_t p = 0; p < count; ++p)
+        {
+            generated.bunch.x[p] = offset + static_cast<double>(p);
+            generated.bunch.y[p] = 1.0 + static_cast<double>(p);
+            generated.bunch.z[p] = 2.0 + static_cast<double>(p);
+            generated.bunch.ux[p] = 0.1 * static_cast<double>(p);
+            generated.bunch.uy[p] = 0.0;
+            generated.bunch.uz[p] = 1.0;
+            generated.bunch.weight[p] = 1.0;
+            generated.bunch.charge[p] = -picBunch::kElementaryCharge;
+            generated.bunch.restMass[p] = picBunch::kElectronMass;
+        }
+        generated.domainOrigin = {0.0, 0.0, 0.0};
+        generated.cellSize = {1.0, 1.0, 1.0};
+        generated.patchOffset = {0, 0, 0};
+        generated.patchExtent = {64, 64, 64};
+        generated.unitMassSpeed = picBunch::kElectronMass * picBunch::kSpeedOfLight;
+        generated.unitCharge = picBunch::kElementaryCharge;
+        generated.unitMass = picBunch::kElectronMass;
+        generated.fallbackMass = picBunch::kElectronMass;
+        return generated;
+    }
+} // namespace
+
+TEST(Restart, WriterGivesTwoGeneratedSpeciesDisjointIdRanges)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_two_generated";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_two.h5";
+    writeParticleInput(input, true, false, false, {"a", "b"});
+
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 6;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.requiredInputSpecies = {"a", "b"};
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    options.generatedSpecies = {
+        generatedBunch("a", 2u, 0.0),
+        generatedBunch("b", 3u, 10.0)};
+    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+
+    auto const path = directory / "checkpoint_000006.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    EXPECT_EQ(datasetPoints(file, "data/6/particles/a/position/x"), 2u);
+    EXPECT_EQ(datasetPoints(file, "data/6/particles/b/position/x"), 3u);
+    auto const idsA = readUint64Vector(file, "data/6/particles/a/id");
+    auto const idsB = readUint64Vector(file, "data/6/particles/b/id");
+    EXPECT_EQ(idsA, (std::vector<std::uint64_t>{0u, 1u}));
+    EXPECT_EQ(idsB, (std::vector<std::uint64_t>{2u, 3u, 4u}));
+    EXPECT_EQ(readUint64Dataset(file, "data/6/fields/picongpu_idProvider/nextId"), 5u);
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, WriterEmitsZeroParticleEmptySpeciesWithoutCharge)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_empty_species";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_b.h5";
+    writeParticleInput(input, true, false, false, {"b"});
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 7;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.requiredInputSpecies = {"b"};
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+
+    picBunch::GeneratedParticles generatedB = generatedBunch("b", 2u, 0.0);
+    generatedB.inputSpecies = "b";
+    picBunch::GeneratedParticles empty;
+    empty.species = "e";
+    empty.empty = true;
+    empty.domainOrigin = {0.0, 0.0, 0.0};
+    empty.cellSize = {0.5, 1.5, 2.5};
+    empty.patchOffset = {0, 0, 0};
+    empty.patchExtent = {4, 5, 6};
+    empty.unitMassSpeed = picBunch::kElectronMass * picBunch::kSpeedOfLight;
+    empty.unitCharge = picBunch::kElementaryCharge;
+    empty.unitMass = picBunch::kElectronMass;
+    empty.fallbackMass = picBunch::kElectronMass;
+    options.generatedSpecies = {generatedB, empty};
+    picBunch::writePicOnGPUCheckpoint(field, options);
+
+    auto const path = directory / "checkpoint_000007.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+
+    // The empty group exists and every standard record is present and empty.
+    EXPECT_EQ(H5Lexists(file, "data/7/particles/e", H5P_DEFAULT), 1);
+    for(char const* record : {
+            "position/x", "position/y", "position/z",
+            "positionOffset/x", "positionOffset/y", "positionOffset/z",
+            "momentum/x", "momentum/y", "momentum/z",
+            "weighting", "id", "charge/charge", "mass/mass"})
+    {
+        std::string const pathInFile = std::string("data/7/particles/e/") + record;
+        EXPECT_EQ(H5Lexists(file, pathInFile.c_str(), H5P_DEFAULT), 1) << record;
+        EXPECT_EQ(datasetPoints(file, pathInFile.c_str()), 0u) << record;
+    }
+    // One domain-covering patch row with zero particles.
+    EXPECT_EQ(
+        readUint64Vector(file, "data/7/particles/e/particlePatches/numParticles"),
+        (std::vector<std::uint64_t>{0u}));
+    EXPECT_EQ(
+        readUint64Vector(file, "data/7/particles/e/particlePatches/numParticlesOffset"),
+        (std::vector<std::uint64_t>{0u}));
+    EXPECT_EQ(
+        readUint64Vector(file, "data/7/particles/e/particlePatches/offset/x"),
+        (std::vector<std::uint64_t>{0u}));
+    EXPECT_EQ(
+        readUint64Vector(file, "data/7/particles/e/particlePatches/extent/x"),
+        (std::vector<std::uint64_t>{4u}));
+    EXPECT_EQ(
+        readUint64Vector(file, "data/7/particles/e/particlePatches/extent/z"),
+        (std::vector<std::uint64_t>{6u}));
+    // The momentum metadata stays the PIConGPU macro-weighting contract.
+    hid_t momentum = H5Gopen2(file, "data/7/particles/e/momentum", H5P_DEFAULT);
+    ASSERT_GE(momentum, 0);
+    EXPECT_EQ(
+        readScalarAttribute<std::uint32_t>(momentum, "macroWeighted", H5T_NATIVE_UINT32),
+        1u);
+    EXPECT_DOUBLE_EQ(
+        readScalarAttribute<double>(momentum, "weightingPower", H5T_NATIVE_DOUBLE),
+        1.0);
+    H5Gclose(momentum);
+    // Zero particles add no charge: the field is written verbatim.
+    auto const written = readFloatDataset(file, "data/7/fields/E/x");
+    ASSERT_EQ(written.size(), field.data[0].size());
+    for(std::size_t i = 0; i < written.size(); ++i)
+        EXPECT_EQ(written[i], static_cast<float>(field.data[0][i]));
+    // nextId covers only the two real particles.
+    EXPECT_EQ(readUint64Dataset(file, "data/7/fields/picongpu_idProvider/nextId"), 2u);
+    H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, RenamedGeneratedSpeciesKeepsTheRawInputCopy)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_renamed";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input_b.h5";
+    writeParticleInput(input, true, false, false, {"b"});
+
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 8;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.requiredInputSpecies = {"b"};
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+    picBunch::GeneratedParticles renamed = generatedBunch("e", 2u, 3.0);
+    renamed.inputSpecies = "b";
+    options.generatedSpecies = {renamed};
+    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+
+    auto const path = directory / "checkpoint_000008.h5";
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    // The renamed output group and the preserved raw input group both exist.
+    EXPECT_EQ(H5Lexists(file, "data/8/particles/e/position/x", H5P_DEFAULT), 1);
+    EXPECT_EQ(H5Lexists(file, "data/8/particles/b/position/x", H5P_DEFAULT), 1);
+    EXPECT_EQ(datasetPoints(file, "data/8/particles/e/position/x"), 2u);
+    EXPECT_EQ(datasetPoints(file, "data/8/particles/b/position/x"), 1u);
+    // Generated ids start after the copied range [0, 1).
+    EXPECT_EQ(
+        readUint64Vector(file, "data/8/particles/e/id"),
+        (std::vector<std::uint64_t>{1u, 2u}));
+    EXPECT_EQ(readUint64Dataset(file, "data/8/fields/picongpu_idProvider/nextId"), 3u);
+    H5Fclose(file);
     std::filesystem::remove_all(temporaryDirectory());
 }

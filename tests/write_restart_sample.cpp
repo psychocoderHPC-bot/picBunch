@@ -162,7 +162,7 @@ int main(int argc, char** argv)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.time = 2.5e-13;
     options.timeUnitSI = 1.0;
     options.dt = 1.0e-15;

@@ -1035,3 +1035,203 @@ TEST(Io, FarTailUsesYeeComponentPositions)
     series.flush();
     std::filesystem::remove(path);
 }
+
+namespace
+{
+    /*! Two-particle sample written through a selectable backend.
+     *
+     * ``offsetInMetres`` selects the ``positionOffset`` convention:
+     *  - false: the standard form, integer cell indices and ``unitSI`` = cell size;
+     *  - true:  offsets already in metres and ``unitSI`` = 1.
+     * Both must read to the same absolute positions.
+     */
+    void writeOffsetConventionSample(std::filesystem::path const& path, bool offsetInMetres)
+    {
+        double const cell = 1.772e-7;
+        std::array<double, 2> const fraction{0.25, 0.5};
+        std::array<std::int32_t, 2> const cells{3, 4};
+        std::array<double, 2> const positionX{fraction[0] * cell, fraction[1] * cell};
+        std::array<double, 2> const positionY{0.125 * cell, 0.75 * cell};
+        std::array<double, 2> const positionZ{0.5 * cell, 0.5 * cell};
+        std::array<double, 2> const momentum{0.0, 0.0};
+        std::array<double, 2> const weight{1.0, 2.0};
+
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& iteration = series.iterations[0];
+        auto& species = iteration.particles["electrons"];
+        species["position"].setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
+        species["momentum"].setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
+
+        auto bindDouble = [](openPMD::RecordComponent& component, double const* value,
+                             std::size_t count, double unitSI) {
+            component.resetDataset(
+                openPMD::Dataset(openPMD::determineDatatype<double>(), openPMD::Extent{count}));
+            component.storeChunkRaw(value, openPMD::Offset{0}, openPMD::Extent{count});
+            component.setUnitSI(unitSI);
+        };
+        bindDouble(species["position"]["x"], positionX.data(), 2u, 1.0);
+        bindDouble(species["position"]["y"], positionY.data(), 2u, 1.0);
+        bindDouble(species["position"]["z"], positionZ.data(), 2u, 1.0);
+        bindDouble(species["momentum"]["x"], momentum.data(), 2u, 1.0);
+        bindDouble(species["momentum"]["y"], momentum.data(), 2u, 1.0);
+        bindDouble(species["momentum"]["z"], momentum.data(), 2u, 1.0);
+        bindDouble(species["weighting"], weight.data(), 2u, 1.0);
+
+        if(offsetInMetres)
+        {
+            std::array<double, 2> const metresX{cells[0] * cell, cells[1] * cell};
+            std::array<double, 2> const metresY{1.0 * cell, 2.0 * cell};
+            std::array<double, 2> const metresZ{0.0, 1.0 * cell};
+            bindDouble(species["positionOffset"]["x"], metresX.data(), 2u, 1.0);
+            bindDouble(species["positionOffset"]["y"], metresY.data(), 2u, 1.0);
+            bindDouble(species["positionOffset"]["z"], metresZ.data(), 2u, 1.0);
+        }
+        else
+        {
+            auto bindInt = [](openPMD::RecordComponent& component, std::int32_t const* value,
+                              std::size_t count, double unitSI) {
+                component.resetDataset(openPMD::Dataset(
+                    openPMD::determineDatatype<std::int32_t>(), openPMD::Extent{count}));
+                component.storeChunkRaw(value, openPMD::Offset{0}, openPMD::Extent{count});
+                component.setUnitSI(unitSI);
+            };
+            bindInt(species["positionOffset"]["x"], cells.data(), 2u, cell);
+            std::array<std::int32_t, 2> const cellsY{1, 2};
+            std::array<std::int32_t, 2> const cellsZ{0, 1};
+            bindInt(species["positionOffset"]["y"], cellsY.data(), 2u, cell);
+            bindInt(species["positionOffset"]["z"], cellsZ.data(), 2u, cell);
+        }
+        series.flush();
+    }
+
+    //! Same two-particle sample in a chosen backend (for the BP5/HDF5 comparison).
+    void writeBackendSample(std::filesystem::path const& path, std::string const& options)
+    {
+        std::array<double, 3> const position{1.0e-7, 2.0e-7, 3.0e-7};
+        std::array<double, 3> const momentum{0.3, -0.7, 1.5};
+        std::array<double, 2> const weight{1.0, 4.0};
+        std::array<double, 2> const charge{
+            -picBunch::kElementaryCharge, -picBunch::kElementaryCharge};
+        std::array<double, 2> const mass{
+            picBunch::kElectronMass, picBunch::kElectronMass};
+
+        openPMD::Series series(path.string(), openPMD::Access::CREATE, options);
+        auto& iteration = series.iterations[0];
+        auto& species = iteration.particles["b"];
+        species["position"].setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
+        species["momentum"].setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
+        species["charge"].setUnitDimension(
+            {{openPMD::UnitDimension::T, 1.0},
+             {openPMD::UnitDimension::I, 1.0}});
+        species["mass"].setUnitDimension({{openPMD::UnitDimension::M, 1.0}});
+        auto bindVector = [&](openPMD::Record& record, std::size_t count, double unitSI) {
+            char const* const names = "xyz";
+            for(int a = 0; a < 3; ++a)
+            {
+                std::array<double, 2> const values{position[a], position[a] * 2.0};
+                auto& component = record[std::string(1, names[a])];
+                component.resetDataset(openPMD::Dataset(
+                    openPMD::determineDatatype<double>(), openPMD::Extent{count}));
+                component.storeChunkRaw(
+                    values.data(), openPMD::Offset{0}, openPMD::Extent{count});
+                component.setUnitSI(unitSI);
+            }
+        };
+        bindVector(species["position"], 2u, 1.0);
+        // Different momenta per particle so a swapped record is visible.
+        char const* const names = "xyz";
+        for(int a = 0; a < 3; ++a)
+        {
+            std::array<double, 2> const values{momentum[a], -momentum[a]};
+            auto& component = species["momentum"][std::string(1, names[a])];
+            component.resetDataset(openPMD::Dataset(
+                openPMD::determineDatatype<double>(), openPMD::Extent{2}));
+            component.storeChunkRaw(values.data(), openPMD::Offset{0}, openPMD::Extent{2});
+            component.setUnitSI(1.0);
+        }
+        auto bindScalar = [](openPMD::RecordComponent& component, double const* value) {
+            component.resetDataset(
+                openPMD::Dataset(openPMD::determineDatatype<double>(), openPMD::Extent{2}));
+            component.storeChunkRaw(value, openPMD::Offset{0}, openPMD::Extent{2});
+            component.setUnitSI(1.0);
+        };
+        bindScalar(species["weighting"], weight.data());
+        bindScalar(species["charge"], charge.data());
+        bindScalar(species["mass"], mass.data());
+        series.flush();
+    }
+} // namespace
+
+TEST(Io, PositionOffsetUnitSICellSizeMatchesDimensionlessMetres)
+{
+    auto const directory = std::filesystem::temp_directory_path()
+        / ("picbunch_offset_" + std::to_string(static_cast<long long>(getpid())));
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    auto const cellPath = directory / "offset_cells.h5";
+    auto const metrePath = directory / "offset_metres.h5";
+    writeOffsetConventionSample(cellPath, false);
+    writeOffsetConventionSample(metrePath, true);
+
+    double const cell = 1.772e-7;
+    auto const cells = picBunch::readBunch(cellPath.string(), 0u);
+    auto const metres = picBunch::readBunch(metrePath.string(), 0u);
+    ASSERT_EQ(cells.bunch.size(), 2u);
+    ASSERT_EQ(metres.bunch.size(), 2u);
+    // Absolute position = fraction*1 + offset*unitOffset, evaluated verbatim.
+    EXPECT_DOUBLE_EQ(cells.bunch.x[0], 0.25 * cell + 3.0 * cell);
+    EXPECT_DOUBLE_EQ(cells.bunch.x[1], 0.5 * cell + 4.0 * cell);
+    EXPECT_DOUBLE_EQ(cells.bunch.y[0], 0.125 * cell + 1.0 * cell);
+    EXPECT_DOUBLE_EQ(cells.bunch.z[1], 0.5 * cell + 1.0 * cell);
+    // The two conventions must agree exactly.
+    for(std::size_t p = 0; p < 2u; ++p)
+    {
+        EXPECT_DOUBLE_EQ(cells.bunch.x[p], metres.bunch.x[p]);
+        EXPECT_DOUBLE_EQ(cells.bunch.y[p], metres.bunch.y[p]);
+        EXPECT_DOUBLE_EQ(cells.bunch.z[p], metres.bunch.z[p]);
+        EXPECT_DOUBLE_EQ(cells.bunch.weight[p], metres.bunch.weight[p]);
+    }
+    std::filesystem::remove_all(directory);
+}
+
+TEST(Io, Bp5DirectoryReadsLikeHdf5Conversion)
+{
+#if defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2
+    auto const directory = std::filesystem::temp_directory_path()
+        / ("picbunch_bp5read_" + std::to_string(static_cast<long long>(getpid())));
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    auto const hdf5Path = directory / "sample.h5";
+    auto const bp5Path = directory / "sample_000000.bp5";
+    writeBackendSample(hdf5Path, "{}");
+    writeBackendSample(bp5Path, "{\"backend\":\"ADIOS2\"}");
+    ASSERT_TRUE(std::filesystem::is_directory(bp5Path));
+    ASSERT_TRUE(std::filesystem::exists(bp5Path / "md.0"));
+
+    auto const hdf5 = picBunch::readBunch(hdf5Path.string(), 0u);
+    auto const bp5 = picBunch::readBunch(bp5Path.string(), 0u);
+    ASSERT_EQ(hdf5.bunch.size(), 2u);
+    ASSERT_EQ(bp5.bunch.size(), 2u);
+    for(std::size_t p = 0; p < 2u; ++p)
+    {
+        EXPECT_DOUBLE_EQ(bp5.bunch.x[p], hdf5.bunch.x[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.y[p], hdf5.bunch.y[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.z[p], hdf5.bunch.z[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.ux[p], hdf5.bunch.ux[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.uy[p], hdf5.bunch.uy[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.uz[p], hdf5.bunch.uz[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.weight[p], hdf5.bunch.weight[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.charge[p], hdf5.bunch.charge[p]);
+        EXPECT_DOUBLE_EQ(bp5.bunch.restMass[p], hdf5.bunch.restMass[p]);
+    }
+    std::filesystem::remove_all(directory);
+#else
+    GTEST_SKIP() << "openPMD was built without the ADIOS2 backend";
+#endif
+}

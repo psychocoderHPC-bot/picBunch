@@ -44,6 +44,7 @@
 #include <limits>
 #include <optional>
 #include <regex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -1572,24 +1573,28 @@ namespace picBunch
             hid_t file,
             std::string const& speciesPath,
             GeneratedParticles const& generated,
-            bool float64)
+            bool float64,
+            std::uint64_t idBase)
         {
             Bunch const& bunch = generated.bunch;
-            std::size_t const count = bunch.size();
-            if(count == 0u)
+            // An ``empty`` entry is checkpoint-only: no particle is read, no
+            // field is deposited, and the group must still be a valid (zero
+            // particle) PIConGPU species.
+            bool const empty = generated.empty || bunch.size() == 0u;
+            std::size_t const count = empty ? 0u : bunch.size();
+            if(generated.empty && bunch.size() != 0u)
                 throw std::runtime_error(
-                    "PicOnGPU restart writer: generated species '"
-                    + generated.species + "' has no particles");
+                    "PicOnGPU restart writer: empty species '"
+                    + generated.species + "' must not carry particles");
             hid_t particles = checked(
                 H5Gopen2(file, speciesPath.c_str(), H5P_DEFAULT), "H5Gopen2");
-            // The generated group is new; there is nothing to delete first.
             std::array<std::vector<double>, 3> position;
             std::array<std::vector<double>, 3> momentum;
             std::array<std::vector<std::int32_t>, 3> positionOffset;
             std::vector<double> weighting(count, 0.0);
             std::vector<double> charge(count, 0.0);
             std::vector<double> mass(count, 0.0);
-            if(bunch.charge.size() != count)
+            if(!empty && bunch.charge.size() != count)
                 throw std::runtime_error(
                     "PicOnGPU restart writer: generated species '"
                     + generated.species + "' has no per-particle charge; "
@@ -1767,12 +1772,16 @@ namespace picBunch
             setScalarAttribute(weightingDataset, "unitSI", H5T_NATIVE_DOUBLE, 1.0);
             closeQuietly(weightingDataset);
 
-            // Global particle ids run [0, count), matching the startId/nextId
-            // range written below.  PIConGPU ignores the record for a species
-            // without particleId, and loads it for a species that has one.
+            // Global particle ids are disjoint across every generated species
+            // and never overlap the copied range [0, copiedCount).  ``idBase``
+            // is the cumulative particle count of the previously written
+            // species; ids therefore run [idBase, idBase + count) and nextId
+            // spans the whole checkpoint.  PIConGPU ignores the record for a
+            // species without particleId and loads it for a species that has
+            // one.
             std::vector<std::uint64_t> ids(count);
             for(std::size_t i = 0; i < count; ++i)
-                ids[i] = static_cast<std::uint64_t>(i);
+                ids[i] = idBase + static_cast<std::uint64_t>(i);
             hid_t idDataset = createOneDimensional(particles, "id", scalarCount, H5T_STD_U64LE);
             checked(
                 H5Dwrite(idDataset, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, ids.data()),
@@ -1889,6 +1898,48 @@ namespace picBunch
             closeQuietly(particles);
         }
 
+        bool isBp5Directory(std::string const& path)
+        {
+            namespace fs = std::filesystem;
+            std::error_code ignored;
+            if(!fs::is_directory(path, ignored))
+                return false;
+            std::string const extension = fs::path(path).extension().string();
+            return extension == ".bp" || extension == ".bp5";
+        }
+
+        /*! Particle species names of an ADIOS2 BP5/BP4 directory input.
+         *
+         * The checkpoint writer copies HDF5 groups with ``H5Ocopy``, which
+         * cannot read ADIOS2.  For a BP5 input it still has to know which
+         * species the input carries, so an undeclared species cannot silently
+         * disappear from the checkpoint.
+         */
+        std::vector<std::string> bp5ParticleSpecies(
+            std::string const& path,
+            std::uint64_t iteration)
+        {
+#if defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2
+            openPMD::Series series(
+                path, openPMD::Access::READ_ONLY, "{\"backend\":\"ADIOS2\"}");
+            if(!series.iterations.contains(iteration))
+                throw std::runtime_error(
+                    "PicOnGPU restart writer: BP5 input '" + path + "' has no iteration "
+                    + std::to_string(iteration));
+            auto& particles = series.iterations[iteration].particles;
+            std::vector<std::string> names;
+            for(auto it = particles.begin(); it != particles.end(); ++it)
+                names.push_back(it->first);
+            return names;
+#else
+            (void)iteration;
+            throw std::runtime_error(
+                "PicOnGPU restart writer: input '" + path
+                + "' is an ADIOS2 BP5 directory, but openPMD-api was built without the "
+                  "ADIOS2 backend; rebuild openPMD with ADIOS2 or convert the input to HDF5");
+#endif
+        }
+
         void publishPicOnGPU(
             Field const& field,
             PicOnGPUWriteOptions const& options,
@@ -1918,47 +1969,127 @@ namespace picBunch
                     setStringAttribute(file, "picBunchPrecisionWarning", kFloat64Warning);
                 }
 
-                // Locate and validate the particle source before writing the fields,
-                // so a missing species fails without a half-written checkpoint.
-                std::string const sourcePath = locateInputFile(options.inputFile, options.inputIteration);
-                source = checked(H5Fopen(sourcePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), "H5Fopen");
-                std::vector<std::string> const sourceGroups
-                    = findSpeciesGroups(source, options.inputIteration, options.species);
-                std::string const generatedSpecies = options.generatedParticles
-                    ? options.generatedParticles->species
-                    : std::string{};
-                if(!generatedSpecies.empty())
+                // Resolve the generated list to its input/output names before
+                // the fields are written, so a bad list fails without a
+                // half-written checkpoint.
+                std::vector<std::string> generatedInput;
+                generatedInput.reserve(options.generatedSpecies.size());
+                // Input groups consumed by a generated entry.  A same-name
+                // entry overwrites the raw group, so the copy is skipped.  A
+                // renamed entry (input "b" -> output "e") still copies "b"
+                // raw, matching the documented "every other input species is
+                // copied" contract.
+                std::set<std::string> generatedInputs;
+                std::set<std::string> overwrittenInputs;
+                for(auto const& generated : options.generatedSpecies)
+                {
+                    std::string inputName;
+                    if(!generated.empty)
+                        inputName = generated.inputSpecies.empty()
+                            ? generated.species
+                            : generated.inputSpecies;
+                    generatedInput.push_back(inputName);
+                    if(!inputName.empty())
+                    {
+                        generatedInputs.insert(inputName);
+                        if(inputName == generated.species)
+                            overwrittenInputs.insert(inputName);
+                    }
+                }
+
+                // BP5 inputs are read through ADIOS2 and cannot be copied with
+                // H5Ocopy; only the species enumeration is read from them.
+                bool const bp5Input = isBp5Directory(options.inputFile);
+                std::vector<std::string> sourceSpecies;
+                std::vector<std::string> sourceGroups;
+                if(bp5Input)
+                    sourceSpecies = bp5ParticleSpecies(options.inputFile, options.inputIteration);
+                else
+                {
+                    std::string const sourcePath
+                        = locateInputFile(options.inputFile, options.inputIteration);
+                    source = checked(
+                        H5Fopen(sourcePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), "H5Fopen");
+                    sourceGroups = findSpeciesGroups(
+                        source, options.inputIteration, std::string{});
+                    for(auto const& group : sourceGroups)
+                        sourceSpecies.push_back(group.substr(group.find_last_of('/') + 1));
+                }
+                // Every explicitly required input species must exist.
+                for(auto const& requested : options.requiredInputSpecies)
                 {
                     bool found = false;
-                    for(auto const& group : sourceGroups)
-                        if(group.substr(group.find_last_of('/') + 1) == generatedSpecies)
+                    for(auto const& name : sourceSpecies)
+                        if(name == requested)
+                            found = true;
+                    if(!found)
+                        throw std::runtime_error(
+                            "PicOnGPU restart writer: input has no particle species '"
+                            + requested + "'");
+                }
+                // Every generated entry must be reconstructible from the input.
+                for(std::size_t i = 0; i < options.generatedSpecies.size(); ++i)
+                {
+                    std::string const& inputName = generatedInput[i];
+                    if(inputName.empty())
+                        continue;
+                    bool found = false;
+                    for(auto const& name : sourceSpecies)
+                        if(name == inputName)
                             found = true;
                     if(!found)
                         throw std::runtime_error(
                             "PicOnGPU restart writer: generated species '"
-                            + generatedSpecies + "' is absent from the input iteration");
+                            + options.generatedSpecies[i].species + "' reads input species '"
+                            + inputName + "', which is absent from the input iteration");
                 }
+                if(bp5Input)
+                {
+                    // A BP5 species that is neither generated nor explicitly
+                    // empty would be dropped silently.  Reject it instead:
+                    // copying it needs an openPMD round-trip (out of scope).
+                    for(auto const& name : sourceSpecies)
+                    {
+                        if(generatedInputs.count(name) != 0u)
+                            continue;
+                        bool emptied = false;
+                        for(auto const& generated : options.generatedSpecies)
+                            if(generated.empty && generated.species == name)
+                                emptied = true;
+                        if(!emptied)
+                            throw std::runtime_error(
+                                "PicOnGPU restart writer: BP5 input '" + options.inputFile
+                                + "' contains species '" + name
+                                + "', which is neither generated nor listed in empty_species; "
+                                  "copying a BP5 species needs an openPMD round-trip, which is "
+                                  "not implemented; convert the input to HDF5 or declare the "
+                                  "species");
+                    }
+                }
+
                 std::vector<std::string> warnings;
-                std::uint64_t totalParticles = 0;
+                std::uint64_t copiedParticles = 0;
                 for(auto const& sourceGroup : sourceGroups)
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
-                    if(species == generatedSpecies)
+                    if(overwrittenInputs.count(species) != 0u)
                         continue;
                     std::string const warning = particleWarning(source, sourceGroup, species);
                     if(!warning.empty())
                         warnings.push_back(warning);
                     auto const count = countSpeciesParticles(source, sourceGroup);
-                    if(totalParticles > std::numeric_limits<std::uint64_t>::max() - count)
+                    if(copiedParticles > std::numeric_limits<std::uint64_t>::max() - count)
                         throw std::runtime_error(
                             "PicOnGPU restart writer: particle count overflows uint64");
-                    totalParticles += count;
+                    copiedParticles += count;
                 }
-                if(options.generatedParticles)
+                std::uint64_t totalParticles = copiedParticles;
+                for(auto const& generated : options.generatedSpecies)
                 {
-                    auto const count
-                        = static_cast<std::uint64_t>(options.generatedParticles->bunch.size());
+                    auto const count = generated.empty
+                        ? std::uint64_t{0}
+                        : static_cast<std::uint64_t>(generated.bunch.size());
                     if(totalParticles > std::numeric_limits<std::uint64_t>::max() - count)
                         throw std::runtime_error(
                             "PicOnGPU restart writer: particle count overflows uint64");
@@ -2111,7 +2242,7 @@ namespace picBunch
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
-                    if(species == generatedSpecies)
+                    if(overwrittenInputs.count(species) != 0u)
                         continue;
                     checked(
                         H5Ocopy(
@@ -2123,12 +2254,19 @@ namespace picBunch
                             H5P_DEFAULT),
                         "H5Ocopy");
                 }
-                if(options.generatedParticles)
+                for(auto const& generated : options.generatedSpecies)
                 {
+                    // A generated group may replace a raw copy of a consumed
+                    // input species, so delete an existing link first.
+                    if(linkExists(particles, generated.species))
+                        checked(
+                            H5Ldelete(
+                                particles, generated.species.c_str(), H5P_DEFAULT),
+                            "H5Ldelete");
                     hid_t generatedGroup = checked(
                         H5Gcreate2(
                             particles,
-                            options.generatedParticles->species.c_str(),
+                            generated.species.c_str(),
                             H5P_DEFAULT,
                             H5P_DEFAULT,
                             H5P_DEFAULT),
@@ -2141,7 +2279,7 @@ namespace picBunch
                 {
                     std::string const species
                         = sourceGroup.substr(sourceGroup.find_last_of('/') + 1);
-                    if(species == generatedSpecies)
+                    if(overwrittenInputs.count(species) != 0u)
                         continue;
                     std::string const particlePath = iterationPath + "/particles/" + species;
                     for(char const* record : {"position", "momentum"})
@@ -2173,17 +2311,27 @@ namespace picBunch
                     for(char const* record : {"charge", "mass", "id"})
                         removeRecordIfPresent(file, particlePath + "/" + record);
                 }
-                if(options.generatedParticles)
+                // Generated ids are disjoint across the list and start after
+                // the copied range, so they never overlap a copied id.
+                std::uint64_t generatedIdBase = copiedParticles;
+                for(auto const& generated : options.generatedSpecies)
+                {
                     writeGeneratedSpecies(
                         file,
-                        iterationPath + "/particles/" + options.generatedParticles->species,
-                        *options.generatedParticles,
-                        options.float64);
+                        iterationPath + "/particles/" + generated.species,
+                        generated,
+                        options.float64,
+                        generatedIdBase);
+                    if(!generated.empty)
+                        generatedIdBase += static_cast<std::uint64_t>(generated.bunch.size());
+                }
 
                 // PML state is part of a PIConGPU checkpoint and is loaded
                 // unconditionally by an open-boundary restart.  Copy it from the
                 // input checkpoint; never synthesize it when the input has none.
-                auto const pmlNames = pmlRecordNames(source, options.inputIteration);
+                auto const pmlNames = source >= 0
+                    ? pmlRecordNames(source, options.inputIteration)
+                    : std::vector<std::string>{};
                 if(!pmlNames.empty())
                 {
                     copyPmlRecords(

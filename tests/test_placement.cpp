@@ -90,7 +90,7 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     config.picongpu.unitMass = picBunch::kElectronMass;
     config.picongpu.unitSpeed = picBunch::kSpeedOfLight;
     config.picongpu.step = 3;
-    config.picongpu.species = "electrons";
+    config.picongpu.species = {"electrons"};
     config.domain.cells = {10, 10, 10};
     config.domain.cellSize = {1.0, 1.0, 1.0};
     config.domain.origin = {0.0, 0.0, 0.0};
@@ -144,7 +144,7 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     options.directory = directory.string();
     options.inputFile = input.string();
     options.inputIteration = 0;
-    options.species = "electrons";
+    options.requiredInputSpecies = {"electrons"};
     options.timeUnitSI = 1.0;
     options.unitLength = 1.0;
     options.unitEField = 1.0;
@@ -160,7 +160,7 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     generated.unitCharge = config.picongpu.unitCharge;
     generated.unitMass = config.picongpu.unitMass;
     generated.fallbackMass = config.picongpu.unitMass;
-    options.generatedParticles = generated;
+    options.generatedSpecies = {generated};
     picBunch::writePicOnGPUCheckpoint(field, options);
 
     auto const path = directory / "checkpoint_000003.h5";
@@ -381,4 +381,113 @@ TEST(Placement, OutOfDomainIsRejectedWithoutClipping)
     // The input is untouched: no particle was clipped or moved.
     EXPECT_DOUBLE_EQ(bunch.x[1], 9.0);
     EXPECT_DOUBLE_EQ(bunch.y[1], 6.0);
+}
+
+TEST(Placement, CenterNoneKeepsAbsoluteInputCoordinates)
+{
+    picBunch::Config config;
+    config.domain.cells = {12, 12, 12};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    // A non-zero offset must be ignored when the input positions are kept.
+    config.placement.fraction = true;
+    config.placement.offset = {0.9, 0.9, 0.9};
+    config.placement.centre = picBunch::Config::Placement::Centre::None;
+
+    picBunch::Bunch bunch;
+    std::array<picBunch::Vec3, 3> const positions{
+        {{1.0, 2.0, 3.0}, {3.0, 4.0, 5.0}, {5.0, 6.0, 7.0}}};
+    bunch.resize(positions.size());
+    for(std::size_t p = 0; p < positions.size(); ++p)
+    {
+        bunch.x[p] = positions[p][0];
+        bunch.y[p] = positions[p][1];
+        bunch.z[p] = positions[p][2];
+        bunch.ux[p] = bunch.uy[p] = bunch.uz[p] = 0.0;
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+
+    auto const placed = picBunch::placeBunch(bunch, config);
+    for(int a = 0; a < 3; ++a)
+    {
+        EXPECT_EQ(placed.shift[a], 0.0);
+        // The reported centroid is the input centroid, not the requested one.
+        EXPECT_NEAR(placed.centroid[a], 3.0 + static_cast<double>(a), 1e-15);
+        EXPECT_NEAR(placed.targetCentre[a], placed.centroid[a], 1e-15);
+    }
+    // Positions are copied bit-identically: no centroid shift is applied.
+    for(std::size_t p = 0; p < positions.size(); ++p)
+    {
+        EXPECT_EQ(placed.bunch.x[p], positions[p][0]);
+        EXPECT_EQ(placed.bunch.y[p], positions[p][1]);
+        EXPECT_EQ(placed.bunch.z[p], positions[p][2]);
+    }
+    // The bounding-box patch still indexes the absolute input cells.
+    EXPECT_EQ(placed.patchOffset, (picBunch::IVec3{1, 2, 3}));
+    EXPECT_EQ(placed.patchExtent, (picBunch::UVec3{5, 5, 5}));
+}
+
+TEST(Placement, CenterCentroidStillAppliesTheShift)
+{
+    picBunch::Config config;
+    config.domain.cells = {12, 12, 12};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    config.placement.fraction = true;
+    config.placement.offset = {0.5, 0.5, 0.5};
+    config.placement.centre = picBunch::Config::Placement::Centre::Centroid;
+
+    picBunch::Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {1.0, 3.0};
+    bunch.y = {1.0, 3.0};
+    bunch.z = {1.0, 3.0};
+    for(std::size_t p = 0; p < 2; ++p)
+    {
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+    auto const placed = picBunch::placeBunch(bunch, config);
+    EXPECT_NEAR(placed.centroid[0], 2.0, 1e-15);
+    EXPECT_NEAR(placed.targetCentre[0], 6.0, 1e-15);
+    EXPECT_NEAR(placed.shift[0], 4.0, 1e-15);
+    EXPECT_NEAR(placed.bunch.x[0], 5.0, 1e-15);
+    EXPECT_NEAR(placed.bunch.x[1], 7.0, 1e-15);
+}
+
+TEST(Placement, CenterNoneRejectsAbsoluteOutOfDomain)
+{
+    picBunch::Config config;
+    config.domain.cells = {10, 10, 10};
+    config.domain.cellSize = {1.0, 1.0, 1.0};
+    config.domain.origin = {0.0, 0.0, 0.0};
+    config.placement.centre = picBunch::Config::Placement::Centre::None;
+
+    picBunch::Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {5.0, 13.0};
+    bunch.y = {4.0, 6.0};
+    bunch.z = {4.0, 6.0};
+    for(std::size_t p = 0; p < 2; ++p)
+    {
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = -picBunch::kElementaryCharge;
+        bunch.restMass[p] = picBunch::kElectronMass;
+    }
+    try
+    {
+        (void)picBunch::placeBunch(bunch, config);
+        FAIL() << "expected an out-of-domain placement error";
+    }
+    catch(std::exception const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis x"), std::string::npos) << message;
+        EXPECT_NE(message.find("outside"), std::string::npos) << message;
+    }
+    // The input is untouched: no particle was clipped or moved.
+    EXPECT_DOUBLE_EQ(bunch.x[1], 13.0);
 }
