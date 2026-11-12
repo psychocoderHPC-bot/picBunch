@@ -297,7 +297,7 @@ def gamma(outdir):
     fs.apply_paper_style(kind="line")
     fig, ax = fs.subplots(0.62, 3.35)
     fig.subplots_adjust(left=0.20, right=0.975, bottom=0.16, top=0.965)
-    ds = [2, 8, 48]
+    ds = [2, 8]
     for g in (10, 50, 100):
         for h, ls in ((1.0, "-"), (0.25, "--")):
             ax.plot(ds, [D[(g, h, d)] for d in ds], color=C[str(g)], ls=ls,
@@ -309,15 +309,15 @@ def gamma(outdir):
     ax.legend(handles=handles, loc="upper right", framealpha=0.92,
               handlelength=1.4, borderpad=0.3)
     ax.set_xscale("log"); ax.set_yscale("log")
-    ax.set_xlim(1.5, 60); ax.set_ylim(1e-4, 1e3)
-    ax.set_xticks([2, 8, 48]); ax.set_xticklabels(["2", "8", "48"])
+    ax.set_xlim(1.5, 12); ax.set_ylim(1e-4, 1e3)
+    ax.set_xticks([2, 8]); ax.set_xticklabels(["2", "8"])
     ax.xaxis.set_minor_locator(mticker.NullLocator())
     ax.set_xlabel("source-target distance $d$ (cells, log)")
     ax.set_ylabel("peak-normalised abs. error (log)")
     ax.grid(alpha=0.3, linewidth=0.5)
     _save(fig, outdir, "F_gamma_err_dist",
           {"figure_id": "gamma", "source_data": os.path.relpath(path, cases.REPO_ROOT),
-           "axis_limits": "x 1.5..60, y 1e-4..1e3 (log-log)"})
+           "axis_limits": "x 1.5..12, y 1e-4..1e3 (log-log)"})
 
 
 # ------------------------------------------------------------------ multivel
