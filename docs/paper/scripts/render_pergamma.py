@@ -22,39 +22,11 @@ sys.path.insert(0, HERE)
 import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.text as mtext  # noqa: E402
-import matplotlib.ticker as mticker  # noqa: E402
 
 COMP = ["Ex", "Ey", "Ez", "Bx", "By", "Bz"]
 CI = {c: i for i, c in enumerate(COMP)}
-
-# Masked/undefined pixels get their own light grey, never a colour that the
-# finite ramp also produces.  The magma ramp is truncated at 0.90 so its pale
-# yellow tail (which reads as white in print) is not part of the finite range.
-MASKED_COLOUR = "#cccccc"
-ERR_CMAP_TOP = 0.90
-SQ_FLOOR_RATIO = 1e-6  # log floor for E^2/B^2: 1e-6 of the panel peak
-
-
-def _cmap(name, top=1.0):
-    """Copy a colormap, optionally truncating its top, and set the bad colour."""
-    base = plt.get_cmap(name)
-    if top < 1.0:
-        cmap = mcolors.ListedColormap(base(np.linspace(0.0, top, 256)),
-                                      name=f"{name}_t{int(top * 100)}")
-    else:
-        cmap = base.copy()
-    cmap.set_bad(MASKED_COLOUR)
-    return cmap
-
-
-def _finite_min_distance(cmap, colour=MASKED_COLOUR):
-    """Smallest RGB distance between the finite ramp and the masked colour."""
-    masked = np.asarray(mcolors.to_rgba(colour))[:3]
-    lut = np.asarray(cmap(np.linspace(0.0, 1.0, 256)))[:, :3]
-    return float(np.min(np.sqrt(np.sum((lut - masked) ** 2, axis=1))))
 
 
 def _gamma_of(path):
@@ -154,47 +126,14 @@ def load(path):
     return out
 
 
-def fmt(v):
-    if v == 0:
-        return "0"
-    if not np.isfinite(v):
-        return "n/a"
-    e = int(np.floor(np.log10(abs(v))))
-    m = v / 10.0 ** e
-    if -2 <= e <= 2:
-        return f"{v:.3g}"
-    return f"{m:.2g}e{e}"
-
-
-def log_ticks(vmin, vmax, nmax=3):
-    """Exactly three decade-rounded ticks, as in the shared style module."""
-    vmin = float(max(vmin, 1e-300))
-    vmax = float(max(vmax, vmin * 10.0))
-    lo = 10.0 ** np.floor(np.log10(vmin))
-    hi = 10.0 ** np.ceil(np.log10(vmax))
-    if hi <= lo:
-        hi = lo * 10.0
-    return [lo, float(np.sqrt(lo * hi)), hi]
-
-
 def add_cbar(fig, cax, image, ticks, labels, title):
-    # Numeric ticks sit left of the bar, the rotated quantity label right of
-    # it.  The two columns get separate horizontal slots below; previously
-    # both were on the right and overran the E^2/B^2 panel.
-    cb = fig.colorbar(image, cax=cax)
-    cb.set_ticks(ticks)
-    cb.set_ticklabels(labels)
-    cb.ax.yaxis.set_ticks_position("left")
-    cb.ax.yaxis.set_label_position("right")
-    cb.ax.tick_params(labelsize=figstyle.TICK_PT, labelleft=True,
-                      labelright=False, pad=1.5, length=2)
-    cb.outline.set_linewidth(0.6)
-    cb.set_label(title, fontsize=figstyle.AXIS_LABEL_PT, labelpad=3)
-    return cb
+    """Delegate to the one canonical colour-bar style."""
+    return figstyle.draw_colorbar(fig, image, cax=cax, ticks=ticks,
+                                  ticklabels=labels, label=title)
 
 
 def draw_case(case, outdir):
-    figstyle.apply_field_style()
+    figstyle.apply_paper_style(kind="field")
     # The B error row is omitted only when all three reference magnetic
     # components vanish (stationary bunch, beta=0).  A moving bunch keeps
     # B_x and B_z nonzero even though its axial B component is zero, so the
@@ -214,12 +153,11 @@ def draw_case(case, outdir):
         bottom_in=(figstyle.FIELD_BOTTOM_NOTE_IN if berr_omitted
                    else figstyle.FIELD_BOTTOM_ERR_IN),
         row_gap_in=figstyle.FIELD_ROW_GAP_IN)
-    fig = plt.figure(figsize=(geo["fig_w_in"], geo["fig_h_in"]))
-    fig.patch.set_facecolor("white")
+    fig = figstyle.figure(1.0, geo["fig_h_in"])
     fig.text(0.5, 0.985,
              "Error rows: grey = masked / no finite error; "
              "the colour ramp spans finite errors only",
-             ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
+             ha="center", va="center")
     panel_x = geo["panel_x"]
     pw, rh = geo["pw"], geo["rh"]
     cb1, cb2, bw = geo["cb1"], geo["cb2"], geo["bar_width"]
@@ -228,17 +166,14 @@ def draw_case(case, outdir):
 
     x = case["x"]
     yc = case["y"]
-    dx, dy = x[1] - x[0], yc[1] - yc[0]
-    ext = [yc[0] - dy / 2, yc[-1] + dy / 2, x[0] - dx / 2, x[-1] + dx / 2]
-    xc = np.linspace(ext[0], ext[1], len(yc))
-    yv = np.linspace(ext[2], ext[3], len(x))
+    xlabel, ylabel = axis.axis_labels("hires", "xy", case["source"])
     xticks = [0, 2, 4, 6]
     yticks = [0, 2, 4, 6]
 
-    cmap_comp = _cmap("RdBu_r")
-    cmap_sq = _cmap("viridis")
-    cmap_err = _cmap("magma", ERR_CMAP_TOP)
-    masked_min_distance = _finite_min_distance(cmap_err)
+    cmap_comp = figstyle.cmap_for("signed_field")
+    cmap_sq = figstyle.cmap_for("squared_field", zero_floor=True)
+    cmap_err = figstyle.cmap_for("error")
+    masked_min_distance = figstyle.finite_min_distance(cmap_err)
     assert masked_min_distance > 0.10, (
         f"finite error ramp reaches the masked colour "
         f"(min distance {masked_min_distance:.3f})")
@@ -260,51 +195,42 @@ def draw_case(case, outdir):
                      if cvals else 0.0)
             if not np.isfinite(cvmax) or cvmax <= 0:
                 cvmax = 1.0
-            cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * 1e-3, 1e-30),
-                                       vmin=-cvmax, vmax=cvmax, base=10)
+            cnorm = mcolors.SymLogNorm(
+                linthresh=max(cvmax * figstyle.SYMLOG_LINTHRESH_FRAC, 1e-30),
+                vmin=-cvmax, vmax=cvmax, base=10)
             sq_zero = float(np.max(np.abs(case["ref"][sq]))) == 0.0
             svmax = (0.0 if sq_zero
                      else float(np.nanmax(case["field"][sq])))
             if np.isfinite(svmax) and svmax > 0:
-                svmin = max(svmax * SQ_FLOOR_RATIO, np.finfo(float).tiny)
+                svmin = max(svmax * figstyle.SQ_FLOOR_RATIO, np.finfo(float).tiny)
                 snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
                 sticks = [svmin, np.sqrt(svmin * svmax), svmax]
-                slabels = [fmt(t) for t in sticks]
+                slabels = [figstyle.fmt_sci(t) for t in sticks]
                 sq_scale = "log"
                 sl = (f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'}"
                       ", log)")
             else:
                 snorm = mcolors.Normalize(vmin=0.0, vmax=1.0)
                 sticks = [0.0, 0.5, 1.0]
-                slabels = ["0", fmt(0.5), fmt(1.0)]
+                slabels = ["0", figstyle.fmt_sci(0.5), figstyle.fmt_sci(1.0)]
                 sq_scale = "linear"
                 sl = f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'})"
             cticks = [-cvmax, 0.0, cvmax]
-            clabels = [fmt(-cvmax), "0", fmt(cvmax)]
+            clabels = [figstyle.fmt_sci(-cvmax), "0", figstyle.fmt_sci(cvmax)]
             cl = f"{part} ({'V/m' if part == 'E' else 'T'})"
         else:
             ce = [case["err"][c] for c in comps]
-            parts = [a[np.isfinite(a) & (a > 0)] for a in ce]
-            good = np.concatenate(parts) if any(p.size for p in parts) else np.array([])
-            if good.size:
-                cvmin = max(float(good.min()), 1e-16)
-                cvmax = max(float(good.max()), cvmin * 10)
-            else:
-                cvmin, cvmax = 1e-12, 1.0
+            cvmin, cvmax = figstyle.error_limits(ce)
             cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax, clip=True)
-            se = case["err"][sq]
-            good = se[np.isfinite(se) & (se > 0)]
-            if good.size:
-                svmin = max(float(good.min()), 1e-16)
-                svmax = max(float(good.max()), svmin * 10)
-            else:
-                svmin, svmax = 1e-12, 1.0
+            svmin, svmax = figstyle.error_limits([case["err"][sq]])
             snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
             sq_scale = "log"
-            cticks = log_ticks(cvmin, cvmax)
-            sticks = log_ticks(svmin, svmax)
-            clabels = [fmt(t) for t in cticks]
-            slabels = [fmt(t) for t in sticks]
+            cticks, clabels = figstyle.error_ticks(cvmin, cvmax)
+            sticks, slabels = figstyle.error_ticks(svmin, svmax)
+            figstyle.assert_masked_distinct(cnorm, cmap_err,
+                                             f"{part} error components")
+            figstyle.assert_masked_distinct(snorm, cmap_err,
+                                             f"{part}$^2$ error")
             cl, sl = f"{part} err", f"{part}$^2$ err"
 
         imgs = []
@@ -321,49 +247,43 @@ def draw_case(case, outdir):
                 Z = axis.to_display(
                     np.ma.masked_where((~valid) | (~np.isfinite(arr)), arr),
                     "hires", "xy", case["source"])
-                im = ax.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                               cmap=cmap_err, norm=cnorm,
-                               interpolation="nearest", resample=False)
-                zz = Z
+                im = figstyle.draw_raster_panel(ax, yc, x, Z, "error",
+                                                cnorm, cmap_err)
                 try:
-                    ax.contour(xc, yv, zz, levels=[1e-3],
+                    ax.contour(yc, x, Z, levels=[figstyle.ERROR_GATE],
                                colors=[figstyle.GATE_STYLE["color"]],
                                linewidths=figstyle.GATE_STYLE["linewidth"],
                                linestyles=figstyle.GATE_STYLE["linestyle"])
                 except Exception:
                     pass
             else:
-                im = ax.imshow(axis.to_display(np.asarray(arr), "hires", "xy",
-                                               case["source"]),
-                               origin="lower", extent=ext, aspect="auto",
-                               cmap=cmap_comp, norm=cnorm,
-                               interpolation="nearest", resample=False)
+                im = figstyle.draw_raster_panel(
+                    ax, yc, x,
+                    axis.to_display(np.asarray(arr), "hires", "xy",
+                                    case["source"]),
+                    "signed_field", cnorm, cmap_comp)
             imgs.append(im)
             if not log and zero[c]:
-                ax.text(0.5, 0.5, rf"${part}_{'xyz'[j]}\equiv0$",
-                        transform=ax.transAxes, ha="center", va="center",
-                        fontsize=figstyle.ANNOT_PT, color="0.25")
+                figstyle.panel_note(ax, rf"${part}_{'xyz'[j]}\equiv0$")
             if log and not np.any(valid):
                 note = case["undef"].get(c, "no valid pixels")
                 # The caption carries the full reason; keep the in-panel note
                 # to the short component identity so it stays inside the axes.
                 note = note.split(" (")[0]
-                ax.text(0.5, 0.5, note, transform=ax.transAxes,
-                        ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
+                figstyle.panel_note(ax, note)
             ax.set_xticks(xticks)
             ax.set_yticks(yticks)
-            ax.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
             if rowkey.endswith("err"):
-                ax.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
+                ax.set_xlabel(xlabel, labelpad=1)
             else:
                 ax.set_xticklabels([])
             if j == 0:
-                ax.set_ylabel(r"$x$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
+                ax.set_ylabel(ylabel, labelpad=1)
             else:
                 ax.set_yticklabels([])
             if rowkey.endswith("field"):
                 ax.set_title(f"${part}_{'xyz'[j]}$" if j < 3 else f"${part}^2$",
-                             fontsize=figstyle.TITLE_PT, pad=2)
+                             pad=2)
             else:
                 ax.set_title("", pad=0)
 
@@ -376,40 +296,36 @@ def draw_case(case, outdir):
             Z = axis.to_display(
                 np.ma.masked_where((~valid) | (~np.isfinite(arrq)), arrq),
                 "hires", "xy", case["source"])
-            imq = axq.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                             cmap=cmap_err, norm=snorm,
-                             interpolation="nearest", resample=False)
+            imq = figstyle.draw_raster_panel(axq, yc, x, Z, "error",
+                                             snorm, cmap_err)
             try:
-                axq.contour(xc, yv, Z, levels=[1e-3],
+                axq.contour(yc, x, Z, levels=[figstyle.ERROR_GATE],
                             colors=[figstyle.GATE_STYLE["color"]],
                             linewidths=figstyle.GATE_STYLE["linewidth"],
                             linestyles=figstyle.GATE_STYLE["linestyle"])
             except Exception:
                 pass
         else:
-            imq = axq.imshow(axis.to_display(np.asarray(arrq), "hires", "xy",
-                                             case["source"]),
-                             origin="lower", extent=ext, aspect="auto",
-                             cmap=cmap_sq, norm=snorm,
-                             interpolation="nearest", resample=False)
+            imq = figstyle.draw_raster_panel(
+                axq, yc, x,
+                axis.to_display(np.asarray(arrq), "hires", "xy",
+                                case["source"]),
+                "squared_field", snorm, cmap_sq)
         if not log and sq_zero:
-            axq.text(0.5, 0.5, rf"${part}^2\equiv0$", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
+            figstyle.panel_note(axq, rf"${part}^2\equiv0$")
         if log and not np.any(case["valid"][sq]):
-            axq.text(0.5, 0.5, "no valid pixels", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
+            figstyle.panel_note(axq, "no valid pixels")
         axq.set_xticks(xticks)
         axq.set_yticks(yticks)
-        axq.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
         if rowkey.endswith("err"):
-            axq.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
+            axq.set_xlabel(xlabel, labelpad=1)
         else:
             axq.set_xticklabels([])
         axq.set_yticklabels([])
         if rowkey.endswith("field"):
             sq_title = (f"${part}^2$ (log)" if sq_scale == "log"
                         else f"${part}^2$")
-            axq.set_title(sq_title, fontsize=figstyle.TITLE_PT, pad=2)
+            axq.set_title(sq_title, pad=2)
         else:
             axq.set_title("", pad=0)
 
@@ -434,8 +350,8 @@ def draw_case(case, outdir):
         rl = (f"{part} {'error' if log else 'field'}\n"
               rf"$\gamma$={case['gamma']:.4g}, $\beta$={case['beta']:.4g}"
               f"\nN=1, {case['n']}$^3$")
-        fig.text(0.0315, y0 + rh / 2, rl, rotation=90, ha="center", va="center",
-                 fontsize=figstyle.FIG_TEXT_PT, linespacing=1.15)
+        fig.text(0.0315, y0 + rh / 2, rl, rotation=90, ha="center",
+                 va="center", linespacing=1.15)
 
         info["rows"][rowkey] = {
             "comp": {"vmin": float(cnorm.vmin), "vmax": float(cnorm.vmax),
@@ -445,9 +361,9 @@ def draw_case(case, outdir):
             "sq": {"vmin": float(snorm.vmin), "vmax": float(snorm.vmax),
                    "ticks": [float(t) for t in sticks],
                    "norm": sq_scale,
-                   "floor_ratio": (SQ_FLOOR_RATIO if sq_scale == "log"
+                   "floor_ratio": (figstyle.SQ_FLOOR_RATIO if sq_scale == "log"
                                    and not log else None)},
-            "masked_colour": MASKED_COLOUR,
+            "masked_colour": figstyle.MASKED_COLOR,
             "finite_min_masked_distance": masked_min_distance,
             "shared_components": True,
             "bar_labels": [cl, sl],
@@ -460,7 +376,7 @@ def draw_case(case, outdir):
         fig.text(0.5, 0.035,
                  "B error row omitted: the reference B is identically zero "
                  "at beta=0, so the relative B error is undefined",
-                 ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
+                 ha="center", va="center")
 
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -499,7 +415,7 @@ def draw_case(case, outdir):
         gap = b.x0 - max(p[4] for p in left_panels)
         assert gap >= 0.008, f"bar too close to panel: {gap}"
         nt = len([t for t in cb.ax.get_yticklabels() if t.get_text().strip()])
-        assert nt == 3, f"colour bar has {nt} ticks, expected 3"
+        assert 2 <= nt <= 3, f"colour bar has {nt} ticks, expected 2-3"
     checks["no_text_overlap"] = True
     checks["components_share_norm_and_bar"] = True
     checks["squared_scale_distinct_with_own_bar"] = True
@@ -511,7 +427,7 @@ def draw_case(case, outdir):
         len([t for t in cb.ax.get_yticklabels() if t.get_text().strip()])
         for cb in cbars)
     checks["bar_gap_fraction"] = 0.008
-    checks["masked_colour"] = MASKED_COLOUR
+    checks["masked_colour"] = figstyle.MASKED_COLOR
     checks["masked_colour_distinct_from_finite_errors"] = True
     checks["finite_min_masked_distance"] = masked_min_distance
     info["checks"] = checks

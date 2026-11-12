@@ -18,7 +18,6 @@ import os
 import sys
 
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.colors import LogNorm
 from matplotlib.lines import Line2D
@@ -131,8 +130,8 @@ def fig_a(outdir):
     pooled = {}
     for r in sub:
         pooled.setdefault(int(_f(r["particles"])), []).append(r)
-    fs.apply_style()
-    fig, ax = plt.subplots(figsize=(fs.width_in(0.62), 3.45))
+    fs.apply_paper_style(kind="line")
+    fig, ax = fs.subplots(0.62, 3.45)
     fig.subplots_adjust(left=0.185, right=0.975, bottom=0.165, top=0.965)
     _plot_totals(ax, ns, sub, rec, pooled)
     _plot_stages(ax, ns, rec)
@@ -160,8 +159,8 @@ def fig_b(outdir):
     rec = {}
     for r in sub:
         rec.setdefault(int(_f(r["box_cells"])), r)
-    fs.apply_style()
-    fig, ax = plt.subplots(figsize=(fs.width_in(0.62), 3.45))
+    fs.apply_paper_style(kind="line")
+    fig, ax = fs.subplots(0.62, 3.45)
     fig.subplots_adjust(left=0.185, right=0.975, bottom=0.165, top=0.965)
     _plot_totals(ax, boxes, sub, rec)
     _plot_stages(ax, boxes, rec)
@@ -171,7 +170,6 @@ def fig_b(outdir):
         top = max(v for v, _ in pts)
         ax.annotate(f"M={int(_f(r['Mx']))}", (b, top),
                     xytext=(0, 9), textcoords="offset points", ha="center",
-                    fontsize=fs.plt.rcParams["font.size"],
                     color=fs.OKABE["grey"])
     ax.set_yscale("log")
     ax.set_xlabel("source box size (cells)")
@@ -199,9 +197,9 @@ def mpi(outdir):
         "mesh": dict(color=fs.OKABE["orange"], marker="s", label="mesh"),
         "write": dict(color=fs.OKABE["green"], marker="D", label="write"),
     }
-    fs.apply_style()
-    fig, (axa, axb) = plt.subplots(2, 1, figsize=(fs.width_in(0.58), 5.35),
-                                   gridspec_kw={"hspace": 0.32})
+    fs.apply_paper_style(kind="line")
+    fig, (axa, axb) = fs.subplots(0.58, 5.35, nrows=2, ncols=1,
+                                  gridspec_kw={"hspace": 0.32})
     fig.subplots_adjust(left=0.215, right=0.975, bottom=0.095, top=0.965)
     for key, c in style.items():
         rr = sorted(by[key], key=lambda r: int(r["rank"]))
@@ -222,7 +220,6 @@ def mpi(outdir):
                          (int(r["rank"]), _f(r["speedup"])),
                          textcoords="offset points", xytext=(0, off),
                          ha="center", va="bottom" if off > 0 else "top",
-                         fontsize=fs.plt.rcParams["font.size"],
                          color=c["color"], fontweight="bold")
     ranks = [1, 2, 4]
     axa.plot(ranks, [36.61 / n for n in ranks], "k--", lw=0.8, alpha=0.7)
@@ -233,7 +230,7 @@ def mpi(outdir):
     axa.legend(loc="lower right", framealpha=0.92, handlelength=1.5,
                borderpad=0.3)
     axa.grid(alpha=0.3, linewidth=0.5)
-    axa.set_title("(a) wall time vs ranks", loc="left")
+    fs.panel_title(axa, "a", "wall time vs ranks")
     axb.plot(ranks, ranks, "k--", lw=0.8, alpha=0.7, label="ideal $S=n$")
     axb.set_xscale("log", base=2)
     axb.set_xlim(0.9, 4.9); axb.set_ylim(0, 5)
@@ -243,7 +240,7 @@ def mpi(outdir):
     axb.legend(loc="lower right", framealpha=0.92, handlelength=1.5,
                borderpad=0.3)
     axb.grid(alpha=0.3, linewidth=0.5)
-    axb.set_title("(b) speedup vs ranks", loc="left")
+    fs.panel_title(axb, "b", "speedup vs ranks")
     for ax in (axa, axb):
         ax.set_xticks([1, 2, 4]); ax.set_xticklabels(["1", "2", "4"])
     _save(fig, outdir, "F_mpi_rank_scaling",
@@ -262,12 +259,12 @@ def w4b(outdir):
             g, a = int(r["gamma"]), float(r["aspect"])
             data.setdefault((g, a), []).append(
                 (int(r["d"]), float(r["worst_rel_error"])))
-    fs.apply_style()
-    fig, ax = plt.subplots(figsize=(fs.width_in(0.95), 4.15))
+    fs.apply_paper_style(kind="line")
+    fig, ax = fs.subplots(0.95, 4.15)
     fig.subplots_adjust(left=0.145, right=0.975, bottom=0.155, top=0.94)
     for (g, a), pts in sorted(data.items()):
         pts.sort()
-        col = fs.GAMMA_COLORS.get(g, "#000000")
+        col = fs.GAMMA_COLORS.get(g, fs.OKABE["black"])
         ls = "-" if a == 1.0 else (0, (2, 1))
         ax.plot([p[0] for p in pts], [p[1] for p in pts], color=col,
                 linestyle=ls, marker="o", markersize=3.8,
@@ -296,8 +293,8 @@ def gamma(outdir):
             D[(int(r["gamma"]), float(r["h"]), int(r["d"]))] = \
                 float(r["peak_normalised_abs_error"])
     C = {str(g): fs.GAMMA_COLORS[g] for g in (10, 50, 100)}
-    fs.apply_style()
-    fig, ax = plt.subplots(figsize=(fs.width_in(0.62), 3.35))
+    fs.apply_paper_style(kind="line")
+    fig, ax = fs.subplots(0.62, 3.35)
     fig.subplots_adjust(left=0.20, right=0.975, bottom=0.16, top=0.965)
     ds = [2, 8, 48]
     for g in (10, 50, 100):
@@ -350,8 +347,8 @@ def multivel(outdir):
     y_a = np.array([float(r["y_angular"]) for r in bins])
     c_e = float(np.sum(m_e * y_e) / np.sum(m_e ** 2))
     c_a = float(np.sum(m_a * y_a) / np.sum(m_a ** 2))
-    fs.apply_style()
-    fig = plt.figure(figsize=(fs.width_in(0.98), 4.95))
+    fs.apply_paper_style(kind="line")
+    fig = fs.figure(0.98, 4.95)
     gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.92], hspace=0.62,
                           wspace=0.30, left=0.095, right=0.985,
                           top=0.965, bottom=0.115)
@@ -366,20 +363,17 @@ def multivel(outdir):
                 label=f"adaptive edges, $B={B}$")
     axa.set_xlabel(r"$\gamma$ (dimensionless)")
     axa.set_ylabel("counts per bin")
-    axa.set_title(r"(a) energy spread 5%, seed 100")
+    fs.panel_title(axa, "a", r"energy spread 5%, seed 100")
     axa.text(0.03, 0.74,
              rf"$\gamma={gmean:.3f}\pm{gstd:.3f}$" + "\n" + rf"$N={len(Eg)}$",
-             transform=axa.transAxes, va="top", ha="left",
-             fontsize=fs.plt.rcParams["font.size"])
+             transform=axa.transAxes, va="top", ha="left")
     axa.legend(loc="upper right", framealpha=0.92, handlelength=1.3,
                borderpad=0.3)
     axb = fig.add_subplot(gs[0, 1])
-    hb = axb.hist2d(Apar, Aperp, bins=[34, 34], cmin=1,
-                    norm=LogNorm(vmin=1, vmax=None), cmap="viridis")
-    cb = fig.colorbar(hb[3], ax=axb, pad=0.02, fraction=0.05)
-    cb.set_label("particles per bin (dimensionless)",
-                 fontsize=fs.plt.rcParams["axes.labelsize"])
-    cb.ax.tick_params(labelsize=fs.plt.rcParams["xtick.labelsize"])
+    hb = fs.hist2d(axb, Apar, Aperp, bins=[34, 34], cmin=1,
+                   norm=LogNorm(vmin=1, vmax=None))
+    fs.draw_colorbar(fig, hb[3], ax=axb,
+                     label="particles per bin (dimensionless)")
     xline = np.linspace(Apar.min(), Apar.max(), 50)
     axb.plot(xline, np.tan(sig_rad) * xline, color=fs.REF_COLOR, lw=1.1,
              ls="--")
@@ -387,18 +381,17 @@ def multivel(outdir):
              color=fs.REF_COLOR, lw=1.1, ls=":")
     axb.set_xlabel(r"$u_\parallel$ ($m_ec$)")
     axb.set_ylabel(r"$u_\perp$ ($m_ec$)")
-    axb.set_title(r"(b) angular spread 5$^\circ$, seed 103")
+    fs.panel_title(axb, "b", r"angular spread 5$^\circ$, seed 103")
     axb.text(0.03, 0.04,
              rf"$\sigma_\theta=5^\circ$ (dashed)" + "\n" +
              rf"median $|\theta|={theta_med:.1f}$ mrad (dotted)",
              transform=axb.transAxes, va="bottom", ha="left",
-             fontsize=fs.plt.rcParams["font.size"], color="black",
+             color=fs.TEXT_COLOR,
              bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none",
                        alpha=0.85))
     axc = fig.add_subplot(gs[1, :])
     axc.axhline(1e-3, **fs.GATE_STYLE)
-    axc.text(1.15, 1.25e-3, r"$10^{-3}$", color=fs.REF_COLOR,
-             fontsize=fs.plt.rcParams["font.size"], va="bottom")
+    axc.text(1.15, 1.25e-3, r"$10^{-3}$", color=fs.REF_COLOR, va="bottom")
     axc.plot(Bv, y_e, "o-", color=fs.GAMMA_COLORS[10], ms=4.0, lw=1.0,
              label=r"energy 5%: measured $T_b-T$")
     axc.plot(Bv, c_e * m_e, "--", color=fs.GAMMA_COLORS[10], lw=1.0,
@@ -413,7 +406,7 @@ def multivel(outdir):
     axc.xaxis.set_minor_locator(mticker.NullLocator())
     axc.set_xlabel("bin count $B$ (log)")
     axc.set_ylabel(r"$T_b-T$, peak-normalised, $8\leq d\leq16$ cells (log)")
-    axc.set_title("(c) measured binning error and model, both cases")
+    fs.panel_title(axc, "c", "measured binning error and model, both cases")
     axc.legend(loc="upper right", framealpha=0.95, handlelength=1.6,
                borderpad=0.3)
     _save(fig, outdir, "F_multivel_dist",
@@ -473,8 +466,8 @@ def mpi_h100(outdir, data_path=None):
         "fft": dict(color=fs.OKABE["green"], marker="^", label="FFT"),
         "writer": dict(color=fs.OKABE["orange"], marker="s", label="writer/IO"),
     }
-    fs.apply_style()
-    fig, ax = plt.subplots(figsize=(fs.width_in(0.58), 3.45))
+    fs.apply_paper_style(kind="line")
+    fig, ax = fs.subplots(0.58, 3.45)
     fig.subplots_adjust(left=0.20, right=0.975, bottom=0.165, top=0.955)
     for stage, st in style.items():
         med = np.array([_f(r[stage + "_median_s"]) for r in rows])
@@ -499,8 +492,7 @@ def mpi_h100(outdir, data_path=None):
     else:
         host_line = "%s (%s)" % (host, gpu)
     ax.text(0.03, 0.97, host_line, transform=ax.transAxes, va="top",
-            ha="left", fontsize=fs.plt.rcParams["font.size"],
-            color=fs.OKABE["grey"])
+            ha="left", color=fs.OKABE["grey"])
     ax.set_xscale("log", base=2); ax.set_yscale("log")
     ax.set_xlim(0.9, 4.9); ax.set_ylim(0.4, 40)
     ax.set_xticks([1, 2, 4]); ax.set_xticklabels(["1", "2", "4"])

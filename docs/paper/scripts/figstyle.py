@@ -1,13 +1,19 @@
-"""Shared style module for the paper figures.
+"""Canonical style module for every paper figure.
 
-Single source of truth for canvas width, fonts, the Okabe-Ito palette, and
-the field/error renderers.  Output is deterministic: fixed backend, fixed PDF
-metadata date, no RNG.  Audit JSON is written under ``<outdir>/audit/``.
+This is the single source of truth for canvas geometry, the font ladder, the
+Okabe-Ito palette, colormaps and normalisation classes, the raster policy, the
+colour-bar style, and the deterministic save path.  Renderers must not set
+style locally: :func:`apply_paper_style` is the only rcParam entry point, and
+:func:`draw_raster_panel`, :func:`cmap_for`, :func:`draw_colorbar`,
+:func:`figure`, :func:`subplots`, :func:`blank_panel` and :func:`panel_note`
+are the only style-carrying draw helpers.  ``check_figstyle_overrides.py``
+enforces this.
 
-Every generator imports this module.  It fixes the canvas width to the width at
-which the figure is included in the paper, so a 9 pt font in the PDF is a 9 pt
-font in print (no hidden shrink factor).  It also provides the only colour-bar
-helper: one bar per row, at the row's right edge.
+Output is deterministic: fixed backend, fixed PDF metadata date, no RNG.
+Audit JSON is written under ``<outdir>/audit/``.
+
+The canvas width is the width at which the figure is included in the paper, so
+a 9 pt font in the PDF is a 9 pt font in print (no hidden shrink factor).
 """
 import datetime as _dt
 import json
@@ -26,9 +32,10 @@ import numpy as np
 # A4 (210 mm) minus 2 x 25.4 mm geometry margins.
 TEXT_BLOCK_IN = 6.268
 
-# ---- Shared font ladder -------------------------------------------------
-# The body text is 10 pt.  No figure text may exceed it; axis labels stay at
-# 9 pt and everything secondary is smaller, so the data panels get the room.
+# ---- Canonical font ladder ---------------------------------------------
+# One ladder for every figure family.  The body text is 10 pt; no figure text
+# may exceed it.  Axis labels are 9 pt, titles/notes 8 pt, ticks and legends
+# 7.5 pt, in-panel annotations 7 pt.
 BODY_TEXT_PT = 10.0
 FIG_TEXT_PT = 8.0       # figure-level notes / row labels
 AXIS_LABEL_PT = 9.0     # x/y axis labels and colour-bar quantity labels
@@ -36,12 +43,101 @@ TITLE_PT = 8.0          # in-panel titles
 TICK_PT = 7.5           # axis and colour-bar tick labels
 ANNOT_PT = 7.0          # in-panel annotations (peak labels, blank notes)
 LEGEND_PT = 7.5
+FONT_FAMILY = "DejaVu Sans"
 
+# ---- Canonical line/axis tokens ----------------------------------------
+LINEWIDTH = 0.8
+TICK_DIRECTION = "out"
+TICK_LENGTH = 2.5
+TICK_WIDTH = 0.6
+TICK_PAD = 1.5
+GRID = False
+TEXT_COLOR = "black"
+ANNOT_COLOR = "0.25"
+
+# ---- Deterministic canvas / save contract ------------------------------
+SCREEN_DPI = 120
+SAVEFIG_DPI = 300
+SAVEFIG_BBOX = "tight"
+SAVEFIG_PAD_IN = 0.03
+SAVEFIG_TRANSPARENT = False
+PDF_FONT_TYPE = 42
+SVG_FONT_TYPE = "none"
 FIXED_DATE = "D:20261102000000+00'00'"
 FIXED_DATE_OBJ = _dt.datetime(2026, 11, 2, tzinfo=_dt.timezone.utc)
 HERE = os.path.dirname(os.path.abspath(__file__))
 AUDIT_DIR = None  # set per save() call: <outdir>/audit
 
+# ---- Canonical colour-bar contract -------------------------------------
+# One layout for every vertical bar: ticks on the left, rotated quantity label
+# on the right, 0.6 pt outline, 2 pt ticks.
+CBAR_TICK_PT = TICK_PT
+CBAR_LABEL_PT = AXIS_LABEL_PT
+CBAR_LABEL_PAD = 3.0
+CBAR_TICK_PAD = 1.5
+CBAR_TICK_LENGTH = 2.0
+CBAR_OUTLINE_WIDTH = 0.6
+CBAR_TICK_SIDE = "left"
+CBAR_LABEL_SIDE = "right"
+CBAR_PAD = 0.02
+CBAR_FRACTION = 0.05
+# Attached bars are inset from the donor axes so the lowest/highest tick label
+# cannot touch the donor's corner tick labels.
+CBAR_SHRINK = 0.96
+CBAR_ANCHOR = (0.5, 1.0)
+
+# ---- Canonical raster policy -------------------------------------------
+# ONE policy for every raster field, in every figure family.  A field array is
+# drawn as an image with nearest-neighbour interpolation at pixel centres; the
+# extent is built from the centres plus/minus half a cell, so pixel edges align
+# exactly with the physical cell edges.  Image pixels share exact edges, so no
+# per-cell antialiasing seam can appear at 300 dpi; nearest-neighbour
+# interpolation adds no resampling artefacts.  ``pcolormesh`` was the source of
+# hairline white seams because cell edges were anti-aliased.
+RASTER_INTERPOLATION = "nearest"
+RASTER_RESAMPLE = False
+RASTER_ORIGIN = "lower"
+RASTER_ASPECT = "auto"
+
+# ---- Canonical colormaps per quantity class ----------------------------
+# Signed field components: diverging, white at zero.
+CMAP_FIELD_SIGNED = "RdBu_r"
+# Squared magnitude: sequential, perceptually uniform.
+CMAP_FIELD_SQUARED = "viridis"
+# Relative error: sequential, top truncated below near-white so the worst
+# finite error cannot read as "no data".
+CMAP_ERROR_BASE = "magma"
+ERR_CMAP_TOP = 0.90
+# Charge density (projection panels): perceptually uniform and distinct from
+# the squared-field viridis so the two quantity classes never look alike.
+CMAP_DENSITY = "cividis"
+# 2D particle-density histograms.
+CMAP_HIST = "viridis"
+
+# ONE grey for every masked / invalid / blank pixel.  Renderers must not
+# define a second grey.
+MASKED_COLOR = "#dddddd"
+BLANK_COLOR = MASKED_COLOR
+MASKED_LEGEND_EDGE = "0.4"
+
+# ---- Canonical norm / floor rules --------------------------------------
+# Error colourbars span [ERROR_FLOOR, decade ceiling] and always mark the
+# 1e-3 acceptance gate.  Squared magnitudes use a log scale floored at
+# SQ_FLOOR_RATIO times the panel peak (six decades).
+ERROR_FLOOR = 1e-6
+ERROR_GATE = 1e-3
+SQ_FLOOR_RATIO = 1e-6
+SQ_LOG_DECADES = 6.0
+SYMLOG_LINTHRESH_FRAC = 1e-3     # of the shared component maximum
+
+# ---- Canonical panel-letter contract -----------------------------------
+# Multi-panel figures prefix the title with "(a) ", left aligned, same pad as
+# every in-panel title.  Field families use row labels instead of letters.
+PANEL_LETTER_FMT = "({})"
+PANEL_TITLE_LOC = "left"
+PANEL_TITLE_PAD = 2.5
+
+# ---- Palette -----------------------------------------------------------
 OKABE = {
     "orange": "#E69F00", "sky": "#56B4E9", "green": "#009E73",
     "yellow": "#F0E442", "blue": "#0072B2", "vermillion": "#D55E00",
@@ -62,16 +158,6 @@ REF_STYLE = {"color": REF_COLOR, "linestyle": "--", "linewidth": 0.9}
 GATE_STYLE = {"color": REF_COLOR, "linestyle": "-.", "linewidth": 1.0}
 SUPPORT_STYLE = {"color": REF_COLOR, "linestyle": "-", "linewidth": 0.9}
 UNITS = {"E": "V/m", "B": "T"}
-
-# Error-panel presentation contract shared by the slice renderers.  The masked
-# colour is a dedicated light grey and the finite error colormap is truncated
-# below its near-white top, so "no data" cannot be confused with the worst
-# finite error.
-MASKED_COLOR = "#dddddd"
-ERR_CMAP_TOP = 0.90
-ERR_FLOOR = 1e-6
-ERR_GATE = 1e-3
-SQ_LOG_DECADES = 6.0
 
 
 def width_in(fraction):
@@ -177,62 +263,231 @@ def _layout_manifest(geo):
     }
 
 
-def draw_field_panel(ax, x, y, arr, cmap, norm, shading="nearest"):
-    """Draw a field raster with no white seams between adjacent pixels.
+def figure_size(width_frac=1.0, height_in=None):
+    """Canvas size in inches from the included width fraction and a height.
 
-    ``pcolormesh`` anti-aliases cell edges by default; on a fine raster this
-    leaves hair-width white seams at 300 dpi.  Cell edges are disabled and
-    anti-aliasing is turned off so neighbouring cells share an exact edge.
+    ``height_in`` is explicit for line/bar figures.  Field figures pass the
+    height solved by :func:`field_layout`, so their square-panel aspect is set
+    by the row count rather than by a renderer constant.
     """
-    mesh = ax.pcolormesh(x, y, arr, cmap=cmap, norm=norm, shading=shading,
-                         antialiased=False, edgecolors="none",
-                         linewidth=0.0)
-    mesh.set_edgecolor("none")
-    mesh.set_antialiased(False)
-    return mesh
+    if height_in is None or float(height_in) <= 0:
+        raise ValueError("figure_size needs a positive height_in")
+    return (width_in(width_frac), float(height_in))
 
 
-def apply_style(base=9.0):
-    """Deterministic rcParams for the non-field (line/bar) figures.
+def figure(width_frac=1.0, height_in=None, **kwargs):
+    """Create a figure on the canonical canvas (single style entry point)."""
+    return plt.figure(figsize=figure_size(width_frac, height_in), **kwargs)
 
-    The field families use :func:`apply_field_style`; the line/bar figures
-    keep their established 9 pt look.
+
+def subplots(width_frac=1.0, height_in=None, nrows=1, ncols=1, **kwargs):
+    """Create subplots on the canonical canvas (single style entry point)."""
+    return plt.subplots(nrows, ncols,
+                        figsize=figure_size(width_frac, height_in), **kwargs)
+
+
+_APPLIED_KIND = "line"
+
+
+def apply_paper_style(kind="line"):
+    """Apply the one paper rcParam ladder; the only style entry point.
+
+    Parameters
+    ----------
+    kind : {"line", "field"}
+        ``"line"`` covers line, bar, scatter and histogram figures;
+        ``"field"`` covers raster field figures.  Both share the same font
+        ladder, line widths, tick geometry, grid state and colormap policy.
+        The kind selects only the raster rcParams (``image.*``), which are
+        inert for line figures; keeping them set unconditionally means an
+        accidental raster call cannot escape the policy.
+
+    Returns
+    -------
+    dict
+        The resolved token dictionary, for audit manifests.
     """
+    global _APPLIED_KIND
+    if kind not in ("line", "field"):
+        raise ValueError(f"unknown paper style kind {kind!r}")
+    _APPLIED_KIND = kind
     plt.rcParams.update({
-        "figure.dpi": 120,
-        "savefig.dpi": 300,
-        "font.family": "DejaVu Sans",
+        "figure.dpi": SCREEN_DPI,
+        "savefig.dpi": SAVEFIG_DPI,
+        "savefig.bbox": SAVEFIG_BBOX,
+        "savefig.pad_inches": SAVEFIG_PAD_IN,
+        "savefig.transparent": SAVEFIG_TRANSPARENT,
+        "font.family": FONT_FAMILY,
         "mathtext.fontset": "dejavusans",
-        "font.size": base,
-        "axes.titlesize": base + 0.5,
-        "axes.labelsize": base,
-        "xtick.labelsize": base,
-        "ytick.labelsize": base,
-        "legend.fontsize": base,
-        "axes.linewidth": 0.8,
-        "axes.grid": False,
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-        "svg.fonttype": "none",
-    })
-
-
-def apply_field_style():
-    """Apply the shared field-figure font ladder (the one style for gp/val/large).
-
-    The body text is 10 pt; axis labels are 9 pt, everything else 7-8 pt, so
-    no figure text can exceed the body text and the square data panels get
-    the room.
-    """
-    apply_style(base=FIG_TEXT_PT)
-    plt.rcParams.update({
         "font.size": FIG_TEXT_PT,
         "axes.titlesize": TITLE_PT,
         "axes.labelsize": AXIS_LABEL_PT,
         "xtick.labelsize": TICK_PT,
         "ytick.labelsize": TICK_PT,
         "legend.fontsize": LEGEND_PT,
+        "axes.linewidth": LINEWIDTH,
+        "axes.grid": GRID,
+        "axes.edgecolor": TEXT_COLOR,
+        "axes.labelcolor": TEXT_COLOR,
+        "xtick.color": TEXT_COLOR,
+        "ytick.color": TEXT_COLOR,
+        "text.color": TEXT_COLOR,
+        "xtick.direction": TICK_DIRECTION,
+        "ytick.direction": TICK_DIRECTION,
+        "xtick.major.size": TICK_LENGTH,
+        "ytick.major.size": TICK_LENGTH,
+        "xtick.major.width": TICK_WIDTH,
+        "ytick.major.width": TICK_WIDTH,
+        "xtick.minor.size": TICK_LENGTH * 0.6,
+        "ytick.minor.size": TICK_LENGTH * 0.6,
+        "xtick.minor.width": TICK_WIDTH * 0.75,
+        "ytick.minor.width": TICK_WIDTH * 0.75,
+        "xtick.major.pad": TICK_PAD,
+        "ytick.major.pad": TICK_PAD,
+        "lines.linewidth": LINEWIDTH,
+        "patch.linewidth": LINEWIDTH,
+        "legend.frameon": True,
+        "image.interpolation": RASTER_INTERPOLATION,
+        "image.resample": RASTER_RESAMPLE,
+        "image.origin": RASTER_ORIGIN,
+        "image.aspect": RASTER_ASPECT,
+        "pdf.fonttype": PDF_FONT_TYPE,
+        "ps.fonttype": PDF_FONT_TYPE,
+        "svg.fonttype": SVG_FONT_TYPE,
     })
+    return style_tokens(kind)
+
+
+def style_tokens(kind=None):
+    """Return the resolved style token dictionary for an audit manifest."""
+    kind = _APPLIED_KIND if kind is None else kind
+    return {
+        "kind": kind,
+        "font_family": FONT_FAMILY,
+        "font_pt": {"body": BODY_TEXT_PT, "figure_text": FIG_TEXT_PT,
+                    "axis_label": AXIS_LABEL_PT, "title": TITLE_PT,
+                    "tick": TICK_PT, "annotation": ANNOT_PT,
+                    "legend": LEGEND_PT, "cbar_tick": CBAR_TICK_PT,
+                    "cbar_label": CBAR_LABEL_PT},
+        "linewidth_pt": LINEWIDTH,
+        "tick": {"direction": TICK_DIRECTION, "length_pt": TICK_LENGTH,
+                 "width_pt": TICK_WIDTH, "pad_pt": TICK_PAD},
+        "grid": GRID,
+        "dpi": {"screen": SCREEN_DPI, "savefig": SAVEFIG_DPI},
+        "raster": {"interpolation": RASTER_INTERPOLATION,
+                   "resample": RASTER_RESAMPLE,
+                   "origin": RASTER_ORIGIN, "aspect": RASTER_ASPECT},
+        "colormaps": {"signed_field": CMAP_FIELD_SIGNED,
+                      "squared_field": CMAP_FIELD_SQUARED,
+                      "error": f"{CMAP_ERROR_BASE} (top {ERR_CMAP_TOP})",
+                      "density": CMAP_DENSITY, "hist": CMAP_HIST},
+        "masked_color": MASKED_COLOR,
+        "error_floor": ERROR_FLOOR,
+        "error_gate": ERROR_GATE,
+        "sq_floor_ratio": SQ_FLOOR_RATIO,
+        "colorbar": {"tick_side": "left (field cax) / right (attached)",
+                     "label_side": CBAR_LABEL_SIDE,
+                     "pad": CBAR_PAD, "fraction": CBAR_FRACTION,
+                     "shrink": CBAR_SHRINK},
+        "savefig": {"bbox": SAVEFIG_BBOX, "pad_inches": SAVEFIG_PAD_IN,
+                    "transparent": SAVEFIG_TRANSPARENT},
+    }
+
+
+def cmap_for(quantity, zero_floor=False):
+    """Return a copy of the canonical colormap for a quantity class.
+
+    ``quantity`` is one of ``signed_field``, ``squared_field``, ``error``,
+    ``density`` or ``hist``.  Every true mask uses the one canonical grey.
+    ``zero_floor`` is for squared-magnitude panels where zero is a physical log
+    floor, not missing data: the bad/under colour becomes the colormap's own
+    lowest colour so zero is not confused with a mask.
+    """
+    if quantity == "error":
+        cmap = _truncated_cmap(CMAP_ERROR_BASE)
+    elif quantity == "signed_field":
+        cmap = plt.get_cmap(CMAP_FIELD_SIGNED).copy()
+    elif quantity == "squared_field":
+        cmap = plt.get_cmap(CMAP_FIELD_SQUARED).copy()
+    elif quantity == "density":
+        cmap = plt.get_cmap(CMAP_DENSITY).copy()
+    elif quantity == "hist":
+        cmap = plt.get_cmap(CMAP_HIST).copy()
+    else:
+        raise ValueError(f"unknown quantity class {quantity!r}")
+    if zero_floor:
+        cmap.set_bad(cmap(0.0))
+        cmap.set_under(cmap(0.0))
+    else:
+        cmap.set_bad(MASKED_COLOR)
+    return cmap
+
+
+def _cell_edges(coord, name):
+    """Cell edges from uniformly spaced pixel centres."""
+    coord = np.asarray(coord, float)
+    if coord.ndim != 1 or coord.size < 2:
+        raise ValueError(f"{name} needs a 1-D vector of at least 2 centres")
+    step = np.diff(coord)
+    if not np.allclose(step, step[0], rtol=1e-6, atol=0.0):
+        raise ValueError(f"{name} centres are not uniformly spaced")
+    half = 0.5 * float(step[0])
+    return float(coord[0] - half), float(coord[-1] + half)
+
+
+def draw_raster_panel(ax, x, y, arr, quantity, norm=None, cmap=None):
+    """Draw one field raster with the single canonical policy.
+
+    ``x`` and ``y`` are the **pixel centres** along the horizontal and vertical
+    axis (lengths equal the array's column and row count).  The extent is built
+    from the centres plus/minus half a cell, so the outer pixel edges coincide
+    exactly with the physical cell edges.  ``imshow`` with nearest-neighbour
+    interpolation and no resampling draws every cell as an exact block with
+    shared edges, which is seam-free at 300 dpi and introduces no interpolation
+    artefacts.  This is the only raster path in the paper.
+    """
+    arr = np.asarray(arr)
+    if arr.ndim != 2:
+        raise ValueError("draw_raster_panel needs a 2-D array")
+    xlo, xhi = _cell_edges(x, "x")
+    ylo, yhi = _cell_edges(y, "y")
+    if arr.shape != (np.asarray(y).size, np.asarray(x).size):
+        raise ValueError(
+            f"raster shape {arr.shape} does not match "
+            f"(len(y), len(x)) = {(np.asarray(y).size, np.asarray(x).size)}")
+    cmap = cmap_for(quantity) if cmap is None else cmap
+    return ax.imshow(arr, origin=RASTER_ORIGIN,
+                     extent=(xlo, xhi, ylo, yhi), aspect=RASTER_ASPECT,
+                     cmap=cmap, norm=norm,
+                     interpolation=RASTER_INTERPOLATION,
+                     resample=RASTER_RESAMPLE)
+
+
+def hist2d(ax, x, y, bins, norm=None, cmin=None):
+    """Draw a 2-D density histogram with the canonical histogram colormap."""
+    return ax.hist2d(x, y, bins=bins, cmin=cmin, norm=norm,
+                     cmap=cmap_for("hist"))
+
+
+def blank_panel(ax, text):
+    """Draw a blank (identically zero) panel with the canonical grey and note."""
+    ax.set_facecolor(BLANK_COLOR)
+    ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=ANNOT_PT,
+            color=ANNOT_COLOR, transform=ax.transAxes)
+
+
+def panel_note(ax, text, x=0.5, y=0.5, ha="center", va="center"):
+    """Draw an in-panel annotation on the canonical annotation ladder."""
+    return ax.text(x, y, text, ha=ha, va=va, fontsize=ANNOT_PT,
+                   color=ANNOT_COLOR, transform=ax.transAxes)
+
+
+def panel_title(ax, letter, title, pad=PANEL_TITLE_PAD):
+    """Set a panel title with the canonical ``(a)`` letter prefix, left aligned."""
+    label = PANEL_LETTER_FMT.format(letter)
+    full = f"{label} {title}".strip()
+    return ax.set_title(full, loc=PANEL_TITLE_LOC, pad=pad,
+                        fontsize=TITLE_PT)
 
 
 _LAYOUT_RECORDS = {}
@@ -408,14 +663,16 @@ def save(fig, outdir, name, manifest, tight=True):
     png = os.path.join(outdir, name + ".png")
     meta_pdf = {"CreationDate": FIXED_DATE_OBJ, "ModDate": FIXED_DATE_OBJ}
     meta_png = {"CreationDate": FIXED_DATE, "ModDate": FIXED_DATE}
+    common = {"transparent": SAVEFIG_TRANSPARENT}
     if tight:
-        fig.savefig(pdf, metadata=meta_pdf, bbox_inches="tight",
-                    pad_inches=0.03)
-        fig.savefig(png, dpi=300, metadata=meta_png, bbox_inches="tight",
-                    pad_inches=0.03)
+        fig.savefig(pdf, metadata=meta_pdf, bbox_inches=SAVEFIG_BBOX,
+                    pad_inches=SAVEFIG_PAD_IN, **common)
+        fig.savefig(png, dpi=SAVEFIG_DPI, metadata=meta_png,
+                    bbox_inches=SAVEFIG_BBOX,
+                    pad_inches=SAVEFIG_PAD_IN, **common)
     else:
-        fig.savefig(pdf, metadata=meta_pdf)
-        fig.savefig(png, dpi=300, metadata=meta_png)
+        fig.savefig(pdf, metadata=meta_pdf, **common)
+        fig.savefig(png, dpi=SAVEFIG_DPI, metadata=meta_png, **common)
     plt.close(fig)
     manifest = dict(manifest)
     manifest.update({
@@ -427,6 +684,7 @@ def save(fig, outdir, name, manifest, tight=True):
             plt.rcParams["xtick.labelsize"], plt.rcParams["ytick.labelsize"],
             plt.rcParams["legend.fontsize"])),
         "generator": "figstyle.save",
+        "style_tokens": style_tokens(),
     })
     with open(os.path.join(audit_dir, name + ".json"), "w") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
@@ -435,23 +693,64 @@ def save(fig, outdir, name, manifest, tight=True):
     return pdf
 
 
-def _cbar(fig, cax, norm, cmap, label, ticks, ticklabels):
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    cb = fig.colorbar(sm, cax=cax)
-    cb.set_label(label, fontsize=plt.rcParams["axes.labelsize"], labelpad=3)
-    cb.ax.tick_params(labelsize=plt.rcParams["xtick.labelsize"], pad=1.5)
-    cb.set_ticks(ticks)
-    cb.set_ticklabels(ticklabels)
-    cb.outline.set_linewidth(0.6)
+def draw_colorbar(fig, mappable, cax=None, ax=None, ticks=None,
+                  ticklabels=None, label=None, tick_side=None):
+    """Draw a vertical colour bar with the one canonical style.
+
+    Ticks sit on the left of the bar, the quantity label on the right, the
+    outline is 0.6 pt and tick geometry comes from the shared ladder.  Field
+    figures pass an explicit ``cax`` from :func:`field_layout`; line figures
+    pass ``ax`` and get the shared pad/fraction placement.
+    """
+    if cax is not None:
+        cb = fig.colorbar(mappable, cax=cax)
+    elif ax is not None:
+        cb = fig.colorbar(mappable, ax=ax, pad=CBAR_PAD,
+                          fraction=CBAR_FRACTION, shrink=CBAR_SHRINK,
+                          anchor=CBAR_ANCHOR)
+    else:
+        raise ValueError("draw_colorbar needs cax or ax")
+    if tick_side is None:
+        # Field bars sit between panels, so their ticks face left into the
+        # reserved gap; an attached bar on the right edge keeps its ticks on
+        # the right so they cannot collide with the donor axes.
+        tick_side = CBAR_TICK_SIDE if cax is not None else "right"
+    if tick_side not in ("left", "right"):
+        raise ValueError(f"unknown colour-bar tick side {tick_side!r}")
+    cb.ax.yaxis.set_ticks_position(tick_side)
+    cb.ax.yaxis.set_label_position(CBAR_LABEL_SIDE)
+    cb.ax.tick_params(labelsize=CBAR_TICK_PT, pad=CBAR_TICK_PAD,
+                      length=CBAR_TICK_LENGTH,
+                      labelleft=tick_side == "left",
+                      labelright=tick_side == "right")
+    cb.outline.set_linewidth(CBAR_OUTLINE_WIDTH)
+    if ticks is not None:
+        cb.set_ticks(ticks)
+    if ticklabels is not None:
+        cb.set_ticklabels(ticklabels)
+    if label is not None:
+        cb.set_label(label, fontsize=CBAR_LABEL_PT, labelpad=CBAR_LABEL_PAD)
     return cb
 
 
-def _fmt_sci(v):
-    if v == 0:
+def _cbar(fig, cax, norm, cmap, label, ticks, ticklabels):
+    """Internal adapter: ScalarMappable colour bar at an explicit cax."""
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    return draw_colorbar(fig, sm, cax=cax, ticks=ticks,
+                         ticklabels=ticklabels, label=label)
+
+
+def fmt_sci(v):
+    """Compact two-significant-figure scientific label (``4.2e6``)."""
+    v = float(v)
+    if v == 0.0:
         return "0"
     e = int(np.floor(np.log10(abs(v))))
     m = v / 10.0 ** e
     return f"{m:.2g}e{e}"
+
+
+_fmt_sci = fmt_sci
 
 
 def _truncated_cmap(name, top=ERR_CMAP_TOP, n=256):
@@ -461,7 +760,14 @@ def _truncated_cmap(name, top=ERR_CMAP_TOP, n=256):
     return mcolors.ListedColormap(rgba, name=f"{name}_trunc")
 
 
-def _assert_masked_distinct(norm, cmap, label="error"):
+def finite_min_distance(cmap, colour=MASKED_COLOR):
+    """Smallest RGB distance between the finite ramp and the masked grey."""
+    masked = np.asarray(mcolors.to_rgba(colour))[:3]
+    lut = np.asarray(cmap(np.linspace(0.0, 1.0, 256)))[:, :3]
+    return float(np.min(np.sqrt(np.sum((lut - masked) ** 2, axis=1))))
+
+
+def assert_masked_distinct(norm, cmap, label="error"):
     """Fail if a finite value maps to the masked grey or a white/grey top."""
     if isinstance(norm, mcolors.LogNorm):
         vals = np.geomspace(float(norm.vmin), float(norm.vmax), 257)
@@ -482,41 +788,73 @@ def _assert_masked_distinct(norm, cmap, label="error"):
             "near-white or grey")
 
 
-def _error_limits(items):
-    """Error range floored at ERR_FLOOR, ceiling at a decade (or the gate)."""
+_assert_masked_distinct = assert_masked_distinct
+
+
+def error_limits(items):
+    """Canonical error range: floor at ERROR_FLOOR, decade ceiling, gate shown.
+
+    ``items`` may be arrays or dictionaries with ``err``/``valid`` entries.
+    The range never drops below the acceptance gate, so the gate contour and
+    its tick are always representable.
+    """
     good = []
     for it in items:
-        e = np.asarray(it["err"], float)
-        v = np.asarray(it["valid"], bool)
-        e = e[v & np.isfinite(e) & (e > 0)]
+        if isinstance(it, dict):
+            e = np.asarray(it["err"], float)
+            v = np.asarray(it["valid"], bool)
+            e = e[v & np.isfinite(e) & (e > 0)]
+        else:
+            e = np.asarray(it, float)
+            e = e[np.isfinite(e) & (e > 0)]
         if e.size:
             good.append(e)
     hi = 1.0
     if good:
         cat = np.concatenate(good)
         hi = 10.0 ** np.ceil(np.log10(float(cat.max())))
-    vmin = ERR_FLOOR
-    vmax = max(float(hi), ERR_GATE)
+    vmin = ERROR_FLOOR
+    vmax = max(float(hi), ERROR_GATE)
     if vmax <= vmin:
         vmax = vmin * 10.0
     return vmin, vmax
 
 
-def _error_ticks(vmin, vmax):
+_error_limits = error_limits
+
+
+def error_ticks(vmin, vmax):
     """Lower floor, the marked 1e-3 gate, and the ceiling."""
     ticks = {float(vmin), float(vmax)}
-    if float(vmin) <= ERR_GATE <= float(vmax):
-        ticks.add(float(ERR_GATE))
+    if float(vmin) <= ERROR_GATE <= float(vmax):
+        ticks.add(float(ERROR_GATE))
     ticks = sorted(ticks)
-    labels = ["1e-3\ngate" if np.isclose(t, ERR_GATE, rtol=1e-9, atol=0.0)
-              else _fmt_sci(t) for t in ticks]
+    labels = ["1e-3\ngate" if np.isclose(t, ERROR_GATE, rtol=1e-9, atol=0.0)
+              else fmt_sci(t) for t in ticks]
     return ticks, labels
 
 
-def _sq_ticks(peak, decades=SQ_LOG_DECADES):
+_error_ticks = error_ticks
+
+
+def sq_limits(values):
+    """Canonical squared-magnitude log range: peak*SQ_FLOOR_RATIO .. peak."""
+    arr = np.asarray(values, float)
+    finite = arr[np.isfinite(arr)]
+    peak = float(finite.max()) if finite.size else 1.0
+    if not np.isfinite(peak) or peak <= 0.0:
+        peak = 1.0
+    floor = max(peak * SQ_FLOOR_RATIO, np.finfo(float).tiny)
+    return floor, peak
+
+
+def sq_ticks(peak, decades=SQ_LOG_DECADES):
     """Decade ticks from peak*10^-decades up to the peak."""
     ticks = [float(peak) * 10.0 ** d for d in np.arange(-int(decades), 1)]
-    return ticks, [_fmt_sci(t) for t in ticks]
+    return ticks, [fmt_sci(t) for t in ticks]
+
+
+_sq_ticks = sq_ticks
 
 
 # Size of the in-panel peak annotation in points at the final print size.  The
@@ -559,28 +897,30 @@ def _peak_fraction(peak, shared):
 
 
 def _masked_note(fig):
-    handle = Patch(facecolor=MASKED_COLOR, edgecolor="0.4", label="masked")
+    handle = Patch(facecolor=MASKED_COLOR, edgecolor=MASKED_LEGEND_EDGE,
+                   label="masked")
     fig.legend(handles=[handle], loc="lower center",
                bbox_to_anchor=(0.5, 0.002), frameon=False, handlelength=1.2,
                handletextpad=0.5, borderaxespad=0.0,
-               fontsize=plt.rcParams["legend.fontsize"])
+               fontsize=LEGEND_PT)
 
 
 def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
-                      fig_height, shading="nearest", support=None,
-                      suptitle=None, manifest=None):
+                      fig_height, support=None, suptitle=None, manifest=None):
     """Rows of field/error panels with exactly one shared colour bar per row.
 
     rows : list of dicts
         {"kind": "field"|"error", "items": [{"arr","err","valid","title"}],
          "part": "E"|"B", "log": bool}
-    x, y : coordinate centres/edges along horizontal / vertical axes.
-    support : optional bool mask; drawn as a white outline on error panels.
+    x, y : pixel **centres** along the horizontal / vertical axis, shared by
+        every row and every family.  The raster policy is fixed by
+        :func:`draw_raster_panel`.
+    support : optional bool mask; drawn as a dark outline on error panels.
     """
-    apply_field_style()
+    apply_paper_style(kind="field")
     ncol = max(len(r["items"]) for r in rows)
     nrow = len(rows)
-    fig = plt.figure(figsize=(width_in(width_frac), fig_height))
+    fig = figure(width_frac, fig_height)
     left = 0.105
     right = 0.878
     bottom = 0.125
@@ -590,18 +930,11 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
         left=left, right=right, bottom=bottom, top=top,
         wspace=0.16, hspace=0.46,
     )
-    field_cmap = plt.get_cmap("RdBu_r").copy()
-    field_cmap.set_bad(MASKED_COLOR)
-    err_cmap = _truncated_cmap("magma")
-    err_cmap.set_bad(MASKED_COLOR)
+    field_cmap = cmap_for("signed_field")
+    err_cmap = cmap_for("error")
+    xlo, xhi = _cell_edges(x, "x")
+    ylo, yhi = _cell_edges(y, "y")
 
-    if shading == "flat":
-        xlo, xhi = float(x[0]), float(x[-1])
-        ylo, yhi = float(y[0]), float(y[-1])
-    else:
-        dx = float(x[1] - x[0]); dy = float(y[1] - y[0])
-        xlo, xhi = float(x[0] - dx / 2), float(x[-1] + dx / 2)
-        ylo, yhi = float(y[0] - dy / 2), float(y[-1] + dy / 2)
     bar_rows = []
     for ri, row in enumerate(rows):
         items = row["items"]
@@ -614,55 +947,51 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
             vmax = max((float(v.max()) for v in finite if v.size), default=1.0)
             if not np.isfinite(vmax) or vmax <= 0:
                 vmax = 1.0
-            norm = mcolors.SymLogNorm(linthresh=max(vmax * ERR_GATE, 1e-30),
-                                      vmin=-vmax, vmax=vmax, base=10)
+            norm = mcolors.SymLogNorm(
+                linthresh=max(vmax * SYMLOG_LINTHRESH_FRAC, 1e-30),
+                vmin=-vmax, vmax=vmax, base=10)
             cmap = field_cmap
             cbar_label = f"{part} [{UNITS[part]}] (symlog)"
             ticks = [-vmax, 0.0, vmax]
-            ticklabels = [_fmt_sci(-vmax), "0", _fmt_sci(vmax)]
+            ticklabels = [fmt_sci(-vmax), "0", fmt_sci(vmax)]
         else:
-            vmin, vmax = _error_limits(items)
+            vmin, vmax = error_limits(items)
             norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
             cmap = err_cmap
             cbar_label = "relative error (dimensionless)"
-            ticks, ticklabels = _error_ticks(vmin, vmax)
-            _assert_masked_distinct(norm, cmap, f"{part} error row")
+            ticks, ticklabels = error_ticks(vmin, vmax)
+            assert_masked_distinct(norm, cmap, f"{part} error row")
 
         for ci, it in enumerate(items):
             ax = fig.add_subplot(gs[ri, ci])
             if kind == "field":
                 arr = np.asarray(it["arr"], float)
                 if np.isfinite(arr).any() and np.nanmax(np.abs(arr)) > 0:
-                    draw_field_panel(ax, x, y, arr, cmap, norm, shading)
+                    draw_raster_panel(ax, x, y, arr, "signed_field",
+                                      norm=norm, cmap=cmap)
                 else:
-                    ax.set_facecolor("0.90")
-                    ax.text(0.5, 0.5, rf"${it.get('symbol', '')}\equiv0$",
-                            ha="center", va="center",
-                            fontsize=plt.rcParams["font.size"],
-                            transform=ax.transAxes, color="0.25")
+                    blank_panel(ax, rf"${it.get('symbol', '')}\equiv0$")
             else:
                 arr = np.asarray(it["err"], float)
                 valid = np.asarray(it["valid"], bool)
                 masked = np.ma.masked_where(~valid | ~np.isfinite(arr), arr)
                 if np.any(valid) and np.isfinite(arr[valid]).any():
-                    draw_field_panel(ax, x, y, masked, cmap, norm, shading)
-                    xc = 0.5 * (x[:-1] + x[1:]) if shading == "flat" else x
-                    yc = 0.5 * (y[:-1] + y[1:]) if shading == "flat" else y
+                    draw_raster_panel(ax, x, y, masked, "error",
+                                      norm=norm, cmap=cmap)
                     try:
-                        ax.contour(xc, yc, np.where(valid & np.isfinite(arr),
-                                                    arr, np.nan),
-                                   levels=[1e-3], colors=[GATE_STYLE["color"]],
+                        ax.contour(x, y, np.where(valid & np.isfinite(arr),
+                                                  arr, np.nan),
+                                   levels=[ERROR_GATE],
+                                   colors=[GATE_STYLE["color"]],
                                    linewidths=GATE_STYLE["linewidth"],
                                    linestyles=GATE_STYLE["linestyle"])
                     except Exception:
                         pass
                 else:
-                    ax.set_facecolor("white")
+                    blank_panel(ax, "")
             if support is not None and kind == "error":
-                xc = 0.5 * (x[:-1] + x[1:]) if shading == "flat" else x
-                yc = 0.5 * (y[:-1] + y[1:]) if shading == "flat" else y
                 try:
-                    ax.contour(xc, yc, support.astype(float), levels=[0.5],
+                    ax.contour(x, y, support.astype(float), levels=[0.5],
                                colors=[SUPPORT_STYLE["color"]],
                                linewidths=SUPPORT_STYLE["linewidth"],
                                linestyles=SUPPORT_STYLE["linestyle"])
@@ -671,9 +1000,8 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
             ax.set_xlim(xlo, xhi)
             ax.set_ylim(ylo, yhi)
             ax.set_aspect("equal")
-            ax.set_title(it["title"], pad=2.5,
-                         fontsize=plt.rcParams["axes.titlesize"])
-            ax.tick_params(length=2.5, pad=1.5)
+            ax.set_title(it["title"], pad=PANEL_TITLE_PAD, fontsize=TITLE_PT)
+            ax.tick_params(length=TICK_LENGTH, pad=TICK_PAD)
             ax.xaxis.set_major_locator(mticker.MaxNLocator(3, prune=None))
             ax.yaxis.set_major_locator(mticker.MaxNLocator(3, prune=None))
             if ri == nrow - 1:
@@ -690,42 +1018,29 @@ def render_field_rows(name, outdir, rows, x, y, xlabel, ylabel, width_frac,
                          "scale": [float(norm.vmin), float(norm.vmax)]})
     if suptitle:
         fig.text(0.5, 0.975, suptitle, ha="center", va="top",
-                 fontsize=plt.rcParams["axes.titlesize"])
+                 fontsize=TITLE_PT)
     if any(r["kind"] == "error" for r in rows):
         _masked_note(fig)
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
     man["layout"] = "one shared colour bar per row at row right edge"
     man["masked_color"] = MASKED_COLOR
-    man["error_floor"] = ERR_FLOOR
+    man["error_floor"] = ERROR_FLOOR
     return save(fig, outdir, name, man)
 
 
 def _fmt_tick(v):
-    return _fmt_sci(v)
+    return fmt_sci(v)
 
 
 def _bar_title(fig, cax, image, ticks, ticklabels, title):
-    """Compact colour bar: numeric ticks left, rotated quantity label right.
-
-    The two text columns are separate so each can be sized and kept out of the
-    neighbouring image panels; putting both on the same side overran the
-    squared-field panel in the old layout.
-    """
-    cb = fig.colorbar(image, cax=cax)
-    cb.set_ticks(ticks)
-    cb.set_ticklabels(ticklabels)
-    cb.ax.yaxis.set_ticks_position("left")
-    cb.ax.yaxis.set_label_position("right")
-    cb.ax.tick_params(labelsize=plt.rcParams["xtick.labelsize"],
-                      labelleft=True, labelright=False, pad=1.5, length=2)
-    cb.outline.set_linewidth(0.6)
-    cb.set_label(title, fontsize=plt.rcParams["axes.labelsize"], labelpad=3)
-    return cb
+    """Internal alias for the canonical colour bar at an explicit cax."""
+    return draw_colorbar(fig, image, cax=cax, ticks=ticks,
+                         ticklabels=ticklabels, label=title)
 
 
 def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
-                            width_frac, shading="nearest",
+                            width_frac,
                             support=None, suptitle=None, manifest=None,
                             compact=False, row_gap_in=FIELD_ROW_GAP_IN,
                             bottom_in=None):
@@ -736,40 +1051,31 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     label.  Geometry comes from :func:`field_layout`, so every field family
     gets the same square panels; only the figure height changes with the row
     count.  ``compact`` shortens the colour-bar labels and the squared-panel
-    log ticks.  ``row_gap_in`` and ``bottom_in`` are inches.
+    log ticks.  ``row_gap_in`` and ``bottom_in`` are inches.  ``x`` and ``y``
+    are pixel **centres** shared by every field family; the raster policy is
+    fixed by :func:`draw_raster_panel`.
     """
-    apply_field_style()
+    apply_paper_style(kind="field")
     nrow = len(rows)
     has_error = any(r["kind"] == "error" for r in rows)
     if bottom_in is None:
         bottom_in = FIELD_BOTTOM_ERR_IN if has_error else FIELD_BOTTOM_IN
     geo = field_layout(nrow, width_frac=width_frac, top_in=FIELD_TOP_IN,
                        bottom_in=bottom_in, row_gap_in=row_gap_in)
-    fig = plt.figure(figsize=(geo["fig_w_in"], geo["fig_h_in"]))
+    fig = figure(width_frac, geo["fig_h_in"])
     panel_x = geo["panel_x"]
     pw, rh, bw = geo["pw"], geo["rh"], geo["bar_width"]
     cb1, cb2 = geo["cb1"], geo["cb2"]
     row_y = geo["row_y"]
 
-    if shading == "flat":
-        xlo, xhi = float(x[0]), float(x[-1])
-        ylo, yhi = float(y[0]), float(y[-1])
-        xc, yc = 0.5 * (x[:-1] + x[1:]), 0.5 * (y[:-1] + y[1:])
-    else:
-        dx = float(x[1] - x[0]); dy = float(y[1] - y[0])
-        xlo, xhi = float(x[0] - dx / 2), float(x[-1] + dx / 2)
-        ylo, yhi = float(y[0] - dy / 2), float(y[-1] + dy / 2)
-        xc, yc = x, y
+    xlo, xhi = _cell_edges(x, "x")
+    ylo, yhi = _cell_edges(y, "y")
 
-    field_cmap = plt.get_cmap("RdBu_r").copy()
-    field_cmap.set_bad(MASKED_COLOR)
-    sq_cmap = plt.get_cmap("viridis").copy()
-    # Zero is the physical log floor of the squared panel, not a mask: show it
-    # with the colormap's own lowest colour.
-    sq_cmap.set_bad(sq_cmap(0.0))
-    sq_cmap.set_under(sq_cmap(0.0))
-    err_cmap = _truncated_cmap("magma")
-    err_cmap.set_bad(MASKED_COLOR)
+    field_cmap = cmap_for("signed_field")
+    # Zero is the physical log floor of the squared panel, not a mask: use the
+    # colormap's own lowest colour so zero is never the mask grey.
+    sq_cmap = cmap_for("squared_field", zero_floor=True)
+    err_cmap = cmap_for("error")
     bar_rows = []
     peak_texts = []
 
@@ -777,7 +1083,9 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         y0 = row_y[ri]
         items = row["items"]
         if len(items) != 4:
-            raise ValueError("render_split_field_rows needs three components plus the squared panel")
+            raise ValueError(
+                "render_split_field_rows needs three components "
+                "plus the squared panel")
         comps, sqitem = items[:3], items[3]
         kind, part = row["kind"], row["part"]
         if kind == "field":
@@ -788,23 +1096,20 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
             # One shared symmetric-log bar for the triad: a real but suppressed
             # component (for example the longitudinal E_x at gamma=10) keeps
             # visible structure instead of collapsing onto the white centre.
-            cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * ERR_GATE, 1e-30),
-                                       vmin=-cvmax, vmax=cvmax, base=10)
-            svmax = float(np.nanmax(np.abs(np.asarray(sqitem["arr"], float))))
-            if not np.isfinite(svmax) or svmax <= 0:
-                svmax = 1.0
-            sfloor = max(svmax * 10.0 ** (-SQ_LOG_DECADES), 1e-30)
+            cnorm = mcolors.SymLogNorm(
+                linthresh=max(cvmax * SYMLOG_LINTHRESH_FRAC, 1e-30),
+                vmin=-cvmax, vmax=cvmax, base=10)
+            sfloor, svmax = sq_limits(np.asarray(sqitem["arr"], float))
             snorm = mcolors.LogNorm(vmin=sfloor, vmax=svmax)
             ccmap, scmap = field_cmap, sq_cmap
             cticks = [-cvmax, 0.0, cvmax]
-            clabels = [_fmt_sci(-cvmax), "0", _fmt_sci(cvmax)]
+            clabels = [fmt_sci(-cvmax), "0", fmt_sci(cvmax)]
             if compact:
-                sfloor_ticks = [snorm.vmin,
-                                float(np.sqrt(snorm.vmin * svmax)), svmax]
-                sticks = sfloor_ticks
-                slabels = [_fmt_sci(t) for t in sticks]
+                sticks = [snorm.vmin,
+                          float(np.sqrt(snorm.vmin * svmax)), svmax]
+                slabels = [fmt_sci(t) for t in sticks]
             else:
-                sticks, slabels = _sq_ticks(svmax)
+                sticks, slabels = sq_ticks(svmax)
             unit2 = "V$^2$/m$^2$" if part == "E" else "T$^2$"
             if compact:
                 clabel = f"{part} ({UNITS[part]})"
@@ -813,35 +1118,34 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                 clabel = f"{part} ({UNITS[part]}) (symlog)"
                 slabel = f"{part}$^2$ ({unit2}) (log)"
         else:
-            cvmin, cvmax = _error_limits(comps)
-            svmin, svmax = _error_limits([sqitem])
+            cvmin, cvmax = error_limits(comps)
+            svmin, svmax = error_limits([sqitem])
             cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax)
             snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax)
             ccmap = scmap = err_cmap
-            cticks, clabels = _error_ticks(cvmin, cvmax)
-            sticks, slabels = _error_ticks(svmin, svmax)
+            cticks, clabels = error_ticks(cvmin, cvmax)
+            sticks, slabels = error_ticks(svmin, svmax)
             clabel = slabel = "rel. error" if compact else "relative error"
-            _assert_masked_distinct(cnorm, ccmap, f"{part} error components")
-            _assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
+            assert_masked_distinct(cnorm, ccmap, f"{part} error components")
+            assert_masked_distinct(snorm, scmap, f"{part}$^2$ error")
 
-        def panel(ax, it, norm, cmap, title):
+        def panel(ax, it, norm, cmap, title, quantity):
             arr = np.asarray(it["arr"], float)
             if kind == "field":
                 if it.get("blank"):
                     # An identically-zero reference component: draw the panel
                     # blank and say which quantity vanishes.  The caption
                     # carries the physical reason (beam axis or stationary).
-                    ax.set_facecolor("0.90")
-                    ax.text(0.5, 0.5, it.get("blank_text", ""),
-                            transform=ax.transAxes, ha="center", va="center",
-                            fontsize=plt.rcParams["font.size"], color="0.25")
+                    blank_panel(ax, it.get("blank_text", ""))
                 else:
-                    draw_field_panel(ax, x, y, arr, cmap, norm, shading)
+                    draw_raster_panel(ax, x, y, arr, quantity,
+                                      norm=norm, cmap=cmap)
             else:
                 e = np.asarray(it["err"], float)
                 v = np.asarray(it["valid"], bool)
                 z = np.ma.masked_where(~v | ~np.isfinite(e), e)
-                draw_field_panel(ax, x, y, z, cmap, norm, shading)
+                draw_raster_panel(ax, x, y, z, "error",
+                                  norm=norm, cmap=cmap)
                 if not bool(np.any(v & np.isfinite(e))):
                     # A fully masked error panel: say why, so the grey cannot
                     # be read as missing data.  An identically-zero reference
@@ -856,19 +1160,18 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                     # the in-panel note is the short component identity.
                     short = note.split(" (")[0]
                     note = short if len(short) <= 30 else "fully masked"
-                    ax.text(0.5, 0.5, note, transform=ax.transAxes,
-                            ha="center", va="center",
-                            fontsize=ANNOT_PT, color="0.25")
+                    panel_note(ax, note)
                 try:
-                    ax.contour(xc, yc, np.where(v & np.isfinite(e), e, np.nan),
-                               levels=[1e-3], colors=[GATE_STYLE["color"]],
+                    ax.contour(x, y, np.where(v & np.isfinite(e), e, np.nan),
+                               levels=[ERROR_GATE],
+                               colors=[GATE_STYLE["color"]],
                                linewidths=GATE_STYLE["linewidth"],
                                linestyles=GATE_STYLE["linestyle"])
                 except Exception:
                     pass
                 if support is not None:
                     try:
-                        ax.contour(xc, yc, support.astype(float), levels=[0.5],
+                        ax.contour(x, y, support.astype(float), levels=[0.5],
                                    colors=[SUPPORT_STYLE["color"]],
                                    linewidths=SUPPORT_STYLE["linewidth"],
                                    linestyles=SUPPORT_STYLE["linestyle"])
@@ -876,9 +1179,8 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                         pass
             ax.set_xlim(xlo, xhi); ax.set_ylim(ylo, yhi)
             ax.set_aspect("auto")
-            ax.set_title(title, pad=2.5,
-                         fontsize=plt.rcParams["axes.titlesize"])
-            ax.tick_params(length=2, pad=1.5)
+            ax.set_title(title, pad=PANEL_TITLE_PAD, fontsize=TITLE_PT)
+            ax.tick_params(length=TICK_LENGTH, pad=TICK_PAD)
             # MaxNLocator(4, prune="both") keeps ticks strictly inside the
             # visible limits and away from the panel corners.  The old
             # MaxNLocator(3) emitted a 7.5 tick beyond a 6.4-wide x range whose
@@ -889,7 +1191,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
 
         for j, it in enumerate(comps):
             ax = fig.add_axes([panel_x[j], y0, pw, rh])
-            panel(ax, it, cnorm, ccmap, it.get("title", ""))
+            panel(ax, it, cnorm, ccmap, it.get("title", ""), "signed_field")
             if kind == "field" and not it.get("blank"):
                 arr_c = np.asarray(it["arr"], float)
                 peak_c = (float(np.nanmax(np.abs(arr_c)))
@@ -912,7 +1214,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         sq_title = sqitem.get("title", "")
         if kind == "field":
             sq_title = sq_title + " (log)"
-        panel(axq, sqitem, snorm, scmap, sq_title)
+        panel(axq, sqitem, snorm, scmap, sq_title, "squared_field")
         if ri == nrow - 1:
             axq.set_xlabel(xlabel)
         else:
@@ -935,7 +1237,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
 
     if suptitle:
         fig.text(0.5, 0.975, suptitle, ha="center", va="top",
-                 fontsize=plt.rcParams["axes.titlesize"])
+                 fontsize=TITLE_PT)
     if any(r["kind"] == "error" for r in rows):
         _masked_note(fig)
 
@@ -958,16 +1260,18 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     man = dict(manifest or {})
     man["colorbars_per_row"] = bar_rows
     man["layout"] = "component triad bar, squared panel with its own bar"
-    man["component_norm"] = "symlog, linthresh=1e-3*shared component maximum"
+    man["component_norm"] = (
+        f"symlog, linthresh={SYMLOG_LINTHRESH_FRAC:g}*shared component maximum")
     man["component_peak_annotation"] = (
         "compact two-line peak label: 'peak' over the percentage of shared max "
         "(one significant figure below 1%, 'max' for the shared maximum)")
     man["peak_annotation_font_pt"] = PEAK_ANNOT_PT
     man["peak_annotation_max_panel_frac"] = (
         round(max(peak_fracs), 4) if peak_fracs else None)
-    man["squared_norm"] = "log, 1e-6*peak..peak (field rows)"
+    man["squared_norm"] = (
+        f"log, {SQ_FLOOR_RATIO:g}*peak..peak (field rows)")
     man["masked_color"] = MASKED_COLOR
-    man["error_floor"] = ERR_FLOOR
-    man["error_gate_tick"] = ERR_GATE
+    man["error_floor"] = ERROR_FLOOR
+    man["error_gate_tick"] = ERROR_GATE
     man.update(_layout_manifest(geo))
     return save(fig, outdir, name, man, tight=False)

@@ -105,8 +105,8 @@ def build(outdir, case, plane, source):
     n = [int(v) for v in d["n"]]
     cell = np.asarray(d["cell"], float)
     origin = np.asarray(d["origin"], float)
-    horiz_e, vert_e = axis.coords(DATASET, plane, n, cell, origin,
-                                  centres=False, source=source)
+    horiz_c, vert_c = axis.coords(DATASET, plane, n, cell, origin,
+                                  centres=True, source=source)
     gamma = 10.0 if case == "g10" else 1.0
     rows = []
     for part in ("E", "B"):
@@ -141,11 +141,9 @@ def build(outdir, case, plane, source):
                                "display_axes": list(axis.display_axes(
                                    DATASET, plane, source))}}
     fs.render_split_field_rows(
-        name, outdir, rows, horiz_e * US, vert_e * US,
+        name, outdir, rows, horiz_c * US, vert_c * US,
         xlabel=xl, ylabel=yl, width_frac=1.0,
-        shading="flat", compact=True, manifest=man)
-    horiz_c, vert_c = axis.coords(DATASET, plane, n, cell, origin,
-                                  centres=True, source=source)
+        compact=True, manifest=man)
     signature = _signature(d, plane, source)
     if gamma == 10.0:
         if not (signature["Bx_max"] == 0.0 and signature["By_max"] > 0.0

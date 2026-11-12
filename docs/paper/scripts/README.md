@@ -18,13 +18,13 @@ and columns. Only the figure height changes with the row count.
 
 The font ladder is fixed: axis labels `9 pt`, panel titles and figure notes
 `8 pt`, tick labels and legends `7.5 pt`, in-panel annotations `7 pt`. Every
-value is at or below the `10 pt` body text. Field data are never smoothed:
-`pcolormesh` uses `antialiased=False`, `edgecolors='none'` and the shading
-that matches the array shape, and `imshow` uses `interpolation='nearest',
-resample=False`. A data pixel is drawn as a visible block; only text and
-line art are anti-aliased. The disabled cell edges also guarantee that no
-white seam appears between adjacent cells at 300 dpi (checked by a raster
-scan of the data rectangles).
+value is at or below the `10 pt` body text. Every raster panel, in every
+family, uses the one `imshow` policy: `interpolation='nearest'`,
+`resample=False`, and an extent built from the pixel centres plus/minus half a
+cell. A data pixel is a visible block with exact shared edges; nothing is
+smoothed and no per-cell anti-aliased edge can leave a white seam at 300 dpi.
+The full rule set is in `STYLE.md`, and `check_figstyle_overrides.py` fails if
+a renderer sets style locally.
 
 ## Axis convention
 
@@ -139,7 +139,9 @@ instead of shipping.
 
 | file | role | inputs | outputs |
 |---|---|---|---|
-| `figstyle.py` | shared style, palette, field/error renderers, deterministic save, layout guard | none | PDF, PNG, `audit/*.json`, `layout_assertions.json` |
+| `figstyle.py` | canonical style module: `apply_paper_style`, palette, colormaps, raster policy, colour bars, field/error renderers, deterministic save, layout guard | none | PDF, PNG, `audit/*.json`, `layout_assertions.json` |
+| `STYLE.md` | machine-checkable style contract and rationale | none | none |
+| `check_figstyle_overrides.py` | fail if a renderer sets fonts, canvas, colormap, raster, mask or colour-bar style locally | `render_*.py`, `run_all.py` | report; exit code |
 | `axis.py` | beam-axis convention, array-axis table, coordinate helpers, assertions, `self_test` | none | assertion dicts |
 | `cases.py` | repo-relative paths and the case registry | `docs/paper/data/cases.json` | path helpers |
 | `render_slices.py` | `val_*` BDATA2 forward/fluctuation and VAR1b 1 mrad slices | `data/bdata2/*.npz`, `data/var1b/*.npz` | 10 PDF/PNG |
