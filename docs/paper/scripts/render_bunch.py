@@ -87,7 +87,7 @@ def _cell_vector(cell):
 
 
 def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2,
-                          field_n=None):
+                          field_n=None, extend_to_bunch=True):
     """Whole-cell sub-range of the field lattice covering the padded bunch.
 
     The returned ``origin`` is ``field_origin + i0*field_cell`` and every
@@ -96,10 +96,17 @@ def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2,
     bounding box only selects which field cells are kept (snapped outward
     with floor/ceil, never sub-cell).
 
-    When ``field_n`` is given, the crop is clipped to the stored field window
-    ``[0, n)``.  This keeps a row whose padded bunch exceeds the stored grid
-    on the same lattice as the field panels instead of extending past them;
-    the clipped row records the fraction of charge that the window can hold.
+    When ``field_n`` is given, ``extend_to_bunch`` decides what happens if
+    the padded bunch exceeds the stored field window ``[0, n)``:
+
+    * ``True`` (the density row): keep the whole padded bunch and let the
+      lattice indices run past the stored window.  The cell size, lattice
+      origin and cell centres stay the field-panel ones; only the extent
+      grows, so every particle's TSC support is resolved and the row
+      conserves the full charge.  The field panels are unaffected because
+      they keep the stored window.
+    * ``False``: clip to ``[0, n)`` and record the fraction of charge the
+      window can hold (legacy behaviour).
     """
     field_origin = np.asarray(field_origin, dtype=float).reshape(3)
     field_cell = _cell_vector(field_cell)
@@ -111,10 +118,12 @@ def crop_to_field_lattice(pos_m, field_origin, field_cell, margin_cells=2,
     clipped = False
     if field_n is not None:
         limit = np.asarray([int(v) for v in field_n], dtype=int)
-        clipped = bool(np.any(i0 < 0) or np.any(i1 > limit))
-        i0 = np.maximum(i0, 0)
-        i1 = np.minimum(i1, limit)
-        i1 = np.maximum(i1, i0 + 1)
+        needs_extent = bool(np.any(i0 < 0) or np.any(i1 > limit))
+        if not extend_to_bunch:
+            clipped = needs_extent
+            i0 = np.maximum(i0, 0)
+            i1 = np.minimum(i1, limit)
+            i1 = np.maximum(i1, i0 + 1)
     origin = field_origin + i0 * field_cell
     n = [int(v) for v in (i1 - i0)]
     return origin, n, field_cell, bbox_lo, bbox_hi, i0, i1, clipped
@@ -246,7 +255,8 @@ def compute(bunch, dataset, figure_name, figure_plane, origin=None, n=None,
      i1, clipped) = crop_to_field_lattice(bunch.pos_m, field_origin,
                                           field_cell,
                                           margin_cells=pad_cells,
-                                          field_n=field_n)
+                                          field_n=field_n,
+                                          extend_to_bunch=True)
     rho = deposit_tsc(bunch, origin, n, cell)
     coords = _coords(origin, n, cell)
 
@@ -340,6 +350,25 @@ def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
     cell_size_identical = bool(np.array_equal(np.asarray(cell, float),
                                               np.asarray(field_cell, float)))
 
+    # The density row may run past the stored field window (it carries the
+    # whole bunch); record how far it extends on each side so the audit shows
+    # that the cell size and cell centres are still the field-panel ones.
+    extends_window = False
+    extension_cells = {}
+    stored_idx = {}
+    if field_n is not None:
+        for name in names:
+            d = _IDX[name]
+            lo = max(0, -int(i0[d]))
+            hi = max(0, int(i1[d]) - int(field_n[d]))
+            extension_cells[name] = [int(lo), int(hi)]
+            stored_idx[name] = [0, int(field_n[d]) - 1]
+            extends_window |= bool(lo or hi)
+    else:
+        for name in names:
+            extension_cells[name] = [0, 0]
+            stored_idx[name] = None
+
     fill_axes = {}
     for name in names:
         sigma_um = validation["particle"][name].get("sigma_um") or 0.0
@@ -384,6 +413,9 @@ def _crop_record(bunch, maps, n, cell, origin, pad_cells, validation,
             "lattice_origin_m": [float(v) for v in field_origin],
             "stored_field_grid_cells": field_n,
             "window_clipped_to_stored_grid": bool(clipped),
+            "extends_stored_field_window": extends_window,
+            "lattice_extension_cells": extension_cells,
+            "stored_cell_index_range": stored_idx,
             "crop_cell_index_range": cell_idx,
             "cell_centres_match_field_lattice": centres_match,
         },

@@ -257,7 +257,7 @@ def w4b(outdir):
         for r in csv.DictReader(fh):
             if r["kind"] != "single":
                 continue
-            g, a = int(r["gamma"]), float(r["aspect"])
+            g, a = int(float(r["gamma"])), float(r["aspect"])
             data.setdefault((g, a), []).append(
                 (int(r["d"]), float(r["worst_rel_error"])))
     fs.apply_paper_style(kind="line")
@@ -291,7 +291,7 @@ def gamma(outdir):
     D = {}
     with open(path, newline="") as fh:
         for r in csv.DictReader(fh):
-            D[(int(r["gamma"]), float(r["h"]), int(r["d"]))] = \
+            D[(int(float(r["gamma"])), float(r["h"]), int(r["d"]))] = \
                 float(r["peak_normalised_abs_error"])
     C = {str(g): fs.GAMMA_COLORS[g] for g in (10, 50, 100)}
     fs.apply_paper_style(kind="line")
@@ -405,6 +405,11 @@ def multivel(outdir):
              color=fs.REF_COLOR, lw=1.1, ls=":")
     axb.set_xlabel(r"$u_\parallel$ ($m_ec$)")
     axb.set_ylabel(r"$u_\perp$ ($m_ec$)")
+    # The fresh distributions put a tick exactly at an axis corner; pruning
+    # both ends keeps the corner tick labels off the neighbouring axes.
+    for ax in (axa, axb):
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
     fs.panel_title(axb, "b", r"angular spread 5$^\circ$, seed 103")
     axb.text(0.03, 0.04,
              rf"$\sigma_\theta=5^\circ$ (dashed)" + "\n" +
