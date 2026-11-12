@@ -243,3 +243,36 @@ contention from kernel cost.
 card, with the box, tile and radius grid in the scaling note. Add the tile 2
 compact row and the `R = 4` row at `N = 1e7`. Update the recommendation and the
 projections only after those rows exist.
+
+## 10. Kernel-spectrum cache is a per-process memory cap
+
+**Symptom.** Both FFT paths cache each verified kernel half-spectrum so a chunked
+run or a benchmark repeat does not rebuild it. The cap was a compile-time
+`1536 MiB`. That value holds the six-component, single-velocity set at
+`M = 220` (about `492 MiB`) but not at `M = 420` (about `3.4 GiB`), where the LRU
+keeps only two components and evicts them between calls.
+
+**Control.** `PICBUNCH_FFT_SPECTRUM_CACHE_MB` sets the cap in MiB (default
+`1536`), and `--fft-spectrum-cache-mb <MiB>` overrides the environment. `0`
+disables the cache. Precedence is CLI option over environment over built-in
+default. The budget is per process and per MPI rank; it is not aggregated over
+ranks. A single entry larger than the cap is skipped, so that shape rebuilds
+every call rather than exceed the budget. Lowering the cap or disabling the cache
+evicts existing entries before the next lookup.
+
+**Evidence.** `README.md` (Kernel-spectrum cache cap) records the `M = 220` and
+`M = 420` trade-off. At `M = 220` the default cap cuts the total by 29% against a
+disabled run for about `400 MiB` more device memory. At `M = 420` the default
+still beats disabling by 19%, but a `3456 MiB` cap that holds all six components
+halves the total. A cache hit copies the stored doubles, so it is bit-identical
+to a fresh build; `Fft.SpectrumCacheCapIsBoundedAndDisables` asserts this for the
+default, a reduced cap, an oversize entry and the disabled path.
+
+**Why it is not a hard-coded larger default.** A `3456 MiB` default would add
+`3.4 GiB` of device memory to every large run, including runs that never repeat a
+shape and therefore never profit from the cache. The default stays a safety
+bound; large-extent users opt in with the flag.
+
+**Plan.** Keep the CLI/env knob and the per-entry skip. If a future default needs
+to scale with the padded box, derive it from the six-component working set and
+require the caller to confirm the device budget.

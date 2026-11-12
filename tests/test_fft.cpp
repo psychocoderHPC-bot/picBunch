@@ -11,6 +11,7 @@
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Parallel.hpp"
+#include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/detail/SpectrumNorm.hpp"
 
 #include <alpaka/alpaka.hpp>
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -510,4 +512,117 @@ TEST(Fft, SpectrumNormMatchesSerialReference)
             EXPECT_NEAR(accNorm.data()[0], ref0, 1.0e-13 * std::max(1.0, std::abs(ref0)));
             EXPECT_NEAR(accNorm.data()[1], ref1, 1.0e-13 * std::max(1.0, std::abs(ref1)));
         });
+}
+
+TEST(Fft, SpectrumCacheCapIsBoundedAndDisables)
+{
+    // The kernel-spectrum cache is a process-wide, per-thread LRU.  Its cap is
+    // tunable (default 1536 MiB, env/CLI) and 0 disables it.  A hit copies the
+    // stored doubles, so every capped/disabled rebuild must be bit-identical to
+    // the cached result, and the cache must never hold more than the cap.
+    picBunch::Bunch bunch;
+    bunch.resize(4);
+    bunch.x = {-2.0e-6, 0.5e-6, 1.5e-6, 3.0e-6};
+    bunch.y = {0.5e-6, -1.5e-6, 2.0e-6, 0.0};
+    bunch.z = {1.0e-6, -0.5e-6, 0.0, 2.5e-6};
+    bunch.ux = {0.0, 0.3, -0.2, 0.5};
+    bunch.uy = {0.0, -0.1, 0.4, 0.0};
+    bunch.uz = {0.0, 0.2, 0.0, -0.3};
+    bunch.weight = {1.0, 2.0, 0.5, 1.5};
+    bunch.charge = {
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge,
+        -picBunch::kElementaryCharge};
+
+    SelfContext context;
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0e-6, 1.0e-6, 1.0e-6};
+    options.gridSize = {8, 8, 8};
+    options.gridOrigin = {-4.0e-6, -4.0e-6, -4.0e-6};
+    options.fftPadding = 2u;
+    options.deterministicDeposit = true;
+    options.parallel = &context;
+    options.fftMode = picBunch::FftMode::Replicated;
+
+    auto expectBitIdentical = [](picBunch::Field const& expected, picBunch::Field const& actual) {
+        for(int c = 0; c < 6; ++c)
+        {
+            ASSERT_EQ(expected.data[c].size(), actual.data[c].size()) << "component " << c;
+            EXPECT_EQ(
+                0,
+                std::memcmp(
+                    expected.data[c].data(),
+                    actual.data[c].data(),
+                    expected.data[c].size() * sizeof(double)))
+                << "component " << c << " differs";
+        }
+    };
+
+    // Disable the cache and drop entries left behind by earlier tests.
+    picBunch::detail::setFftSpectrumCacheLimitMiB(0u);
+    picBunch::Field const baseline = picBunch::computeField(bunch, options);
+    {
+        auto const stats = picBunch::detail::fftSpectrumCacheStats();
+        EXPECT_EQ(0u, stats.entries) << "disabled cache must not retain entries";
+        EXPECT_EQ(0u, stats.bytes) << "disabled cache must not retain bytes";
+    }
+
+    // 1 MiB is enough for the 8^3 case: store after the second miss and hit on
+    // the third call.  Every result must equal the disabled/cache-free build.
+    picBunch::detail::setFftSpectrumCacheLimitMiB(1u);
+    picBunch::Field const cached1 = picBunch::computeField(bunch, options);
+    picBunch::Field const cached2 = picBunch::computeField(bunch, options);
+    picBunch::Field const cached3 = picBunch::computeField(bunch, options);
+    expectBitIdentical(baseline, cached1);
+    expectBitIdentical(baseline, cached2);
+    expectBitIdentical(baseline, cached3);
+    auto const smallStats = picBunch::detail::fftSpectrumCacheStats();
+    EXPECT_GE(smallStats.entries, 1u) << "at least one kernel spectrum should be cached";
+    EXPECT_GT(smallStats.bytes, 0u);
+    EXPECT_LE(smallStats.bytes, 1u * 1024u * 1024u) << "cache exceeded its cap";
+    EXPECT_GT(smallStats.hits, 0u) << "the third call should hit the cache";
+
+    // A 32^3 output (padding 2) has a ~2 MiB kernel spectrum, larger than the
+    // 1 MiB cap.  The per-entry rule must skip it instead of exceeding the cap.
+    picBunch::ComputeOptions big = options;
+    big.gridSize = {32, 32, 32};
+    big.gridOrigin = {-16.0e-6, -16.0e-6, -16.0e-6};
+    picBunch::Field const big1 = picBunch::computeField(bunch, big);
+    picBunch::Field const big2 = picBunch::computeField(bunch, big);
+    picBunch::Field const big3 = picBunch::computeField(bunch, big);
+    expectBitIdentical(big1, big2);
+    expectBitIdentical(big1, big3);
+    auto const oversizeStats = picBunch::detail::fftSpectrumCacheStats();
+    EXPECT_EQ(smallStats.entries, oversizeStats.entries)
+        << "an oversize entry must be skipped, not cached";
+    EXPECT_EQ(smallStats.bytes, oversizeStats.bytes)
+        << "an oversize entry must not consume budget";
+    EXPECT_LE(oversizeStats.bytes, 1u * 1024u * 1024u);
+
+    // Disabling after entries exist evicts them and returns a fresh build that
+    // is still bit-identical.  Repeated calls must not grow the cache.
+    picBunch::detail::setFftSpectrumCacheLimitMiB(0u);
+    for(int i = 0; i < 4; ++i)
+        expectBitIdentical(baseline, picBunch::computeField(bunch, options));
+    {
+        auto const stats = picBunch::detail::fftSpectrumCacheStats();
+        EXPECT_EQ(0u, stats.entries);
+        EXPECT_EQ(0u, stats.bytes);
+    }
+
+    // Precedence: the explicit setter (CLI) wins over the environment, which
+    // wins over the built-in default.  Restore the environment afterwards.
+    picBunch::detail::clearFftSpectrumCacheLimitOverride();
+    setenv(picBunch::detail::kFftSpectrumCacheEnv, "7", 1);
+    EXPECT_EQ(7u, picBunch::detail::fftSpectrumCacheLimitMiB());
+    picBunch::detail::setFftSpectrumCacheLimitMiB(3u);
+    EXPECT_EQ(3u, picBunch::detail::fftSpectrumCacheLimitMiB()) << "setter must win over env";
+    picBunch::detail::clearFftSpectrumCacheLimitOverride();
+    EXPECT_EQ(7u, picBunch::detail::fftSpectrumCacheLimitMiB()) << "env must win over default";
+    unsetenv(picBunch::detail::kFftSpectrumCacheEnv);
+    EXPECT_EQ(
+        picBunch::detail::kDefaultFftSpectrumCacheMiB,
+        picBunch::detail::fftSpectrumCacheLimitMiB());
+    picBunch::detail::setFftSpectrumCacheLimitMiB(picBunch::detail::kDefaultFftSpectrumCacheMiB);
 }

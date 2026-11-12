@@ -7,6 +7,8 @@
 // precision have separate budgets (README, "Accuracy and error budget").
 
 #include "picBunch/Compute.hpp"
+
+#include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/Config.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
@@ -103,6 +105,11 @@ namespace
             "                        (default: 0 = tolerance policy).  1 disables\n"
             "                        padding (diagnostic: wrapped images leak into\n"
             "                        the output); values above 3 only add cost\n"
+            "  --fft-spectrum-cache-mb <MiB>\n"
+            "                        cap the process-wide kernel-spectrum cache in\n"
+            "                        MiB (default: 1536; 0 disables).  Overrides\n"
+            "                        PICBUNCH_FFT_SPECTRUM_CACHE_MB; the cap is per\n"
+            "                        process and per MPI rank\n"
             "  --near-shell <mode>   none|exact|fast|fast-gpu (default: none).  exact\n"
             "                        replaces the mesh contribution of every source\n"
             "                        within the shell by the adaptive reference (a\n"
@@ -185,6 +192,7 @@ namespace
         std::uint64_t outputIteration = 0;
         double tolerance = 1e-3;
         unsigned fftPadding = 0; //!< 0 = tolerance policy
+        std::optional<std::size_t> fftSpectrumCacheMiB; //!< unset = env/default
         std::string nearShell = "none";
         double nearShellRadius = 0.0;
         std::size_t nearShellTile = 4;
@@ -380,6 +388,9 @@ namespace
                         "--fft-padding must be between 0 and 8 (0 selects the tolerance policy)");
                 args.fftPadding = static_cast<unsigned>(padding);
             }
+            else if(option == "--fft-spectrum-cache-mb")
+                args.fftSpectrumCacheMiB
+                    = parseIteration(value("--fft-spectrum-cache-mb"), "--fft-spectrum-cache-mb");
             else if(option == "--near-shell")
                 args.nearShell = value("--near-shell");
             else if(option == "--near-shell-radius")
@@ -1055,6 +1066,9 @@ int main(int argc, char** argv)
         usage(stderr);
         return 2;
     }
+
+    if(args.fftSpectrumCacheMiB)
+        picBunch::detail::setFftSpectrumCacheLimitMiB(*args.fftSpectrumCacheMiB);
 
     if(args.config)
     {
