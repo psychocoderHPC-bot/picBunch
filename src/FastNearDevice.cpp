@@ -1594,9 +1594,12 @@ namespace picBunch::pbfast
                     BatchedTile const t = a.tiles[tile];
                     DeviceParams const& prm = a.params[tile];
                     std::uint32_t const nodes = t.nx * t.ny * t.nz;
+                    std::uint32_t const comps = prm.activeComponents > 0
+                        ? static_cast<std::uint32_t>(prm.activeComponents)
+                        : 6u;
                     std::uint32_t const chunks
                         = static_cast<std::uint32_t>((a.workOffset[tile + 1u] - a.workOffset[tile])
-                                                     / (6ull * nodes));
+                                                     / (static_cast<std::uint64_t>(comps) * nodes));
                     std::uint64_t const rem = idx - a.workOffset[tile];
                     std::uint32_t const perComp = nodes * chunks;
                     int const c = static_cast<int>(rem / perComp);
@@ -1622,6 +1625,12 @@ namespace picBunch::pbfast
                         std::uint32_t const q = a.indices[k];
                         double const x_srcArr[3] = {a.x[q], a.y[q], a.z[q]};
                         double const uArr[3] = {a.ux[q], a.uy[q], a.uz[q]};
+                        // A stationary source has beta = 0, hence B = 0 exactly.
+                        // The tile-level split already omits the B components
+                        // for an all-stationary tile; this also removes the
+                        // stationary sources from a mixed tile's B sums.
+                        if(c >= 3 && uArr[0] == 0.0 && uArr[1] == 0.0 && uArr[2] == 0.0)
+                            continue;
                         double const urepArr[3] = {a.rex[q], a.rey[q], a.rez[q]};
                         double E[3], B[3];
                         dshapeField(x_obsArr, x_srcArr, uArr, a.cells, prm, E, B);
@@ -1871,8 +1880,12 @@ namespace picBunch::pbfast
                 : static_cast<std::uint32_t>(
                       (tiles[t].srcCount + sourcesPerThread - 1u) / sourcesPerThread);
             chunks[t] = std::max(1u, want);
+            std::uint32_t const comps
+                = tileParams[t].activeComponents > 0 ? static_cast<std::uint32_t>(
+                      tileParams[t].activeComponents)
+                                                     : 6u;
             workOffset[t + 1u] = workOffset[t]
-                + 6ull * static_cast<std::uint64_t>(nodes) * chunks[t];
+                + static_cast<std::uint64_t>(comps) * nodes * chunks[t];
         }
         std::uint64_t const work = workOffset[ntiles];
         if(work == 0u)
