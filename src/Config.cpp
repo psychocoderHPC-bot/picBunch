@@ -280,8 +280,8 @@ namespace picBunch
         if(auto const* node = accuracy.get("near_shell_tile"))
         {
             auto const tile = asInteger(*node, "accuracy.near_shell_tile");
-            if(tile <= 0)
-                fail("accuracy.near_shell_tile", "must be positive");
+            if(tile < 0)
+                fail("accuracy.near_shell_tile", "must be zero (automatic) or positive");
             config.accuracy.nearShellTile = static_cast<std::size_t>(tile);
         }
         if(auto const* node = accuracy.get("near_shell_fast_order"))
@@ -384,8 +384,7 @@ namespace picBunch
             fail("accuracy.near_shell", "expected \"none\", \"exact\", \"fast\" or \"fast-gpu\"");
         if(config.accuracy.nearShellRadius < 0.0 || !std::isfinite(config.accuracy.nearShellRadius))
             fail("accuracy.near_shell_radius", "must be finite and non-negative");
-        if(config.accuracy.nearShellTile == 0u)
-            fail("accuracy.near_shell_tile", "must be positive");
+        // Zero is valid here: it selects the automatic tile rule.
 
         // Unknown keys are warnings.  The list is deliberately explicit so a
         // typo is visible instead of silently changing nothing.

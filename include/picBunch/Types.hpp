@@ -176,7 +176,14 @@ namespace picBunch
         //! Shell radius in PIC cells; 0 derives it from ComputeOptions::tolerance.
         double radiusCells = 0.0;
         //! Output tile edge in nodes for the local subtraction FFT.
-        std::size_t tileNodes = 4;
+        //!
+        //! 0 selects the automatic rule, which samples the source distribution
+        //! and chooses 2 when the near-set pair count clearly favours it, and 4
+        //! otherwise.  A positive value is an explicit override and always wins.
+        std::size_t tileNodes = 0;
+        //! Diagnostic output: receives the tile edge actually used, including
+        //! the automatic choice.  May be left null.
+        std::size_t* resolvedTileNodes = nullptr;
         //! Gauss order per panel of the fast remainder (default 5).
         int fastOrder = 5;
         //! Order of the fast oblique singular box.  0 selects the shared

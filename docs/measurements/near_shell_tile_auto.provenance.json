@@ -1,0 +1,32 @@
+{
+  "campaign": "near-shell-automatic-tile",
+  "date": "2026-11-12",
+  "base_commit": "18eb1a4f9a577727c58296f65d44b1228bead643",
+  "change": "automatic near-shell tile selection (tile 0 = auto, explicit override)",
+  "host": {
+    "name": "fwk394",
+    "gpu": "Quadro GV100 32 GB",
+    "gpu_architecture": "sm_70",
+    "driver": "555.52.04",
+    "cuda": "12.5.82",
+    "cpu": "Intel Xeon W-2175"
+  },
+  "reason_for_host": "rosi_v100 provisioning failed (Slurm configuration permission error); Quadro GV100 is the same sm_70 Volta generation used for the archived V100 campaign.",
+  "binary_sha256": "a86a77ed5000522f96dd6bd0b359eb951055d451126674a06ff9533486e33343",
+  "settings": {
+    "shell": "fast",
+    "fast_order": 5,
+    "exact_cells": 0,
+    "radius_cells": 3,
+    "fft_padding": 2,
+    "deterministic_deposit": true,
+    "source_sampler": "LCG 0x9e3779b97f4a7c15",
+    "omp_threads": 8
+  },
+  "notes": [
+    "near_seconds is the near-shell loop only; mesh seconds are excluded.",
+    "compact and sparse rows are single runs; the dense 1e6 rows are single runs each; the dense 1e7 row is a single tile-2 run (2757 s, 13015206528 pairs) and tile 4 was not re-run at 1e7.",
+    "grid4 is the fallback case where the pair counts are within the 1.25*1.05 throughput margin, so the rule keeps tile 4.",
+    "rosi_v100 measurements in near-shell-scaling.md are unchanged and remain the source of the 1.25 throughput constant."
+  ]
+}

@@ -97,7 +97,8 @@ namespace picBunch
             double tolerance = 1e-3;
             std::string nearShell = "none";
             double nearShellRadius = 0.0; //!< PIC cells; 0 derives from tolerance
-            std::size_t nearShellTile = 4;
+            //! 0 selects the automatic near-set pair-count rule.
+            std::size_t nearShellTile = 0;
             int nearShellFastOrder = 5; //!< Gauss order of the fast remainder
             //! Oblique singular-box order: 0 = auto, else an allowed even order.
             int nearShellObliqueOrder = 0;

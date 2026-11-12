@@ -171,3 +171,23 @@ reproduces the committed `fastnear_fast_52pt.csv` byte-for-byte.
   flag the largest field change on the fixed `N=1e6` 20-cell case is
   `3.22e-8` V/m on a `1.87e7` V/m peak (`1.7e-15` relative) because the chunk
   boundaries move. SHA256 `a6d6d653e5dd3c4f244e9cd204b2e934b001c6cb0290ee978b0f4a4d8ee64f21`.
+
+## Automatic near-shell tile (2026-11-12)
+
+- `near_shell_tile_auto.csv` — tile 2 / tile 4 A/B for the automatic near-shell
+  rule: dense 12-cell cloud at `N = 1e6` (`273.4` s against `621.7` s,
+  `1.301e9` against `3.339e9` pairs) and `N = 1e7` tile 2 (`2,757.1` s,
+  `1.302e10` pairs), compact 2000 sources at `N = 2e3` and `1e5`, sparse 2000
+  sources over 48 cells, and the 4^3 fallback where the pair counts are within
+  the throughput margin. The `chosen` column marks the automatic decision.
+  Host `fwk394`, Quadro GV100 32 GB (sm_70), driver 555.52.04, CUDA 12.5.82,
+  Intel Xeon W-2175; fast shell, order 5, `--exact-cells 0`, `R = 3`, FFT
+  padding 2, deterministic LCG sources, `OMP_NUM_THREADS=8`; binary sha256
+  `a86a77ed5000522f96dd6bd0b359eb951055d451126674a06ff9533486e33343`. Date
+  2026-11-12. `rosi_v100` provisioning failed (Slurm configuration permission
+  error), so the A/B ran on the same sm_70 Volta generation; the archived
+  `rosi_v100` dense rows above are unchanged and provide the 1.25 throughput
+  constant. SHA256 see `MANIFEST.sha256`.
+- `near_shell_tile_auto.provenance.json` — host, toolchain, binary hash,
+  settings, the sampled-estimate rule and the rosi-unavailable reason. SHA256
+  see `MANIFEST.sha256`.

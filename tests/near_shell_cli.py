@@ -156,6 +156,23 @@ def main():
         if result.returncode != 0:
             print(result.stderr)
             raise SystemExit(f"--near-shell-oblique-order {value} failed")
+    auto_result = run(
+        args.app,
+        common + [
+            "--output", str(work / "near_auto.h5"),
+            "--near-shell", "exact",
+            "--near-shell-radius", "3",
+            "--near-shell-tile", "auto",
+        ],
+    )
+    if auto_result.returncode != 0:
+        print(auto_result.stderr)
+        raise SystemExit("--near-shell-tile auto failed")
+    if "tile=auto" not in auto_result.stdout:
+        raise SystemExit("run summary does not report the automatic tile")
+    if "near shell: automatic tile=" not in auto_result.stderr:
+        raise SystemExit("the automatic tile selection was not logged")
+
     bad = run(
         args.app,
         common + ["--output", str(work / "near_bad.h5"), "--near-shell", "exact",

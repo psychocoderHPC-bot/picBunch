@@ -146,7 +146,7 @@ picBunch --input <openPMD file/series> [--species <name|index>] \
          [--cell-size <dx>[,<dy>,<dz>]] [--grid <nx>,<ny>,<nz>] \
          [--origin <x>,<y>,<z>] [--backend auto|cuda|hip|cpu] \
          [--near-shell none|exact|fast] [--near-shell-radius <cells>] \
-         [--near-shell-tile <nodes>] [--near-shell-fast-order <n>]
+         [--near-shell-tile <auto|nodes>] [--near-shell-fast-order <n>]
          [--near-shell-oblique-order <auto|N>] \
          [--near-shell-exact-cells <-2|-1|0|1|2>] \
          [--fft-padding <N>]
@@ -219,7 +219,14 @@ cells and defaults to `3` at tolerance `1e-3`, plus one cell per decade below
 that, capped at `6`. The near set is chosen per `--near-shell-tile` nodes, so
 the effective radius exceeds the nominal one by at most half a tile. The three
 flags are parsed by the shipped binary and the run summary prints
-`near shell: mode=... R=... PIC cells tile=... nodes`. The measured worst-case
+`near shell: mode=... R=... PIC cells tile=... nodes` (or `tile=auto`). The
+tile edge defaults to `auto`: a strided sample of up to 4096 sources estimates
+the near-set pair count at tiles 2 and 4 with the same membership test used to
+build the near set, and tile 2 is used only when its pair saving exceeds tile
+4's measured 1.25x per-pair throughput advantage plus a 5% margin. Every other
+case keeps tile 4. `--near-shell-tile N` always overrides the rule, and the
+compute stage logs the chosen edge as
+`near shell: automatic tile=...` with both estimates. The measured worst-case
 envelope is `1e-3` or better for gamma ~ 1, aspect 1 at R >= 3 PIC cells, and for
 gamma ~ 10, aspect 1, oblique velocity at R >= 4; gamma 1 at aspect 4 needs about
 32 cells and is outside the shell's reach. The exact evaluator costs about

@@ -100,7 +100,11 @@ int main(int argc, char** argv)
             else if(a == "--radius")
                 radius = std::stod(next());
             else if(a == "--tile")
-                tile = static_cast<std::size_t>(std::stoul(next()));
+            {
+                std::string const text = next();
+                tile = (text == "auto") ? 0u
+                                        : static_cast<std::size_t>(std::stoul(text));
+            }
             else if(a == "--shell")
                 shell = next();
             else if(a == "--order")
@@ -180,6 +184,8 @@ int main(int argc, char** argv)
         ns.fastObliqueOrder = (obliqueOrder == "auto") ? 0 : std::stoi(obliqueOrder);
         ns.radiusCells = radius;
         ns.tileNodes = tile;
+        std::size_t resolvedTile = tile;
+        ns.resolvedTileNodes = &resolvedTile;
         std::size_t pairs = 0;
         std::size_t exactCount = 0;
         ns.exactPairs = &pairs;
@@ -202,7 +208,7 @@ int main(int argc, char** argv)
         meta << "u " << u[0] << " " << u[1] << " " << u[2] << "\n";
         meta << "source " << source[0] << " " << source[1] << " " << source[2] << "\n";
         meta << "radius " << radius << "\n";
-        meta << "tile " << tile << "\n";
+        meta << "tile " << resolvedTile << "\n";
         meta << "shell " << shell << "\n";
         meta << "evaluator " << (shell == "fast" ? "pbfast-asinh+GL" : "nbref-adaptive")
              << "\n";
@@ -218,7 +224,12 @@ int main(int argc, char** argv)
         meta << "exact_cells " << exactCells << "\n";
         meta << "mesh_seconds " << meshS << "\n";
         meta << "near_shell_seconds " << totalS << "\n";
-        std::printf("pairs=%zu mesh=%.6f s near=%.6f s\n", pairs, meshS, totalS);
+        std::printf(
+            "pairs=%zu mesh=%.6f s near=%.6f s tile=%zu\n",
+            pairs,
+            meshS,
+            totalS,
+            resolvedTile);
         return 0;
     }
     catch(std::exception const& e)

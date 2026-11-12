@@ -1,0 +1,15 @@
+# Near-shell automatic tile A/B, fwk394 Quadro GV100, 2026-11-12.
+# Fast shell, order 5, --exact-cells 0, deterministic source LCG, R=3 cells.
+# "chosen" marks the edge the automatic rule selected for that case.
+case,N,grid,cloud_cells,tile,chosen,pairs,near_seconds
+dense12,1000000,64,12,2,yes,1301361504,273.411538
+dense12,1000000,64,12,4,no,3338959488,621.715812
+dense12,10000000,64,12,2,yes,13015206528,2757.062757
+compact,2000,64,0,2,yes,2495136,0.370324
+compact,2000,64,0,4,no,6144000,0.714867
+compact,100000,64,0,2,yes,124783728,16.617357
+compact,100000,64,0,4,no,307200000,31.504207
+sparse,2000,64,48,2,yes,2602992,0.766320
+sparse,2000,64,48,4,no,6691584,1.202700
+grid4,1000,4,4,2,no,334320,0.147598
+grid4,1000,4,4,4,yes,384000,0.151947

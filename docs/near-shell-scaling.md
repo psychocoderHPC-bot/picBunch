@@ -80,18 +80,67 @@ an hour: `43.5` minutes against `88.0` minutes at tile 4. Switching the default
 from tile 4 to tile 2 in this regime halves the near-shell time and leaves the
 pair count at about 39% of the tile 4 count.
 
-For a compact or on-node source distribution, use tile 4. The compact case was
-measured at tile 4 only in this campaign: 2000 sources at the centre of a 64^3
-grid give `6.144e6` pairs in `0.710` s (`8.65` Mpairs/s, about `1.7` times the
-dense tile 2 throughput), see
-[measurements/near_shell_device_speedup.csv](measurements/near_shell_device_speedup.csv).
-Tile 4 also has the lower host RSS in every dense row of this campaign. The
-compact case was not re-run at tile 2, so re-measure before changing the
-default for that regime.
+A direct tile 2 / tile 4 A/B on the same compact case (2000 sources at the
+centre of a 64^3 grid) shows tile 2 is faster, not tile 4: `0.373` s against
+`0.718` s on a Quadro GV100, with `2.495e6` against `6.144e6` pairs. The earlier
+compact row measured tile 4 only, so it did not establish tile 4 as the
+optimum; tile 4 wins per evaluated pair (`8.55` against `6.7` Mpairs/s) but
+evaluates 2.46 times as many pairs. At `N = 1e5` the same split is `16.6` s at
+tile 2 against `31.5` s at tile 4 (`1.248e8` against `3.072e8` pairs). A sparse
+2000-source cloud spread over 48 cells behaves the same way: `2.60e6` pairs at
+tile 2 against `6.69e6` at tile 4.
 
-Do not treat tile 4 as the universal default. It remains the right choice when
-the source set per node is small or the cloud is compact, and it is the current
-default because of that regime, not because of the dense-cloud cost.
+Tile 4 keeps the lower host RSS in every dense row of this campaign. That
+memory advantage, not a runtime advantage, is the reason to force it for a
+memory-bound deployment.
+
+Do not treat tile 4 as the universal default. The measured optimum follows the
+near-set pair count, not the physical compact/sparse label.
+
+## Automatic tile choice
+
+The CLI and TOML default is `--near-shell-tile auto` (`near_shell_tile = 0`).
+The automatic rule mirrors the per-source membership test that builds the near
+set. It walks a deterministic, evenly strided sample of at most 4096 sources
+and, for tile edges 2 and 4, counts the clipped tile node volume of every tile
+whose node box is within the shell radius. Scaling by `N / sample` gives an
+estimate of the (source, node) pair count; the cost is a few milliseconds even
+at `N = 1e7`.
+
+Tile 2 is chosen only when
+
+```
+pairs(4) > 1.25 * 1.05 * pairs(2)
+```
+
+The `1.25` is the measured tile-4/tile-2 pair throughput on the V100 campaign
+(`6.3` against `5.0` Mpairs/s) and `1.05` is a safety margin, so the rule only
+switches when tile 2 wins by at least about 5% against the best fixed edge. An
+explicit `--near-shell-tile N` always wins and skips the estimate. The compute
+stage prints the selected edge and both estimates:
+
+```
+near shell: automatic tile=2 (tile 2 pair saving exceeds the tile 4 throughput
+  gain; estimated pairs: tile 2 = 1.3e+09, tile 4 = 3.34e+09)
+```
+
+The pair ratio is the quantity that matters. A 12-cell cloud and a compact or
+sparse cloud on a grid larger than one tile-4 block all shrink their near set
+by roughly 2.4-2.6x at tile 2, so the rule selects tile 2 in all three cases.
+Tile 4 remains the result only when the two pair counts are within the
+throughput margin, which happens when the whole source cloud already fits one
+tile-4 block (for example a 4^3 grid: `3.34e5` against `3.84e5` pairs, where
+the two edges agree within run-to-run noise of about 3%) or the grid itself is
+at most one tile wide.
+
+Verification host: Quadro GV100 (sm_70, CUDA 12.5) on `fwk394`, because
+`rosi_v100` was not reachable during this run. The rule is geometric and the
+throughput constant comes from the archived rosi V100 campaign, so the choice
+transfers; the absolute seconds do not. On this host the dense 12-cell cloud
+selects tile 2: `273.4` s at `N = 1e6` against `621.7` s at tile 4, and
+`2,757.1` s (`46.0` min) at `N = 1e7` with `13,015,206,528` pairs. The tile 4
+`N = 1e7` row is not re-run on this host; the archived rosi V100 value remains
+`88.0` min.
 
 ## Projections
 
@@ -131,9 +180,12 @@ storage or the per-tile source list must re-measure it.
   killed before they produced a pair count. These numbers are a contention upper
   bound, not a hardware comparison. A HIP scaling row needs an exclusive card
   and a profiler run.
-- There is no tile 2 compact measurement and no `R = 4` row at `N = 1e7`. Both
-  are cheap to add to the same driver and should be measured before the tile
-  default changes in code.
+- The compact tile 2 / tile 4 A/B and the sparse rows above are single-run or
+  median-of-three measurements on a Quadro GV100, not a second V100 campaign.
+  There is still no `R = 4` row at `N = 1e7`.
+- The automatic rule has no host-RSS estimate. If a deployment is memory-bound,
+  force `--near-shell-tile 4`; tile 2 still uses about twice the host RSS at
+  `N = 1e7`.
 - The driver reports the near-shell loop. End-to-end cost also includes the
   reader, deposit, mesh FFT and writer, which are small here but are tracked
   separately in the cost tables.
