@@ -63,9 +63,8 @@ z-y plane at $x=3.2\,\si{\micro\metre}$ is continued in
 Fig.~\ref{fig:valforward}. \densityrow{} Below the density row, each image
 carries the electric block first and the magnetic block second.
 The electric block shows four columns $E_x,E_y,E_z,E^2$: the three components
-share one symmetric-logarithmic scale and bar, while $E^2$ has its own
-logarithmic scale from $10^{-6}$ of the panel peak to the peak and its own unit
-label. Each component panel is labelled with its peak as a percentage of the
+share one symmetric-logarithmic scale and bar (the text gives the $E^2$ scale
+and unit). Each component panel is labelled with its peak as a percentage of the
 largest component peak on that plane (the shared colour scale): the panel that
 sets the maximum reads \texttt{max}, peaks below one percent use one
 significant figure (e.g.\ \texttt{.04\%}), and only an exactly zero peak reads
@@ -99,18 +98,14 @@ Fig.~\ref{fig:valforward}.}
 \includegraphics[width=\linewidth]{figs/val_fluct_zy.pdf}
 \caption{Fluctuation-case reference with the same geometry and bunch as
 Fig.~\ref{fig:valforward} but a $1.046$\,mrad rms $x$-divergence.
-\densityrow{} Below the density row, each image
-carries the electric field row first and the magnetic field row second; the
-upper and lower images are the x-y and z-y planes, with $y$ horizontal and the
-beam axis. The electric row shows four columns $E_x,E_y,E_z,E^2$ from the
-order-12 independent continuum reference: the three components share one
-symmetric-logarithmic scale and bar (peak in percent of the shared maximum),
-while $E^2$ has its own logarithmic scale and unit label. The magnetic row
-shows the same four columns $B_x,B_y,B_z,B^2$ with the same conventions; the
-$x$-divergence lifts $B_y$ off zero, although it remains about
-$3\times10^{-4}$ of the dominant component. The panels show the reference
-field; the corresponding binned picBunch output is reported in
-Appendix~\ref{app:multivel}.}
+The top row repeats the charge-density overview of
+Fig.~\ref{fig:valforward}. The upper and lower images are the x-y and z-y
+planes, with $y$ horizontal and the beam axis; each carries the electric
+field row first and the magnetic field row second, with the scales and masks
+of Fig.~\ref{fig:valforward}. The panels show the order-12 independent
+continuum reference; the $x$-divergence lifts $B_y$ off zero, although it
+remains about $3\times10^{-4}$ of the dominant component. The corresponding
+binned picBunch output is reported in Appendix~\ref{app:multivel}.}
 \label{fig:valfluct}
 \end{figure}
 
@@ -118,19 +113,11 @@ Appendix~\ref{app:multivel}.}
 \centering
 \includegraphics[width=\linewidth]{figs/val_1mrad_xy_E.pdf}\\[2pt]
 \includegraphics[width=\linewidth]{figs/val_1mrad_xy_B.pdf}
-\caption{Binned $1$\,mrad case (first 200 of the unit-weight 1000-particle
-seed-43 bunch, $N=200$, $Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at
-$z=1.6\,\si{\micro\metre}$ ($z=8$ of the 16-cell $32\times32\times16$ grid),
-cell $2\times10^{-7}$\,m), with the picBunch velocity-binned field against
-the
-order-12 independent continuum reference. \densityrow{} The upper image is electric and
-the lower magnetic, each with four columns: three components on one shared
-scale and bar (peak in percent of the shared maximum), and $E^2$ or $B^2$ on
-its own logarithmic scale and bar; $y$
-is horizontal and is the beam axis. Error rows are logarithmic, floored at
-$10^{-6}$ and marked at the $10^{-3}$ gate, and grey pixels are masked where
-the local field magnitude is below $10^{-3}$ of the largest component peak on
-the plane. The dark outline marks the TSC support.}
+\caption{Binned $1$\,mrad case (seed-43 unit-weight bunch, $N=200$,
+$Q=-32$\,aC, $\gamma=10$, $32\times32$ x-y plane at
+$z=1.6\,\si{\micro\metre}$, cell $2\times10^{-7}$\,m), with the picBunch
+velocity-binned field against the order-12 independent continuum reference.
+The upper image is electric and the lower magnetic.}
 \label{fig:val1mrad}
 \end{figure}
 

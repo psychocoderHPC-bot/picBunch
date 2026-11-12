@@ -206,11 +206,19 @@ def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
 
 
 def _bunch_layout_kw(bunch):
-    """Compact field layout used only when the bunch row is present."""
+    """Compact field layout used only when the bunch row is present.
+
+    The appendix slice plates place a long caption under a tall field block.
+    ``panel_height_scale`` squeezes only the panel height (the panel width,
+    the placed ``\\linewidth`` and every font token stay fixed), and the
+    trimmed top/row gaps remove whitespace that carried no information.  At
+    the default of the shared style module the layout is unchanged.
+    """
     if bunch is None:
         return {}
-    return {"bunch": bunch, "panel_scale": 1.0, "top_in": 0.14,
-            "bottom_in": 0.58, "row_gap_in": 0.40}
+    return {"bunch": bunch, "panel_scale": 1.0,
+            "panel_height_scale": 0.74, "top_in": 0.10,
+            "bottom_in": 0.58, "row_gap_in": 0.30}
 
 
 def _beam_centroid_um(sources_cells, cell):

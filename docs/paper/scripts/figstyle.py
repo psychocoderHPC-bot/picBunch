@@ -223,17 +223,24 @@ def field_panel_width_frac():
 
 def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
                  bottom_in=FIELD_BOTTOM_IN, row_gap_in=FIELD_ROW_GAP_IN,
-                 panel_scale=1.0):
-    """Unified square-panel layout for a field figure.
+                 panel_scale=1.0, panel_height_scale=1.0):
+    """Unified panel layout for a field figure.
 
     Returns a dict with the canvas size, the four panel x positions, the
     panel width/height (both in figure fractions and in inches), the colour
-    bar positions and the y origin of every row.  ``panel_width_in`` equals
-    ``panel_height_in`` by construction, independent of ``nrows``.
+    bar positions and the y origin of every row.  At the default
+    ``panel_height_scale == 1.0`` every panel is square
+    (``panel_width_in == panel_height_in``), independent of ``nrows``.
 
     ``panel_scale`` shrinks every square panel by that factor and re-centres
     the block horizontally.  It is a height-budget knob; at the default 1.0
     the layout is byte-identical to the canonical field grid.
+
+    ``panel_height_scale`` reduces only the panel height, leaving the panel
+    width (and therefore every font, tick and colour-bar label) untouched.
+    It is the height-budget knob for the appendix slice plates, whose image
+    plus caption would otherwise overrun the text block; the placed width
+    stays ``\\linewidth`` and no font token changes size.
     """
     nrows = int(nrows)
     if nrows < 1:
@@ -241,14 +248,18 @@ def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
     panel_scale = float(panel_scale)
     if not (0.5 <= panel_scale <= 1.0):
         raise ValueError("panel_scale must be in [0.5, 1.0]")
+    panel_height_scale = float(panel_height_scale)
+    if not (0.5 <= panel_height_scale <= 1.0):
+        raise ValueError("panel_height_scale must be in [0.5, 1.0]")
     fig_w_in = width_in(width_frac)
     pw = field_panel_width_frac() * panel_scale
     panel_in = pw * fig_w_in
-    fig_h_in = (float(top_in) + nrows * panel_in
+    panel_h_in = panel_in * panel_height_scale
+    fig_h_in = (float(top_in) + nrows * panel_h_in
                 + (nrows - 1) * float(row_gap_in) + float(bottom_in))
     top = 1.0 - float(top_in) / fig_h_in
     bottom = float(bottom_in) / fig_h_in
-    rh = panel_in / fig_h_in
+    rh = panel_h_in / fig_h_in
     gap = float(row_gap_in) / fig_h_in
 
     xs = [FIELD_LEFT,
@@ -287,6 +298,7 @@ def field_layout(nrows, width_frac=1.0, top_in=FIELD_TOP_IN,
         "cb1": cb1, "cb2": cb2, "bar_width": FIELD_BAR_WIDTH,
         "row_y": row_y, "top": top, "bottom": bottom, "row_gap": gap,
         "nrows": nrows, "panel_scale": panel_scale,
+        "panel_height_scale": panel_height_scale,
     }
 
 
@@ -1162,7 +1174,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
                             support=None, suptitle=None, manifest=None,
                             compact=False, row_gap_in=FIELD_ROW_GAP_IN,
                             bottom_in=None, bunch=None, panel_scale=1.0,
-                            top_in=FIELD_TOP_IN):
+                            top_in=FIELD_TOP_IN, panel_height_scale=1.0):
     """Field/error rows with a component triad and a separate squared panel.
 
     Every row has four items: three signed components sharing one colour bar,
@@ -1176,9 +1188,11 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
 
     ``bunch`` is an optional pre-built bunch-form row (see
     :mod:`render_bunch`).  It is drawn as the FIRST row of this same figure:
-    the field block keeps its physical size and position at the bottom, the
-    canvas grows by the row's reserve, and ``panel_scale`` shrinks the square
-    field panels when the height budget needs it.
+    the field block keeps its physical size and position at the bottom and
+    the canvas grows by the row's reserve.  ``panel_scale`` shrinks the
+    square field panels when the height budget needs it; the height-only
+    ``panel_height_scale`` squeezes the panel height for a tighter fit while
+    keeping the place width and every font token unchanged.
     """
     apply_paper_style(kind="field")
     nrow = len(rows)
@@ -1187,7 +1201,8 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
         bottom_in = FIELD_BOTTOM_ERR_IN if has_error else FIELD_BOTTOM_IN
     geo = field_layout(nrow, width_frac=width_frac, top_in=top_in,
                        bottom_in=bottom_in, row_gap_in=row_gap_in,
-                       panel_scale=panel_scale)
+                       panel_scale=panel_scale,
+                       panel_height_scale=panel_height_scale)
     bunch_geo = (bunch.geometry(geo["fig_w_in"])
                  if bunch is not None else None)
     fig_h_in = geo["fig_h_in"] + (bunch_geo["reserve_in"]
@@ -1195,7 +1210,7 @@ def render_split_field_rows(name, outdir, rows, x, y, xlabel, ylabel,
     fig = figure(width_frac, fig_h_in)
     panel_x = geo["panel_x"]
     pw = geo["pw"]
-    rh = geo["panel_width_in"] / fig_h_in
+    rh = geo["panel_height_in"] / fig_h_in
     bw = geo["bar_width"]
     cb1, cb2 = geo["cb1"], geo["cb2"]
     if bunch_geo is None:
