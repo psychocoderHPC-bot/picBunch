@@ -125,6 +125,30 @@ def schedule(cases, root, rate, gpu_count=4):
     return slots, loads
 
 
+def _directions():
+    """Axis, face-diagonal and cube-diagonal unit directions."""
+    dirs = []
+    for axis in range(3):
+        for sign in (-1.0, 1.0):
+            vec = [0.0, 0.0, 0.0]
+            vec[axis] = sign
+            dirs.append(tuple(vec))
+    for i in range(3):
+        for j in range(i + 1, 3):
+            for si in (-1.0, 1.0):
+                for sj in (-1.0, 1.0):
+                    vec = [0.0, 0.0, 0.0]
+                    vec[i] = si / math.sqrt(2.0)
+                    vec[j] = sj / math.sqrt(2.0)
+                    dirs.append(tuple(vec))
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                dirs.append((sx / math.sqrt(3.0), sy / math.sqrt(3.0),
+                             sz / math.sqrt(3.0)))
+    return dirs
+
+
 def reference_points(run, ref):
     """Return ``(points_cell, comp, d_cells, ijk)`` for one reference stage."""
     cell = [float(v) for v in run["mesh"]["cell"]]
@@ -138,18 +162,31 @@ def reference_points(run, ref):
         lattice = float(ref["lattice_cell_m"])
         centre = [float(v) for v in ref["centre_cells"]]
         source = [centre[i] * lattice for i in range(3)]
+        source_cell = [source[i] / cell[i] for i in range(3)]
         base = 1e-7
+        seen = set()
         for ring in ref["rings"]:
-            for axis in ref["axes"]:
-                for comp in range(6):
-                    delta = int(math.floor(ring * base / lattice - YEE[comp][axis] + 0.5))
-                    point = list(source)
-                    for a in range(3):
-                        point[a] += (delta if a == axis else 0.0) * lattice
-                        point[a] += YEE[comp][a] * lattice
-                    points.append([point[a] / cell[a] for a in range(3)])
+            distance = ring * base
+            for comp in range(6):
+                for direction in _directions():
+                    target = [distance * direction[a] for a in range(3)]
+                    delta = [int(round(target[a] / cell[a] - YEE[comp][a]))
+                             for a in range(3)]
+                    node = [source_cell[a] + delta[a] + YEE[comp][a]
+                            for a in range(3)]
+                    if any(node[a] < 0.0 or node[a] > n[a] - 1 for a in range(3)):
+                        continue
+                    key = (comp, tuple(delta))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    actual = math.sqrt(sum((delta[a] + YEE[comp][a]) ** 2
+                                           * cell[a] ** 2 for a in range(3))) / base
+                    if abs(actual - ring) > 0.35:
+                        continue
+                    points.append(node)
                     comps.append(comp)
-                    d_cells.append(math.dist(point, source) / base)
+                    d_cells.append(actual)
                     ijk.append((-1, -1, -1))
     else:
         for plane, fixed in ref["planes"].items():

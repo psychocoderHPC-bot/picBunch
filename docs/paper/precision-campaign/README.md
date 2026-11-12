@@ -150,14 +150,18 @@ reference settings (`order 8`, `max_level 4`, `tol 1e-2`):
 
 * `hires-g10` (128^3): 3.8 s wall, mesh compute 1.4-2.9 s.
 * `var1b-1mrad` (32x32x16, 64 bins): 15.5 s wall.
-* `line-w4b` (8 meshes, 8 references): 15.8 s wall; mesh compute 0.5-2.8 s.
+* `line-w4b` (8 meshes, 8 references): 21.4 s wall; mesh compute 0.5-2.8 s.
+* `line-gamma` (6 meshes, 6 references): 82.8 s wall.
+* `bdata2-forward` (64^3, two planes): 100.6 s wall at pilot reference order.
+* `large1-g1` (128x128x64, two planes): 143.3 s wall at pilot reference order.
 * `multivel` (10 runs, 1-256 bins, 64^3): 15.4 s wall; mesh compute 0.6-2.9 s.
 
 Every pilot output loaded with numpy, had the expected key set and the
-expected shapes (`128x128` for `hires`, `32x32` for `var1b`, `64^3` fields plus
-`(512, 8)` panels for `multivel`, 56 rows for `w4b`). The gamma=1 `w4b` rows
-reproduce the committed CSV to the printed precision, which validates the
-lattice and metric.
+expected shapes (`128x128` for `hires`, `32x32` for `var1b`, `128x128`/`64x128`
+for `large1`, `64x64` for `bdata2`, `64^3` fields plus `(512, 8)` panels for
+`multivel`, 56 rows for `w4b`, 18 for `gamma`). The gamma=1 `w4b` rows
+reproduce the committed CSV to the printed precision, and the `large1-g1`
+centroid matches the committed case registry exactly.
 
 Production reference settings are coarser in the pilot; the per-case
 `est` values in `cases.json` are used for the production plan and are

@@ -27,11 +27,18 @@ is short. Four cases ran in four GPU slots. `wall_s` is the full case
 | --- | --- | --- | --- |
 | `hires-g10` | 1 x 128^3 | 1.4-2.9 s | 3.8 |
 | `var1b-1mrad` | 1 x 32x32x16, 64 bins | 2.7 s | 15.5 |
-| `line-w4b` | 8 meshes + 8 references | 0.5-2.8 s | 15.8 |
+| `line-w4b` | 8 meshes + 8 references | 0.5-2.8 s | 21.4 |
+| `line-gamma` | 6 meshes + 6 references | 1.6-2.8 s | 82.8 |
+| `bdata2-forward` | 1 x 64^3, 2 planes | 0.7 s | 100.6 |
+| `large1-g1` | 1 x 128x128x64, 2 planes | 0.7 s | 143.3 |
 | `multivel` | 10 runs, 1-256 bins, 64^3 | 0.6-2.9 s | 15.4 |
 
-Pilot campaign wall was 16.7 s on four slots (the first pilot4 run contained
-two reduction bugs that are fixed; the corrected pilot4b wall was 15.8 s).
+The largest pilot blocks are the two dense references: `bdata2-forward`
+(49 152 sample points x 200 sources) took 100.6 s and `large1-g1`
+(196 608 x 100) took 143.3 s at the pilot order 8. The production `large1`
+reference uses order 4 and should be cheaper; the production `bdata2`
+reference uses order 12 and is the one case block whose reference may roughly
+double.
 
 ## Production reference calibration
 
@@ -85,6 +92,18 @@ work is the out-of-scope scaling/performance block.
 * `w4b_rel_error.csv`: 56 rows with the required six columns; the gamma=1 rows
   reproduce the committed CSV to the printed precision
   (`d=2` 0.11650316569 vs 0.1165031662; `d=32` 1.429e-6 vs 1.429e-6).
+* `forward_slice.npz`: 63 keys, all 63 required; the real
+  `_transform_field_export` consumed the `campaign/fields/bdata2-forward.npz`
+  export (63 arrays, `sources (200, 7)`).
+* `slices_g1.npz`: 60 keys, all 58 required; `xy` arrays `128x128`, `zy`
+  `64x128`; the charge-weighted centroid is
+  `(1.27649588e-05, 1.27838583e-05, 6.30329885e-06)` m, identical to the
+  committed case registry.
+* `w4b_rel_error.csv` and `gamma_err_dist.csv` have the required columns and
+  56/18 rows. The direction lattice was widened from axis-only to axis +
+  face-diagonal + cube-diagonal, so `d=48` is covered (the axis-only lattice
+  fell off the 96-node grid); `gamma=10,h=0.25,d=48` now reproduces the
+  committed `6.77651668e-4` to six digits.
 * One provenance record was written for each pilot case, with git commit,
   configuration hash, full commands, GPU slot, UTC times, exit code and
   output SHA-256.
