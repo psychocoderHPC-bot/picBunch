@@ -136,7 +136,9 @@ label=...)` is the only colour-bar call.
 The side rule is geometric, not stylistic: a bar between panels must put its
 ticks in the reserved gap, while an attached bar at the right edge must keep
 them outside the donor axes. Both use the same fonts, outline and label
-placement.
+placement. A `LogNorm` bar without explicit tick labels is labelled in plain
+scientific notation (`1e-10`) at the tick size, matching the field-family
+bars; no mathtext exponent is drawn at a sub-size script.
 
 ## 7. Typography and axis tokens
 

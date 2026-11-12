@@ -587,8 +587,10 @@ def draw_row(fig, fig_w_in, fig_h_in, y_bottom_in, bunch, computed, dataset,
     if len(exps) < 2:
         exps = [lo_exp, max(hi_exp, lo_exp + 1)]
     ticks = [10.0 ** e for e in exps]
-    labels = [r"$10^{%d}$" % e for e in exps]
-    fs.draw_colorbar(fig, sm, cax=cax, ticks=ticks, ticklabels=labels,
+    # ``draw_colorbar`` labels a LogNorm bar in plain scientific notation at
+    # the tick size, so no mathtext exponent is shrunk below the legibility
+    # floor and the label width stays inside BUNCH_BAR_GAP_MM.
+    fs.draw_colorbar(fig, sm, cax=cax, ticks=ticks,
                      label=r"$|\rho|$ [C/m$^2$] (log)")
     return geo
 

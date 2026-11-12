@@ -834,6 +834,12 @@ def draw_colorbar(fig, mappable, cax=None, ax=None, ticks=None,
         cb.set_ticks(ticks)
     if ticklabels is not None:
         cb.set_ticklabels(ticklabels)
+    elif isinstance(getattr(mappable, "norm", None), mcolors.LogNorm):
+        # Log colour bars use plain scientific notation ("1e-10"), the same
+        # convention as the field-family bars.  The default LogFormatter emits
+        # mathtext ``10^{-n}`` whose exponent is a sub-size script.
+        cb.ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda value, _pos: fmt_sci(value)))
     if label is not None:
         cb.set_label(label, fontsize=CBAR_LABEL_PT, labelpad=CBAR_LABEL_PAD)
     return cb
