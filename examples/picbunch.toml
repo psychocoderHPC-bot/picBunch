@@ -28,6 +28,12 @@ step = 0
 # particle property record. float64 is only usable with a PIConGPU that can
 # convert checkpoint dtypes; stock PIConGPU aborts on double particle records.
 precision = "float32"
+# Field-absorber kind of the deck that restarts the checkpoint, matching the
+# deck's --fieldAbsorber. "none" (default) and "exponential" leave the
+# checkpoint unchanged; "pml" adds the eight zero-filled "Convolutional PML
+# E/B_{xneg,xpos,yneg,ypos,zneg,zpos}" slab records a PML deck loads on
+# restart, so the PML slabs start from rest.
+#absorber = "none"
 # Species to read from --input and write into the checkpoint.  A string is the
 # one-entry historical form.  An array is an ordered input list: each entry is
 # read, placed and field-computed, and the six field components are summed.

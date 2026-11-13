@@ -102,11 +102,15 @@ namespace picBunch
 
         //! The openPMD backend JSON config: ADIOS2 must be named explicitly so
         //! the backend and the file extension can never disagree; HDF5 uses the
-        //! build default (empty config).
+        //! build default (empty config).  ``verify_homogeneous_extents`` is
+        //! relaxed for the input read so a particle species whose record
+        //! extents are not all present (or differ) does not abort the whole
+        //! checkpoint write before the PML slabs are emitted.
         std::string backendConfigJson(CheckpointBackend backend)
         {
-            return backend == CheckpointBackend::Adios2 ? R"({"backend": "adios2"})"
-                                                        : std::string{};
+            return backend == CheckpointBackend::Adios2
+                ? R"({"backend": "adios2", "verify_homogeneous_extents": false})"
+                : R"({"verify_homogeneous_extents": false})";
         }
 
         Datatype fieldDatatype(bool float64)
@@ -756,25 +760,169 @@ namespace picBunch
 
             // Write the field: one full-shape chunk per component.
             // openPMD's deferred-data contract keeps every stored buffer alive
-            // until the flush below.
+            // until the flush below.  storeChunkRaw requires the element type
+            // to match the allocated Dataset (float32 or float64).
+            std::vector<std::shared_ptr<std::vector<double>>> float64FieldBuffers;
             std::vector<std::vector<float>> fieldBuffers;
-            fieldBuffers.reserve(6);
-            for(int c = 0; c < 6; ++c)
+            if(options.float64)
             {
-                Mesh& mesh = c < 3 ? iteration.meshes["E"] : iteration.meshes["B"];
-                MeshRecordComponent rc = mesh[componentNames[c % 3]];
-                std::vector<float> buf;
-                buf.reserve(field.data[c].size());
-                for(double const v : field.data[c])
-                    buf.push_back(static_cast<float>(v / compUnit[c]));
-                rc.storeChunkRaw(
-                    buf.data(),
-                    Offset{0u, 0u, 0u},
-                    Extent{static_cast<std::uint64_t>(nz),
-                           static_cast<std::uint64_t>(ny),
-                           static_cast<std::uint64_t>(nx)});
-                fieldBuffers.push_back(std::move(buf));
+                float64FieldBuffers.reserve(6);
+                for(int c = 0; c < 6; ++c)
+                {
+                    Mesh& mesh = c < 3 ? iteration.meshes["E"] : iteration.meshes["B"];
+                    MeshRecordComponent rc = mesh[componentNames[c % 3]];
+                    auto buf = std::make_shared<std::vector<double>>();
+                    buf->reserve(field.data[c].size());
+                    for(double const v : field.data[c])
+                        buf->push_back(v / compUnit[c]);
+                    rc.storeChunkRaw(
+                        buf->data(),
+                        Offset{0u, 0u, 0u},
+                        Extent{static_cast<std::uint64_t>(nz),
+                               static_cast<std::uint64_t>(ny),
+                               static_cast<std::uint64_t>(nx)});
+                    float64FieldBuffers.push_back(std::move(buf));
+                }
             }
+            else
+            {
+                fieldBuffers.reserve(6);
+                for(int c = 0; c < 6; ++c)
+                {
+                    Mesh& mesh = c < 3 ? iteration.meshes["E"] : iteration.meshes["B"];
+                    MeshRecordComponent rc = mesh[componentNames[c % 3]];
+                    std::vector<float> buf;
+                    buf.reserve(field.data[c].size());
+                    for(double const v : field.data[c])
+                        buf.push_back(static_cast<float>(v / compUnit[c]));
+                    rc.storeChunkRaw(
+                        buf.data(),
+                        Offset{0u, 0u, 0u},
+                        Extent{static_cast<std::uint64_t>(nz),
+                               static_cast<std::uint64_t>(ny),
+                               static_cast<std::uint64_t>(nx)});
+                    fieldBuffers.push_back(std::move(buf));
+                }
+            }
+
+            // Convolutional PML auxiliary state (absorber = "pml" only).
+            //
+            // A PIConGPU deck built with --fieldAbsorber pml loads eight slab
+            // records on restart, "Convolutional PML E_<slab>" and
+            // "Convolutional PML B_<slab>" for the six slab names xneg, xpos,
+            // yneg, ypos, zneg, zpos (getPmlSlabName in the openPMD plugin's
+            // RestartFieldLoader), each with the six cross components xy, xz,
+            // yx, yz, zx, zy.  The layout matches the PIConGPU writer: full
+            // domain extent (Nz,Ny,Nx) like E and B, axisLabels z,y,x,
+            // dataOrder C, geometry cartesian, gridSpacing/gridGlobalOffset/
+            // gridUnitSI from the main field, unitDimension of the parent E or
+            // B record, per-component unitSI unitEField/unitBField and the
+            // parent Yee position duplicated across the split components.
+            //
+            // picBunch computes a free-space field and has no PML state, so the
+            // values are the physically correct initial state of a fresh deck:
+            // zero.  PIConGPU resets the slab buffers at startup (Field::reset
+            // zeroes both buffers), so a run that checkpointed right after
+            // initialization stores zeros in these slabs.  Restoring zeros is
+            // therefore the faithful initial condition for a deck whose PML
+            // has never run.
+            if(options.absorber == "pml")
+            {
+                char const* const pmlComponents[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
+                char const* const pmlSlabs[6]
+                    = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+                for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
+                {
+                    bool const isElectric = std::string_view{record} == "Convolutional PML E";
+                    double const recordUnit = isElectric ? options.unitEField : options.unitBField;
+                    std::size_t const parentFirst = isElectric ? std::size_t{0} : std::size_t{3};
+                    std::array<double, 7> const recordUnitDimension
+                        = isElectric ? std::array<double, 7>{1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0}
+                                     : std::array<double, 7>{0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0};
+                    for(char const* slab : pmlSlabs)
+                    {
+                        Mesh mesh = iteration.meshes[std::string{record} + "_" + slab];
+                        mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
+                        mesh.setGridSpacing(
+                            std::vector<double>{
+                                field.grid.spacing[2] / options.unitLength,
+                                field.grid.spacing[1] / options.unitLength,
+                                field.grid.spacing[0] / options.unitLength});
+                        mesh.setGridGlobalOffset(
+                            std::vector<double>{
+                                field.grid.origin[2] / options.unitLength,
+                                field.grid.origin[1] / options.unitLength,
+                                field.grid.origin[0] / options.unitLength});
+                        mesh.setGridUnitSI(options.unitLength);
+                        mesh.setUnitDimension(recordUnitDimension);
+                        for(int a = 0; a < 6; ++a)
+                        {
+                            // Split components inherit the parent Yee position:
+                            // x -> (xy, xz), y -> (yx, yz), z -> (zx, zy).
+                            MeshRecordComponent rc = mesh[pmlComponents[a]];
+                            std::size_t const parentAxis = a / 2;
+                            rc.setPosition(
+                                std::vector<double>{
+                                    kYeeOffset[parentFirst + parentAxis][0],
+                                    kYeeOffset[parentFirst + parentAxis][1],
+                                    kYeeOffset[parentFirst + parentAxis][2]});
+                            rc.setUnitSI(recordUnit);
+                            allocateFull(rc, fieldDatatype(options.float64), nz, ny, nx);
+                        }
+                        mesh.setAttribute("fieldSmoothing", std::string("none"));
+                    }
+                }
+                // All 48 components are zero: the deferred-data contract
+                // keeps every stored buffer alive until the flush below.
+                //  storeChunkRaw requires the element type to match the
+                //  allocated Dataset (float32 or float64).
+                auto const pmlExtent = Extent{static_cast<std::uint64_t>(nz),
+                                              static_cast<std::uint64_t>(ny),
+                                              static_cast<std::uint64_t>(nx)};
+                auto const pmlOffset = Offset{0u, 0u, 0u};
+                if(options.float64)
+                {
+                    std::vector<std::shared_ptr<std::vector<double>>> pmlDoubleBuffers;
+                    pmlDoubleBuffers.reserve(48);
+                    for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
+                    {
+                        for(char const* slab : pmlSlabs)
+                        {
+                            Mesh& mesh = iteration.meshes[std::string{record} + "_" + slab];
+                            for(char const* component : pmlComponents)
+                            {
+                                MeshRecordComponent rc = mesh[component];
+                                auto zero = std::make_shared<std::vector<double>>(
+                                    field.grid.size(), 0.0);
+                                rc.storeChunkRaw(zero->data(), pmlOffset, pmlExtent);
+                                pmlDoubleBuffers.push_back(std::move(zero));
+                            }
+                        }
+                    }
+                    // Extend the shared-ptr vector's lifetime to the flush
+                    // below by appending it to float64FieldBuffers.
+                    for(auto& b : pmlDoubleBuffers)
+                        float64FieldBuffers.push_back(std::move(b));
+                }
+                else
+                {
+                    for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
+                    {
+                        for(char const* slab : pmlSlabs)
+                        {
+                            Mesh& mesh = iteration.meshes[std::string{record} + "_" + slab];
+                            for(char const* component : pmlComponents)
+                            {
+                                MeshRecordComponent rc = mesh[component];
+                                std::vector<float> zero(field.grid.size(), 0.0f);
+                                rc.storeChunkRaw(zero.data(), pmlOffset, pmlExtent);
+                                fieldBuffers.push_back(std::move(zero));
+                            }
+                        }
+                    }
+                }
+            }
+
             out.flush();
 
             // Enumerate the input species before the id provider so the

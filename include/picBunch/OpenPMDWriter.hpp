@@ -236,6 +236,17 @@ namespace picBunch
          *  ``picBunchPrecisionWarning`` root attribute.
          */
         bool float64 = false;
+        /*! Field-absorber kind of the PIConGPU deck that restarts this
+          * checkpoint: ``"none"`` (default), ``"exponential"`` or ``"pml"``.
+          *
+          * Only ``"pml"`` changes the emitted tree: it adds the eight
+          * convolutional-PML slab records a ``--fieldAbsorber pml`` deck loads
+          * on restart.  See ``writePicOnGPUCheckpoint`` for the layout.
+          * ``"exponential"`` is accepted because an exponential deck never
+          * stores auxiliary field state; a PIConGPU restart reads it back from
+          * the compiled parameters, so no checkpoint record is needed.
+          */
+        std::string absorber = "none";
         /*! Checkpoint output backend (see ``CheckpointBackend``).
          *
          * ``Auto`` (the default) derives the backend from the output path and
@@ -273,7 +284,19 @@ namespace picBunch
      *  - every ``generatedSpecies`` entry as its own group.  Generated ids are
      *    disjoint across the list and never overlap the copied range
      *    ``[0, copiedCount)``.  An ``empty`` entry is a valid zero-particle
-     *    group.
+     *    group;
+     *  - for ``absorber = "pml"`` only: ``fields/Convolutional PML E_{xneg,xpos,
+     *    yneg,ypos,zneg,zpos}`` and ``fields/Convolutional PML B_{...}``, one
+     *    mesh per slab with the six cross components ``xy,xz,yx,yz,zx,zy``,
+     *    float32 (float64 with ``float64``) and extent ``(Nz,Ny,Nx)`` like E
+     *    and B.  The values are all zero, the physically correct initial state
+     *    of a fresh deck (PIConGPU resets the slab buffers on startup, see
+     *    ``Field::reset``), with ``unitSI`` ``unitEField``/``unitBField`` and
+     *    the Yee parent positions duplicated per split component.  A deck that
+     *    restarts from this checkpoint runs the PML slabs from rest, which
+     *    matches a PIConGPU run that wrote its first checkpoint at step 0.
+     *    ``absorber = "none"`` and ``"exponential"`` keep the previous tree.
+     *    A value outside the accepted set is rejected at parse time.
 
      * Record attributes survive the copy; the numeric datasets are rewritten
      * to the configured precision so a checkpoint never mixes dtypes.  Missing

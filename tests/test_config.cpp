@@ -449,6 +449,32 @@ TEST(Config, PrecisionSwitchRejectsUnknownValue)
         std::runtime_error);
 }
 
+TEST(Config, AbsorberKeyDefaultsToNoneAndParsesPml)
+{
+    ConfigTest fixture;
+    auto const defaultConfig = picBunch::loadConfig(fixture.write("abs-default.toml", fullConfig));
+    EXPECT_EQ(defaultConfig.picongpu.absorber, "none");
+
+    std::string text = fullConfig;
+    text.replace(text.find("precision = \"float64\""), 21, "precision = \"float64\"\nabsorber = \"pml\"");
+    auto const pml = picBunch::loadConfig(fixture.write("abs-pml.toml", text));
+    EXPECT_EQ(pml.picongpu.absorber, "pml");
+
+    text.replace(text.find("absorber = \"pml\""), 16, "absorber = \"exponential\"");
+    auto const exponential = picBunch::loadConfig(fixture.write("abs-exp.toml", text));
+    EXPECT_EQ(exponential.picongpu.absorber, "exponential");
+}
+
+TEST(Config, AbsorberKeyRejectsUnknownValue)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    text.replace(text.find("precision = \"float64\""), 21, "precision = \"float64\"\nabsorber = \"pml2\"");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("abs-unknown.toml", text)),
+        std::runtime_error);
+}
+
 namespace
 {
     void replaceOnce(std::string& text, std::string const& needle, std::string const& replacement)
