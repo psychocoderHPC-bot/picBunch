@@ -23,9 +23,9 @@ instead of about 116 s), and `restart/restart.log` ends with
 
 For an open-boundary LWFA checkpoint, the writer now copies the PML slabs from
 the input checkpoint. The rerun on `rosi_v100` used the real checkpoint
-`w7b-20261102/lwfa/gt-run/checkpoints/out_000002.h5` (638976 electrons, twelve
+`w7b-20261102/lwfa/gt-run/checkpoints/out_000002.h5` (638976 electrons, eight
 `Convolutional PML` groups with six datasets each) and the same reduced deck
-(64x128x64, `--periodic 0 0 1`). picBunch copied all twelve groups and the restart
+(64x128x64, `--periodic 0 0 1`). picBunch copied all eight groups and the restart
 exited 0 with
 
 ```

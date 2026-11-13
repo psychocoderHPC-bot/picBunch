@@ -132,10 +132,10 @@ drops from the $\sim116$\,s neuralBunch path to $1.8$\,s because the
 checkpoint carries the field. For an open-boundary deck the writer copies
 the \texttt{Convolutional PML} slabs from the input checkpoint verbatim
 (converting a non-float32 slab to float32), so the PML state arrives with
-the restart. On a real LWFA checkpoint ($638976$ electrons, twelve
+the restart. On a real LWFA checkpoint ($638976$ electrons, eight
 \texttt{Convolutional PML} groups with six datasets each,
 $64\times128\times64$, \texttt{--periodic 0 0 1}) the writer copies all
-twelve groups and the restart exits 0; the copied PML datasets are float32
+eight groups and the restart exits 0; the copied PML datasets are float32
 and bitwise equal to the source, initialization is $3.986$\,s, and the
 main $E$ and $B$ records are recomputed from the particles and stay
 float32.

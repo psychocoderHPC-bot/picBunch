@@ -152,7 +152,7 @@ PML state. It copies the `Convolutional PML ...` groups of the input
 checkpoint verbatim, so a deck that restarts from a checkpoint whose input
 carried PML records (a previous PIConGPU checkpoint, for example) restarts
 without this error. The open-boundary rerun in [picongpu-restart.md](picongpu-restart.md)
-is that case: the input had twelve `Convolutional PML` groups and the restart
+is that case: the input had eight `Convolutional PML` groups and the restart
 exited 0 with the PML datasets bitwise equal to the source.
 
 Two workarounds keep a PML-like open boundary with a picBunch checkpoint:
