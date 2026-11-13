@@ -51,18 +51,23 @@ returns the same data from either backend. The HDF5 *container bytes* differ
 
 No payload field is backend-limited. Only the container differs.
 
-## PIConGPU restart checkpoints stay HDF5
+## PIConGPU restart checkpoints use the openPMD writer
 
-`writePicOnGPUCheckpoint` (`publishPicOnGPU`) is not openPMD IO: it writes the
-PIConGPU restart layout with the HDF5 C API (`H5Fcreate`, `H5Dcreate`,
-`H5Dwrite`, `H5Ocopy`), hardcodes the `.h5` suffix, and CMake requires HDF5 for
-this path. The restart verifiers (`tools/verify/check_picongpu_restart.py`,
-`check_openpmd.py`) are h5py-only and expect `checkpoint_%06d.h5`.
+The application writes restart checkpoints with
+`writePicOnGPUCheckpointOpenPMD` (`publishPicOnGPUOpenPMD`), not with the HDF5
+C API. It builds an openPMD-Series and selects the backend like the field
+writer: a `.h5` destination uses the HDF5 backend, a `.bp5` destination uses the
+ADIOS2/BP5 backend, and the `[checkpoint] backend` key (`auto`, `adios2`,
+`hdf5`) overrides the path-derived choice. Both containers carry the same tree:
+`openPMDextension = 1`, the `/data/<step>` iteration, one full-shape
+`(Nz, Ny, Nx)` record component per field component, and the same particle
+records, including zero-particle `empty` species.
 
-This path intentionally remains HDF5. Moving it to BP5 would be a checkpoint
-format rewrite (several hundred lines across the writer, CMake and the restart
-tests), not a backend switch, and the reproduction does not need it: every
-openPMD-level dataset (bunch input and E/B output) can use ADIOS2/BP5.
+The legacy raw-HDF5 writer `writePicOnGPUCheckpoint` (`publishPicOnGPU`,
+`H5Fcreate`/`H5Dcreate`/`H5Ocopy`) still exists, but only the unit tests and
+`picBunchWriteRestartSample` call it; the application does not. The h5py-only
+`tools/verify/check_picongpu_restart.py` therefore inspects that legacy tree,
+while `check_openpmd.py` verifies the openPMD field writer.
 
 CTest results depend on the build configuration and the optional tests it
 registers. The original ADIOS2-enabled verification build (main @ 478f6e1,
