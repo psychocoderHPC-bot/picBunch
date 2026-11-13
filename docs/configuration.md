@@ -47,12 +47,36 @@ unit_bfield = unit_mass / (unit_time * unit_charge)
 | `speed_of_light` | no | `SI::SPEED_OF_LIGHT_SI` in m/s. Default `2.99792458e8`. Override only if the deck does. |
 | `step` | yes | Checkpoint step in `[0, 999999]`; also the file suffix. |
 | `precision` | no | `"float32"` (default) or `"float64"`, applied uniformly to every field component and every particle property record. `positionOffset` stays int32 and `id` stays uint64. |
-| `species` | yes | Species to read from `--input` and write to the checkpoint. |
+| `species` | yes | Species to read from `--input` and write to the checkpoint. A string (the historical form, one entry) or an ordered array of strings. Each entry is read, placed with the same `[placement]` block, field-computed and summed. |
+| `output_species` | no | Optional array of output group names, positionally aligned with `species`. Its length must equal `species`; omitted or empty means "the output name equals the input name" for every entry. |
+| `empty_species` | no | Optional array of deck species written as checkpoint-only groups with zero particles. They are **never** read from `--input`. A name may not also appear in `species` or `output_species`. |
 
 The values must match the restart deck, not the deck that produced the input
 bunch. PIConGPU restart ignores the particle `unitSI` and interprets momentum in
 `unit_mass * unit_speed` and mass/charge in `unit_mass`/`unit_charge`, so a
 mismatch scales every record.
+
+#### Multiple species
+
+`species` is an ordered list. Entry `i` is read with `BunchSelection{species[i]}`,
+placed, and field-deposited on its own; the six field components are then summed.
+The mesh field is linear in charge, so the sum is the field of the union of all
+species. `base_charge`/`base_mass` are the physics source for the whole list;
+there is no per-entry override.
+
+`output_species` renames positionally: `species = ["b"]` with
+`output_species = ["e"]` reads input group `b` and writes checkpoint group `e`.
+The raw input group is still copied into the checkpoint (the "every input
+species is copied" contract). With a BP5 input the raw group cannot be copied;
+a renamed entry then acts as a move.
+
+`empty_species` lists deck species that must exist in the checkpoint with zero
+particles but have no input data. They get the standard records as empty
+datasets, one domain-covering patch row with `numParticles = 0`, and no ids. A
+name that is both generated and empty is a configuration error.
+
+A generated species whose input group is absent from `--input` is an error; the
+error names the input group.
 
 The old manual `unit_length`, `unit_e`, `unit_b`, `unit_charge`, `unit_mass` and
 `unit_speed` keys are no longer part of the schema. They are still accepted as
@@ -85,17 +109,24 @@ fraction of the domain extent (one full domain length is `1.0`).
 
 | key | required | meaning |
 | --- | --- | --- |
-| `position` | yes | Three components `[x, y, z]`: the offset from the domain origin to the bunch centroid, in the unit selected by `offset_unit`. |
-| `offset_unit` | yes | `"metres"` or `"fraction"` of the domain extent. |
+| `center` | no | `"centroid"` (default) or `"none"`. `"centroid"` shifts the charge-weighted centroid to `position`. `"none"` keeps the absolute input coordinates and applies no shift, which is what a non-centred bunch needs. |
+| `position` | yes (with `center = "centroid"`) | Three components `[x, y, z]`: the offset from the domain origin to the bunch centroid, in the unit selected by `offset_unit`. Optional when `center = "none"`; a non-zero value then warns that it is ignored. |
+| `offset_unit` | yes (with `center = "centroid"`) | `"metres"` or `"fraction"` of the domain extent. Optional when `center = "none"`. |
 | `patch` | no | `"bbox"` (default) or `"domain"`. |
 | `patch_count` | no | Positive integer (default `1`): split the generated species along `z` into this many rank-overlap regions. |
 
 The old `left`, `front` and `top` scalar keys are no longer accepted; the error
 names `placement.position`. Use the vector.
 
-Fractional values must be in `[0, 1]`. The placement uses the charge-weighted
-centroid `sum(q w r) / sum(q w)`. The bounding-box centre is printed in the log
-for comparison but does not drive the placement.
+Fractional values must be in `[0, 1]` in centroid mode. The placement uses the
+charge-weighted centroid `sum(q w r) / sum(q w)`. The bounding-box centre is
+printed in the log for comparison but does not drive the placement.
+
+`center = "none"` reproduces the absolute input coordinates exactly (the writer
+receives positions bit-identical to the reader output) and still checks domain
+containment: a bunch that leaves the domain aborts with the same axis/distance
+message. This is the mode for a bunch whose input centroid is not the domain
+centre, e.g. a beam at `(45.4, 109.0, 45.4) um`.
 
 A shifted bunch that would leave the domain is rejected, never clipped. The
 error names the offending axis (`x`, `y` or `z`) and the distance outside the
@@ -129,6 +160,55 @@ accurate in-support: `none` is the safest default, `fast` is validated for stati
 and near-axial motion, and `exact` is an adaptive reference that is accurate except for
 a measured few-percent residual at the closest axial node.
 
+### `[checkpoint]`
+
+| key | required | meaning |
+| --- | --- | --- |
+| `backend` | no | `"auto"` (default), `"adios2"` or `"hdf5"`. `auto` derives the backend from `--destination`: a `.bp5` directory selects the ADIOS2/BP5 backend and a `.h5` directory selects the HDF5 backend. Both backends are written through the same openPMD-Series writer, so both produce the same tree: one full-shape `(Nz, Ny, Nx)` record component per field component, identical geometry and unit attributes, and the same particle records. PIConGPU selects the container with `--checkpoint.openPMD.ext bp5` (or `h5`). |
+
+## Large domains under MPI
+
+Run the configured path under `mpirun -n R` and keep `--fft-mode auto` (the
+default). With more than one rank, auto selects the distributed z-slab FFT:
+each rank owns one slab of the padded spectrum and one z-slab of the six output
+components, and `makeGrid` scales its per-rank padded-node cap by `R * 8`.
+`--fft-mode replicated` keeps the full field on every rank and does not scale
+the cap. A domain whose padded box is above `2^28` nodes therefore needs at
+least two ranks; it is rejected on one rank with the `limit 268435456 nodes`
+message.
+
+The rank count lowers the per-process memory, not the aggregate. The
+distributed path holds three complex arrays over the padded box
+(`3 * M^3 * 16 B` total across ranks), so the device, not the host, sets the
+first large-domain limit. The writer gathers the rank-local z-slabs on rank 0
+and emits one full-shape record component per field component, so the
+checkpoint tree is independent of the rank count.
+
+## Chunked field computation is not supported
+
+picBunch does **not** ship a chunked or slab-tiled field-computation path, and
+there is no `accuracy.field_slab_planes` configuration key. A checkpoint is
+written only from a fully materialised field; the peak device memory is
+therefore the full padded FFT box plus the six output components (about 370
+bytes per grid cell on the reference small case, 400x160x440 cells at 2e-7 m;
+measured 10.5 GiB on the GV100). Host RSS on the same case was 1.6 GiB.
+
+The slab approach was implemented and measured, then removed. Two wrapper bugs
+were fixed first: a wrong `idist` that aliased every z-row, and a batched 2-D
+plan that never transformed z. The slab field still disagreed with the untiled
+reference: the relative E error was 0.45-0.67, and the spectral-curl B path
+overflowed to about `1e307` because the half-spectrum Hermitian symmetry is
+broken on the DC and Nyquist planes. That is a correctness gap, not a tuning
+problem, so the feature is not shippable.
+
+The correct future approach is a decomposition that preserves the global z
+spectrum: either a distributed FFT along z with the correct global halo, or an
+overlap-save scheme whose per-slab transform is embedded in the full-plane
+spectrum rather than an independent small transform. Any such path must prove
+all six components against the untiled field to a stated tolerance before it is
+accepted, and it must keep one full-shape record component per field component
+in the checkpoint.
+
 ## Particle patch and records
 
 The writer creates one particle patch for the species. With
@@ -159,6 +239,26 @@ never invents a conversion.
 
 The checkpoint also contains `fields/picongpu_idProvider`, every other species
 present in the input iteration, and `checkpoints.txt`.
+
+## Input position conventions
+
+The reader evaluates positions verbatim as
+`x = position * unitSI_position + positionOffset * unitSI_offset`. Two
+`positionOffset` conventions are therefore accepted and give the same absolute
+positions:
+
+- integer cell indices with `positionOffset.unitSI` equal to the cell size (the
+  convention PIConGPU and this writer use);
+- offsets already in metres with `positionOffset.unitSI = 1`.
+
+No conversion or inference is applied. A non-standard `unitSI` that equals the
+cell size is numerically correct because the stored offset is an integer cell
+index in that case.
+
+The input backend is selected from the path: a `.h5` file uses HDF5, and a
+`.bp`/`.bp5` directory (for example `particles_000000.bp5`) uses ADIOS2/BP5.
+A BP5 directory needs an openPMD-api built with ADIOS2; without it the reader
+fails with a message naming the directory and the missing backend.
 
 ## Precision
 

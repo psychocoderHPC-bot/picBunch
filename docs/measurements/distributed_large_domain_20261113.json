@@ -1,0 +1,427 @@
+{
+  "task": "B9c",
+  "commit_base": "2befa2e",
+  "date": "2026-11-13",
+  "hardware": {
+    "node": "fwk394",
+    "cpu": "Xeon W-2175 14c/28t",
+    "host_ram_gib": 125,
+    "gpu": "Quadro GV100 32 GiB (sm_70, CUDA_VISIBLE_DEVICES=1)"
+  },
+  "fix": {
+    "wiring": "runConfigured creates MpiParallelContext, sets options.parallel and honors --fft-mode before computeField/makeGrid",
+    "cap": "kMaxPaddedNodes = 1<<28 is per rank; distributed context multiplies it by size*8",
+    "checkpoint": "distributed z-slabs are gathered on rank 0 before the openPMD checkpoint writer; one full-shape record component per field component"
+  },
+  "cap_scaling": {
+    "kMaxPaddedNodes": 268435456,
+    "medium_padded_nodes": 1351680000,
+    "reduced_medium_padded_nodes": 540672000,
+    "small_padded_nodes": 168960000,
+    "limits": {
+      "1": 268435456,
+      "2": 4294967296,
+      "4": 8589934592,
+      "8": 17179869184
+    }
+  },
+  "runs": {
+    "S1": {
+      "tag": "S1",
+      "exit": 0,
+      "n": 1,
+      "wall_sec": 16,
+      "limit_sec": 600,
+      "gpu_peak_mib": 8008,
+      "per_rank_rss_mb": {
+        "0": 1604
+      },
+      "total_rss_mb": 1604,
+      "checkpoint_bytes": 708456890,
+      "compute_ms": 1890.853,
+      "writer_ms": 12109.412,
+      "gather_ms": null,
+      "field_layout": "replicated",
+      "auto_selected_distributed": false,
+      "error": null
+    },
+    "S2": {
+      "tag": "S2",
+      "exit": 0,
+      "n": 2,
+      "wall_sec": 37,
+      "limit_sec": 600,
+      "gpu_peak_mib": 8614,
+      "per_rank_rss_mb": {
+        "0": 3539,
+        "1": 3207
+      },
+      "total_rss_mb": 6746,
+      "checkpoint_bytes": 708456890,
+      "compute_ms": 24809.841,
+      "writer_ms": 10597.985,
+      "gather_ms": 718.388,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    },
+    "S4": {
+      "tag": "S4",
+      "exit": 0,
+      "n": 4,
+      "wall_sec": 37,
+      "limit_sec": 900,
+      "gpu_peak_mib": 9234,
+      "per_rank_rss_mb": {
+        "0": 1848,
+        "1": 1839,
+        "2": 1678,
+        "3": 1684
+      },
+      "total_rss_mb": 7049,
+      "checkpoint_bytes": 708456890,
+      "compute_ms": 26216.555,
+      "writer_ms": 9165.758,
+      "gather_ms": 642.129,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    },
+    "M1": {
+      "tag": "M1",
+      "exit": 1,
+      "n": 1,
+      "wall_sec": 3,
+      "limit_sec": 120,
+      "gpu_peak_mib": 1,
+      "per_rank_rss_mb": {
+        "0": 13
+      },
+      "total_rss_mb": 13,
+      "checkpoint_bytes": null,
+      "compute_ms": null,
+      "writer_ms": null,
+      "gather_ms": null,
+      "field_layout": null,
+      "auto_selected_distributed": false,
+      "error": "makeGrid: padded FFT grid for output grid 440x800x480 with padding 2 is infeasible (limit 268435456 nodes); check the input gridSpacing/gridUnitSI or pass --cell-size"
+    },
+    "M2": {
+      "tag": "M2",
+      "exit": 137,
+      "n": 2,
+      "wall_sec": 131,
+      "limit_sec": 180,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "0": 27201,
+        "1": 24647
+      },
+      "total_rss_mb": 51848,
+      "checkpoint_bytes": null,
+      "compute_ms": null,
+      "writer_ms": null,
+      "gather_ms": null,
+      "field_layout": null,
+      "auto_selected_distributed": false,
+      "error": null,
+      "rss_note": "both ranks recorded; total 51.8 GB"
+    },
+    "M4": {
+      "tag": "M4",
+      "exit": 137,
+      "n": 4,
+      "wall_sec": 56,
+      "limit_sec": 3600,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "2": 12394,
+        "3": 12384
+      },
+      "total_rss_mb": null,
+      "checkpoint_bytes": null,
+      "compute_ms": null,
+      "writer_ms": null,
+      "gather_ms": null,
+      "field_layout": null,
+      "auto_selected_distributed": false,
+      "error": null,
+      "rss_note": "ranks 2 and 3 recorded 12,394 and 12,384 MB; ranks 0 and 1 were sampled live at ~11.8 GB each before the abort, so the four-rank total was ~49 GB"
+    },
+    "M4rep": {
+      "tag": "M4rep",
+      "gpu_peak_mib": null,
+      "per_rank_rss_mb": {},
+      "total_rss_mb": null,
+      "checkpoint_bytes": null,
+      "compute_ms": null,
+      "writer_ms": null,
+      "gather_ms": null,
+      "field_layout": null,
+      "auto_selected_distributed": false,
+      "error": "makeGrid: padded FFT grid for output grid 440x800x480 with padding 2 is infeasible (limit 268435456 nodes); check the input gridSpacing/gridUnitSI or pass --cell-size"
+    },
+    "R1": {
+      "tag": "R1",
+      "exit": 1,
+      "n": 1,
+      "wall_sec": 3,
+      "limit_sec": 60,
+      "gpu_peak_mib": 1,
+      "per_rank_rss_mb": {
+        "0": 13
+      },
+      "total_rss_mb": 13,
+      "checkpoint_bytes": null,
+      "compute_ms": null,
+      "writer_ms": null,
+      "gather_ms": null,
+      "field_layout": null,
+      "auto_selected_distributed": false,
+      "error": "makeGrid: padded FFT grid for output grid 440x320x480 with padding 2 is infeasible (limit 268435456 nodes); check the input gridSpacing/gridUnitSI or pass --cell-size"
+    },
+    "R2": {
+      "tag": "R2",
+      "exit": 0,
+      "n": 2,
+      "wall_sec": 110,
+      "limit_sec": 1200,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "0": 10994,
+        "1": 9961
+      },
+      "total_rss_mb": 20955,
+      "checkpoint_bytes": 2419770554,
+      "compute_ms": 87795.089,
+      "writer_ms": 19180.456,
+      "gather_ms": 2258.969,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    },
+    "R2b": {
+      "tag": "R2b",
+      "exit": 0,
+      "n": 2,
+      "wall_sec": 112,
+      "limit_sec": 1200,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "0": 10994,
+        "1": 9956
+      },
+      "total_rss_mb": 20950,
+      "checkpoint_bytes": 2419770554,
+      "compute_ms": 91704.574,
+      "writer_ms": 17262.642,
+      "gather_ms": 2220.999,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    },
+    "R4": {
+      "tag": "R4",
+      "exit": 0,
+      "n": 4,
+      "wall_sec": 85,
+      "limit_sec": 1800,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "0": 5572,
+        "1": 5570,
+        "2": 5057,
+        "3": 5051
+      },
+      "total_rss_mb": 21250,
+      "checkpoint_bytes": 2419770554,
+      "compute_ms": 67938.451,
+      "writer_ms": 14568.665,
+      "gather_ms": 1879.597,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    },
+    "R8": {
+      "tag": "R8",
+      "exit": 0,
+      "n": 8,
+      "wall_sec": 83,
+      "limit_sec": 1800,
+      "gpu_peak_mib": 32482,
+      "per_rank_rss_mb": {
+        "0": 4803,
+        "1": 2864,
+        "2": 2860,
+        "3": 2860,
+        "4": 2610,
+        "5": 2609,
+        "6": 2610,
+        "7": 2608
+      },
+      "total_rss_mb": 23824,
+      "checkpoint_bytes": 2419770554,
+      "compute_ms": 63756.274,
+      "writer_ms": 15593.343,
+      "gather_ms": 1964.104,
+      "field_layout": "distributed",
+      "auto_selected_distributed": true,
+      "error": null
+    }
+  },
+  "correctness": {
+    "small_4rank_vs_1rank": {
+      "reference": "S1 (1 rank, replicated)",
+      "test": "S4 (4 ranks, distributed)",
+      "components": {
+        "E_x": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 1306.9586975546877,
+          "sum_sq": 5.174221865812685,
+          "max_abs": 0.031569164246320724,
+          "fnv1a32": 598193977,
+          "reference_fnv1a32": 2035160631,
+          "relative": 4.5014985522964007e-13
+        },
+        "E_y": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 0.06365561433388782,
+          "sum_sq": 2.0325298207067975e-09,
+          "max_abs": 5.316027440471771e-08,
+          "fnv1a32": 3208217658,
+          "reference_fnv1a32": 2871135222,
+          "relative": 2.61055608971478e-10
+        },
+        "E_z": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 1327.332866147237,
+          "sum_sq": 5.1830055048000965,
+          "max_abs": 0.03639979287981987,
+          "fnv1a32": 2097375995,
+          "reference_fnv1a32": 2388413734,
+          "relative": 1.9520515902551378e-13
+        },
+        "B_x": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 45.09610159051513,
+          "sum_sq": 0.0021454323918133674,
+          "max_abs": 0.00010059306077891961,
+          "fnv1a32": 1628605003,
+          "reference_fnv1a32": 2860407535,
+          "relative": 3.5317681471175706e-11
+        },
+        "B_y": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 0.01382798569695964,
+          "sum_sq": 5.099464107877533e-10,
+          "max_abs": 2.3715035979421373e-07,
+          "fnv1a32": 103245218,
+          "reference_fnv1a32": 1313368603,
+          "relative": 1.828716892399095e-12
+        },
+        "B_z": {
+          "shape": [
+            240,
+            400,
+            220
+          ],
+          "dtype": "float32",
+          "sum_abs": 41.60297353754167,
+          "sum_sq": 0.0018423990500340691,
+          "max_abs": 9.542757470626384e-05,
+          "fnv1a32": 2228691555,
+          "reference_fnv1a32": 1240367977,
+          "relative": 2.3268390253918542e-12
+        }
+      },
+      "max_relative": 2.61055608971478e-10,
+      "bound": 1e-06,
+      "pass": true
+    },
+    "reduced_8rank_vs_4rank": {
+      "reference": "R4 (4 ranks, distributed)",
+      "test": "R8 (8 ranks, distributed)",
+      "components": {
+        "E_x": {
+          "relative": 1.4516715005546918e-10
+        },
+        "E_y": {
+          "relative": 1.0097095479530677e-10
+        },
+        "E_z": {
+          "relative": 8.841394430710755e-12
+        },
+        "B_x": {
+          "relative": 5.22893183882374e-10
+        },
+        "B_y": {
+          "relative": 4.5683909806637834e-12
+        },
+        "B_z": {
+          "relative": 2.0423322424191804e-12
+        }
+      },
+      "max_relative": 5.22893183882374e-10
+    }
+  },
+  "checkpoint_structure": {
+    "series": "openPMD file-based iteration, checkpoint_000000.h5",
+    "field_records": "fields/E/{x,y,z}, fields/B/{x,y,z}",
+    "dataset_per_component": true,
+    "stored_shape_z_y_x": {
+      "small": [
+        240,
+        400,
+        220
+      ],
+      "reduced_medium": [
+        480,
+        320,
+        440
+      ]
+    },
+    "dtype": "float32",
+    "axis_labels": [
+      "z",
+      "y",
+      "x"
+    ],
+    "species": {
+      "b": 49932,
+      "e": 0
+    },
+    "openpmd_readable": true
+  },
+  "findings": {
+    "medium_gpu_wall": "M2 and M4 pinned the 32 GiB GV100 at 32,482 MiB and did not complete. The medium padded box needs 3*M^3 complex values = 64.9 GB of unified working set, about 2x the device. M2 reached 51.8 GB of host RSS; the earlier legacy-CLI 2-rank run was observed for more than 6 h without producing a checkpoint.",
+    "r2_large_slab_corruption": "The 2-rank reduced-medium runs (R2, R2b) completed but produced non-physical field values (E_x max 4.43e10 vs 5.01e-2 at 4/8 ranks); the values were identical in both runs. The 4- and 8-rank runs agree to 5.2e-10 and the 2-rank small case agrees with the 1-rank reference to 2.6e-10. This points at the 13 GiB/rank device-memory pressure on the 32 GiB card, not at the checkpoint gather or the 1/4/8-rank compute. Treat 2 ranks at this per-rank slab size as unsafe until the vendor-workspace failure is surfaced.",
+    "replicated_mode": "The medium with --fft-mode replicated is rejected earlier by the per-rank cap (limit 268435456), because only a distributed context scales the cap; replicated would need ~64.9 GB per rank.",
+    "r4_correctness": "R4 has no 1-rank reference because 540.7M padded nodes exceed the single-rank cap. It is checked by rank-count invariance against R8 (5.2e-10) and by the small-case 1-rank reference (S4 vs S1, 2.6e-10); its field magnitudes match the small-case physics."
+  },
+  "conclusion": "The --config path now scales the per-rank padded-node cap by the rank count before makeGrid, so a multi-rank TOML run above 2^28 padded nodes is accepted. The verified working large domain on this single 32 GiB GV100 is the reduced medium 440x320x480 at 2e-7 m: 540.7M padded nodes at 4 ranks in 85 s, 6.5 GiB GPU per rank (21.25 GiB total host peak), 2.42 GB checkpoint, 5.2e-10 rank-count agreement. The full medium 440x800x480 needs 3*M^3*16 B ~ 64.9 GB of unified working set and pins the 32 GiB device at 2 and 4 ranks; it does not complete. The first wall on this node is the GPU, not the 125 GiB host RAM."
+}

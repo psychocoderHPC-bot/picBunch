@@ -617,47 +617,52 @@ namespace
     int runConfigured(Arguments const& args)
     {
         picBunch::Config const config = picBunch::loadConfig(*args.config);
+        picBunch::MpiParallelContext parallel;
+        int const rank = picBunch::mpiRank();
+        int const size = picBunch::mpiSize();
+        bool const root = rank == 0;
         for(auto const& warning : config.warnings)
-            std::fprintf(stderr, "picBunch: warning: %s\n", warning.c_str());
+            if(root)
+                std::fprintf(stderr, "picBunch: warning: %s\n", warning.c_str());
 
-        std::printf(
-            "config: species=%s step=%llu precision=%s\n",
-            config.picongpu.species.c_str(),
-            static_cast<unsigned long long>(config.picongpu.step),
-            config.picongpu.float64 ? "float64" : "float32");
-
-        picBunch::BunchSelection selection;
-        selection.speciesName = config.picongpu.species;
-        picBunch::BunchData const bunchData = picBunch::readBunch(args.input, selection);
-        std::printf(
-            "read %zu particles (species %s, iteration %llu)\n",
-            bunchData.bunch.size(),
-            config.picongpu.species.c_str(),
-            static_cast<unsigned long long>(bunchData.iteration));
-
-        picBunch::PlacedBunch const placed = picBunch::placeBunch(bunchData.bunch, config);
-        std::printf(
-            "centroid (charge-weighted, used): (%.9g, %.9g, %.9g) m\n",
-            placed.centroid[0], placed.centroid[1], placed.centroid[2]);
-        std::printf(
-            "bounding-box centre (reported only): (%.9g, %.9g, %.9g) m\n",
-            placed.boundingCentre[0], placed.boundingCentre[1], placed.boundingCentre[2]);
-        std::printf(
-            "target centre: (%.9g, %.9g, %.9g) m; shift: (%.9g, %.9g, %.9g) m\n",
-            placed.targetCentre[0], placed.targetCentre[1], placed.targetCentre[2],
-            placed.shift[0], placed.shift[1], placed.shift[2]);
-        std::printf(
-            "particle patch: offset=(%lld,%lld,%lld) cells extent=(%llu,%llu,%llu) cells\n",
-            static_cast<long long>(placed.patchOffset[0]),
-            static_cast<long long>(placed.patchOffset[1]),
-            static_cast<long long>(placed.patchOffset[2]),
-            static_cast<unsigned long long>(placed.patchExtent[0]),
-            static_cast<unsigned long long>(placed.patchExtent[1]),
-            static_cast<unsigned long long>(placed.patchExtent[2]));
+        std::string speciesList;
+        for(std::size_t i = 0; i < config.picongpu.species.size(); ++i)
+        {
+            if(i != 0)
+                speciesList += ",";
+            speciesList += config.picongpu.outputSpecies.empty()
+                ? config.picongpu.species[i]
+                : config.picongpu.outputSpecies[i];
+        }
+        if(root)
+            std::printf(
+                "config: species=[%s] step=%llu precision=%s\n",
+                speciesList.c_str(),
+                static_cast<unsigned long long>(config.picongpu.step),
+                config.picongpu.float64 ? "float64" : "float32");
+        if(!config.picongpu.emptySpecies.empty())
+        {
+            std::string emptyList;
+            for(std::size_t i = 0; i < config.picongpu.emptySpecies.size(); ++i)
+            {
+                if(i != 0)
+                    emptyList += ",";
+                emptyList += config.picongpu.emptySpecies[i];
+            }
+            if(root)
+                std::printf("checkpoint-only empty species: [%s]\n", emptyList.c_str());
+        }
 
         picBunch::ComputeOptions options;
-        // The checkpoint writer consumes the full field on rank 0.
-        options.fftMode = picBunch::FftMode::Replicated;
+        // Use the same FFT policy as the CLI path.  Auto selects the
+        // distributed z-slab transform for any multi-rank run, which is what
+        // makes a domain above the per-rank padded-node cap runnable on the
+        // documented --config path.  An explicit replicated request still
+        // computes the full field on every rank.
+        options.fftMode = (args.fftMode == "replicated")
+            ? picBunch::FftMode::Replicated
+            : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
+                                              : picBunch::FftMode::Auto;
         options.tolerance = config.accuracy.tolerance;
         options.fftPadding = args.fftPadding;
         options.cellSize = config.domain.cellSize;
@@ -675,20 +680,249 @@ namespace
         options.nearShell.radiusCells = config.accuracy.nearShellRadius;
         options.nearShell.tileNodes = config.accuracy.nearShellTile;
         options.nearShell.exactCellReach = config.accuracy.nearShellExactCells;
-        std::printf(
-            "field grid: cells=(%zu,%zu,%zu) cell_size=(%.9g,%.9g,%.9g) m "
-            "origin=(%.9g,%.9g,%.9g) m\n",
-            config.domain.cells[0], config.domain.cells[1], config.domain.cells[2],
-            config.domain.cellSize[0], config.domain.cellSize[1], config.domain.cellSize[2],
-            config.domain.origin[0], config.domain.origin[1], config.domain.origin[2]);
-        picBunch::Field const field = picBunch::computeField(placed.bunch, options);
+        // The velocity-box policy is the same advanced CLI switch as in the
+        // legacy path.  The config path defaults to auto, which for a
+        // gamma >> 10 beam can exceed the box cap; --velocity-bins /
+        // --velocity-moments make the documented small case runnable.
+        options.velocityBinning.mode
+            = (args.velocityBins == 0u) ? picBunch::VelocityBinningOptions::Mode::Auto
+                                        : picBunch::VelocityBinningOptions::Mode::Explicit;
+        options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
+        options.velocityBinning.modelConstant = args.binModelConstant;
+        options.velocityBinning.maxBins = args.maxVelocityBins;
+        options.velocityMoments.mode
+            = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
+            : (args.velocityMoments == "2" || args.velocityMoments == "3")
+                ? picBunch::VelocityMomentsOptions::Mode::Explicit
+                : picBunch::VelocityMomentsOptions::Mode::Off;
+        if(args.velocityMoments == "2" || args.velocityMoments == "3")
+            options.velocityMoments.order = std::stoul(args.velocityMoments);
+        options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
+
+        // Wire the rank context before the first makeGrid call.  makeGrid
+        // scales kMaxPaddedNodes by the rank count only when a distributed
+        // context is visible; the configured path used to reach it with a null
+        // pointer and rejected the same domain the CLI accepted.
+        options.parallel = &parallel;
+        picBunch::mpiBroadcastComputeOptions(options, 0);
+        options.parallel = &parallel;
+        if(root)
+        {
+            std::printf(
+                "field grid: cells=(%zu,%zu,%zu) cell_size=(%.9g,%.9g,%.9g) m "
+                "origin=(%.9g,%.9g,%.9g) m\n",
+                config.domain.cells[0], config.domain.cells[1], config.domain.cells[2],
+                config.domain.cellSize[0], config.domain.cellSize[1], config.domain.cellSize[2],
+                config.domain.origin[0], config.domain.origin[1], config.domain.origin[2]);
+            std::printf(
+                "placement: %s\n",
+                config.placement.centre == picBunch::Config::Placement::Centre::None
+                    ? "none (absolute input coordinates, no centroid shift)"
+                    : "centroid (charge-weighted centroid moved to placement.position)");
+            std::printf(
+                "fft mode: %s (%d rank%s; auto uses the distributed z-slab transform "
+                "for any multi-rank run)\n",
+                args.fftMode.c_str(), size, size == 1 ? "" : "s");
+        }
+
+        // One bunch per species entry.  Positions are placed with the same
+        // [placement] block and the field contributions are summed: the mesh
+        // field is linear in charge, so the sum is the field of the union of
+        // all species (precedent: the chunked accumulation in runChunked).
+        picBunch::Field totalField;
+        std::vector<picBunch::GeneratedParticles> generatedSpecies;
+        generatedSpecies.reserve(
+            config.picongpu.species.size() + config.picongpu.emptySpecies.size());
+        std::uint64_t inputIteration = 0;
+        bool haveIteration = false;
+        double readerMs = 0.0;
+        double computeMs = 0.0;
+        for(std::size_t s = 0; s < config.picongpu.species.size(); ++s)
+        {
+            std::string const& inputSpecies = config.picongpu.species[s];
+            std::string const& outputSpecies = config.picongpu.outputSpecies.empty()
+                ? inputSpecies
+                : config.picongpu.outputSpecies[s];
+            picBunch::BunchSelection selection;
+            selection.speciesName = inputSpecies;
+
+            // Rank 0 reads and every rank receives the replicated bunch, as on
+            // the CLI path.  Publish a root reader error before the first
+            // collective so peers cannot wait in the broadcast.
+            picBunch::BunchData bunchData;
+            std::string rootSetupError;
+            if(root)
+            {
+                try
+                {
+                    auto const readStart = Clock::now();
+                    bunchData = picBunch::readBunch(args.input, selection);
+                    readerMs += elapsedMs(readStart);
+                }
+                catch(std::exception const& error)
+                {
+                    rootSetupError = error.what();
+                }
+                catch(...)
+                {
+                    rootSetupError = "unknown error while reading the input";
+                }
+            }
+            std::string setupMessage = rootSetupError;
+            int const setupStatus = picBunch::mpiBroadcastRootSetupStatus(setupMessage, 0);
+            if(setupStatus != 0)
+                throw std::runtime_error(
+                    setupMessage.empty() ? "root setup failed" : setupMessage);
+            picBunch::mpiBroadcastBunch(bunchData.bunch, 0);
+            {
+                double meta[3] = {
+                    bunchData.time,
+                    bunchData.timeUnitSI,
+                    static_cast<double>(bunchData.iteration)};
+                picBunch::mpiBroadcast(meta, 3, 0);
+                if(!root)
+                {
+                    bunchData.time = meta[0];
+                    bunchData.timeUnitSI = meta[1];
+                    bunchData.iteration = static_cast<std::uint64_t>(meta[2]);
+                }
+            }
+            if(!haveIteration)
+            {
+                inputIteration = bunchData.iteration;
+                haveIteration = true;
+            }
+            else if(bunchData.iteration != inputIteration)
+                throw std::runtime_error(
+                    "configuration key 'picongpu.species': every species must come from "
+                    "the same input iteration; '" + inputSpecies + "' is at iteration "
+                    + std::to_string(bunchData.iteration) + ", expected "
+                    + std::to_string(inputIteration));
+            if(root)
+                std::printf(
+                    "read %zu particles (input species %s -> output species %s, iteration %llu)\n",
+                    bunchData.bunch.size(),
+                    inputSpecies.c_str(),
+                    outputSpecies.c_str(),
+                    static_cast<unsigned long long>(bunchData.iteration));
+
+            picBunch::PlacedBunch const placed
+                = picBunch::placeBunch(bunchData.bunch, config);
+            if(root)
+            {
+                std::printf(
+                    "  centroid (charge-weighted): (%.9g, %.9g, %.9g) m\n",
+                    placed.centroid[0], placed.centroid[1], placed.centroid[2]);
+                std::printf(
+                    "  target centre: (%.9g, %.9g, %.9g) m; shift: (%.9g, %.9g, %.9g) m\n",
+                    placed.targetCentre[0], placed.targetCentre[1], placed.targetCentre[2],
+                    placed.shift[0], placed.shift[1], placed.shift[2]);
+                std::printf(
+                    "  particle patch: offset=(%lld,%lld,%lld) cells "
+                    "extent=(%llu,%llu,%llu) cells\n",
+                    static_cast<long long>(placed.patchOffset[0]),
+                    static_cast<long long>(placed.patchOffset[1]),
+                    static_cast<long long>(placed.patchOffset[2]),
+                    static_cast<unsigned long long>(placed.patchExtent[0]),
+                    static_cast<unsigned long long>(placed.patchExtent[1]),
+                    static_cast<unsigned long long>(placed.patchExtent[2]));
+            }
+
+            auto const speciesComputeStart = Clock::now();
+            picBunch::Field part = picBunch::computeField(placed.bunch, options);
+            computeMs += elapsedMs(speciesComputeStart);
+            if(totalField.data[0].empty())
+            {
+                totalField = std::move(part);
+            }
+            else
+            {
+                for(int c = 0; c < 6; ++c)
+                {
+                    if(totalField.data[c].size() != part.data[c].size())
+                        throw std::runtime_error(
+                            "configuration key 'picongpu.species': field sizes differ "
+                            "between species; every species must use the same grid");
+                    for(std::size_t l = 0; l < part.data[c].size(); ++l)
+                        totalField.data[c][l] += part.data[c][l];
+                }
+            }
+
+            picBunch::GeneratedParticles generated;
+            generated.species = outputSpecies;
+            generated.inputSpecies = inputSpecies;
+            generated.bunch = placed.bunch;
+            generated.domainOrigin = config.domain.origin;
+            generated.cellSize = config.domain.cellSize;
+            generated.patchOffset = placed.patchOffset;
+            generated.patchExtent = placed.patchExtent;
+            generated.patches = placed.patches;
+            generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
+            generated.unitCharge = config.picongpu.unitCharge;
+            generated.unitMass = config.picongpu.unitMass;
+            generated.fallbackMass = config.picongpu.unitMass;
+            generatedSpecies.push_back(std::move(generated));
+        }
+        if(totalField.data[0].empty())
+            throw std::runtime_error(
+                "configuration key 'picongpu.species': no species produced a field");
+
+        // Checkpoint-only species: never read from the input and written as a
+        // valid zero-particle group.  They always use a domain-covering patch,
+        // because there is no bunch from which to derive a bounding box.
+        for(auto const& emptySpecies : config.picongpu.emptySpecies)
+        {
+            picBunch::GeneratedParticles generated;
+            generated.species = emptySpecies;
+            generated.empty = true;
+            generated.domainOrigin = config.domain.origin;
+            generated.cellSize = config.domain.cellSize;
+            generated.patchOffset = picBunch::IVec3{0, 0, 0};
+            generated.patchExtent = picBunch::UVec3{
+                config.domain.cells[0], config.domain.cells[1], config.domain.cells[2]};
+            generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
+            generated.unitCharge = config.picongpu.unitCharge;
+            generated.unitMass = config.picongpu.unitMass;
+            generated.fallbackMass = config.picongpu.unitMass;
+            generatedSpecies.push_back(std::move(generated));
+            if(root)
+                std::printf(
+                    "checkpoint-only species %s: 0 particles (never read from the input)\n",
+                    emptySpecies.c_str());
+        }
+
+        if(root)
+            std::printf(
+                "compute wall (field only, rank 0): %.3f ms; reader %.3f ms\n",
+                computeMs,
+                readerMs);
+        bool const distributedLayout = size > 1 && totalField.zSlab;
+        if(root)
+            std::printf(
+                "field layout: %s\n",
+                distributedLayout ? "distributed (one z-slab per rank)"
+                                  : "replicated (full field on every rank)");
+        // The checkpoint writer needs the full field.  A distributed run
+        // gathers the rank-local z-slabs on rank 0 (no rank ever allocated the
+        // full box during the transform) and writes one full-shape record
+        // component per field component.  A replicated run already owns it.
+        if(totalField.zSlab)
+        {
+            auto const gatherStart = Clock::now();
+            picBunch::mpiGatherFieldSlabs(totalField, 0);
+            if(root)
+                std::printf(
+                    "checkpoint gather: %d z-slab(s) onto rank 0 in %.3f ms\n",
+                    size,
+                    elapsedMs(gatherStart));
+        }
 
         picBunch::PicOnGPUWriteOptions restart;
         restart.step = config.picongpu.step;
         restart.directory = *args.destination;
         restart.inputFile = args.input;
-        restart.inputIteration = bunchData.iteration;
-        restart.species = config.picongpu.species;
+        restart.inputIteration = inputIteration;
+        restart.requiredInputSpecies = config.picongpu.species;
         restart.time = static_cast<double>(config.picongpu.step) * config.picongpu.dt;
         restart.timeUnitSI = 1.0;
         restart.dt = config.picongpu.dt;
@@ -701,28 +935,62 @@ namespace
         restart.unitMass = config.picongpu.unitMass;
         restart.unitCharge = config.picongpu.unitCharge;
         restart.float64 = config.picongpu.float64;
+        restart.generatedSpecies = std::move(generatedSpecies);
+        restart.backend = config.checkpoint.backend == "adios2"
+            ? picBunch::CheckpointBackend::Adios2
+            : config.checkpoint.backend == "hdf5"
+            ? picBunch::CheckpointBackend::Hdf5
+            : picBunch::CheckpointBackend::Auto;
+        // Resolve the Auto backend from the destination path: a ``.bp5``
+        // directory selects ADIOS2, a ``.h5`` directory selects HDF5.  Both
+        // backends are written through the same openPMD-Series writer, so the
+        // on-disk structure is identical apart from the container format.
+        if(restart.backend == picBunch::CheckpointBackend::Auto)
+        {
+            std::string const dest = *args.destination;
+            bool const isBp5
+                = dest.size() >= 4u && dest.compare(dest.size() - 4u, 4u, ".bp5") == 0;
+            restart.backend
+                = isBp5 ? picBunch::CheckpointBackend::Adios2
+                        : picBunch::CheckpointBackend::Hdf5;
+        }
 
-        picBunch::GeneratedParticles generated;
-        generated.species = config.picongpu.species;
-        generated.bunch = placed.bunch;
-        generated.domainOrigin = config.domain.origin;
-        generated.cellSize = config.domain.cellSize;
-        generated.patchOffset = placed.patchOffset;
-        generated.patchExtent = placed.patchExtent;
-        generated.patches = placed.patches;
-        generated.unitMassSpeed = config.picongpu.unitMass * config.picongpu.unitSpeed;
-        generated.unitCharge = config.picongpu.unitCharge;
-        generated.unitMass = config.picongpu.unitMass;
-        generated.fallbackMass = config.picongpu.unitMass;
-        restart.generatedParticles = generated;
-
-        picBunch::writePicOnGPUCheckpoint(field, restart);
-        std::printf(
-            "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
-            static_cast<unsigned long long>(config.picongpu.step),
-            args.destination->c_str(),
-            config.picongpu.float64 ? "float64" : "float32",
-            config.picongpu.float64 ? "float64" : "float32");
+        // Both the HDF5 and the ADIOS2/BP5 backend go through the openPMD
+        // writer, so the two outputs carry the same tree and the same
+        // full-shape per-component field records.  Only rank 0 writes: it
+        // holds the gathered (or replicated) full field and the particle
+        // records, and a single Series avoids duplicate collective chunks.
+        std::string writerMessage;
+        if(root)
+        {
+            try
+            {
+                auto const writerStart = Clock::now();
+                picBunch::writePicOnGPUCheckpointOpenPMD(totalField, restart);
+                std::printf(
+                    "writer wall (checkpoint, rank 0): %.3f ms\n",
+                    elapsedMs(writerStart));
+                std::printf(
+                    "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
+                    static_cast<unsigned long long>(config.picongpu.step),
+                    args.destination->c_str(),
+                    config.picongpu.float64 ? "float64" : "float32",
+                    config.picongpu.float64 ? "float64" : "float32");
+            }
+            catch(std::exception const& error)
+            {
+                writerMessage = error.what();
+            }
+            catch(...)
+            {
+                writerMessage = "unknown exception in the checkpoint writer";
+            }
+        }
+        // Publish the root writer outcome so peers cannot wait forever.
+        int const writerStatus = picBunch::mpiBroadcastRootSetupStatus(writerMessage, 0);
+        if(writerStatus != 0)
+            throw std::runtime_error(
+                writerMessage.empty() ? "checkpoint writer failed" : writerMessage);
         return 0;
     }
 
@@ -1078,6 +1346,11 @@ int main(int argc, char** argv)
     if(args.fftSpectrumCacheMiB)
         picBunch::detail::setFftSpectrumCacheLimitMiB(*args.fftSpectrumCacheMiB);
 
+    // MPI must be initialised before the configured path, because that path
+    // now builds the rank context before makeGrid (the per-rank padded-node
+    // cap scales with the rank count there just as it does on the CLI path).
+    picBunch::MpiGuard mpiRuntime(argc, argv);
+
     if(args.config)
     {
         try
@@ -1091,7 +1364,6 @@ int main(int argc, char** argv)
         }
     }
 
-    picBunch::MpiGuard mpiRuntime(argc, argv);
     if(args.maxParticleChunkGb > 0.0)
     {
         try
@@ -1685,21 +1957,24 @@ int main(int argc, char** argv)
             restart.inputFile = args.input;
             restart.inputIteration = bunchData.iteration;
             if(args.picongpuSpecies)
-                restart.species = *args.picongpuSpecies;
+                restart.requiredInputSpecies = {*args.picongpuSpecies};
             else if(args.species && !isInteger(*args.species))
-                restart.species = *args.species;
+                restart.requiredInputSpecies = {*args.species};
             restart.time = bunchData.time;
             restart.timeUnitSI = bunchData.timeUnitSI;
             restart.dt = args.picongpuDt;
             restart.unitLength = *args.unitLength;
             restart.unitEField = *args.unitEField;
             restart.unitBField = *args.unitBField;
+            // The legacy CLI path has no path-derived backend; write HDF5
+            // through the same openPMD-Series writer as the configured path.
+            restart.backend = picBunch::CheckpointBackend::Hdf5;
             // The writer derives nextId from the particles actually copied, so
             // the id range covers every species.  Do not override it with the
             // size of the bunch species read for the field calculation.
 
             auto const writerStart = Clock::now();
-            picBunch::writePicOnGPUCheckpoint(field, restart);
+            picBunch::writePicOnGPUCheckpointOpenPMD(field, restart);
             times.writerMs = elapsedMs(writerStart);
             std::printf(
                 "wrote PIConGPU restart checkpoint %s/%s_%06llu.h5 (step %llu)\n",

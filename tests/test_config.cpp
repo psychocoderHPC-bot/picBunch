@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
+#include "picBunch/Compute.hpp"
 #include "picBunch/Config.hpp"
+#include "picBunch/Mpi.hpp"
 #include "picBunch/Placement.hpp"
 #include "picBunch/Types.hpp"
 
@@ -11,6 +13,37 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
+
+#if defined(PICBUNCH_ENABLE_MPI)
+#    include <mpi.h>
+
+namespace
+{
+    void ensureMpiInitialised()
+    {
+        int initialised = 0;
+        MPI_Initialized(&initialised);
+        if(!initialised)
+            MPI_Init(nullptr, nullptr);
+    }
+
+    // gtest_main returns without MPI_Finalize; finalise once at process exit.
+    struct ConfigMpiFinalizer
+    {
+        ~ConfigMpiFinalizer()
+        {
+            int initialised = 0;
+            int finalised = 0;
+            MPI_Initialized(&initialised);
+            MPI_Finalized(&finalised);
+            if(initialised && !finalised)
+                MPI_Finalize();
+        }
+    };
+    ConfigMpiFinalizer g_configMpiFinalizer;
+} // namespace
+#endif
 
 namespace
 {
@@ -84,7 +117,9 @@ TEST(Config, ParsesEveryRequiredKey)
     EXPECT_DOUBLE_EQ(config.picongpu.dt, 1.0e-15);
     EXPECT_EQ(config.picongpu.step, 42u);
     EXPECT_TRUE(config.picongpu.float64);
-    EXPECT_EQ(config.picongpu.species, "electrons");
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"electrons"}));
+    EXPECT_TRUE(config.picongpu.outputSpecies.empty());
+    EXPECT_TRUE(config.picongpu.emptySpecies.empty());
     EXPECT_EQ(config.domain.cells, (picBunch::Idx3{32, 24, 16}));
     EXPECT_DOUBLE_EQ(config.domain.cellSize[0], 1.0e-7);
     EXPECT_DOUBLE_EQ(config.domain.origin[0], 1.0e-6);
@@ -503,4 +538,298 @@ TEST(Config, PositionDrivesTargetCentreFromDomainOrigin)
         EXPECT_NEAR(placed.centroid[a], target[a], 1e-18);
         EXPECT_NEAR(placed.shift[a], 0.0, 1e-18);
     }
+}
+
+TEST(Config, SpeciesListIsOrderedAndOutputNamesOptional)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\", \"ions\"]\noutput_species = [\"e\", \"i\"]");
+    auto const config = picBunch::loadConfig(fixture.write("species-list.toml", text));
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"b", "ions"}));
+    EXPECT_EQ(config.picongpu.outputSpecies, (std::vector<std::string>{"e", "i"}));
+    EXPECT_TRUE(config.picongpu.emptySpecies.empty());
+}
+
+TEST(Config, EmptySpeciesParsesAndIsNeverAGeneratedName)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\nempty_species = [\"e\", \"protons\"]");
+    auto const config = picBunch::loadConfig(fixture.write("empty-species.toml", text));
+    EXPECT_EQ(config.picongpu.species, (std::vector<std::string>{"b"}));
+    EXPECT_EQ(config.picongpu.emptySpecies, (std::vector<std::string>{"e", "protons"}));
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, RejectsSpeciesThatIsBothFilledAndEmpty)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\nempty_species = [\"b\"]");
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("overlap.toml", text));
+        FAIL() << "expected a validation error";
+    }
+    catch(std::runtime_error const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("empty_species"), std::string::npos) << message;
+        EXPECT_NE(message.find("'b'"), std::string::npos) << message;
+    }
+}
+
+TEST(Config, RejectsOutputSpeciesLengthMismatch)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\"]\noutput_species = [\"e\", \"f\"]");
+    try
+    {
+        (void)picBunch::loadConfig(fixture.write("output-mismatch.toml", text));
+        FAIL() << "expected a validation error";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("output_species"), std::string::npos)
+            << error.what();
+    }
+}
+
+TEST(Config, RejectsDuplicateSpecies)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "species = \"electrons\"", "species = [\"b\", \"b\"]");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("duplicate.toml", text)),
+        std::runtime_error);
+}
+
+TEST(Config, PlacementCenterNoneMakesPositionOptional)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "position = [0.5, 0.25, 0.75]\n", "");
+    replaceOnce(text, "offset_unit = \"fraction\"\n", "");
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"none\"");
+    auto const config = picBunch::loadConfig(fixture.write("center-none.toml", text));
+    EXPECT_EQ(
+        static_cast<int>(config.placement.centre),
+        static_cast<int>(picBunch::Config::Placement::Centre::None));
+    // position/offset_unit are optional in this mode; nothing is reported.
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, PlacementCenterNoneWarnsThatPositionIsIgnored)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"none\"");
+    auto const config = picBunch::loadConfig(fixture.write("center-none-pos.toml", text));
+    ASSERT_EQ(config.warnings.size(), 1u);
+    EXPECT_NE(config.warnings[0].find("placement.position"), std::string::npos);
+    EXPECT_NE(config.warnings[0].find("ignored"), std::string::npos);
+}
+
+TEST(Config, PlacementCenterDefaultIsCentroid)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write("center-default.toml", fullConfig));
+    EXPECT_EQ(
+        static_cast<int>(config.placement.centre),
+        static_cast<int>(picBunch::Config::Placement::Centre::Centroid));
+}
+
+TEST(Config, RejectsUnknownPlacementCenter)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"middle\"");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("center-bad.toml", text)),
+        std::runtime_error);
+}
+
+TEST(Config, StrictAcceptsSpeciesListAndCenterKeys)
+{
+    ConfigTest fixture;
+    std::string text = std::string("strict = true\n") + fullConfig;
+    replaceOnce(
+        text,
+        "species = \"electrons\"",
+        "species = [\"b\", \"ions\"]\noutput_species = [\"e\", \"i\"]\nempty_species = [\"protons\"]");
+    replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"centroid\"");
+    EXPECT_NO_THROW((void)picBunch::loadConfig(fixture.write("strict-new-keys.toml", text)));
+}
+
+TEST(Config, CheckpointBackendDefaultsToAuto)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write("default.toml", fullConfig));
+    EXPECT_EQ(config.checkpoint.backend, "auto");
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, CheckpointBackendParsesAndIsAKnownTable)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write(
+        "adios2.toml", fullConfig + "\n[checkpoint]\nbackend = \"ADIOS2\"\n"));
+    EXPECT_EQ(config.checkpoint.backend, "adios2");
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, CheckpointBackendRejectsUnknownValue)
+{
+    ConfigTest fixture;
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write(
+            "bad.toml", fullConfig + "\n[checkpoint]\nbackend = \"raw\"\n")),
+        std::runtime_error);
+}
+
+namespace
+{
+    // makeGrid only reads rank/size from the context, so a fake multi-rank
+    // context exercises the cap rule without launching MPI.
+    struct FakeParallelContext final : picBunch::ParallelContext
+    {
+        explicit FakeParallelContext(int ranks)
+        {
+            rank = 0;
+            size = ranks;
+        }
+    };
+
+    std::string capConfig(std::size_t nx, std::size_t ny, std::size_t nz)
+    {
+        return std::string("strict = true\n") + R"(
+[picongpu]
+delta_t = 1.9880352844493162e-17
+cell_size = [2.0e-7, 2.0e-7, 2.0e-7]
+base_mass = 9.1093837139e-31
+base_charge = -1.602176634e-19
+base_density = 1.0e24
+typical_particles_per_cell = 2
+step = 0
+precision = "float32"
+species = ["b"]
+
+[domain]
+cells = [)" + std::to_string(nx) + ", " + std::to_string(ny) + ", "
+            + std::to_string(nz) + R"(]
+origin = [0.0, 0.0, 0.0]
+cell_size = [2.0e-7, 2.0e-7, 2.0e-7]
+
+[placement]
+patch = "domain"
+center = "none"
+
+[accuracy]
+tolerance = 1.0e-3
+near_shell = "none"
+)";
+    }
+
+    // One particle at the domain centre keeps makeGrid's containment check
+    // satisfied without any I/O.
+    picBunch::Bunch centredParticle(picBunch::ComputeOptions const& options)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        auto const& cells = *options.gridSize;
+        auto const& origin = *options.gridOrigin;
+        bunch.x[0] = origin[0] + 0.5 * static_cast<double>(cells[0]) * options.cellSize[0];
+        bunch.y[0] = origin[1] + 0.5 * static_cast<double>(cells[1]) * options.cellSize[1];
+        bunch.z[0] = origin[2] + 0.5 * static_cast<double>(cells[2]) * options.cellSize[2];
+        bunch.ux[0] = 0.0;
+        bunch.uy[0] = 0.0;
+        bunch.uz[0] = 0.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = -1.602176634e-19;
+        return bunch;
+    }
+
+    // Each MPI rank writes its own copy: the shared ConfigTest directory
+    // cannot be removed by two processes at the same time.
+    std::string writeRankUnique(std::string const& name, std::string const& text)
+    {
+        namespace fs = std::filesystem;
+        fs::path const directory = fs::temp_directory_path()
+            / ("picbunch-config-mpi-" + std::to_string(picBunch::mpiRank()));
+        fs::remove_all(directory);
+        fs::create_directories(directory);
+        fs::path const path = directory / name;
+        std::ofstream output(path);
+        output << text;
+        return path.string();
+    }
+
+    picBunch::ComputeOptions optionsFromConfig(picBunch::Config const& config)
+    {
+        picBunch::ComputeOptions options;
+        options.tolerance = config.accuracy.tolerance;
+        options.cellSize = config.domain.cellSize;
+        options.gridSize = config.domain.cells;
+        options.gridOrigin = config.domain.origin;
+        options.fftMode = picBunch::FftMode::Auto;
+        return options;
+    }
+} // namespace
+
+TEST(Config, MultiRankTomlCapScalesByRankCount)
+{
+    // The medium case 440x800x480 at 2e-7 m has a padded box of 1.352e9 nodes,
+    // above the single-rank 2^28 cap.  A TOML-derived configuration with two
+    // ranks must be accepted (2^28 * 2 * 8 = 4.295e9) and rejected when the
+    // per-rank share exceeds that budget.
+    ConfigTest fixture;
+    auto const medium = picBunch::loadConfig(fixture.write("medium.toml", capConfig(440, 800, 480)));
+    auto const options = optionsFromConfig(medium);
+    picBunch::Bunch const bunch = centredParticle(options);
+
+    FakeParallelContext const oneRank(1);
+    picBunch::ComputeOptions single = options;
+    single.parallel = &oneRank;
+    EXPECT_THROW(
+        (void)picBunch::makeGrid(bunch, single),
+        std::runtime_error);
+
+    FakeParallelContext const twoRanks(2);
+    picBunch::ComputeOptions pair = options;
+    pair.parallel = &twoRanks;
+    picBunch::Grid accepted;
+    EXPECT_NO_THROW(accepted = picBunch::makeGrid(bunch, pair));
+    EXPECT_EQ(accepted.n, (picBunch::Idx3{440, 800, 480}));
+
+    // 880x1600x960 cells pad to 1.081e10 nodes, above the two-rank budget.
+    auto const tooBig = picBunch::loadConfig(fixture.write("big.toml", capConfig(880, 1600, 960)));
+    picBunch::ComputeOptions big = optionsFromConfig(tooBig);
+    picBunch::Bunch const bigBunch = centredParticle(big);
+    big.parallel = &twoRanks;
+    EXPECT_THROW((void)picBunch::makeGrid(bigBunch, big), std::runtime_error);
+}
+
+TEST(Config, MultiRankTomlCapRealContext)
+{
+    // The same rule through the real MPI context.  Run under ``mpirun -n 2``;
+    // a serial CTest invocation skips the multi-rank assertion.
+#if defined(PICBUNCH_ENABLE_MPI)
+    ensureMpiInitialised();
+#endif
+    if(picBunch::mpiSize() < 2)
+        GTEST_SKIP() << "run under 'mpirun -n 2' for the multi-rank context check";
+
+    auto const medium = picBunch::loadConfig(
+        writeRankUnique("medium-real.toml", capConfig(440, 800, 480)));
+    picBunch::ComputeOptions options = optionsFromConfig(medium);
+    picBunch::Bunch const bunch = centredParticle(options);
+    picBunch::MpiParallelContext parallel;
+    options.parallel = &parallel;
+    EXPECT_NO_THROW({
+        picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+        EXPECT_EQ(grid.n, (picBunch::Idx3{440, 800, 480}));
+    });
 }

@@ -89,6 +89,14 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MpiFailure.SetupStatusReportsRootErrorOnEveryRank
             )
+            # The configured path must see the rank context before makeGrid so
+            # the per-rank padded-node cap scales with the rank count.
+            add_test(
+                NAME picBunch.ConfigMultiRankCap
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=Config.MultiRankTomlCapRealContext
+            )
             add_test(
                 NAME picBunch.MpiInvalidInput
                 COMMAND
@@ -162,6 +170,16 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/verify/check_picongpu_restart.py
                 --writer $<TARGET_FILE:picBunchWriteRestartSample>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        # End-to-end species list: two species summed, a checkpoint-only empty
+        # species, and disjoint generated ids through the real config path.
+        add_test(
+            NAME picBunch.SpeciesCli
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/species_cli.py
+                --app $<TARGET_FILE:picBunchApp>
+                --workdir ${CMAKE_CURRENT_BINARY_DIR}/species-cli
         )
         # End-to-end exercise of the shipped binary: --near-shell exact must be
         # accepted by the parser and must change the field inside the shell.

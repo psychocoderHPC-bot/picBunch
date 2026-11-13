@@ -58,11 +58,27 @@ namespace picBunch
     PlacedBunch placeBunch(Bunch const& bunch, Config const& config)
     {
         PlacedBunch result;
-        result.centroid = chargeWeightedCentroid(bunch);
-        result.boundingCentre = boundingBoxCentre(bunch);
+        bool const keepAbsolute
+            = config.placement.centre == Config::Placement::Centre::None;
+        // ``centre = "none"`` keeps the absolute input coordinates: there is no
+        // centroid shift, so the requested target is the input centroid and the
+        // shift is exactly zero.  An empty bunch has no centroid at all; it is
+        // only reachable through the checkpoint-only ``empty_species`` path,
+        // which never calls this function.
+        if(bunch.size() > 0u)
+        {
+            result.centroid = chargeWeightedCentroid(bunch);
+            result.boundingCentre = boundingBoxCentre(bunch);
+        }
 
         for(int a = 0; a < 3; ++a)
         {
+            if(keepAbsolute)
+            {
+                result.targetCentre[a] = result.centroid[a];
+                result.shift[a] = 0.0;
+                continue;
+            }
             double const extent = static_cast<double>(config.domain.cells[a]) * config.domain.cellSize[a];
             double const requested = config.placement.fraction
                 ? config.placement.offset[a] * extent

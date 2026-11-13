@@ -192,6 +192,17 @@ if(NOT openPMD_HAVE_HDF5)
     )
 endif()
 message(STATUS "picBunch: openPMD-api ${openPMD_VERSION} (HDF5 backend: yes)")
+if(NOT openPMD_HAVE_ADIOS2)
+    message(
+        WARNING
+        "openPMD-api ${openPMD_VERSION} at ${openPMD_DIR} was built WITHOUT the ADIOS2 "
+        "backend (openPMD_HAVE_ADIOS2=FALSE). HDF5 input stays fully supported, but a "
+        "BP5/BP directory input (e.g. particles_000000.bp5) will be rejected with a clear "
+        "error. Point openPMD_DIR at an ADIOS2-enabled install to read BP5."
+    )
+else()
+    message(STATUS "picBunch: openPMD-api ${openPMD_VERSION} (ADIOS2 backend: yes)")
+endif()
 
 # ---------------------------------------------------------------------------
 # Sanitizers
@@ -257,6 +268,7 @@ add_library(
     src/Config.cpp
     src/OpenPMD.cpp
     src/OpenPMDWrite.cpp
+    src/OpenPMDWriteOpenPMD.cpp
     src/Mpi.cpp
     src/Placement.cpp
 )

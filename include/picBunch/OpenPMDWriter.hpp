@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -104,6 +105,28 @@ namespace picBunch
      * HDF5 openPMD 1.1 file-based iteration, float32 fields in PIConGPU internal
      * units, and the input particle species copied with its attributes intact.
      */
+    /*! Checkpoint output backend.
+     *
+     * The checkpoint is an openPMD Series.  ``Hdf5`` writes a single
+     * ``<prefix>_%06T.h5`` file (the openPMD HDF5 backend, the historical
+     * default and the most widely tested restart path).  ``Adios2`` writes a
+     * ``<prefix>_%06T.bp5`` directory (the openPMD ADIOS2/BP5 backend).  Both
+     * produce an identical openPMD tree (one dataset per field component,
+     * identical attributes) that PIConGPU's openPMD restart reads by file
+     * extension: set ``openPMD.ext = bp5`` on the PIConGPU side to restart from
+     * an ADIOS2 checkpoint.
+     *
+     * ``Auto`` derives the backend from the output path: a ``.bp5`` directory
+     * selects ADIOS2, a ``.h5`` file selects HDF5, and any other destination
+     * falls back to HDF5 (the openPMD default extension).
+     */
+    enum class CheckpointBackend
+    {
+        Auto,
+        Hdf5,
+        Adios2
+    };
+
     /** One species reconstructed from a bunch at its placed position.
      *
      * The writer creates the particle group instead of copying it from the
@@ -121,7 +144,19 @@ namespace picBunch
      */
     struct GeneratedParticles
     {
+        //! Output particle group name written into the checkpoint.
         std::string species;
+        //! Input group name this entry is reconstructed from.  Empty means
+        //! ``species`` (the historical single-species behaviour).  Ignored when
+        //! ``empty`` is set.
+        std::string inputSpecies;
+        /*! Write a checkpoint-only group with zero particles.
+         *
+         * The entry is never read from the input file and ``bunch`` stays empty.
+         * It carries the six standard records as empty datasets and one
+         * domain-covering ``particlePatches`` row with ``numParticles = 0``.
+         */
+        bool empty = false;
         Bunch bunch; //!< positions already shifted to the placement
         Vec3 domainOrigin{0.0, 0.0, 0.0}; //!< SI metres
         Vec3 cellSize{1.0, 1.0, 1.0}; //!< SI metres
@@ -155,11 +190,13 @@ namespace picBunch
         std::string inputFile;
         //! Iteration index used to locate the source particle group.
         std::uint64_t inputIteration = 0;
-        /*! Particle species group name to require in the input iteration.
-         * Empty disables the check.  Every species present is copied; a
-         * multi-species checkpoint needs all of them for a PIConGPU restart.
+        /*! Input particle species groups that must exist in the input
+         * iteration.  Empty disables the check.  Every other species present is
+         * copied; a multi-species checkpoint needs all of them for a PIConGPU
+         * restart.  A generated species consumes its ``inputSpecies`` group
+         * instead of copying it.
          */
-        std::string species;
+        std::vector<std::string> requiredInputSpecies;
         double time = 0.0;
         double timeUnitSI = 1.0;
         //! Stored ``dt`` attribute in units of ``timeUnitSI`` (not converted).
@@ -185,9 +222,13 @@ namespace picBunch
         //! stores at least the total number of particles copied across all
         //! species, so it is never written smaller.
         std::uint64_t nextId = 0;
-        //! When set, this species is reconstructed from particles instead of
-        //! copied raw.  Every other input species is still copied.
-        std::optional<GeneratedParticles> generatedParticles;
+        /*! Species reconstructed from particles instead of copied raw.
+         *
+         * Entries with ``inputSpecies`` set consume that input group (it is not
+         * copied).  Entries with ``empty`` set are checkpoint-only.  Every
+         * other input species is still copied.
+         */
+        std::vector<GeneratedParticles> generatedSpecies;
         /*! Write every field component and every particle property record in
          *  float64 instead of the default float32.  ``positionOffset`` stays
          *  int32 and ``id`` stays uint64.  A stock PIConGPU cannot load double
@@ -195,7 +236,20 @@ namespace picBunch
          *  ``picBunchPrecisionWarning`` root attribute.
          */
         bool float64 = false;
+        /*! Checkpoint output backend (see ``CheckpointBackend``).
+         *
+         * ``Auto`` (the default) derives the backend from the output path and
+         * keeps the historical ``.h5`` output for a destination that is neither
+         * a ``.bp5`` directory nor a ``.h5`` file.  ``Hdf5`` forces the ``.h5``
+         * file; ``Adios2`` forces the ``.bp5`` directory.  The value is resolved
+         * once and both the file name and the openPMD backend used for the
+         * write follow it.
+         */
+        CheckpointBackend backend = CheckpointBackend::Auto;
     };
+
+    //! Append ``step`` to ``<directory>/checkpoints.txt`` (idempotent).
+    void appendCheckpointStep(std::filesystem::path const& directory, std::uint64_t step);
 
     /** Write one PIConGPU checkpoint-restart iteration.
 
@@ -215,7 +269,11 @@ namespace picBunch
      *    ``nextId >= total particles`` over all copied species;
      *  - ``particles/<species>`` for every species in the input iteration,
      *    copied from its input group and normalized to the configured precision,
-     *    including ``particlePatches`` when present.
+     *    including ``particlePatches`` when present;
+     *  - every ``generatedSpecies`` entry as its own group.  Generated ids are
+     *    disjoint across the list and never overlap the copied range
+     *    ``[0, copiedCount)``.  An ``empty`` entry is a valid zero-particle
+     *    group.
 
      * Record attributes survive the copy; the numeric datasets are rewritten
      * to the configured precision so a checkpoint never mixes dtypes.  Missing
@@ -228,5 +286,21 @@ namespace picBunch
      *         a missing input particle group, or an HDF5 failure.
      */
     void writePicOnGPUCheckpoint(Field const& field, PicOnGPUWriteOptions const& options);
+
+    /** openPMD-Series checkpoint writer (HDF5 and ADIOS2/BP5 backends).
+     *
+     * Writes the PIConGPU-restart tree through the backend-agnostic openPMD
+     * C++ API, so one code path produces an identical openPMD layout for both
+     * ``.h5`` (HDF5 backend) and ``.bp5`` (ADIOS2 backend).  The backend is
+     * resolved from ``options.backend`` and the output path (see
+     * ``CheckpointBackend``).  Every field component is one full-shape
+     * ``(Nz, Ny, Nx)`` record component.
+     *
+     * @throws std::invalid_argument or std::runtime_error on missing units,
+     *         a field that does not match the grid, or an openPMD failure.
+     */
+    void writePicOnGPUCheckpointOpenPMD(
+        Field const& field,
+        PicOnGPUWriteOptions const& options);
 
 } // namespace picBunch
