@@ -59,8 +59,6 @@
 
 namespace
 {
-    double const kPi = 3.141592653589793238462643383279502884;
-
     // Current tab:fast (docs/paper/sec_accuracy.tex as of the pre-publication
     // revision at commit 7a292eb): worst per-component relative error, per
     // configuration and region.  The interior entries are the measured limits

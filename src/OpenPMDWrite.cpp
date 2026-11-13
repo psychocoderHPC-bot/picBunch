@@ -611,7 +611,7 @@ namespace picBunch
                                 static_cast<openPMD::Extent::value_type>(ny),
                                 static_cast<openPMD::Extent::value_type>(nx)};
                             openPMD::Offset const chunkOffset{thisBegin, 0, 0};
-                            auto buffer = std::make_shared<double[]>(tile.size());
+                            auto buffer = std::shared_ptr<double[]>(new double[tile.size()]());
                             std::copy(tile.begin(), tile.end(), buffer.get());
                             component.storeChunk(buffer, chunkOffset, chunkExtent);
                         }
@@ -968,8 +968,17 @@ namespace picBunch
         {
             if(!linkExists(file, path))
                 return false;
+#if H5_VERSION_GE(1, 12, 0)
+            H5O_info2_t info;
+            checked(
+                H5Oget_info_by_name3(file, path.c_str(), &info, H5O_INFO_BASIC, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+#else
             H5O_info_t info;
-            checked(H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT), "H5Oget_info_by_name");
+            checked(
+                H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+#endif
             if(info.type != H5O_TYPE_DATASET)
                 return false;
             hid_t dataset = checked(H5Dopen2(file, path.c_str(), H5P_DEFAULT), "H5Dopen2");
@@ -1038,8 +1047,15 @@ namespace picBunch
 
         void copyAttributes(hid_t source, hid_t destination, bool skipExisting = false)
         {
+#if H5_VERSION_GE(1, 12, 0)
+            H5O_info2_t info;
+            checked(
+                H5Oget_info3(source, &info, H5O_INFO_BASIC | H5O_INFO_NUM_ATTRS),
+                "H5Oget_info");
+#else
             H5O_info_t info;
             checked(H5Oget_info(source, &info), "H5Oget_info");
+#endif
             for(hsize_t index = 0; index < info.num_attrs; ++index)
             {
                 hid_t attribute = checked(
@@ -1081,10 +1097,17 @@ namespace picBunch
         {
             if(H5Lexists(file, path.c_str(), H5P_DEFAULT) <= 0)
                 return;
+#if H5_VERSION_GE(1, 12, 0)
+            H5O_info2_t info;
+            checked(
+                H5Oget_info_by_name3(file, path.c_str(), &info, H5O_INFO_BASIC, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+#else
             H5O_info_t info;
             checked(
                 H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT),
                 "H5Oget_info_by_name");
+#endif
             if(info.type != H5O_TYPE_DATASET)
                 return;
             hid_t dataset = checked(H5Dopen2(file, path.c_str(), H5P_DEFAULT), "H5Dopen2");
@@ -1124,10 +1147,17 @@ namespace picBunch
         {
             if(H5Lexists(file, path.c_str(), H5P_DEFAULT) <= 0)
                 return;
+#if H5_VERSION_GE(1, 12, 0)
+            H5O_info2_t info;
+            checked(
+                H5Oget_info_by_name3(file, path.c_str(), &info, H5O_INFO_BASIC, H5P_DEFAULT),
+                "H5Oget_info_by_name");
+#else
             H5O_info_t info;
             checked(
                 H5Oget_info_by_name(file, path.c_str(), &info, H5P_DEFAULT),
                 "H5Oget_info_by_name");
+#endif
             if(info.type == H5O_TYPE_DATASET)
             {
                 if(float64)

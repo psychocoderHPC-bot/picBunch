@@ -23,8 +23,6 @@
 namespace
 {
     constexpr double kElementaryCharge = 1.602176634e-19;
-    constexpr double kElectronMass = 9.1093837015e-31;
-    constexpr double kSpeedOfLight = 299792458.0;
 
     std::vector<double> parseTriple(char const* text)
     {
