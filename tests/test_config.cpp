@@ -10,9 +10,11 @@
 
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -832,4 +834,111 @@ TEST(Config, MultiRankTomlCapRealContext)
         picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
         EXPECT_EQ(grid.n, (picBunch::Idx3{440, 800, 480}));
     });
+}
+
+namespace
+{
+    struct CliResult
+    {
+        int status = -1;
+        std::string output;
+    };
+
+    //! Run the production executable with an explicit argument string.
+    CliResult runCli(std::string const& arguments)
+    {
+        std::string const command
+            = std::string{"\""} + PICBUNCH_APP_PATH + "\" " + arguments + " 2>&1";
+        CliResult result;
+        FILE* pipe = ::popen(command.c_str(), "r");
+        EXPECT_NE(pipe, nullptr);
+        if(pipe != nullptr)
+        {
+            std::array<char, 4096> buffer{};
+            while(std::fgets(buffer.data(), buffer.size(), pipe) != nullptr)
+                result.output += buffer.data();
+            int const status = ::pclose(pipe);
+            result.status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        }
+        return result;
+    }
+} // namespace
+
+TEST(Config, CliReportsMissingValueInsteadOfSwallowingNextFlag)
+{
+    // The operator command that used to consume --velocity-bins as the value of
+    // --destination, shift every later argument and blame the wrong token.
+    auto const result = runCli(
+        "--config test.toml --input ../particles_000000.bp5 --destination "
+        "--velocity-bins 1 --fft-mode auto ../bunc.bp5");
+    EXPECT_EQ(result.status, 2) << result.output;
+    EXPECT_NE(
+        result.output.find(
+            "picBunch: error: option '--destination' requires a value "
+            "(got '--velocity-bins')"),
+        std::string::npos)
+        << result.output;
+}
+
+TEST(Config, CliReportsMissingValueAtEndOfCommandLine)
+{
+    auto const result = runCli("--input");
+    EXPECT_EQ(result.status, 2) << result.output;
+    EXPECT_NE(
+        result.output.find(
+            "picBunch: error: option '--input' requires a value "
+            "(end of command line)"),
+        std::string::npos)
+        << result.output;
+}
+
+TEST(Config, CliRejectsEmptyInlineValue)
+{
+    auto const result = runCli("--input=");
+    EXPECT_EQ(result.status, 2) << result.output;
+    EXPECT_NE(
+        result.output.find("picBunch: error: option '--input' requires a value (got '')"),
+        std::string::npos)
+        << result.output;
+}
+
+TEST(Config, CliConsumesNegativeNumericToken)
+{
+    // A single leading '-' is a value, not a flag.  --tolerance rejects the
+    // negative number itself, which proves the token reached the option.
+    auto const result
+        = runCli("--input /nonexistent/picbunch-cli-test.h5 --tolerance -1e-6");
+    EXPECT_EQ(result.status, 2) << result.output;
+    EXPECT_NE(
+        result.output.find("--tolerance must be finite and positive"),
+        std::string::npos)
+        << result.output;
+    EXPECT_EQ(result.output.find("requires a value"), std::string::npos)
+        << result.output;
+}
+
+TEST(Config, CliAcceptsNegativeOffsetValues)
+{
+    // Negative physical offsets start with a single '-' and must survive parsing.
+    auto const result = runCli(
+        "--input /nonexistent/picbunch-cli-test.h5 --cell-size 1e-6 "
+        "--grid 16,16,16 --origin -1e-6,-2e-6,-3e-6");
+    EXPECT_EQ(result.output.find("requires a value"), std::string::npos)
+        << result.output;
+    EXPECT_EQ(result.output.find("unknown option"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.status, 2) << result.output;
+}
+
+TEST(Config, CliAcceptsInlineValueThatStartsWithDoubleDash)
+{
+    // --option=value is the escape hatch for values that look like flags.
+    auto const result = runCli(
+        "--input=/nonexistent/picbunch-cli-test.h5 --species=--electron "
+        "--output-dir=--out");
+    EXPECT_EQ(result.output.find("unknown option"), std::string::npos)
+        << result.output;
+    EXPECT_EQ(result.output.find("requires a value"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.status, 2) << result.output;
 }
