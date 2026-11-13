@@ -183,6 +183,23 @@ example
 `the velocity-bin model requires at least 8388608 boxes for tolerance 0.001000
 (estimated error at 8388608 boxes: ...; at the 256-box cap: 1.867e-01)`.
 
+One exception keeps cold, nearly monoenergetic beams usable. Under the default
+cap the auto policy uses one box when the bunch is essentially single-velocity:
+the charge-weighted relative spread of `|u|` is at most `2%` and every particle
+is within `50 mrad` of the charge-weighted mean direction (the same
+representative the one-box path uses). The `gamma * Delta_theta` worst case can
+ask for millions of boxes for such a beam even though one velocity class is the
+physical model. The run prints one line with the measured spread and divergence
+and reports the one-box `modelError`. That estimate may exceed `--tolerance`;
+when it does the run proceeds with a warning rather than claiming the target is
+met, because the binning model is conservative for a cold relativistic beam (the
+operator's gamma-1101, 4.2 mrad bunch has a one-box estimate of `1.33e+01` and
+still runs). An explicit `--velocity-bins N` always wins, and a non-default
+`--max-velocity-bins` disables the fallback so an explicit infeasible cap still
+fails with the message above. A broad distribution, including the 5% energy
+spread and 5 degree angular calibration cases, does not meet the criterion and
+keeps the historical split-or-fail behaviour.
+
 ## Padding
 
 The free-space convolution needs zero padding. With `fftPadding = 1` the FFT
