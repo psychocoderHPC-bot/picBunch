@@ -50,7 +50,31 @@ set(_expect_success TRUE)
 if(CASE STREQUAL "documented-only")
     # default backend: CPU, host FFTW on, device FFTs off
 elseif(CASE STREQUAL "cuda-fftw-off")
-    list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ARCH=70 -DalpakaV_DEP_FFTW=OFF)
+    # sm_70 was dropped from nvcc 13, which rejects compute_70 at configure
+    # time; the contract this case pins is the backend switch, not a specific
+    # architecture, so probe the toolchain and use its lowest still-supported
+    # capability (70 before CUDA 13, 80 from it on).  The probe runs in this
+    # script, so it needs its own nvcc lookup: the PICBUNCH_TEST_NVCC cache
+    # entry from the test build tree is not visible here.
+    find_program(_nvcc NAMES nvcc)
+    if(NOT _nvcc)
+        message(FATAL_ERROR "cuda-fftw-off case: no nvcc found to probe the architecture")
+    endif()
+    execute_process(
+        COMMAND ${_nvcc} --version
+        OUTPUT_VARIABLE _nvcc_version OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_VARIABLE _nvcc_version_error ERROR_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _nvcc_version_status
+    )
+    if(NOT _nvcc_version MATCHES "release ([0-9]+)\."
+       AND NOT _nvcc_version_error MATCHES "release ([0-9]+)\.")
+        message(FATAL_ERROR "cuda-fftw-off case: cannot parse the nvcc version (rc ${_nvcc_version_status}): out='${_nvcc_version}' err='${_nvcc_version_error}'")
+    endif()
+    set(_probe_arch 80)
+    if(CMAKE_MATCH_1 LESS 13)
+        set(_probe_arch 70)
+    endif()
+    list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ARCH=${_probe_arch} -DalpakaV_DEP_FFTW=OFF)
 elseif(CASE STREQUAL "cuda-conflict")
     set(_expect_success FALSE)
     list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ENABLE_HIP=ON)

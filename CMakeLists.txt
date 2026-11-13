@@ -112,7 +112,9 @@ endif()
 if(PICBUNCH_ENABLE_CUDA)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
         if(PICBUNCH_ARCH STREQUAL "")
-            set(PICBUNCH_ARCH "70" CACHE STRING "" FORCE)
+            # 80: the lowest compute capability current nvcc (>= 13) still
+            # supports; nvcc 13 dropped 70, which no longer configures.
+            set(PICBUNCH_ARCH "80" CACHE STRING "" FORCE)
         endif()
         string(REGEX REPLACE "^sm_" "" _picbunch_cuda_arch "${PICBUNCH_ARCH}")
         set(CMAKE_CUDA_ARCHITECTURES "${_picbunch_cuda_arch}" CACHE STRING "CUDA architectures" FORCE)
