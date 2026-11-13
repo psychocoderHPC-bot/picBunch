@@ -50,7 +50,23 @@ set(_expect_success TRUE)
 if(CASE STREQUAL "documented-only")
     # default backend: CPU, host FFTW on, device FFTs off
 elseif(CASE STREQUAL "cuda-fftw-off")
-    list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ARCH=70 -DalpakaV_DEP_FFTW=OFF)
+    # sm_70 was dropped from nvcc 13, which rejects compute_70 at configure
+    # time; the contract this case pins is the backend switch, not a specific
+    # architecture, so probe the toolchain and use its lowest still-supported
+    # capability (70 before CUDA 13, 80 from it on).
+    execute_process(
+        COMMAND ${PICBUNCH_TEST_NVCC} --version
+        OUTPUT_VARIABLE _nvcc_version OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT _nvcc_version MATCHES "release ([0-9]+)\.")
+        message(FATAL_ERROR "cannot parse the nvcc version: '${_nvcc_version}'")
+    endif()
+    set(_probe_arch 80)
+    if(CMAKE_MATCH_1 LESS 13)
+        set(_probe_arch 70)
+    endif()
+    list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ARCH=${_probe_arch} -DalpakaV_DEP_FFTW=OFF)
 elseif(CASE STREQUAL "cuda-conflict")
     set(_expect_success FALSE)
     list(APPEND _args -DPICBUNCH_ENABLE_CUDA=ON -DPICBUNCH_ENABLE_HIP=ON)
