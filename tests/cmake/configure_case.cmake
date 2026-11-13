@@ -53,24 +53,22 @@ elseif(CASE STREQUAL "cuda-fftw-off")
     # sm_70 was dropped from nvcc 13, which rejects compute_70 at configure
     # time; the contract this case pins is the backend switch, not a specific
     # architecture, so probe the toolchain and use its lowest still-supported
-    # capability (70 before CUDA 13, 80 from it on).
+    # capability (70 before CUDA 13, 80 from it on).  The probe runs in this
+    # script, so it needs its own nvcc lookup: the PICBUNCH_TEST_NVCC cache
+    # entry from the test build tree is not visible here.
+    find_program(_nvcc NAMES nvcc)
+    if(NOT _nvcc)
+        message(FATAL_ERROR "cuda-fftw-off case: no nvcc found to probe the architecture")
+    endif()
     execute_process(
-        COMMAND ${PICBUNCH_TEST_NVCC} --version
+        COMMAND ${_nvcc} --version
         OUTPUT_VARIABLE _nvcc_version OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_VARIABLE _nvcc_version_error ERROR_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _nvcc_version_status
     )
-    # The banner (stdout, or stderr on some toolchains) must be parseable, so
-    # the arch probe never guesses; fail with both streams otherwise.
     if(NOT _nvcc_version MATCHES "release ([0-9]+)\."
        AND NOT _nvcc_version_error MATCHES "release ([0-9]+)\.")
-        file(WRITE "${WORK_DIR}/nvcc-probe-debug.log"
-            "nvcc probe failed in case '${CASE}'\n"
-            "nvcc path: '${PICBUNCH_TEST_NVCC}'\n"
-            "exit status: '${_nvcc_version_status}'\n"
-            "stdout: '${_nvcc_version}'\n"
-            "stderr: '${_nvcc_version_error}'\n")
-        message(FATAL_ERROR "cannot parse the nvcc version (rc ${_nvcc_version_status}); debug: ${WORK_DIR}/nvcc-probe-debug.log")
+        message(FATAL_ERROR "cuda-fftw-off case: cannot parse the nvcc version (rc ${_nvcc_version_status}): out='${_nvcc_version}' err='${_nvcc_version_error}'")
     endif()
     set(_probe_arch 80)
     if(CMAKE_MATCH_1 LESS 13)
