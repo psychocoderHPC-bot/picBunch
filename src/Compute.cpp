@@ -16,6 +16,7 @@
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
 #include "picBunch/Readout.hpp"
+#include "picBunch/detail/FieldGuard.hpp"
 #include "picBunch/detail/FftPlanCache.hpp"
 #include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/detail/SpectrumNorm.hpp"
@@ -44,6 +45,7 @@
 #    include <omp.h>
 #endif
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -222,7 +224,14 @@ namespace picBunch
                     };
                     std::uint32_t const key = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx
                         + wrap(cx, Mx);
-                    alpaka::onAcc::atomicAdd(acc, &counts[key], 1u);
+                    // The shared cursor contract is shifted by one: the host
+                    // histogram increments ``cursor[key + 1]`` and the prefix sum
+                    // then turns ``cursor[key]`` into the first slot of the bin.
+                    // Counting at ``key`` instead would leave the prefix sum
+                    // holding bin ends, so the scatter below would hand out
+                    // slots past the last bin and every bin range would be
+                    // shifted (a zero or corrupted deposit).
+                    alpaka::onAcc::atomicAdd(acc, &counts[key + 1u], 1u);
                 }
             }
         };
@@ -266,11 +275,12 @@ namespace picBunch
                     std::uint32_t const key = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx
                         + wrap(cx, Mx);
                     std::uint32_t const j = alpaka::onAcc::atomicAdd(acc, &cursor[key], 1u);
-                    ordered[j] = BinnedParticle{
-                        particle.tx - static_cast<double>(cx),
-                        particle.ty - static_cast<double>(cy),
-                        particle.tz - static_cast<double>(cz),
-                        particle.q};
+                    // Store the payload exactly as the host permutation does:
+                    // the absolute mesh coordinate.  The deposit kernel derives
+                    // the TSC argument itself as ``t - nearestNode``; pre-shifting
+                    // here would subtract the node twice and every weight would
+                    // fall outside the TSC support (a zero deposit).
+                    ordered[j] = BinnedParticle{particle.tx, particle.ty, particle.tz, particle.q};
                     // dPart is replaced by the ordered buffer below, so the
                     // deposit uses the identity permutation here.
                     slot[j] = j;
@@ -1753,6 +1763,10 @@ namespace picBunch
         for(std::size_t p = 0; p < bunch.size(); ++p)
             members[boxOf[p]].push_back(p);
 
+        // Net charge drives the zero-field post-condition below.  It is exact:
+        // a bunch whose weights and charges cancel to zero has no field.
+        double const netCharge = detail::totalCharge(bunch);
+
         Grid const grid = makeGrid(bunch, options);
         Field field;
         field.grid = grid;
@@ -1883,6 +1897,22 @@ namespace picBunch
             throw std::runtime_error(
                 "computeField: output node count " + std::to_string(outNodes)
                 + " exceeds the 32-bit gathered-index limit");
+
+        // Everything a zero-field report needs to identify the run.
+        auto const guardDescription = [&](Field const& result, char const* path) {
+            char const* const mode
+                = options.nearShell.mode == NearShellOptions::Mode::None ? "none" : "near-exact";
+            char const* const shape = result.grid.shape == Shape::CIC
+                ? "cic"
+                : (result.grid.shape == Shape::PQS ? "pqs" : "tsc");
+            std::ostringstream text;
+            text << "path=" << path << ", near_shell=" << mode << ", shape=" << shape
+                 << ", grid=" << result.grid.n[0] << "x" << result.grid.n[1] << "x"
+                 << result.grid.n[2] << " nodes, fft_padding=" << result.grid.fftPadding
+                 << ", particles=" << bunch.size() << ", velocity_boxes=" << binCount
+                 << ", layout=" << (useDistributed ? "distributed" : "replicated");
+            return text.str();
+        };
 
         // Serial host TSC deposit of a particle list, in list order.  Same
         // stencil as the device kernel, without atomicAdd's unspecified order.
@@ -2893,7 +2923,13 @@ namespace picBunch
                 }
             }
             if(vmField)
+            {
+                detail::abortOnEmptyChargedField(
+                    *vmField,
+                    netCharge,
+                    guardDescription(*vmField, "velocity-moment"));
                 return *vmField;
+            }
         }
 
         if(useDistributed)
@@ -3224,6 +3260,11 @@ namespace picBunch
             }
             times.fftMs += dfft.fftMilliseconds();
             times.transposeMs += dfft.transposeMilliseconds();
+            detail::abortOnEmptyChargedDistributedField(
+                field,
+                netCharge,
+                guardDescription(field, "distributed"),
+                *par);
             return field;
         }
 
@@ -3471,6 +3512,7 @@ namespace picBunch
             for(int c = 0; c < 6; ++c)
                 par->allreduceSum(field.data[c].data(), field.data[c].size());
 
+        detail::abortOnEmptyChargedField(field, netCharge, guardDescription(field, "replicated"));
         return field;
     }
 } // namespace picBunch
