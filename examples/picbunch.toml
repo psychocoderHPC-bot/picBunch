@@ -68,3 +68,9 @@ tolerance = 1.0e-3
 near_shell = "none"
 near_shell_radius = 0.0
 near_shell_tile = 0  # 0 = automatic near-set pair-count rule
+
+[checkpoint]
+# "auto" (default) derives the container from --destination: a .bp5 directory
+# selects ADIOS2/BP5, a .h5 directory selects HDF5. Both go through the same
+# openPMD writer and produce the same tree. "adios2" and "hdf5" force one.
+backend = "auto"

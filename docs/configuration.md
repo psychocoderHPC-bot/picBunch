@@ -160,6 +160,37 @@ accurate in-support: `none` is the safest default, `fast` is validated for stati
 and near-axial motion, and `exact` is an adaptive reference that is accurate except for
 a measured few-percent residual at the closest axial node.
 
+### `[checkpoint]`
+
+| key | required | meaning |
+| --- | --- | --- |
+| `backend` | no | `"auto"` (default), `"adios2"` or `"hdf5"`. `auto` derives the backend from `--destination`: a `.bp5` directory selects the ADIOS2/BP5 backend and a `.h5` directory selects the HDF5 backend. Both backends are written through the same openPMD-Series writer, so both produce the same tree: one full-shape `(Nz, Ny, Nx)` record component per field component, identical geometry and unit attributes, and the same particle records. PIConGPU selects the container with `--checkpoint.openPMD.ext bp5` (or `h5`). |
+
+## Chunked field computation is not supported
+
+picBunch does **not** ship a chunked or slab-tiled field-computation path, and
+there is no `accuracy.field_slab_planes` configuration key. A checkpoint is
+written only from a fully materialised field; the peak device memory is
+therefore the full padded FFT box plus the six output components (about 370
+bytes per grid cell on the reference small case, 400x160x440 cells at 2e-7 m;
+measured 10.5 GiB on the GV100). Host RSS on the same case was 1.6 GiB.
+
+The slab approach was implemented and measured, then removed. Two wrapper bugs
+were fixed first: a wrong `idist` that aliased every z-row, and a batched 2-D
+plan that never transformed z. The slab field still disagreed with the untiled
+reference: the relative E error was 0.45-0.67, and the spectral-curl B path
+overflowed to about `1e307` because the half-spectrum Hermitian symmetry is
+broken on the DC and Nyquist planes. That is a correctness gap, not a tuning
+problem, so the feature is not shippable.
+
+The correct future approach is a decomposition that preserves the global z
+spectrum: either a distributed FFT along z with the correct global halo, or an
+overlap-save scheme whose per-slab transform is embedded in the full-plane
+spectrum rather than an independent small transform. Any such path must prove
+all six components against the untiled field to a stated tolerance before it is
+accepted, and it must keep one full-shape record component per field component
+in the checkpoint.
+
 ## Particle patch and records
 
 The writer creates one particle patch for the species. With
