@@ -27,6 +27,16 @@
       }
     },
     {
+      "name": "cuda-sm80",
+      "displayName": "CUDA, A100/H100 (sm_80)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICBUNCH_ENABLE_CUDA": "ON",
+        "PICBUNCH_ARCH": "80"
+      }
+    },
+    {
       "name": "hip-gfx1100",
       "displayName": "HIP, Radeon RX 7900 (gfx1100)",
       "inherits": "base",
@@ -51,6 +61,10 @@
       "configurePreset": "cuda-v100"
     },
     {
+      "name": "cuda-sm80",
+      "configurePreset": "cuda-sm80"
+    },
+    {
       "name": "hip-gfx1100",
       "configurePreset": "hip-gfx1100"
     },
@@ -63,6 +77,13 @@
     {
       "name": "cuda-v100",
       "configurePreset": "cuda-v100",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cuda-sm80",
+      "configurePreset": "cuda-sm80",
       "output": {
         "outputOnFailure": true
       }
