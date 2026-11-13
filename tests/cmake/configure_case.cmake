@@ -60,11 +60,11 @@ elseif(CASE STREQUAL "cuda-fftw-off")
         ERROR_VARIABLE _nvcc_version_error ERROR_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _nvcc_version_status
     )
-    # nvcc prints the banner to stdout; the banner must be parseable, whatever
-    # the stream, so the arch probe never guesses.
-    if(NOT _nvcc_version_status EQUAL 0
-       AND NOT _nvcc_version MATCHES "release ([0-9]+)\.")
-        message(FATAL_ERROR "nvcc --version failed (rc ${_nvcc_version_status}): out='${_nvcc_version}' err='${_nvcc_version_error}'")
+    # The banner (stdout, or stderr on some toolchains) must be parseable, so
+    # the arch probe never guesses; fail with both streams otherwise.
+    if(NOT _nvcc_version MATCHES "release ([0-9]+)\."
+       AND NOT _nvcc_version_error MATCHES "release ([0-9]+)\.")
+        message(FATAL_ERROR "cannot parse the nvcc version (rc ${_nvcc_version_status}): out='${_nvcc_version}' err='${_nvcc_version_error}'")
     endif()
     set(_probe_arch 80)
     if(CMAKE_MATCH_1 LESS 13)
