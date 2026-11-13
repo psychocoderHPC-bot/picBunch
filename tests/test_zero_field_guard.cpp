@@ -233,3 +233,40 @@ TEST(ZeroFieldGuard, ZeroChargeBunchIsRejectedBeforeTheFieldSolve)
         bunch.charge[p] = 0.0;
     EXPECT_THROW(picBunch::computeField(bunch, optionsFor(16u, 1.0)), std::runtime_error);
 }
+
+TEST(ZeroFieldGuard, RelativisticMeshFieldIsNonZeroAndFastTilesStayBounded)
+{
+    // The deposit regression above pins the binned path against the
+    // deterministic reference for a near-stationary bunch.  The same fixed
+    // deposit must also deliver a finite, non-zero field for a relativistic
+    // bunch (gamma ~ 550): the mesh contribution of a moving bunch is
+    // contracted, never zero, and the fast near-shell correction must not
+    // raise the peak by more than the guard's 3x limit.
+    Bunch const bunch = uniformBunch(5000u, 64u, 1.0, 550.0);
+    ComputeOptions const options = optionsFor(64u, 1.0);
+    Field const reference = picBunch::computeField(bunch, options);
+    double const peak = peakE(reference);
+    ASSERT_GT(peak, 0.0)
+        << "relativistic bunch (u_y=550): the mesh field is identically zero";
+    for(int c = 0; c < 6; ++c)
+        for(double const value : reference.data[c])
+            ASSERT_TRUE(std::isfinite(value)) << "relativistic field is not finite";
+
+    // near-shell fast with explicit tiles: the correction is bounded by the
+    // guard; a deposit defect that writes ~1e63 V/m is caught here.
+    for(std::size_t const tile : {2u, 4u})
+    {
+        ComputeOptions fastOptions = options;
+        fastOptions.nearShell.mode = picBunch::NearShellOptions::Mode::FastGpu;
+        fastOptions.nearShell.radiusCells = 3.0;
+        fastOptions.nearShell.tileNodes = tile;
+        fastOptions.nearShell.fastOrder = 5;
+        fastOptions.nearShell.fastObliqueOrder = 4;
+        Field fastField;
+        ASSERT_NO_THROW(fastField = picBunch::computeField(bunch, fastOptions));
+        double const fastPeak = peakE(fastField);
+        EXPECT_LE(fastPeak, 3.0 * peak)
+            << "tile " << tile << ": the fast correction raised the peak from "
+            << peak << " to " << fastPeak << " V/m";
+    }
+}
