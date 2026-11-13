@@ -376,6 +376,82 @@ namespace picBunch
             return frame;
         }
 
+        //! Measurements behind the near-single-velocity one-box fallback.
+        struct SingleVelocityMeasure
+        {
+            //! Charge-weighted relative spread of ``|u|``.
+            double relativeSpread = 0.0;
+            //! Largest particle angle (rad) to the one-box representative.
+            double maxAngle = 0.0;
+        };
+
+        /*! Measure how close ``bunch`` is to a single velocity class.
+         *
+         * The relative spread uses the charge-weighted RMS deviation of ``|u|``
+         * from its charge-weighted mean, so neither a few high-charge outliers
+         * nor opposite charges can hide a spread.  The angle is measured
+         * against the one-box representative (the charge-weighted mean
+         * momentum), exactly the representative the one-box path would use.
+         */
+        SingleVelocityMeasure measureSingleVelocity(
+            Bunch const& bunch,
+            std::vector<double> const& absCharge,
+            double totalAbsoluteCharge)
+        {
+            std::size_t const count = bunch.size();
+            SingleVelocityMeasure measure;
+            Vec3 sumU{0.0, 0.0, 0.0};
+            double meanMagnitude = 0.0;
+            for(std::size_t p = 0; p < count; ++p)
+            {
+                Vec3 const u{bunch.ux[p], bunch.uy[p], bunch.uz[p]};
+                sumU[0] += absCharge[p] * u[0];
+                sumU[1] += absCharge[p] * u[1];
+                sumU[2] += absCharge[p] * u[2];
+                meanMagnitude += absCharge[p] * norm(u);
+            }
+            meanMagnitude /= totalAbsoluteCharge;
+            if(!(meanMagnitude > 0.0))
+            {
+                // A bunch of stationary particles never reaches here (the
+                // shared-velocity check returns first).  Fail the angle test
+                // explicitly so an unexpected zero mean cannot qualify.
+                measure.maxAngle = std::acos(-1.0);
+                return measure;
+            }
+            Vec3 const representative{
+                sumU[0] / totalAbsoluteCharge,
+                sumU[1] / totalAbsoluteCharge,
+                sumU[2] / totalAbsoluteCharge};
+            double const representativeNorm = norm(representative);
+            double weightedVariance = 0.0;
+            for(std::size_t p = 0; p < count; ++p)
+            {
+                Vec3 const u{bunch.ux[p], bunch.uy[p], bunch.uz[p]};
+                double const magnitude = norm(u);
+                double const deviation = magnitude - meanMagnitude;
+                weightedVariance += absCharge[p] * deviation * deviation;
+                if(magnitude > 0.0)
+                {
+                    // A zero representative for moving members is the full
+                    // angular mismatch, matching the content model.
+                    double angle = std::acos(-1.0);
+                    if(representativeNorm > 0.0)
+                    {
+                        double const cosine
+                            = std::max(
+                                -1.0,
+                                std::min(1.0, dot(u, representative) / (magnitude * representativeNorm)));
+                        angle = std::acos(cosine);
+                    }
+                    measure.maxAngle = std::max(measure.maxAngle, angle);
+                }
+            }
+            measure.relativeSpread
+                = std::sqrt(weightedVariance / totalAbsoluteCharge) / meanMagnitude;
+            return measure;
+        }
+
         //! Axis split of a total box budget ``B`` over the active axes.
         //!
         //! Minimizes the geometric part of the model, ``sqrt((r1/N1)^2 +
@@ -780,6 +856,29 @@ namespace picBunch
                 {
                     targetBins = B;
                     break;
+                }
+            }
+            if(targetBins == 0u)
+            {
+                // A cold, nearly monoenergetic and nearly collinear bunch is
+                // one velocity class: the gamma * Delta_theta worst-case term
+                // can ask for millions of boxes even though one box is the
+                // physical model.  Only the default-cap auto policy may take
+                // this path, so an explicit --velocity-bins or a non-default
+                // --max-velocity-bins keeps the historical failure.
+                if(policy.mode == VelocityBinningOptions::Mode::Auto
+                   && policy.maxBins == kDefaultMaxVelocityBins)
+                {
+                    SingleVelocityMeasure const measure
+                        = measureSingleVelocity(bunch, absCharge, totalAbsoluteCharge);
+                    if(measure.relativeSpread <= kSingleVelocityRelativeSpread
+                       && measure.maxAngle <= kSingleVelocityMaxAngle)
+                    {
+                        targetBins = 1u;
+                        out.singleVelocityFallback = true;
+                        out.singleVelocityRelativeSpread = measure.relativeSpread;
+                        out.singleVelocityMaxAngle = measure.maxAngle;
+                    }
                 }
             }
             if(targetBins == 0u)

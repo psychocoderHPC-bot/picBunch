@@ -140,14 +140,18 @@ namespace
             "                        in-support cells\n"
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
-            "                        estimate is below --tolerance (default: 0)\n"
+            "                        estimate is below --tolerance (default: 0); an\n"
+            "                        explicit N overrides the automatic choice\n"
             "  --bin-model-constant <C>\n"
             "                        calibration constant of the bin error model\n"
             "                        (diagnostic override of the shipped fit)\n"
             "  --max-velocity-bins <N>\n"
             "                        box-count cap of the auto policy (default: 256);\n"
             "                        an infeasible requirement fails with the needed\n"
-            "                        count\n"
+            "                        count, unless the bunch is essentially single-\n"
+            "                        velocity (charge-weighted |u| spread <= 2%% and\n"
+            "                        divergence <= 50 mrad) at the default cap, where\n"
+            "                        one box is used\n"
             "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
@@ -1714,6 +1718,18 @@ int main(int argc, char** argv)
                 binning.modelConstant,
                 args.tolerance,
                 binning.multiVelocity ? "" : ", single velocity");
+        if(binning.singleVelocityFallback)
+            std::printf(
+                "velocity bins: auto one-box fallback: the bunch is essentially "
+                "single-velocity (charge-weighted relative |u| spread %.3e <= %.1e, "
+                "maximum divergence %.3e rad <= %.2g rad); the one-box model "
+                "estimate %.3e exceeds tolerance %.3e\n",
+                binning.singleVelocityRelativeSpread,
+                picBunch::kSingleVelocityRelativeSpread,
+                binning.singleVelocityMaxAngle,
+                picBunch::kSingleVelocityMaxAngle,
+                binning.modelError,
+                args.tolerance);
 
         auto fieldPeaks = [&](picBunch::Field const& value) {
             std::array<double, 2> peaks{0.0, 0.0};

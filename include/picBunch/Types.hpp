@@ -280,7 +280,10 @@ namespace picBunch
      * ``modelSum`` is the uncalibrated sum; ``modelError`` is the calibrated
      * estimate.  The auto policy chooses the smallest power-of-two box count
      * whose best axis split drives ``modelError`` below the requested
-     * tolerance; an infeasible requirement fails with the needed count.
+     * tolerance.  At the default cap an essentially single-velocity bunch
+     * (see ``kSingleVelocityRelativeSpread`` and ``kSingleVelocityMaxAngle``)
+     * falls back to one box; any other infeasible requirement fails with the
+     * needed count.
      */
     struct VelocityBinning
     {
@@ -313,6 +316,14 @@ namespace picBunch
         double modelConstant = kDefaultVelocityModelConstant;
         //! Calibrated estimate ``modelConstant * modelSum``.
         double modelError = 0.0;
+        //! True when the auto policy used the near-single-velocity one-box
+        //! fallback because the model exceeded the default cap.
+        bool singleVelocityFallback = false;
+        //! Charge-weighted relative ``|u|`` spread measured for that decision.
+        double singleVelocityRelativeSpread = 0.0;
+        //! Largest particle angle (rad) to the one-box representative measured
+        //! for that decision.
+        double singleVelocityMaxAngle = 0.0;
 
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
         //! fixed binning on a sub-bunch (the near shell tile mesh).

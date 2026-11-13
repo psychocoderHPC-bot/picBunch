@@ -55,6 +55,29 @@ namespace
         return out;
     }
 
+    //! Monoenergetic bunch at ``gamma`` with a constant polar angle
+    //! ``divergence`` (rad) around +z, azimuth sampled evenly.
+    Bunch divergentBunch(double gamma, double divergence, std::size_t count)
+    {
+        Bunch bunch;
+        bunch.resize(count);
+        double const u = std::sqrt(gamma * gamma - 1.0);
+        for(std::size_t p = 0; p < count; ++p)
+        {
+            double const phi
+                = 2.0 * std::acos(-1.0) * static_cast<double>(p) / static_cast<double>(count);
+            bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+            bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+            bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+            bunch.ux[p] = u * std::sin(divergence) * std::cos(phi);
+            bunch.uy[p] = u * std::sin(divergence) * std::sin(phi);
+            bunch.uz[p] = u * std::cos(divergence);
+            bunch.weight[p] = 1.0;
+            bunch.charge[p] = kElectronCharge;
+        }
+        return bunch;
+    }
+
     picBunch::ComputeOptions smallOptions()
     {
         picBunch::ComputeOptions options;
@@ -464,5 +487,88 @@ TEST(VelocityBins, InfeasibleRequirementPrintsTheCapError)
         ASSERT_NE(reqAt, std::string::npos) << message;
         double const requiredError = std::stod(message.substr(reqAt + reqLabel.size()));
         EXPECT_LT(requiredError, parsed) << message;
+    }
+}
+
+TEST(VelocityBins, MonoenergeticHighGammaUsesOneBoxWithoutFlags)
+{
+    // The operator hit: gamma 1101 with a few mrad divergence demands millions
+    // of boxes from the gamma * Delta_theta term.  It is one velocity class, so
+    // the default auto policy must use one box and run without flags.
+    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    ASSERT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    ASSERT_EQ(binning.count, 1u);
+    EXPECT_TRUE(binning.singleVelocityFallback);
+    ASSERT_EQ(binning.representativeU.size(), 1u);
+    EXPECT_LE(
+        binning.singleVelocityRelativeSpread,
+        picBunch::kSingleVelocityRelativeSpread);
+    EXPECT_LE(binning.singleVelocityMaxAngle, picBunch::kSingleVelocityMaxAngle);
+    // The diagnostics stay honest: the one-box estimate is above tolerance.
+    EXPECT_GT(binning.modelError, 1e-3);
+}
+
+TEST(VelocityBins, ExplicitBinsOverrideSingleVelocityFallback)
+{
+    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 4;
+    VelocityBinning const four = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_EQ(four.count, 4u);
+    EXPECT_FALSE(four.singleVelocityFallback);
+
+    // Even an explicit single box is the user's choice, not the fallback.
+    policy.explicitBins = 1;
+    VelocityBinning const one = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_EQ(one.count, 1u);
+    EXPECT_FALSE(one.singleVelocityFallback);
+}
+
+TEST(VelocityBins, NonDefaultCapKeepsTheHistoricalFailure)
+{
+    // An explicit --max-velocity-bins is authoritative even for a bunch that
+    // would qualify for the default-cap one-box fallback.
+    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
+    VelocityBinningOptions policy;
+    policy.maxBins = 2;
+    try
+    {
+        picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+        FAIL() << "expected the explicit 2-box cap to throw";
+    }
+    catch(std::runtime_error const& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("requires at least"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(VelocityBins, BroadDistributionDoesNotTakeTheFallback)
+{    // A 5% energy spread splits within the default cap and keeps the binned
+    // path; it is not essentially single-velocity.
+    Bunch const spread = axisBunch(gammaLinspace(8.0, 12.0, 64));
+    VelocityBinning const autoBins = picBunch::deriveVelocityBinning(spread, 1e-3);
+    EXPECT_GT(autoBins.count, 1u);
+    EXPECT_FALSE(autoBins.singleVelocityFallback);
+    EXPECT_LE(autoBins.modelError, 1e-3);
+
+    // A 5 degree angular spread is far outside the angular criterion.  A
+    // non-default cap is authoritative, so the run still fails with the
+    // required count instead of silently collapsing to one box.
+    Bunch const angular = divergentBunch(10.0, 5.0 * std::acos(-1.0) / 180.0, 64);
+    VelocityBinningOptions policy;
+    policy.maxBins = 2;
+    try
+    {
+        picBunch::deriveVelocityBinning(angular, 1e-3, policy);
+        FAIL() << "expected the broad angular bunch to throw above a 2-box cap";
+    }
+    catch(std::runtime_error const& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("requires at least"), std::string::npos)
+            << e.what();
     }
 }
