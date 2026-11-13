@@ -93,8 +93,9 @@ namespace picBunch::detail
                         double dist2 = 0.0;
                         for(int a = 0; a < 3; ++a)
                         {
-                            double const d
-                                = std::max({low[a] - pos[a], 0.0, pos[a] - high[a]});
+                            double const pad = 0.5 * cellSize[a];
+                            double const d = std::max(
+                                {low[a] - pad - pos[a], 0.0, pos[a] - (high[a] + pad)});
                             double const dn = d / cellSize[a];
                             dist2 += dn * dn;
                         }

@@ -600,10 +600,10 @@ namespace picBunch
                 double const reach = radius * cells[a];
                 double const sp = spacing[a];
                 double const tj = sp * static_cast<double>(tile);
+                double const u = pos[a] - origin[a];
                 long const lo = static_cast<long>(std::floor(
-                    (pos[a] - reach - static_cast<double>(tile - 1u) * sp) / tj));
-                long const hi
-                    = static_cast<long>(std::floor((pos[a] + reach) / tj));
+                    (u - reach - static_cast<double>(tile - 1u) * sp) / tj));
+                long const hi = static_cast<long>(std::floor((u + reach) / tj));
                 // One guard tile each side absorbs floating-point rounding at
                 // the range boundary; the exact distance test below decides.
                 qLo[a] = std::clamp(lo - 1L, 0L, static_cast<long>(tileCount[a]) - 1L);
@@ -630,8 +630,12 @@ namespace picBunch
                         double dist2 = 0.0;
                         for(int a = 0; a < 3; ++a)
                         {
-                            double const d
-                                = std::max({low[a] - pos[a], 0.0, pos[a] - high[a]});
+                            // Observation points extend half a PIC cell past
+                            // the node box; expand the membership box so the
+                            // per-pair radial blend can see every source.
+                            double const pad = 0.5 * cells[a];
+                            double const d = std::max(
+                                {low[a] - pad - pos[a], 0.0, pos[a] - (high[a] + pad)});
                             double const dn = d / cells[a];
                             dist2 += dn * dn;
                         }
