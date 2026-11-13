@@ -77,8 +77,11 @@ setup of the deck that restarts the checkpoint and mirrors its
 `--fieldAbsorber` value. It accepts `none` (the default), `exponential` and
 `pml`; an unknown value is rejected. `none` and `exponential` write the same
 tree because the exponential absorber keeps no field state that a restart
-loads. `pml` additionally writes the eight zero-filled `Convolutional PML E_*`
-and `B_*` slab records an open-boundary PIConGPU deck reads on restart.
+loads. `pml` additionally writes the twelve zero-filled `Convolutional PML`
+slab records an open-boundary PIConGPU deck reads on restart: six field
+components `E` and `B`, each with a `neg` and a `pos` slab record
+(`E_xneg`, `E_xpos`, `E_yneg`, `E_ypos`, `E_zneg`, `E_zpos`, and the same six
+for `B`).
 Without those slabs the restart aborts with
 `Key 'Convolutional PML E_xneg' does not exist`. Set `absorber = "pml"` when
 the restart deck uses the convolutional PML: a checkpoint written with
