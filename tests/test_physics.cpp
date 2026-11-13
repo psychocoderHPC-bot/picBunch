@@ -138,8 +138,7 @@ TEST(Physics, OneParticleAgainstIndependentReference)
 //   (4.0,4.0,4.0), (4.7,5.1,4.3), (6.2,5.8,6.1) m, q = -e, weight = 1.
 // They were produced by the independent quadrature in
 // ~/pr24/pr24w53-ref/indfield.py on rosi_v100:
-//   cd ~/pr24/pr24w53-ref && env -u LD_PRELOAD PYTHONPATH=. python3 \
-//     /tmp/gen_one.py <i> <j> <k> <component>
+//   cd ~/pr24/pr24w53-ref && env -u LD_PRELOAD PYTHONPATH=. python3 /tmp/gen_one.py <i> <j> <k> <component>
 // with integrate_point(x_obs, x_src, u, 1, 1, 1, order=12, refine=3) and the
 // same k*q conversion as the single-particle reference.  The reference file is
 // not a git checkout; its SHA-256 is

@@ -1027,10 +1027,12 @@ TEST(Io, FarTailUsesYeeComponentPositions)
         bool const hasOffset = picBunch::kYeeOffset[c][0] != 0.0
             || picBunch::kYeeOffset[c][1] != 0.0 || picBunch::kYeeOffset[c][2] != 0.0;
         if(hasOffset && std::abs(expected[component]) > 0.0)
+        {
             EXPECT_GT(
                 std::abs(expected[component] - separate[component]),
                 1.0e-6 * std::abs(expected[component]))
                 << "component " << c << " offset is not observable in this setup";
+        }
     }
     series.flush();
     std::filesystem::remove(path);

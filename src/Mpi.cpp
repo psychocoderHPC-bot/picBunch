@@ -652,5 +652,8 @@ namespace picBunch
             field.slabOffset = 0u;
             field.slabCount = 0u;
         }
+#if !defined(PICBUNCH_ENABLE_MPI)
+        (void)root;
+#endif
     }
 } // namespace picBunch

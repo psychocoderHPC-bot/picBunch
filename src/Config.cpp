@@ -12,18 +12,20 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace picBunch
 {
     namespace
     {
-        [[noreturn]] void fail(std::string const& key, std::string const& why)
+        [[noreturn]] void fail(std::string_view key, std::string_view why)
         {
-            throw std::runtime_error("configuration key '" + key + "': " + why);
+            throw std::runtime_error(
+                "configuration key '" + std::string(key) + "': " + std::string(why));
         }
 
-        toml::node const& require(toml::table const& table, std::string const& key)
+        toml::node const& require(toml::table const& table, std::string_view key)
         {
             auto const* node = table.get(key);
             if(node == nullptr)
@@ -31,7 +33,7 @@ namespace picBunch
             return *node;
         }
 
-        toml::table const& requireTable(toml::table const& table, std::string const& key)
+        toml::table const& requireTable(toml::table const& table, std::string_view key)
         {
             auto const* node = require(table, key).as_table();
             if(node == nullptr)
@@ -41,7 +43,7 @@ namespace picBunch
 
         // Optional table: returns a pointer to the table, or nullptr when the
         // key is absent (no failure).
-        toml::table const* requireTableOptional(toml::table const& table, std::string const& key)
+        toml::table const* requireTableOptional(toml::table const& table, std::string_view key)
         {
             auto const* node = table.get(key);
             if(node == nullptr)
