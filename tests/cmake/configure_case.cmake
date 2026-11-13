@@ -64,7 +64,13 @@ elseif(CASE STREQUAL "cuda-fftw-off")
     # the arch probe never guesses; fail with both streams otherwise.
     if(NOT _nvcc_version MATCHES "release ([0-9]+)\."
        AND NOT _nvcc_version_error MATCHES "release ([0-9]+)\.")
-        message(FATAL_ERROR "cannot parse the nvcc version (rc ${_nvcc_version_status}): out='${_nvcc_version}' err='${_nvcc_version_error}'")
+        file(WRITE "${WORK_DIR}/nvcc-probe-debug.log"
+            "nvcc probe failed in case '${CASE}'\n"
+            "nvcc path: '${PICBUNCH_TEST_NVCC}'\n"
+            "exit status: '${_nvcc_version_status}'\n"
+            "stdout: '${_nvcc_version}'\n"
+            "stderr: '${_nvcc_version_error}'\n")
+        message(FATAL_ERROR "cannot parse the nvcc version (rc ${_nvcc_version_status}); debug: ${WORK_DIR}/nvcc-probe-debug.log")
     endif()
     set(_probe_arch 80)
     if(CMAKE_MATCH_1 LESS 13)
