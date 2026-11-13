@@ -361,10 +361,36 @@ namespace
         Arguments args;
         for(int i = 1; i < argc; ++i)
         {
-            std::string const option = argv[i];
+            std::string const rawOption = argv[i];
+            std::string option = rawOption;
+            std::optional<std::string> inlineValue;
+            if(option.size() > 2 && option[0] == '-' && option[1] == '-')
+            {
+                auto const separator = option.find('=');
+                if(separator != std::string::npos)
+                {
+                    inlineValue = option.substr(separator + 1);
+                    option.resize(separator);
+                }
+            }
             auto value = [&](char const* name) -> std::string {
+                if(inlineValue)
+                {
+                    if(inlineValue->empty())
+                        throw std::invalid_argument(
+                            std::string("error: option '") + name
+                            + "' requires a value (got '')");
+                    return *inlineValue;
+                }
                 if(i + 1 >= argc)
-                    throw std::invalid_argument(std::string("missing value for ") + name);
+                    throw std::invalid_argument(
+                        std::string("error: option '") + name
+                        + "' requires a value (end of command line)");
+                std::string const next = argv[i + 1];
+                if(next.rfind("--", 0) == 0)
+                    throw std::invalid_argument(
+                        std::string("error: option '") + name + "' requires a value (got '"
+                        + next + "')");
                 return argv[++i];
             };
             if(option == "--input")
@@ -498,7 +524,7 @@ namespace
                 std::exit(0);
             }
             else
-                throw std::invalid_argument("unknown option '" + option + "'");
+                throw std::invalid_argument("unknown option '" + rawOption + "'");
         }
         if(args.input.empty())
             throw std::invalid_argument("--input is required");
