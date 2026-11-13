@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
+#include "picBunch/Compute.hpp"
 #include "picBunch/Config.hpp"
+#include "picBunch/Mpi.hpp"
 #include "picBunch/Placement.hpp"
 #include "picBunch/Types.hpp"
 
@@ -12,6 +14,36 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#if defined(PICBUNCH_ENABLE_MPI)
+#    include <mpi.h>
+
+namespace
+{
+    void ensureMpiInitialised()
+    {
+        int initialised = 0;
+        MPI_Initialized(&initialised);
+        if(!initialised)
+            MPI_Init(nullptr, nullptr);
+    }
+
+    // gtest_main returns without MPI_Finalize; finalise once at process exit.
+    struct ConfigMpiFinalizer
+    {
+        ~ConfigMpiFinalizer()
+        {
+            int initialised = 0;
+            int finalised = 0;
+            MPI_Initialized(&initialised);
+            MPI_Finalized(&finalised);
+            if(initialised && !finalised)
+                MPI_Finalize();
+        }
+    };
+    ConfigMpiFinalizer g_configMpiFinalizer;
+} // namespace
+#endif
 
 namespace
 {
@@ -656,4 +688,148 @@ TEST(Config, CheckpointBackendRejectsUnknownValue)
         (void)picBunch::loadConfig(fixture.write(
             "bad.toml", fullConfig + "\n[checkpoint]\nbackend = \"raw\"\n")),
         std::runtime_error);
+}
+
+namespace
+{
+    // makeGrid only reads rank/size from the context, so a fake multi-rank
+    // context exercises the cap rule without launching MPI.
+    struct FakeParallelContext final : picBunch::ParallelContext
+    {
+        explicit FakeParallelContext(int ranks)
+        {
+            rank = 0;
+            size = ranks;
+        }
+    };
+
+    std::string capConfig(std::size_t nx, std::size_t ny, std::size_t nz)
+    {
+        return std::string("strict = true\n") + R"(
+[picongpu]
+delta_t = 1.9880352844493162e-17
+cell_size = [2.0e-7, 2.0e-7, 2.0e-7]
+base_mass = 9.1093837139e-31
+base_charge = -1.602176634e-19
+base_density = 1.0e24
+typical_particles_per_cell = 2
+step = 0
+precision = "float32"
+species = ["b"]
+
+[domain]
+cells = [)" + std::to_string(nx) + ", " + std::to_string(ny) + ", "
+            + std::to_string(nz) + R"(]
+origin = [0.0, 0.0, 0.0]
+cell_size = [2.0e-7, 2.0e-7, 2.0e-7]
+
+[placement]
+patch = "domain"
+center = "none"
+
+[accuracy]
+tolerance = 1.0e-3
+near_shell = "none"
+)";
+    }
+
+    // One particle at the domain centre keeps makeGrid's containment check
+    // satisfied without any I/O.
+    picBunch::Bunch centredParticle(picBunch::ComputeOptions const& options)
+    {
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        auto const& cells = *options.gridSize;
+        auto const& origin = *options.gridOrigin;
+        bunch.x[0] = origin[0] + 0.5 * static_cast<double>(cells[0]) * options.cellSize[0];
+        bunch.y[0] = origin[1] + 0.5 * static_cast<double>(cells[1]) * options.cellSize[1];
+        bunch.z[0] = origin[2] + 0.5 * static_cast<double>(cells[2]) * options.cellSize[2];
+        bunch.ux[0] = 0.0;
+        bunch.uy[0] = 0.0;
+        bunch.uz[0] = 0.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = -1.602176634e-19;
+        return bunch;
+    }
+
+    // Each MPI rank writes its own copy: the shared ConfigTest directory
+    // cannot be removed by two processes at the same time.
+    std::string writeRankUnique(std::string const& name, std::string const& text)
+    {
+        namespace fs = std::filesystem;
+        fs::path const directory = fs::temp_directory_path()
+            / ("picbunch-config-mpi-" + std::to_string(picBunch::mpiRank()));
+        fs::remove_all(directory);
+        fs::create_directories(directory);
+        fs::path const path = directory / name;
+        std::ofstream output(path);
+        output << text;
+        return path.string();
+    }
+
+    picBunch::ComputeOptions optionsFromConfig(picBunch::Config const& config)
+    {
+        picBunch::ComputeOptions options;
+        options.tolerance = config.accuracy.tolerance;
+        options.cellSize = config.domain.cellSize;
+        options.gridSize = config.domain.cells;
+        options.gridOrigin = config.domain.origin;
+        options.fftMode = picBunch::FftMode::Auto;
+        return options;
+    }
+} // namespace
+
+TEST(Config, MultiRankTomlCapScalesByRankCount)
+{
+    // The medium case 440x800x480 at 2e-7 m has a padded box of 1.352e9 nodes,
+    // above the single-rank 2^28 cap.  A TOML-derived configuration with two
+    // ranks must be accepted (2^28 * 2 * 8 = 4.295e9) and rejected when the
+    // per-rank share exceeds that budget.
+    ConfigTest fixture;
+    auto const medium = picBunch::loadConfig(fixture.write("medium.toml", capConfig(440, 800, 480)));
+    auto const options = optionsFromConfig(medium);
+    picBunch::Bunch const bunch = centredParticle(options);
+
+    FakeParallelContext const oneRank(1);
+    picBunch::ComputeOptions single = options;
+    single.parallel = &oneRank;
+    EXPECT_THROW(
+        (void)picBunch::makeGrid(bunch, single),
+        std::runtime_error);
+
+    FakeParallelContext const twoRanks(2);
+    picBunch::ComputeOptions pair = options;
+    pair.parallel = &twoRanks;
+    picBunch::Grid accepted;
+    EXPECT_NO_THROW(accepted = picBunch::makeGrid(bunch, pair));
+    EXPECT_EQ(accepted.n, (picBunch::Idx3{440, 800, 480}));
+
+    // 880x1600x960 cells pad to 1.081e10 nodes, above the two-rank budget.
+    auto const tooBig = picBunch::loadConfig(fixture.write("big.toml", capConfig(880, 1600, 960)));
+    picBunch::ComputeOptions big = optionsFromConfig(tooBig);
+    picBunch::Bunch const bigBunch = centredParticle(big);
+    big.parallel = &twoRanks;
+    EXPECT_THROW((void)picBunch::makeGrid(bigBunch, big), std::runtime_error);
+}
+
+TEST(Config, MultiRankTomlCapRealContext)
+{
+    // The same rule through the real MPI context.  Run under ``mpirun -n 2``;
+    // a serial CTest invocation skips the multi-rank assertion.
+#if defined(PICBUNCH_ENABLE_MPI)
+    ensureMpiInitialised();
+#endif
+    if(picBunch::mpiSize() < 2)
+        GTEST_SKIP() << "run under 'mpirun -n 2' for the multi-rank context check";
+
+    auto const medium = picBunch::loadConfig(
+        writeRankUnique("medium-real.toml", capConfig(440, 800, 480)));
+    picBunch::ComputeOptions options = optionsFromConfig(medium);
+    picBunch::Bunch const bunch = centredParticle(options);
+    picBunch::MpiParallelContext parallel;
+    options.parallel = &parallel;
+    EXPECT_NO_THROW({
+        picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+        EXPECT_EQ(grid.n, (picBunch::Idx3{440, 800, 480}));
+    });
 }

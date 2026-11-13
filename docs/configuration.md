@@ -166,6 +166,24 @@ a measured few-percent residual at the closest axial node.
 | --- | --- | --- |
 | `backend` | no | `"auto"` (default), `"adios2"` or `"hdf5"`. `auto` derives the backend from `--destination`: a `.bp5` directory selects the ADIOS2/BP5 backend and a `.h5` directory selects the HDF5 backend. Both backends are written through the same openPMD-Series writer, so both produce the same tree: one full-shape `(Nz, Ny, Nx)` record component per field component, identical geometry and unit attributes, and the same particle records. PIConGPU selects the container with `--checkpoint.openPMD.ext bp5` (or `h5`). |
 
+## Large domains under MPI
+
+Run the configured path under `mpirun -n R` and keep `--fft-mode auto` (the
+default). With more than one rank, auto selects the distributed z-slab FFT:
+each rank owns one slab of the padded spectrum and one z-slab of the six output
+components, and `makeGrid` scales its per-rank padded-node cap by `R * 8`.
+`--fft-mode replicated` keeps the full field on every rank and does not scale
+the cap. A domain whose padded box is above `2^28` nodes therefore needs at
+least two ranks; it is rejected on one rank with the `limit 268435456 nodes`
+message.
+
+The rank count lowers the per-process memory, not the aggregate. The
+distributed path holds three complex arrays over the padded box
+(`3 * M^3 * 16 B` total across ranks), so the device, not the host, sets the
+first large-domain limit. The writer gathers the rank-local z-slabs on rank 0
+and emits one full-shape record component per field component, so the
+checkpoint tree is independent of the rank count.
+
 ## Chunked field computation is not supported
 
 picBunch does **not** ship a chunked or slab-tiled field-computation path, and

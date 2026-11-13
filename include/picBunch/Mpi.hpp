@@ -115,4 +115,15 @@ namespace picBunch
      * the whole bunch-box field, not the global domain, so its size stays small.
      */
     void mpiBroadcastField(Field& field, int root);
+
+    /*! Gather the rank-local z-slabs of a distributed field onto ``root``.
+     *
+     * Every rank contributes its contiguous ``[slabOffset, slabOffset +
+     * slabCount)`` planes.  On ``root`` the six components are resized to the
+     * full grid, the slabs are placed at their offsets, and ``zSlab`` is
+     * cleared.  Non-root fields are left untouched.  A replicated field is a
+     * no-op; a single-rank context only converts an explicit distributed
+     * slab (which already covers every plane) to the full-field form.
+     */
+    void mpiGatherFieldSlabs(Field& field, int root);
 } // namespace picBunch

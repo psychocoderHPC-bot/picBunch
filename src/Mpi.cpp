@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -554,5 +555,102 @@ namespace picBunch
         (void)field;
         (void)root;
 #endif
+    }
+
+    void mpiGatherFieldSlabs(Field& field, int root)
+    {
+        if(!field.zSlab)
+            return;
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            std::size_t const plane = field.grid.n[0] * field.grid.n[1];
+            std::size_t const nz = field.grid.n[2];
+            std::size_t const fullCount = plane * nz;
+            if(fullCount > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                throw std::runtime_error(
+                    "mpiGatherFieldSlabs: one field component exceeds the MPI int "
+                    "count range");
+            int const size = mpiSize();
+            int const rank = mpiRank();
+            int const localPlanes = static_cast<int>(field.slabCount);
+            // All ranks verify the slab set covers every plane before the
+            // first Gatherv; a root-only throw would strand the peers.
+            int totalPlanes = 0;
+            MPI_Allreduce(&localPlanes, &totalPlanes, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+            if(static_cast<std::size_t>(totalPlanes) != nz)
+                throw std::runtime_error(
+                    "mpiGatherFieldSlabs: the rank slabs cover "
+                    + std::to_string(totalPlanes) + " of " + std::to_string(nz)
+                    + " z planes");
+            std::vector<int> counts(static_cast<std::size_t>(size), 0);
+            std::vector<int> displs(static_cast<std::size_t>(size), 0);
+            MPI_Gather(
+                &localPlanes,
+                1,
+                MPI_INT,
+                rank == root ? counts.data() : nullptr,
+                1,
+                MPI_INT,
+                root,
+                MPI_COMM_WORLD);
+            int const sendCount = localPlanes * static_cast<int>(plane);
+            // MPI_Gatherv counts are in elements of the receive type, not in
+            // z planes; convert once on every rank (counts are identical on
+            // all ranks only on the root, but the non-root copy is ignored).
+            std::vector<int> countsElements(counts);
+            if(rank == root)
+                for(auto& value : countsElements)
+                    value *= static_cast<int>(plane);
+            for(int c = 0; c < 6; ++c)
+            {
+                std::vector<double> rootSlab;
+                double* send = field.data[static_cast<std::size_t>(c)].data();
+                if(rank == root)
+                {
+                    // Move root's own slab aside: MPI_Gatherv forbids the root
+                    // send and receive buffers from overlapping (except with
+                    // MPI_IN_PLACE).  The move keeps the gather copy-free.
+                    rootSlab = std::move(field.data[static_cast<std::size_t>(c)]);
+                    field.data[static_cast<std::size_t>(c)].resize(fullCount);
+                    send = rootSlab.data();
+                    std::size_t push = 0u;
+                    for(int r = 0; r < size; ++r)
+                    {
+                        displs[static_cast<std::size_t>(r)]
+                            = static_cast<int>(push * plane);
+                        push += static_cast<std::size_t>(counts[static_cast<std::size_t>(r)]);
+                    }
+                }
+                MPI_Gatherv(
+                    send,
+                    sendCount,
+                    MPI_DOUBLE,
+                    rank == root ? field.data[static_cast<std::size_t>(c)].data() : nullptr,
+                    countsElements.data(),
+                    displs.data(),
+                    MPI_DOUBLE,
+                    root,
+                    MPI_COMM_WORLD);
+            }
+            if(rank == root)
+            {
+                field.zSlab = false;
+                field.slabOffset = 0u;
+                field.slabCount = 0u;
+            }
+        }
+        else
+#endif
+        {
+            // Single rank: an explicit distributed call still covers every
+            // plane, so promote it to the full-field representation.
+            if(field.slabOffset != 0u || field.slabCount != field.grid.n[2])
+                throw std::runtime_error(
+                    "mpiGatherFieldSlabs: a single-rank slab does not cover the full grid");
+            field.zSlab = false;
+            field.slabOffset = 0u;
+            field.slabCount = 0u;
+        }
     }
 } // namespace picBunch

@@ -172,6 +172,23 @@ reproduces the committed `fastnear_fast_52pt.csv` byte-for-byte.
   `3.22e-8` V/m on a `1.87e7` V/m peak (`1.7e-15` relative) because the chunk
   boundaries move. SHA256 `a6d6d653e5dd3c4f244e9cd204b2e934b001c6cb0290ee978b0f4a4d8ee64f21`.
 
+
+## Distributed large-domain path, GV100 (2026-11-13)
+
+- `distributed_large_domain_20261113.md` — the configured TOML path with the
+  rank context wired before `makeGrid`. Records the per-rank cap scaling, the
+  medium `440x800x480` runs that pin the 32 GiB GV100 at 2 and 4 ranks, the
+  reduced medium `440x320x480` that completes at 4 and 8 ranks, and the small
+  case's 4-rank-vs-1-rank agreement (worst `2.61e-10`, all six components).
+  Host `fwk394`, Quadro GV100 32 GiB, 125 GiB host, CUDA `sm_70`, Open MPI
+  4.1.6, openPMD 0.17.1, date 2026-11-13. The 2-rank reduced-medium run
+  completed with non-physical values and is recorded as a risk, not a result.
+  SHA256 see `MANIFEST.sha256`.
+- `distributed_large_domain_20261113.json` — machine-readable form of the same
+  tables: cap limits, per-rank and total memory, wall and stage times, GPU
+  peaks, checkpoint sizes, per-component checksums and agreement, and the
+  checkpoint structure. SHA256 see `MANIFEST.sha256`.
+
 ## Automatic near-shell tile (2026-11-12)
 
 - `near_shell_tile_auto.csv` — tile 2 / tile 4 A/B for the automatic near-shell

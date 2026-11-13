@@ -89,6 +89,14 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MpiFailure.SetupStatusReportsRootErrorOnEveryRank
             )
+            # The configured path must see the rank context before makeGrid so
+            # the per-rank padded-node cap scales with the rank count.
+            add_test(
+                NAME picBunch.ConfigMultiRankCap
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=Config.MultiRankTomlCapRealContext
+            )
             add_test(
                 NAME picBunch.MpiInvalidInput
                 COMMAND
