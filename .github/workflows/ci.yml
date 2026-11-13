@@ -57,6 +57,21 @@ env:
   OMPI_MCA_rmaps_base_oversubscribe: '1'
 
 jobs:
+  no-direct-hdf5:
+    name: guard (no direct HDF5 C API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject H5* calls in library sources
+        run: |
+          if grep -rnE 'H5[A-Za-z_]*\(' src include; then
+            echo "error: direct HDF5 C API calls are forbidden in src/ and include/" >&2
+            exit 1
+          fi
+          echo "no direct HDF5 C API calls in src/ or include/"
+
   cpu:
     name: cpu (ubuntu-latest, Release, MPI)
     runs-on: ubuntu-latest

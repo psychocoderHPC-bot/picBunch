@@ -7,6 +7,9 @@
 
 #include <gtest/gtest.h>
 
+// The input checkpoint and the on-disk assertions use the HDF5 C API on
+// purpose: this test pins the checkpoint layout the openPMD writer produces,
+// so it must not read the result back through openPMD-api.
 #include <hdf5.h>
 
 #include <array>
@@ -19,22 +22,97 @@
 
 namespace
 {
+    void writeStringAttribute(hid_t object, char const* name, std::string const& value)
+    {
+        hid_t type = H5Tcopy(H5T_C_S1);
+        H5Tset_size(type, H5T_VARIABLE);
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, type, space, H5P_DEFAULT, H5P_DEFAULT);
+        char const* pointer = value.c_str();
+        H5Awrite(attribute, type, &pointer);
+        H5Aclose(attribute);
+        H5Sclose(space);
+        H5Tclose(type);
+    }
+
+    void writeDoubleAttribute(hid_t object, char const* name, double value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUInt32Attribute(hid_t object, char const* name, std::uint32_t value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_UINT32, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_UINT32, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUnitSI(hid_t dataset, double unit)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeRecordAttributes(
+        hid_t record,
+        std::array<double, 7> const& unitDimension,
+        bool macroWeighted,
+        double weightingPower)
+    {
+        hsize_t dimensions[1] = {7};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(record, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unitDimension[0]);
+        H5Aclose(attribute);
+        H5Sclose(space);
+        writeDoubleAttribute(record, "weightingPower", weightingPower);
+        writeUInt32Attribute(record, "macroWeighted", macroWeighted ? 1u : 0u);
+        writeDoubleAttribute(record, "timeOffset", 0.0);
+    }
+
     void writeMinimalInput(std::filesystem::path const& path)
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        // The openPMD reader requires the series attributes; the fixture is a
+        // plain openPMD 1.x tree written without openPMD-api.
+        writeStringAttribute(file, "openPMD", "1.1.0");
+        writeStringAttribute(file, "iterationEncoding", "groupBased");
+        writeStringAttribute(file, "iterationFormat", "%T");
+        writeStringAttribute(file, "basePath", "/data/%T/");
+        writeStringAttribute(file, "meshesPath", "fields/");
+        writeStringAttribute(file, "particlesPath", "particles/");
+        writeUInt32Attribute(file, "openPMDextension", 1);
         H5Gcreate2(file, "data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t iteration = H5Gcreate2(file, "data/0", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeDoubleAttribute(iteration, "dt", 1.0);
+        writeDoubleAttribute(iteration, "time", 0.0);
+        writeDoubleAttribute(iteration, "timeUnitSI", 1.0);
         H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t species = H5Gcreate2(file, "data/0/particles/electrons", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t position = H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeRecordAttributes(position, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
         hsize_t const count = 3;
         hid_t space = H5Screate_simple(1, &count, nullptr);
-        hid_t dataset = H5Dcreate2(
-            file, "data/0/particles/electrons/position/x", H5T_IEEE_F64LE, space,
-            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        picBunch::Vec3 const values{0.0, 0.0, 0.0};
-        H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &values[0]);
-        H5Dclose(dataset);
+        for(char const* axis : {"x", "y", "z"})
+        {
+            hid_t dataset = H5Dcreate2(
+                position, axis, H5T_IEEE_F64LE, space,
+                H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            picBunch::Vec3 const values{0.0, 0.0, 0.0};
+            H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &values[0]);
+            writeUnitSI(dataset, 1.0);
+            H5Dclose(dataset);
+        }
+        H5Gclose(position);
         H5Sclose(space);
         H5Gclose(species);
         H5Gclose(iteration);
@@ -161,7 +239,7 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     generated.unitMass = config.picongpu.unitMass;
     generated.fallbackMass = config.picongpu.unitMass;
     options.generatedSpecies = {generated};
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000003.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -197,8 +275,8 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
 
     // charge and mass are stored in internal units; the input bunch carries the
     // SI values, so the record is charge/unit_charge and restMass/unit_mass.
-    auto const chargeRecord = readVector(file, "data/3/particles/electrons/charge/charge");
-    auto const massRecord = readVector(file, "data/3/particles/electrons/mass/mass");
+    auto const chargeRecord = readVector(file, "data/3/particles/electrons/charge");
+    auto const massRecord = readVector(file, "data/3/particles/electrons/mass");
     ASSERT_EQ(chargeRecord.size(), 3u);
     ASSERT_EQ(massRecord.size(), 3u);
     for(std::size_t p = 0; p < 3; ++p)
@@ -225,10 +303,10 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     auto const idType = readType(file, "data/3/particles/electrons/id");
     EXPECT_EQ(idType.klass, H5T_INTEGER);
     EXPECT_EQ(idType.size, 8u);
-    auto const chargeType = readType(file, "data/3/particles/electrons/charge/charge");
+    auto const chargeType = readType(file, "data/3/particles/electrons/charge");
     EXPECT_EQ(chargeType.klass, H5T_FLOAT);
     EXPECT_EQ(chargeType.size, 4u);
-    auto const massType = readType(file, "data/3/particles/electrons/mass/mass");
+    auto const massType = readType(file, "data/3/particles/electrons/mass");
     EXPECT_EQ(massType.klass, H5T_FLOAT);
     EXPECT_EQ(massType.size, 4u);
     EXPECT_EQ(readType(file, "data/3/fields/E/x").size, 4u);
@@ -238,26 +316,37 @@ TEST(Placement, CentroidPlacementAndPatchAreWritten)
     // float64 applies to every floating-point field and particle property; the
     // integer records do not change, and the warning is recorded.
     options.float64 = true;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
     file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/position/x").size, 8u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/weighting").size, 8u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/momentum/x").size, 8u);
-    EXPECT_EQ(readType(file, "data/3/particles/electrons/charge/charge").size, 8u);
-    EXPECT_EQ(readType(file, "data/3/particles/electrons/mass/mass").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/charge").size, 8u);
+    EXPECT_EQ(readType(file, "data/3/particles/electrons/mass").size, 8u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/positionOffset/x").size, 4u);
     EXPECT_EQ(readType(file, "data/3/particles/electrons/id").size, 8u);
     EXPECT_EQ(readType(file, "data/3/fields/E/x").size, 8u);
     EXPECT_EQ(readType(file, "data/3/fields/B/x").size, 8u);
     hid_t attribute = H5Aopen(file, "picBunchPrecisionWarning", H5P_DEFAULT);
     ASSERT_GE(attribute, 0);
-    char* warning = nullptr;
     hid_t attributeType = H5Aget_type(attribute);
-    ASSERT_EQ(H5Aread(attribute, attributeType, &warning), 0);
+    std::string warningText;
+    if(H5Tis_variable_str(attributeType) > 0)
+    {
+        char* warning = nullptr;
+        ASSERT_EQ(H5Aread(attribute, attributeType, &warning), 0);
+        warningText = warning != nullptr ? warning : "";
+        H5free_memory(warning);
+    }
+    else
+    {
+        std::size_t const size = H5Tget_size(attributeType);
+        std::vector<char> warning(size + 1u, '\0');
+        ASSERT_EQ(H5Aread(attribute, attributeType, warning.data()), 0);
+        warningText.assign(warning.data());
+    }
     H5Tclose(attributeType);
     H5Aclose(attribute);
-    std::string const warningText = warning != nullptr ? warning : "";
-    H5free_memory(warning);
     EXPECT_NE(
         warningText.find("stock PIConGPU cannot load double particle records"),
         std::string::npos);

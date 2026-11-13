@@ -39,12 +39,11 @@ and B records are recomputed from the particles and stay float32.
 
 ## PML handling
 
-The input checkpoint is scanned at `data/<inputIteration>/fields`. Every link
-whose name starts with `Convolutional PML ` is copied with `H5Ocopy`, so the
-component values, `position` and `unitSI` attributes survive unchanged. The
-writer converts a non-float32 component to float32, rejects a component whose
-extent differs from the output grid, and replaces the record geometry with the
-main-field geometry. It never synthesizes PML state.
+The input checkpoint is scanned at `data/<inputIteration>/fields`. Every record
+whose name starts with `Convolutional PML ` is copied through the openPMD
+Series API, so the component values, `position` and `unitSI` attributes survive
+unchanged. The writer replaces the record geometry with the main-field geometry
+and never synthesizes PML state.
 
 When the input checkpoint has no PML records, the writer keeps its previous
 behaviour and writes only E, B and `picongpu_idProvider`. An open-boundary

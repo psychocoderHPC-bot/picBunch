@@ -63,11 +63,12 @@ ADIOS2/BP5 backend, and the `[checkpoint] backend` key (`auto`, `adios2`,
 `(Nz, Ny, Nx)` record component per field component, and the same particle
 records, including zero-particle `empty` species.
 
-The legacy raw-HDF5 writer `writePicOnGPUCheckpoint` (`publishPicOnGPU`,
-`H5Fcreate`/`H5Dcreate`/`H5Ocopy`) still exists, but only the unit tests and
-`picBunchWriteRestartSample` call it; the application does not. The h5py-only
-`tools/verify/check_picongpu_restart.py` therefore inspects that legacy tree,
-while `check_openpmd.py` verifies the openPMD field writer.
+The legacy raw-HDF5 writer `writePicOnGPUCheckpoint` (`publishPicOnGPU`) and
+its direct `H5*` implementation have been removed. The library sources under
+`src/` and `include/` contain no direct HDF5 C API calls; HDF5 remains
+available as an openPMD backend. The h5py-only
+`tools/verify/check_picongpu_restart.py` inspects the openPMD HDF5 checkpoint
+tree, while `check_openpmd.py` verifies the openPMD field writer.
 
 CTest results depend on the build configuration and the optional tests it
 registers. The original ADIOS2-enabled verification build (main @ 478f6e1,

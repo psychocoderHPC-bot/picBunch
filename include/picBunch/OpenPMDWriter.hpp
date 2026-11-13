@@ -241,7 +241,7 @@ namespace picBunch
           *
           * Only ``"pml"`` changes the emitted tree: it adds the eight
           * convolutional-PML slab records a ``--fieldAbsorber pml`` deck loads
-          * on restart.  See ``writePicOnGPUCheckpoint`` for the layout.
+          * on restart.  See ``writePicOnGPUCheckpointOpenPMD`` for the layout.
           * ``"exponential"`` is accepted because an exponential deck never
           * stores auxiliary field state; a PIConGPU restart reads it back from
           * the compiled parameters, so no checkpoint record is needed.
@@ -261,54 +261,6 @@ namespace picBunch
 
     //! Append ``step`` to ``<directory>/checkpoints.txt`` (idempotent).
     void appendCheckpointStep(std::filesystem::path const& directory, std::uint64_t step);
-
-    /** Write one PIConGPU checkpoint-restart iteration.
-
-     * Emitted tree (all verified against a real PIConGPU checkpoint):
-     *  - ``<directory>/<prefix>_<step:06d>.h5`` and ``<directory>/checkpoints.txt``;
-     *  - series attributes ``openPMD``, ``iterationEncoding=fileBased``,
-     *    ``iterationFormat=<prefix>_%06T``, ``meshesPath=fields/`` and
-     *    ``picongpuIOVersionMajor=5`` / ``Minor=0``;
-     *  - ``data/<step>/{iteration,sim_slides,dt,time,timeUnitSI}``;
-     *  - ``fields/E/{x,y,z}`` and ``fields/B/{x,y,z}`` as float32 by default
-     *    (float64 when requested) with extent ``(Nz,Ny,Nx)``, stored as
-     *    ``field/unit`` in PIConGPU internal units;
-     *  - ``gridSpacing*gridUnitSI`` recover metres, with both written in the
-     *    ``z,y,x`` storage order;
-     *  - ``fields/picongpu_idProvider/{startId,nextId}`` uint64; one global
-     *    range for the whole checkpoint with ``startId = 0`` and
-     *    ``nextId >= total particles`` over all copied species;
-     *  - ``particles/<species>`` for every species in the input iteration,
-     *    copied from its input group and normalized to the configured precision,
-     *    including ``particlePatches`` when present;
-     *  - every ``generatedSpecies`` entry as its own group.  Generated ids are
-     *    disjoint across the list and never overlap the copied range
-     *    ``[0, copiedCount)``.  An ``empty`` entry is a valid zero-particle
-     *    group;
-     *  - for ``absorber = "pml"`` only: ``fields/Convolutional PML E_{xneg,xpos,
-     *    yneg,ypos,zneg,zpos}`` and ``fields/Convolutional PML B_{...}``, one
-     *    mesh per slab with the six cross components ``xy,xz,yx,yz,zx,zy``,
-     *    float32 (float64 with ``float64``) and extent ``(Nz,Ny,Nx)`` like E
-     *    and B.  The values are all zero, the physically correct initial state
-     *    of a fresh deck (PIConGPU resets the slab buffers on startup, see
-     *    ``Field::reset``), with ``unitSI`` ``unitEField``/``unitBField`` and
-     *    the Yee parent positions duplicated per split component.  A deck that
-     *    restarts from this checkpoint runs the PML slabs from rest, which
-     *    matches a PIConGPU run that wrote its first checkpoint at step 0.
-     *    ``absorber = "none"`` and ``"exponential"`` keep the previous tree.
-     *    A value outside the accepted set is rejected at parse time.
-
-     * Record attributes survive the copy; the numeric datasets are rewritten
-     * to the configured precision so a checkpoint never mixes dtypes.  Missing
-     * patch metadata is reported through a ``picBunchRestartWarning`` root
-     * attribute and a message on ``stderr``; PIConGPU may then reject the
-     * restart.  ``float64`` additionally records ``picBunchPrecisionWarning``
-     * and prints the same warning on ``stderr``.
-
-     * @throws std::runtime_error or std::invalid_argument on missing units,
-     *         a missing input particle group, or an HDF5 failure.
-     */
-    void writePicOnGPUCheckpoint(Field const& field, PicOnGPUWriteOptions const& options);
 
     /** openPMD-Series checkpoint writer (HDF5 and ADIOS2/BP5 backends).
      *
