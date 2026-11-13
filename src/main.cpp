@@ -831,8 +831,29 @@ namespace
         restart.unitCharge = config.picongpu.unitCharge;
         restart.float64 = config.picongpu.float64;
         restart.generatedSpecies = std::move(generatedSpecies);
+        restart.backend = config.checkpoint.backend == "adios2"
+            ? picBunch::CheckpointBackend::Adios2
+            : config.checkpoint.backend == "hdf5"
+            ? picBunch::CheckpointBackend::Hdf5
+            : picBunch::CheckpointBackend::Auto;
+        // Resolve the Auto backend from the destination path: a ``.bp5``
+        // directory selects ADIOS2, a ``.h5`` directory selects HDF5.  Both
+        // backends are written through the same openPMD-Series writer, so the
+        // on-disk structure is identical apart from the container format.
+        if(restart.backend == picBunch::CheckpointBackend::Auto)
+        {
+            std::string const dest = *args.destination;
+            bool const isBp5
+                = dest.size() >= 4u && dest.compare(dest.size() - 4u, 4u, ".bp5") == 0;
+            restart.backend
+                = isBp5 ? picBunch::CheckpointBackend::Adios2
+                        : picBunch::CheckpointBackend::Hdf5;
+        }
 
-        picBunch::writePicOnGPUCheckpoint(totalField, restart);
+        // Both the HDF5 and the ADIOS2/BP5 backend go through the openPMD
+        // writer, so the two outputs carry the same tree and the same
+        // full-shape per-component field records.
+        picBunch::writePicOnGPUCheckpointOpenPMD(totalField, restart);
         std::printf(
             "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
             static_cast<unsigned long long>(config.picongpu.step),
@@ -1810,12 +1831,15 @@ int main(int argc, char** argv)
             restart.unitLength = *args.unitLength;
             restart.unitEField = *args.unitEField;
             restart.unitBField = *args.unitBField;
+            // The legacy CLI path has no path-derived backend; write HDF5
+            // through the same openPMD-Series writer as the configured path.
+            restart.backend = picBunch::CheckpointBackend::Hdf5;
             // The writer derives nextId from the particles actually copied, so
             // the id range covers every species.  Do not override it with the
             // size of the bunch species read for the field calculation.
 
             auto const writerStart = Clock::now();
-            picBunch::writePicOnGPUCheckpoint(field, restart);
+            picBunch::writePicOnGPUCheckpointOpenPMD(field, restart);
             times.writerMs = elapsedMs(writerStart);
             std::printf(
                 "wrote PIConGPU restart checkpoint %s/%s_%06llu.h5 (step %llu)\n",

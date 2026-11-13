@@ -39,6 +39,19 @@ namespace picBunch
             return *node;
         }
 
+        // Optional table: returns a pointer to the table, or nullptr when the
+        // key is absent (no failure).
+        toml::table const* requireTableOptional(toml::table const& table, std::string const& key)
+        {
+            auto const* node = table.get(key);
+            if(node == nullptr)
+                return nullptr;
+            auto const* sub = node->as_table();
+            if(sub == nullptr)
+                fail(key, "expected a table");
+            return sub;
+        }
+
         double asDouble(toml::node const& node, std::string const& key)
         {
             auto const value = node.value<double>();
@@ -398,6 +411,24 @@ namespace picBunch
                 fail("accuracy.near_shell_exact_cells", "must be between -2 and 2");
             config.accuracy.nearShellExactCells = static_cast<int>(cells);
         }
+        // Checkpoint output backend.  The table is optional; ``backend`` defaults
+        // to "auto".  Only "auto", "adios2" and "hdf5" are accepted.
+        if(auto const* checkpointTable = requireTableOptional(document, "checkpoint"))
+        {
+            if(auto const* node = checkpointTable->get("backend"))
+            {
+                config.checkpoint.backend = asString(*node, "checkpoint.backend");
+                std::string lower = config.checkpoint.backend;
+                for(char& ch : lower)
+                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                if(lower != "auto" && lower != "adios2" && lower != "hdf5")
+                    fail(
+                        "checkpoint.backend",
+                        "must be \"auto\", \"adios2\" or \"hdf5\" (got \"" + config.checkpoint.backend
+                            + "\")");
+                config.checkpoint.backend = lower;
+            }
+        }
 
         // Validation.
         auto positive = [](double value, std::string const& key) {
@@ -546,7 +577,7 @@ namespace picBunch
         {
             std::string const name(key.str());
             if(name != "strict" && name != "picongpu" && name != "domain" && name != "placement"
-               && name != "accuracy")
+               && name != "accuracy" && name != "checkpoint")
                 config.warnings.push_back("unknown configuration key '" + name + "' was ignored");
         }
         if(config.strict && !config.warnings.empty())

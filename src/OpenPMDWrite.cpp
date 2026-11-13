@@ -1036,31 +1036,6 @@ namespace picBunch
                 + "'; the input has neither a position record nor particlePatches/numParticles");
         }
 
-        void appendCheckpointStep(std::filesystem::path const& directory, std::uint64_t step)
-        {
-            std::filesystem::path const path = directory / "checkpoints.txt";
-            std::string const stepText = std::to_string(step);
-            bool present = false;
-            {
-                std::ifstream input(path);
-                std::string line;
-                while(std::getline(input, line))
-                    if(line == stepText)
-                        present = true;
-            }
-            if(!present)
-            {
-                std::ofstream output(path, std::ios::app);
-                if(!output)
-                    throw std::runtime_error(
-                        "PicOnGPU restart writer: cannot write '" + path.string() + "'");
-                output << stepText << '\n';
-                if(!output)
-                    throw std::runtime_error(
-                        "PicOnGPU restart writer: failed writing '" + path.string() + "'");
-            }
-        }
-
         void copyAttributes(hid_t source, hid_t destination, bool skipExisting = false)
         {
             H5O_info_t info;

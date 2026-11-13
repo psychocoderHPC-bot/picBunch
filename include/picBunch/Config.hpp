@@ -127,6 +127,16 @@ namespace picBunch
             int nearShellExactCells = -2;
         } accuracy;
 
+        struct Checkpoint
+        {
+            //! ``"auto"`` (default), ``"adios2"`` or ``"hdf5"``.  ``auto``
+            //! derives the backend from the output path (a ``.bp5`` directory
+            //! selects ADIOS2, a ``.h5`` file selects HDF5, anything else falls
+            //! back to HDF5).  This only overrides the path-derived default; it
+            //! does not change which file is produced.
+            std::string backend = "auto";
+        } checkpoint;
+
         //! Reject unknown keys instead of warning about them.
         bool strict = false;
         std::vector<std::string> warnings;

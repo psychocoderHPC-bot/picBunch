@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -104,6 +105,28 @@ namespace picBunch
      * HDF5 openPMD 1.1 file-based iteration, float32 fields in PIConGPU internal
      * units, and the input particle species copied with its attributes intact.
      */
+    /*! Checkpoint output backend.
+     *
+     * The checkpoint is an openPMD Series.  ``Hdf5`` writes a single
+     * ``<prefix>_%06T.h5`` file (the openPMD HDF5 backend, the historical
+     * default and the most widely tested restart path).  ``Adios2`` writes a
+     * ``<prefix>_%06T.bp5`` directory (the openPMD ADIOS2/BP5 backend).  Both
+     * produce an identical openPMD tree (one dataset per field component,
+     * identical attributes) that PIConGPU's openPMD restart reads by file
+     * extension: set ``openPMD.ext = bp5`` on the PIConGPU side to restart from
+     * an ADIOS2 checkpoint.
+     *
+     * ``Auto`` derives the backend from the output path: a ``.bp5`` directory
+     * selects ADIOS2, a ``.h5`` file selects HDF5, and any other destination
+     * falls back to HDF5 (the openPMD default extension).
+     */
+    enum class CheckpointBackend
+    {
+        Auto,
+        Hdf5,
+        Adios2
+    };
+
     /** One species reconstructed from a bunch at its placed position.
      *
      * The writer creates the particle group instead of copying it from the
@@ -213,7 +236,20 @@ namespace picBunch
          *  ``picBunchPrecisionWarning`` root attribute.
          */
         bool float64 = false;
+        /*! Checkpoint output backend (see ``CheckpointBackend``).
+         *
+         * ``Auto`` (the default) derives the backend from the output path and
+         * keeps the historical ``.h5`` output for a destination that is neither
+         * a ``.bp5`` directory nor a ``.h5`` file.  ``Hdf5`` forces the ``.h5``
+         * file; ``Adios2`` forces the ``.bp5`` directory.  The value is resolved
+         * once and both the file name and the openPMD backend used for the
+         * write follow it.
+         */
+        CheckpointBackend backend = CheckpointBackend::Auto;
     };
+
+    //! Append ``step`` to ``<directory>/checkpoints.txt`` (idempotent).
+    void appendCheckpointStep(std::filesystem::path const& directory, std::uint64_t step);
 
     /** Write one PIConGPU checkpoint-restart iteration.
 
@@ -250,5 +286,21 @@ namespace picBunch
      *         a missing input particle group, or an HDF5 failure.
      */
     void writePicOnGPUCheckpoint(Field const& field, PicOnGPUWriteOptions const& options);
+
+    /** openPMD-Series checkpoint writer (HDF5 and ADIOS2/BP5 backends).
+     *
+     * Writes the PIConGPU-restart tree through the backend-agnostic openPMD
+     * C++ API, so one code path produces an identical openPMD layout for both
+     * ``.h5`` (HDF5 backend) and ``.bp5`` (ADIOS2 backend).  The backend is
+     * resolved from ``options.backend`` and the output path (see
+     * ``CheckpointBackend``).  Every field component is one full-shape
+     * ``(Nz, Ny, Nx)`` record component.
+     *
+     * @throws std::invalid_argument or std::runtime_error on missing units,
+     *         a field that does not match the grid, or an openPMD failure.
+     */
+    void writePicOnGPUCheckpointOpenPMD(
+        Field const& field,
+        PicOnGPUWriteOptions const& options);
 
 } // namespace picBunch

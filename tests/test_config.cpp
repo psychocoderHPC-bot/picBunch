@@ -631,3 +631,29 @@ TEST(Config, StrictAcceptsSpeciesListAndCenterKeys)
     replaceOnce(text, "patch_count = 4", "patch_count = 4\ncenter = \"centroid\"");
     EXPECT_NO_THROW((void)picBunch::loadConfig(fixture.write("strict-new-keys.toml", text)));
 }
+
+TEST(Config, CheckpointBackendDefaultsToAuto)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write("default.toml", fullConfig));
+    EXPECT_EQ(config.checkpoint.backend, "auto");
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, CheckpointBackendParsesAndIsAKnownTable)
+{
+    ConfigTest fixture;
+    auto const config = picBunch::loadConfig(fixture.write(
+        "adios2.toml", fullConfig + "\n[checkpoint]\nbackend = \"ADIOS2\"\n"));
+    EXPECT_EQ(config.checkpoint.backend, "adios2");
+    EXPECT_TRUE(config.warnings.empty());
+}
+
+TEST(Config, CheckpointBackendRejectsUnknownValue)
+{
+    ConfigTest fixture;
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write(
+            "bad.toml", fullConfig + "\n[checkpoint]\nbackend = \"raw\"\n")),
+        std::runtime_error);
+}

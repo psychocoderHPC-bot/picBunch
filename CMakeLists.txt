@@ -268,6 +268,7 @@ add_library(
     src/Config.cpp
     src/OpenPMD.cpp
     src/OpenPMDWrite.cpp
+    src/OpenPMDWriteOpenPMD.cpp
     src/Mpi.cpp
     src/Placement.cpp
 )

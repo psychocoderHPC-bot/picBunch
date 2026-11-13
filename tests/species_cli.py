@@ -163,8 +163,16 @@ def main():
         if sorted(particles.keys()) != ["e0", "s1", "s2"]:
             print(f"unexpected species: {sorted(particles.keys())}", file=sys.stderr)
             return 1
-        if particles["e0/position/x"].shape[0] != 0:
-            print("empty species is not empty", file=sys.stderr)
+        # An empty species is written as a constant record with shape [0]
+        # (the PIConGPU/openPMD representation), not as a zero-length dataset.
+        # Accept either so the test covers both writer layouts.
+        empty_position = particles["e0/position/x"]
+        if isinstance(empty_position, h5py.Dataset):
+            empty_shape = list(empty_position.shape)
+        else:
+            empty_shape = np.asarray(empty_position.attrs["shape"]).tolist()
+        if empty_shape != [0]:
+            print(f"empty species is not empty: {empty_shape}", file=sys.stderr)
             return 1
         patches = particles["e0/particlePatches/numParticles"][...]
         if patches.tolist() != [0]:
