@@ -323,7 +323,7 @@ endif()
 # Command line tool
 # ---------------------------------------------------------------------------
 add_executable(picBunchApp src/main.cpp)
-target_compile_features(picBunchApp PRIVATE cxx_std_20)
+target_compile_features(picBunchApp PUBLIC cxx_std_20)
 set_target_properties(picBunchApp PROPERTIES OUTPUT_NAME picBunch)
 target_link_libraries(picBunchApp PRIVATE picBunch::picBunch picBunch::openPMD)
 if(PICBUNCH_ENABLE_MPI)
@@ -350,7 +350,7 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Measurement driver for the exact near shell (host-only, no openPMD).
 add_executable(picBunchDfftCheck tools/dfft-check/check.cpp)
-target_compile_features(picBunchDfftCheck PRIVATE cxx_std_20)
+target_compile_features(picBunchDfftCheck PUBLIC cxx_std_20)
 target_link_libraries(picBunchDfftCheck PRIVATE picBunch::picBunch picBunch::openPMD)
 alpaka_finalize(picBunchDfftCheck)
 
@@ -391,7 +391,7 @@ unset(CMAKE_REQUIRED_LINK_DIRECTORIES)
 unset(CMAKE_REQUIRED_LIBRARIES)
 message(STATUS "picBunch: FFTW plan constructor takes sign argument: ${PBFFTW3_PLAN_TAKES_SIGN}")
 add_executable(picBunchFftSizeCheck tools/fft-size/check.cpp)
-target_compile_features(picBunchFftSizeCheck PRIVATE cxx_std_20)
+target_compile_features(picBunchFftSizeCheck PUBLIC cxx_std_20)
 if(PBFFTW3_PLAN_TAKES_SIGN)
     target_compile_definitions(picBunchFftSizeCheck PRIVATE PBFFTW3_PLAN_TAKES_SIGN=1)
 endif()
@@ -399,7 +399,7 @@ target_link_libraries(picBunchFftSizeCheck PRIVATE picBunch::picBunch PBFFTW3::P
 alpaka_finalize(picBunchFftSizeCheck)
 
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
-target_compile_features(picBunchNearShellMeasure PRIVATE cxx_std_20)
+target_compile_features(picBunchNearShellMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchNearShellMeasure)
 
@@ -409,7 +409,7 @@ alpaka_finalize(picBunchNearShellMeasure)
 # needs no CUDA or FFTW.  The near-field headers include alpaka's macro header
 # unconditionally, so the tool needs the header-only alpaka target.
 add_executable(picBunchFastNear52pt tools/verify/pb_fast_near_52pt.cpp)
-target_compile_features(picBunchFastNear52pt PRIVATE cxx_std_20)
+target_compile_features(picBunchFastNear52pt PUBLIC cxx_std_20)
 target_include_directories(picBunchFastNear52pt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(picBunchFastNear52pt PRIVATE alpaka::alpaka)
 alpaka_finalize(picBunchFastNear52pt)
@@ -420,13 +420,13 @@ alpaka_finalize(picBunchFastNear52pt)
 # so it never links the evaluator under test.  Values are precomputed; the
 # accuracy test only reads the CSV.
 add_executable(picBunchNearShellRayReference tools/near-shell/ray_reference.cpp)
-target_compile_features(picBunchNearShellRayReference PRIVATE cxx_std_20)
+target_compile_features(picBunchNearShellRayReference PUBLIC cxx_std_20)
 
 # Measurement driver for velocity binning: synthetic mixed-velocity bunch,
 # binned fields for a list of box counts, for the continuum reference
 # comparison (tools/velocity-bins/compare_velocity_bins.py).
 add_executable(picBunchVelocityBinsMeasure tools/velocity-bins/measure_velocity_bins.cpp)
-target_compile_features(picBunchVelocityBinsMeasure PRIVATE cxx_std_20)
+target_compile_features(picBunchVelocityBinsMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchVelocityBinsMeasure)
 
@@ -439,7 +439,7 @@ alpaka_finalize(picBunchVelocityBinsMeasure)
 if(PICBUNCH_BUILD_BENCH)
     find_package(Threads REQUIRED)
     add_executable(picBunchBench tools/bench/bench.cpp)
-    target_compile_features(picBunchBench PRIVATE cxx_std_20)
+    target_compile_features(picBunchBench PUBLIC cxx_std_20)
     target_link_libraries(picBunchBench PRIVATE picBunch::picBunch Threads::Threads)
     if(PICBUNCH_ENABLE_MPI)
         # The rank-parallel context lives in the host-only library; the MPI
