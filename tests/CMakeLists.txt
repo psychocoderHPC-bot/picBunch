@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Rene Widera
 
 add_executable(picBunchSmoke smoke.cpp)
+target_compile_features(picBunchSmoke PRIVATE cxx_std_20)
 target_link_libraries(picBunchSmoke PRIVATE picBunch::picBunch picBunch::openPMD)
 alpaka_finalize(picBunchSmoke)
 
@@ -50,6 +51,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_alpaka_readout.cpp
         test_openpmd_wait.cpp
     )
+    target_compile_features(picBunchUnitTests PRIVATE cxx_std_20)
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
         picBunchUnitTests
@@ -133,6 +135,7 @@ endif()
 # that uses h5py only (no openPMD binding).  Registered when python3 + h5py are
 # available; otherwise configure prints the manual command.
 add_executable(picBunchWriteSample write_sample.cpp)
+target_compile_features(picBunchWriteSample PRIVATE cxx_std_20)
 target_link_libraries(
     picBunchWriteSample
     PRIVATE picBunch::picBunch picBunch::openPMD
@@ -140,6 +143,7 @@ target_link_libraries(
 alpaka_finalize(picBunchWriteSample)
 
 add_executable(picBunchWriteRestartSample write_restart_sample.cpp)
+target_compile_features(picBunchWriteRestartSample PRIVATE cxx_std_20)
 target_link_libraries(
     picBunchWriteRestartSample
     PRIVATE picBunch::picBunch picBunch::openPMD
