@@ -2,15 +2,18 @@
 // SPDX-FileCopyrightText: Rene Widera
 //
 // Group: explicit geometry resolution and the PIConGPU checkpoint writer.
-// The writer is checked through the raw HDF5 layout, not through openPMD-api,
-// so attribute names, dtypes, extents and the unit normalization are tested as
-// they land on disk.
+// The HDF5 layout is checked through the raw HDF5 API, so attribute names,
+// dtypes, extents and the unit normalization are tested as they land on disk.
+// Backend-parity checks read the same tree back through openPMD-api.
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Config.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
+
+#include <openPMD/config.hpp>
+#include <openPMD/openPMD.hpp>
 
 #include <hdf5.h>
 
@@ -43,13 +46,6 @@ namespace
         hid_t dataset = H5Dcreate2(loc, name, type, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         H5Sclose(space);
         return dataset;
-    }
-
-    void writeScalarDouble(hid_t loc, char const* name, double value)
-    {
-        hid_t dataset = create(loc, name, H5T_IEEE_F64LE, {1});
-        H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &value);
-        H5Dclose(dataset);
     }
 
     void writeFloatComponent(hid_t parent, char const* name, float value)
@@ -1315,6 +1311,52 @@ TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
 
 namespace
 {
+    //! One particlePatches row read back through the openPMD API.
+    struct PatchRow
+    {
+        std::vector<std::uint64_t> numParticles;
+        std::vector<std::uint64_t> numParticlesOffset;
+        std::array<std::vector<std::uint64_t>, 3> offset;
+        std::array<std::vector<std::uint64_t>, 3> extent;
+    };
+
+    std::vector<std::uint64_t> loadPatchComponent(
+        openPMD::Series& series,
+        openPMD::RecordComponent component)
+    {
+        auto const extent = component.getExtent();
+        std::uint64_t count = 1u;
+        for(auto const length : extent)
+            count *= length;
+        std::vector<std::uint64_t> values(static_cast<std::size_t>(count));
+        if(count != 0u)
+        {
+            auto raw = component.loadChunk<std::uint64_t>(openPMD::Offset{0}, extent);
+            series.flush();
+            for(std::size_t i = 0; i < values.size(); ++i)
+                values[i] = raw.get()[i];
+        }
+        return values;
+    }
+
+    //! Read the patch metadata of one species from either backend.
+    PatchRow readPatchRow(openPMD::Series& series, std::uint64_t step, std::string const& species)
+    {
+        auto& patches = series.iterations[step].particles[species].particlePatches;
+        PatchRow row;
+        row.numParticles = loadPatchComponent(
+            series, patches["numParticles"][openPMD::RecordComponent::SCALAR]);
+        row.numParticlesOffset = loadPatchComponent(
+            series, patches["numParticlesOffset"][openPMD::RecordComponent::SCALAR]);
+        for(std::size_t a = 0; a < 3u; ++a)
+        {
+            std::string const axis(1, "xyz"[a]);
+            row.offset[a] = loadPatchComponent(series, patches["offset"][axis]);
+            row.extent[a] = loadPatchComponent(series, patches["extent"][axis]);
+        }
+        return row;
+    }
+
     //! A small generated bunch with distinct positions per particle.
     picBunch::GeneratedParticles generatedBunch(std::string name, std::size_t count, double offset)
     {
@@ -1465,6 +1507,69 @@ TEST(Restart, WriterEmitsZeroParticleEmptySpeciesWithoutCharge)
     // nextId covers only the two real particles.
     EXPECT_EQ(readUint64Dataset(file, "data/7/fields/picongpu_idProvider/nextId"), 2u);
     H5Fclose(file);
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+TEST(Restart, EmptySpeciesCollidingWithInputKeepsDomainPatchMetadata)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_empty_collision";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    // The input carries a same-named "e" group with stale patch metadata.  The
+    // checkpoint-only "e" must replace it, not copy it and overwrite only the
+    // particle records.
+    auto const input = temporaryDirectory() / "input_be.h5";
+    writeParticleInput(input, true, false, false, {"b", "e"});
+
+    auto const field = makeField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 9;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.requiredInputSpecies = {"b"};
+    options.unitLength = 1.0;
+    options.unitEField = 1.0;
+    options.unitBField = 1.0;
+
+    picBunch::GeneratedParticles generatedB = generatedBunch("b", 2u, 0.0);
+    generatedB.inputSpecies = "b";
+    picBunch::GeneratedParticles empty;
+    empty.species = "e";
+    empty.empty = true;
+    empty.domainOrigin = {0.0, 0.0, 0.0};
+    empty.cellSize = {0.5, 1.5, 2.5};
+    empty.patchOffset = {0, 0, 0};
+    empty.patchExtent = {4, 5, 6};
+    empty.unitMassSpeed = picBunch::kElectronMass * picBunch::kSpeedOfLight;
+    empty.unitCharge = picBunch::kElementaryCharge;
+    empty.unitMass = picBunch::kElectronMass;
+    empty.fallbackMass = picBunch::kElectronMass;
+    options.generatedSpecies = {generatedB, empty};
+
+    auto const check = [&](picBunch::CheckpointBackend backend, std::filesystem::path const& path) {
+        options.backend = backend;
+        std::filesystem::remove_all(path);
+        picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
+        ASSERT_TRUE(std::filesystem::exists(path)) << path;
+        openPMD::Series series(path.string(), openPMD::Access::READ_ONLY);
+        auto const row = readPatchRow(series, options.step, "e");
+        EXPECT_EQ(row.numParticles, (std::vector<std::uint64_t>{0u}));
+        EXPECT_EQ(row.numParticlesOffset, (std::vector<std::uint64_t>{0u}));
+        for(std::size_t a = 0; a < 3u; ++a)
+        {
+            EXPECT_EQ(row.offset[a], (std::vector<std::uint64_t>{0u})) << "axis " << a;
+            EXPECT_EQ(
+                row.extent[a],
+                (std::vector<std::uint64_t>{static_cast<std::uint64_t>(field.grid.n[a])}))
+                << "axis " << a;
+        }
+    };
+
+    check(picBunch::CheckpointBackend::Hdf5, directory / "checkpoint_000009.h5");
+#if defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2
+    check(picBunch::CheckpointBackend::Adios2, directory / "checkpoint_000009.bp5");
+#endif
     std::filesystem::remove_all(temporaryDirectory());
 }
 

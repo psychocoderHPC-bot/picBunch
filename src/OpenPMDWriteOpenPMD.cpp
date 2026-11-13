@@ -1308,12 +1308,18 @@ namespace picBunch
 
             // A same-name generated entry overwrites the raw input group and
             // therefore skips the copy.  A renamed entry (input "b" -> output
-            // "e") still copies "b" raw.
+            // "e") still copies "b" raw.  A checkpoint-only empty species also
+            // skips the copy: the input may carry a same-named group whose
+            // particlePatches must not survive next to the generated
+            // domain-covering patch row.
             std::set<std::string> overwrittenInputs;
             for(auto const& generated : options.generatedSpecies)
             {
                 if(generated.empty)
+                {
+                    overwrittenInputs.insert(generated.species);
                     continue;
+                }
                 std::string const inputName = generated.inputSpecies.empty()
                     ? generated.species
                     : generated.inputSpecies;

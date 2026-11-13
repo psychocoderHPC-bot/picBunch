@@ -70,6 +70,20 @@ available as an openPMD backend. The h5py-only
 `tools/verify/check_picongpu_restart.py` inspects the openPMD HDF5 checkpoint
 tree, while `check_openpmd.py` verifies the openPMD field writer.
 
+## Field-absorber key
+
+`[picongpu] absorber` in the picBunch configuration describes the boundary
+setup of the deck that restarts the checkpoint and mirrors its
+`--fieldAbsorber` value. It accepts `none` (the default), `exponential` and
+`pml`; an unknown value is rejected. `none` and `exponential` write the same
+tree because the exponential absorber keeps no field state that a restart
+loads. `pml` additionally writes the eight zero-filled `Convolutional PML E_*`
+and `B_*` slab records an open-boundary PIConGPU deck reads on restart.
+Without those slabs the restart aborts with
+`Key 'Convolutional PML E_xneg' does not exist`. Set `absorber = "pml"` when
+the restart deck uses the convolutional PML: a checkpoint written with
+`absorber = "none"` has no PML slabs and cannot restart a PML deck.
+
 CTest results depend on the build configuration and the optional tests it
 registers. The original ADIOS2-enabled verification build (main @ 478f6e1,
 ADIOS2 2.11.0 / openPMD 0.17.1 as pinned above) registered 23 tests and
