@@ -57,8 +57,9 @@ elseif(CASE STREQUAL "cuda-fftw-off")
     execute_process(
         COMMAND ${PICBUNCH_TEST_NVCC} --version
         OUTPUT_VARIABLE _nvcc_version OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
+        ERROR_VARIABLE _nvcc_version_error
     )
+    set(_nvcc_version "${_nvcc_version}${_nvcc_version_error}")
     if(NOT _nvcc_version MATCHES "release ([0-9]+)\.")
         message(FATAL_ERROR "cannot parse the nvcc version: '${_nvcc_version}'")
     endif()
