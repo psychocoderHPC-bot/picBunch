@@ -13,6 +13,8 @@ perpendicular value $24$ in Table~\ref{tab:crossover} for the same
 $\gamma=1$, aspect 4 configuration is the crossover at the stricter
 $3\!\times\!10^{-4}$ gate (perpendicular direction), a different
 threshold from the $10^{-3}$-gate continuum crossover quoted here. The
+crossover distances are V100 values and were not re-measured in this
+campaign. The
 mesh against the point field carries the TSC smoothing in addition to the
 deposit error, and the two disagree by a factor of $58$ in L2 at
 $\gamma=10$, aspect 1, $d=48$ (Table~\ref{tab:d48}); a
@@ -37,7 +39,7 @@ opt-in near shell assembles exactly to
 roundoff, and its tile subtraction is not the limiting term: at the
 measured $R=3/4$ radii on the $h=1$ slice grid the residual is the mesh
 contribution outside the shell, not the subtraction. The fast backend
-meets $10^{-3}$ stationary ($6.82\times10^{-4}$ interior) and moving axial
+meets $10^{-3}$ stationary ($3.71\times10^{-4}$ interior) and moving axial
 ($1.40\times10^{-4}$ interior); the moving oblique interior is
 $1.94\times10^{-3}$, the measured limit of the fast backend at its default
 order (Table~\ref{tab:fast}). The shell radius is the dominant cost lever:
@@ -48,12 +50,13 @@ the same interior error, against a mesh-only wall of $0.500$\,s
 
 The $\gamma$ landscape states the mesh's sub-cell limit. At a fixed
 distance in cells the error grows steeply with $\gamma$:
-$4.4\times10^{-2}$, $1.05$, $5.47$ for $\gamma=10,50,100$ at $d=8$,
+$0.26$, $2.3$, $5.3$ for $\gamma=10,50,100$ at $d=8$,
 $h=1$ (Table~\ref{tab:gamma}, Fig.~\ref{fig:gamma-dist}). The controlling
 length is the beaming cone width $d/\gamma$; for $\gamma\ge50$ the cone is
-sub-cell, and in the node-unit kernel the $h$-refinement exponent $p$ rises
-from $1.64$ at $\gamma=10$ to $2.06$ at $\gamma=100$, so refinement
-continues to pay off, most at high $\gamma$. Sub-cell resolution of the cone
+sub-cell, and in the node-unit kernel the $h$-refinement exponent $p$
+decreases from $1.33$ at $\gamma=10$ to $1.09$ at $\gamma=100$ (three-point
+fit over $h=4,1,1/4$ cells on the $d=2$ band), so refinement continues to
+reduce the error across the range. Sub-cell resolution of the cone
 is the binding limit: at $d=8$, $\gamma=100$ the cone is $0.08$ cells, and
 $10^{-2}$ requires $h$ below that. At $\gamma=50$ to $100$ the
 near-charge error requires a shell of radius of order $\gamma$ cells; that
@@ -63,9 +66,10 @@ mesh.
 The scope of the validated measurements is a single shared velocity, or a
 set of binned velocity classes with one convolution per class; the near
 shell needs no binning because each pair carries its own velocity. The
-measured binned behaviour is bin-independent to $4.3\times10^{-4}\%$ for
-the 5\% energy spread and $1.4\%$ against the arbiter for the 1\,mrad case
-(Appendix~\ref{app:multivel}). The computed quantity is the
+measured binned behaviour agrees to $6.9\times10^{-6}$ in the $B_z$ peak
+and $1.1\times10^{-3}$ in the small $B_y$ component for the 5\% energy
+spread. The 1\,mrad case is within $1.4\%$ of the arbiter in its original
+full-grid run and is not re-measured here (Appendix~\ref{app:multivel}). The computed quantity is the
 TSC-convolved uniformly-moving point-charge field; the convolution is
 free-space (no boundary condition other than zero fill beyond the far-tail
 switch); and there is no radiation term, because the motion is uniform.

@@ -1,25 +1,27 @@
 {
-  "adios2_version": "2.9.2",
+  "adios2_version": "2.12.1",
   "axis_rule": "n/a",
   "binary_sha256": {
-    "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+    "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
   },
   "case_id": "line-multivel",
-  "command": "picBunch (fix 69bfd77, Release, CUDA sm_70) --input inputs/mvpaper_{e5,a5}.h5 --species e --input-iteration 0 --output-iteration 0 --cell-size 1e-7 --grid 64,64,64 --origin 0,0,0 --velocity-bins {1,4,16,64,256} --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output out/mv_{e5,a5}_b{B}.h5; 10 runs",
-  "config_sha256": null,
-  "cuda_version": "12.6",
+  "command": "CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 16 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b16.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 256 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b256.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 4 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b4.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b64.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 16 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b16.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 256 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b256.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 4 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b4.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b64.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_line.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/multivel/reduce_spec.json",
+  "config_sha256": {
+    "sha256": "4d53bf46dd9211408108038a34879da94b740d65263b41e988df34e222ded423"
+  },
+  "cuda_version": "13.4.2",
   "data_sha256": [
     {
       "path": "docs/paper/data/line/multivel_energy.npz",
-      "sha256": "a7e8afab8e2fbf39ae4d23f4643b350b1348be107fe9b976999d4b32611a15ec"
+      "sha256": "eb6e35546606b79d2ea3b8917f0538263173ca431443c782131d8543ad15212c"
     },
     {
       "path": "docs/paper/data/line/multivel_angular.npz",
-      "sha256": "3e7ff34ee05de02d6073d302113de17a3514937031b20a0be7fa445004990930"
+      "sha256": "7a9be45833dad3fdb2e766ad483ba00b790254269fe984b64677fdf503cfceb4"
     },
     {
       "path": "docs/paper/data/line/multivel_binning.csv",
-      "sha256": "38efae1cd17d750344ad2c8dc1b688a236c6bddaba366b75a7f2bac8d46a6a30"
+      "sha256": "388c539fc4ed25f50f8866e63670fc646ba563b9d350c6192126dab0c1e60813"
     },
     {
       "path": "docs/paper/data/line/multivel_peaks.csv",
@@ -27,38 +29,48 @@
     },
     {
       "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
-      "sha256": "f56d16a4fcafad0e818617ab69d97efa95250358a2929bdb5cea69ae5a6fcbf3"
+      "sha256": "21467ebdad4bd99a29788db0ec41935e1d9f159a78498fdffa9d771e551f82c0"
     },
     {
       "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
-      "sha256": "da5d204ad3b6ca016c9f0039e1f7e94f8cd69fe6ae5caf48a70971d9399c4f5c"
+      "sha256": "322d9cbc7390441a2b2f927aa2ebc0972f4f65ac53467e7eb08141e93b7e658f"
     },
     {
       "path": "docs/paper/data/line/multivel_fields_a5_b16.npz",
-      "sha256": "9f7d795c13430504ca728ac62b8bd99e23504d4fbecee1a449d2ca5e619355e3"
+      "sha256": "fac874df0a3cd692a154a2dad89336319e4fa61786d485e198790dce5711e7cd"
     },
     {
       "path": "docs/paper/data/line/multivel_fields_a5_b64.npz",
-      "sha256": "4b6963a495c2cb9991564984ab235f60db1e64a8f51f4521400a73651ddf81e7"
+      "sha256": "b27a2f4e130c4a7ecfb5f2e53c826d1cf3cff30149c5999fbfe4f6fde71e67c7"
     }
   ],
-  "end_utc": "2026-11-10T06:36:00Z",
+  "end_utc": "2026-11-12T12:38:19Z",
   "figure_ids": [
     "F_multivel_dist"
   ],
-  "git_commit": "69bfd77d03493a10e0da4c8fdad25c6480c0582a",
-  "gpu_model": "Tesla V100-SXM2-32GB",
-  "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+  "generator": {
+    "reducer": {
+      "path": "docs/paper/precision-campaign/reduce_line.py",
+      "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
+    }
+  },
+  "git_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
+  "gpu_model": "NVIDIA H100 PCIe 80 GB",
+  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
   "io_backend": "hdf5",
   "measurement_kind": "fresh-h100",
-  "notes": "Generated by make_provenance.py from case line-multivel. Fields the run did not record are null.",
+  "notes": "Fresh campaign-20261112-t5b re-reduction on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0,1,2). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced data carry additive bunch_* keys taken from the actual run input that produced the fields. GPUs used: 4x NVIDIA H100 PCIe 80 GB; this case ran on CUDA_VISIBLE_DEVICES=0,1,2. T12d: reduce_line.py changed only in mode_gamma (per-ring peak normalisation, matching reducer 5343a97); this w4b/multivel reduction is unaffected.",
   "openpmd_version": "0.17.1",
+  "reference_only": false,
   "repeats": 1,
-  "script_sha256": null,
+  "script_sha256": {
+    "path": "docs/paper/precision-campaign/reduce_line.py",
+    "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
+  },
   "seed": [
     100,
     103
   ],
-  "start_utc": "2026-11-10T06:34:00Z",
+  "start_utc": "2026-11-12T12:37:33Z",
   "statistic": "single"
 }

@@ -1,0 +1,2119 @@
+{
+ "schema": "picbunch-precision-campaign/1",
+ "campaign": {
+  "host": "jureca-h100",
+  "gpu_count": 4,
+  "gpu_binding": "CUDA_VISIBLE_DEVICES=<slot>; one process per GPU (device 0 inside the process)",
+  "allocation_seconds": 14400,
+  "batch_guard_seconds": 10800,
+  "excluded_out_of_scope": [
+   "F_a/F_b scaling-cost (docs/measurements/matrix.csv)",
+   "F_mpi_rank_scaling_h100 (docs/paper/data/line/h100_mpi_scaling.csv)"
+  ],
+  "balance": "two-pool scheduler: four GPU mesh workers with one CUDA_VISIBLE_DEVICES slot each pull from a shared work queue; references run concurrently in a separate CPU pool; LPT is used only for --estimate",
+  "reference_pool": "--ref-workers 8 x --ref-threads 16 (128 of 144 cores)"
+ },
+ "reference_driver": "reference/exact_field_driver",
+ "cases": [
+  {
+   "id": "line-w4b",
+   "family": "w4b",
+   "figures": [
+    "F_w4b_rel_error"
+   ],
+   "runs": [
+    {
+     "name": "g1-a1",
+     "input": "w4b-g1",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g1-a4",
+     "input": "w4b-g1-a4",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       384
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       192.0
+      ]
+     }
+    },
+    {
+     "name": "g10-a1",
+     "input": "w4b-g10",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g10-a4",
+     "input": "w4b-g10-a4",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       384
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       192.0
+      ]
+     }
+    },
+    {
+     "name": "g50-a1",
+     "input": "w4b-g50",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g50-a4",
+     "input": "w4b-g50-a4",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       384
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       192.0
+      ]
+     }
+    },
+    {
+     "name": "g100-a1",
+     "input": "w4b-g100",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g100-a4",
+     "input": "w4b-g100-a4",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       384
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       192.0
+      ]
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_line.py",
+    "mode": "w4b",
+    "out": "reduced/line/w4b_rel_error.csv",
+    "ingest": "w4b/w4b_paper_metric.csv",
+    "units": [
+     {
+      "run": "g1-a1",
+      "gamma": 1.0,
+      "aspect": 1,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g1-a4",
+      "gamma": 1.0,
+      "aspect": 4,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g10-a1",
+      "gamma": 10.0,
+      "aspect": 1,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g10-a4",
+      "gamma": 10.0,
+      "aspect": 4,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g50-a1",
+      "gamma": 50.0,
+      "aspect": 1,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g50-a4",
+      "gamma": 50.0,
+      "aspect": 4,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g100-a1",
+      "gamma": 100.0,
+      "aspect": 1,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     },
+     {
+      "run": "g100-a4",
+      "gamma": 100.0,
+      "aspect": 4,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       4,
+       8,
+       12,
+       16,
+       24,
+       32
+      ]
+     }
+    ]
+   },
+   "est": {
+    "mesh_s": 400,
+    "ref_s": 80,
+    "reduce_s": 10
+   }
+  },
+  {
+   "id": "line-gamma",
+   "family": "gamma",
+   "figures": [
+    "F_gamma_err_dist"
+   ],
+   "runs": [
+    {
+     "name": "g10-h1.0",
+     "input": "gamma-g10-h1",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g10-h0.25",
+     "input": "gamma-g10-h25",
+     "mesh": {
+      "grid": [
+       384,
+       384,
+       384
+      ],
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 2.5e-08,
+      "centre_cells": [
+       192.0,
+       192.0,
+       192.0
+      ]
+     }
+    },
+    {
+     "name": "g50-h1.0",
+     "input": "gamma-g50-h1",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g50-h0.25",
+     "input": "gamma-g50-h25",
+     "mesh": {
+      "grid": [
+       384,
+       384,
+       384
+      ],
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 2.5e-08,
+      "centre_cells": [
+       192.0,
+       192.0,
+       192.0
+      ]
+     }
+    },
+    {
+     "name": "g100-h1.0",
+     "input": "gamma-g100-h1",
+     "mesh": {
+      "grid": [
+       96,
+       96,
+       96
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 1e-07,
+      "centre_cells": [
+       48.0,
+       48.0,
+       48.0
+      ]
+     }
+    },
+    {
+     "name": "g100-h0.25",
+     "input": "gamma-g100-h25",
+     "mesh": {
+      "grid": [
+       384,
+       384,
+       384
+      ],
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--fft-padding",
+       "1"
+      ]
+     },
+     "reference": {
+      "mode": "rings",
+      "rings": [
+       2,
+       8,
+       48
+      ],
+      "axes": [
+       0,
+       1,
+       2
+      ],
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001,
+      "lattice_cell_m": 2.5e-08,
+      "centre_cells": [
+       192.0,
+       192.0,
+       192.0
+      ]
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_line.py",
+    "mode": "gamma",
+    "out": "reduced/line/gamma_err_dist.csv",
+    "ingest": "reduced/line/gamma_err_dist.csv",
+    "units": [
+     {
+      "run": "g10-h1.0",
+      "gamma": 10.0,
+      "h": 1.0,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     },
+     {
+      "run": "g10-h0.25",
+      "gamma": 10.0,
+      "h": 0.25,
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     },
+     {
+      "run": "g50-h1.0",
+      "gamma": 50.0,
+      "h": 1.0,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     },
+     {
+      "run": "g50-h0.25",
+      "gamma": 50.0,
+      "h": 0.25,
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     },
+     {
+      "run": "g100-h1.0",
+      "gamma": 100.0,
+      "h": 1.0,
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     },
+     {
+      "run": "g100-h0.25",
+      "gamma": 100.0,
+      "h": 0.25,
+      "cell": [
+       2.5e-08,
+       2.5e-08,
+       2.5e-08
+      ],
+      "rings": [
+       2,
+       8,
+       48
+      ]
+     }
+    ]
+   },
+   "est": {
+    "mesh_s": 960,
+    "ref_s": 60,
+    "reduce_s": 10
+   }
+  },
+  {
+   "id": "hires-g1p0",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g1p0",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 1.0,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g1p0.npz",
+    "ingest": "campaign/fields/hires-g1p0.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g1p0"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g1p1",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g1p1",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 1.1,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g1p1.npz",
+    "ingest": "campaign/fields/hires-g1p1.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g1p1"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g1p5",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g1p5",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 1.5,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g1p5.npz",
+    "ingest": "campaign/fields/hires-g1p5.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g1p5"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g2p0",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g2p0",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 2.0,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g2p0.npz",
+    "ingest": "campaign/fields/hires-g2p0.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g2p0"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g10",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g10",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 10.0,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g10.npz",
+    "ingest": "campaign/fields/hires-g10.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g10"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g50",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g50",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 50.0,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g50.npz",
+    "ingest": "campaign/fields/hires-g50.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g50"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "hires-g100",
+   "family": "hires",
+   "figures": [
+    "gp_g"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "hires-g100",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       128
+      ],
+      "cell": [
+       5e-08,
+       5e-08,
+       5e-08
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [
+       "--near-shell",
+       "fast"
+      ]
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 64
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "hires",
+    "planes": [
+     "xy"
+    ],
+    "gamma": 100.0,
+    "cell_m": 5e-08,
+    "out": "reduced/hires/hi_g100.npz",
+    "ingest": "campaign/fields/hires-g100.npz",
+    "particle_pos_m": [
+     3.2e-06,
+     3.2e-06,
+     3.2e-06
+    ],
+    "case": "g100"
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 5,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "bdata2-forward",
+   "family": "bdata2",
+   "figures": [
+    "val_forward_xy",
+    "val_forward_zy"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "bdata2-forward",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 32,
+       "zy": 32
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "bdata2",
+    "planes": [
+     "xy",
+     "zy"
+    ],
+    "case": "forward",
+    "cell_m": 1e-07,
+    "proxy": 0,
+    "pic_field_source": "fresh forward-case HDF5 field",
+    "out": "reduced/bdata2/forward_slice.npz",
+    "ingest": "campaign/fields/bdata2-forward.npz"
+   },
+   "est": {
+    "mesh_s": 120,
+    "ref_s": 200,
+    "reduce_s": 5
+   }
+  },
+  {
+   "id": "bdata2-fluctuation",
+   "family": "bdata2",
+   "figures": [
+    "val_fluct_xy",
+    "val_fluct_zy"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "bdata2-fluctuation",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 64,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 32,
+       "zy": 32
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "bdata2",
+    "planes": [
+     "xy",
+     "zy"
+    ],
+    "case": "fluctuation",
+    "cell_m": 1e-07,
+    "proxy": 0,
+    "pic_field_source": "fresh momentum-spread HDF5 field",
+    "out": "reduced/bdata2/fluctuation_slice.npz",
+    "ingest": "campaign/fields/bdata2-fluctuation.npz"
+   },
+   "est": {
+    "mesh_s": 180,
+    "ref_s": 200,
+    "reduce_s": 5
+   }
+  },
+  {
+   "id": "var1b-1mrad",
+   "family": "var1b",
+   "figures": [
+    "val_1mrad_xy_E",
+    "val_1mrad_xy_B"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "var1b-1mrad",
+     "mesh": {
+      "grid": [
+       32,
+       32,
+       16
+      ],
+      "cell": [
+       2e-07,
+       2e-07,
+       2e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 64,
+      "extra": []
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 8
+      },
+      "order": 12,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "var1b",
+    "planes": [
+     "xy"
+    ],
+    "case": "var1b",
+    "label": "1mrad",
+    "cell_m": 2e-07,
+    "out": "reduced/var1b/slices_var1b.npz",
+    "ingest": null
+   },
+   "est": {
+    "mesh_s": 60,
+    "ref_s": 40,
+    "reduce_s": 3
+   }
+  },
+  {
+   "id": "large1-g1",
+   "family": "large1",
+   "figures": [
+    "large_sxy_g1",
+    "large_szy_g1"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "large-g1",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       64
+      ],
+      "cell": [
+       2e-07,
+       2e-07,
+       2e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": []
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 32,
+       "zy": 64
+      },
+      "order": 4,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "large1",
+    "planes": [
+     "xy",
+     "zy"
+    ],
+    "case": "g1",
+    "cell_m": 2e-07,
+    "gamma": 1.0,
+    "zero_below": 1e-12,
+    "out": "reduced/large1/slices_g1.npz",
+    "ingest": null
+   },
+   "est": {
+    "mesh_s": 120,
+    "ref_s": 400,
+    "reduce_s": 5
+   }
+  },
+  {
+   "id": "large1-g10",
+   "family": "large1",
+   "figures": [
+    "large_sxy_g10",
+    "large_szy_g10"
+   ],
+   "runs": [
+    {
+     "name": "main",
+     "input": "large-g10",
+     "mesh": {
+      "grid": [
+       128,
+       128,
+       64
+      ],
+      "cell": [
+       2e-07,
+       2e-07,
+       2e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": []
+     },
+     "reference": {
+      "mode": "planes",
+      "planes": {
+       "xy": 32,
+       "zy": 64
+      },
+      "order": 4,
+      "max_level": 5,
+      "tol": 0.001
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_slices.py",
+    "style": "large1",
+    "planes": [
+     "xy",
+     "zy"
+    ],
+    "case": "g10",
+    "cell_m": 2e-07,
+    "gamma": 10.0,
+    "zero_below": 1e-12,
+    "out": "reduced/large1/slices_g10.npz",
+    "ingest": null
+   },
+   "est": {
+    "mesh_s": 120,
+    "ref_s": 400,
+    "reduce_s": 5
+   }
+  },
+  {
+   "id": "multivel",
+   "family": "multivel",
+   "figures": [
+    "F_multivel_dist"
+   ],
+   "runs": [
+    {
+     "name": "e5-b1",
+     "input": "mv-e5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "e5-b4",
+     "input": "mv-e5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 4,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "e5-b16",
+     "input": "mv-e5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 16,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "e5-b64",
+     "input": "mv-e5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 64,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "e5-b256",
+     "input": "mv-e5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 256,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "a5-b1",
+     "input": "mv-a5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 1,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "a5-b4",
+     "input": "mv-a5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 4,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "a5-b16",
+     "input": "mv-a5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 16,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "a5-b64",
+     "input": "mv-a5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 64,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    },
+    {
+     "name": "a5-b256",
+     "input": "mv-a5",
+     "mesh": {
+      "grid": [
+       64,
+       64,
+       64
+      ],
+      "cell": [
+       1e-07,
+       1e-07,
+       1e-07
+      ],
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "bins": 256,
+      "extra": [],
+      "near_shell": {
+       "mode": "fast",
+       "radius": 3,
+       "tile": 4,
+       "fast_order": 5
+      }
+     }
+    }
+   ],
+   "reduce": {
+    "script": "reduce_line.py",
+    "mode": "multivel",
+    "bins": [
+     1,
+     4,
+     16,
+     64
+    ],
+    "ref_bins": 256,
+    "cell_m": 1e-07,
+    "grid": [
+     64,
+     64,
+     64
+    ],
+    "out": "reduced/line/multivel_binning.csv",
+    "fields_out": "reduced/line",
+    "panel_e5": "inputs/mvpanel-e5.npz",
+    "panel_a5": "inputs/mvpanel-a5.npz",
+    "input_e5": "inputs/mv-e5.h5",
+    "input_a5": "inputs/mv-a5.h5",
+    "panel_out_e5": "reduced/line/multivel_energy.npz",
+    "panel_out_a5": "reduced/line/multivel_angular.npz"
+   },
+   "est": {
+    "mesh_s": 840,
+    "ref_s": 0,
+    "reduce_s": 20
+   }
+  }
+ ]
+}

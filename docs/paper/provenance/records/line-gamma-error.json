@@ -2,35 +2,44 @@
   "adios2_version": "2.12.1",
   "axis_rule": "n/a",
   "binary_sha256": {
-    "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+    "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
   },
   "case_id": "line-gamma-error",
-  "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input in/line_g10.h5 --cell-size 1e-7 --grid 96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --fft-padding 1 --shape tsc --output out/line_g10_h1.bp (and g50/g100 h=1); --cell-size 2.5e-8 --grid 384 --output out/line_g{10,50,100}_h25.bp (h=1/4)",
-  "config_sha256": null,
-  "cuda_version": "13.4.92",
+  "command": "CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g10-h0.25.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g10-h1.0.h5 ; CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g100-h0.25.h5 ; CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g100-h1.0.h5 ; CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g50-h0.25.h5 ; CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g50-h1.0.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_line.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/line-gamma/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12",
+  "config_sha256": {
+    "sha256": "9326fd66fe9d10f21238fb84ebb51b9eaed1bc749f551cb2ece1a0882b5603c3"
+  },
+  "cuda_version": "13.4.2",
   "data_sha256": [
     {
       "path": "docs/paper/data/line/gamma_err_dist.csv",
-      "sha256": "f909a558df2db459e4722ba8d6f826d362ef8f898661db1b875c01d87cb7fbea"
+      "sha256": "657bc01a7d0296eb9585ffcf9d5c7919dcd3c54da34932fc2864f03ead6f1484"
     }
   ],
-  "end_utc": "2026-11-09T06:59:29Z",
+  "end_utc": "2026-11-12T12:38:59Z",
   "figure_ids": [
     "F_gamma_err_dist"
   ],
-  "git_commit": "e1ddfb55eff92dc12cc2067b52253aa218914ff5",
+  "generator": {
+    "reducer": {
+      "path": "docs/paper/precision-campaign/reduce_line.py",
+      "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
+    }
+  },
+  "git_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
   "gpu_model": "NVIDIA H100 PCIe 80 GB",
   "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-  "io_backend": "adios2/BP5",
+  "io_backend": "hdf5",
   "measurement_kind": "fresh-h100",
-  "notes": "Fresh 2026-11-09 jureca-h100 (jrc0880) BP5 campaign figdata2-20261109. h=1 inputs in/line_g{10,50,100}.h5 sha256 cb1f9af86cd05cf304165cc754d1af3819f591b010d288b111d843cb98494c70, 56878f1f7e5aaf4a30fb753f9af8750519f3f3a94795c81b49f61279ada8037b, 787c940ab0495e7b37d81f4f91bdfed68de3fd0f8780a370ae9e05e05c819ad7 with committed ER1b order-12 references d4d79faf99d8bd39fe8e936aac001dc5a4bf6f8edacb7c888ad898707b667bba, a533a40e86ca74cd009e9a0e7bf1512dc00462084cf4676745d74d44d42e9cbb, 2c78eaedf1176600ad9c57a5a378053639769ba98cc472f277167a364fa26888; outputs data.0 sha256 7cd09e8b6f48eb579d6c0fad7a056c350fb9c15cf39aa55a230400c033b1a6a1, 1d0e6b169588ff4a642afbf957676fd5652477d60e62d50d302d77eaa7e03eb1, 633ec111d5d8ad7578256f2d7b9f90969237734e30aacbc16562158a57d74460. h=1/4 uses the standard refined mesh cell 2.5e-8 m, 384^3, references ref_h25std_g{10,50,100}.npz sha256 62fc19a9af754e252f0dd37e0bec56f2b7cfe0238555e020f7a52ca36d43a532, c5a43a0424b936bb02d38badd3f95807bd38d8084d40341b45e8d55ed9898f64, 708a4be24d051e9e196bb137dbb2fd67f8e4553aa434fe02ba27109df46aa679; outputs data.0 sha256 b23c333346b565232ec5ed76eba6d0845cf85f6bbbbe03ab6bb2825d5a73820b, 9d5ca7884880f9e3837f4872a8959fe2c90f30e9aa91f49face8e53b3fde674c, 92d691d6ecf7fd37858880aa177d8999a4449fed6be4f11fe87f0e6c2e78118a. Metric: per-ring worst peak-normalised |mesh-ref|/peak(ref) at d=2/8/48 against the order-12 TSC-convolved continuum. These are the current-model h=1/4 rows (2.524e-1/2.539e-4/6.777e-4 at gamma=10), not the legacy v0.5.0 kRefinement=0.25 values 0.188/6.86e-5/7.11e-4.",
+  "notes": "Fresh campaign-20261112-t5b re-reduction on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0,2,3). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced data carry additive bunch_* keys taken from the actual run input that produced the fields. GPUs used: 4x NVIDIA H100 PCIe 80 GB; this case ran on CUDA_VISIBLE_DEVICES=0,2,3. T12d correction: the same reduced CSV was rebuilt from the same raw line-gamma outputs with the per-ring peak normalisation (reducer 5343a97); docs/paper/precision-campaign/reduce_line.py now matches that reducer. This raises the d=8/d=48 errors that the pre-fix all-ring normalisation under-reported; d=2 rows are unchanged. Values cross-checked against the T4g GAMMA-CORRECTED table.",
   "openpmd_version": "0.17.1",
+  "reference_only": false,
   "repeats": 1,
   "script_sha256": {
-    "path": "docs/paper/scripts/ingest_measurements.py",
-    "sha256": "def79048bef0f3e166a52b73079d640f0bfeeda71fdf4db9675dfc6e3f7eb7d2"
+    "path": "docs/paper/precision-campaign/reduce_line.py",
+    "sha256": "16c321b8a5988d10f2a4d2c9d9d0f4d17d35f38398d3e4cb1261b2f003cd2c55"
   },
   "seed": null,
-  "start_utc": "2026-11-09T06:55:52Z",
+  "start_utc": "2026-11-12T12:37:33Z",
   "statistic": "single"
 }

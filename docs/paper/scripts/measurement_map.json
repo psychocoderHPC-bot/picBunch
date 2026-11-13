@@ -1,4 +1,5 @@
 {
+  "campaign_root": "/home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b",
   "cases": {
     "bdata2-fluctuation": {
       "family": "val_fluct",
@@ -6,26 +7,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-fluctuation.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/bdata2-fluctuation/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/bdata2-fluctuation/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-fluctuation.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-fluctuation__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-fluctuation__main.bin 0.001 1e-07 1e-07 1e-07 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:47:45Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -35,26 +36,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-forward.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/bdata2-forward/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/bdata2-forward/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-forward.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-forward__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-forward__main.bin 0.001 1e-07 1e-07 1e-07 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:48:11Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=3. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -91,26 +92,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g10.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g10/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g10/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g10.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g10__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g10__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:09Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=0. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:57Z",
         "statistic": "single"
       }
     },
@@ -120,26 +121,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g100.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g100/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g100/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g100.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g100__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g100__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:08Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:45Z",
         "statistic": "single"
       }
     },
@@ -149,26 +150,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p0.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g1p0/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g1p0/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p0.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p0__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p0__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:06Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:45Z",
         "statistic": "single"
       }
     },
@@ -178,26 +179,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p1.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g1p1/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g1p1/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p1__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p1__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:04Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:45Z",
         "statistic": "single"
       }
     },
@@ -207,26 +208,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p5.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g1p5/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g1p5/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g1p5.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p5__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g1p5__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:02Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -236,26 +237,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g2p0.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g2p0/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g2p0/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g2p0.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g2p0__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g2p0__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:00Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -265,26 +266,26 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch field run on jureca-h100, BP5 output; reduced slice export for paper",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g50.h5 --cell-size 5e-08,5e-08,5e-08 --grid 128,128,128 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/hires-g50/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/hires-g50/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/hires-g50.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g50__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/hires-g50__main.bin 0.001 5e-08 5e-08 5e-08 5 12",
         "config": {
           "path": "campaign/scripts/campaign_run.py",
           "root": "measurement"
         },
-        "cuda_version": "12.6",
-        "end_utc": null,
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:37:58Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -294,24 +295,24 @@
         "adios2_version": "2.12.1",
         "axis_rule": "x",
         "binary": {
-          "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch --input in/large_g1_N100.h5 --cell-size 2e-7 --grid 128,128,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --output out/large_g1.bp (BP5), then BP5->HDF5; xy z=32, zy x=64",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/large-g1.h5 --cell-size 2e-07,2e-07,2e-07 --grid 128,128,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/large1-g1/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/large1-g1/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/large-g1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/large1-g1__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/large1-g1__main.bin 0.001 2e-07 2e-07 2e-07 5 4",
         "config": {
           "sha256": "a8ecd5e48fcdebfaf03c3893dda36bd84ac56c058d098a51947ca9403ed1bb85"
         },
-        "cuda_version": "13.4.92",
-        "end_utc": null,
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:39:02Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh large_g1 field from valid3 out/large_g1.h5; reference is the raw exact-driver large_g1_128.bin scaled to SI at cell 2e-7 (manifest sha 64b7ebc8e8312bc7782b10d9c05b064139db0e9b8c01c1feae146970ee9c59ea). Config digest is waveB1.sh; harness digest is run_case.sh. The stationary gamma=1 analytic B is identically zero; reference values below 1e-12 T (double round-off ~2e-19 T after scaling) are set to zero, as recorded in the transform. ",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=1. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single-run"
       }
     },
@@ -321,24 +322,24 @@
         "adios2_version": "2.12.1",
         "axis_rule": "x",
         "binary": {
-          "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch --input in/large_g10_N100.h5 --cell-size 2e-7 --grid 128,128,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --output out/large_g10.bp (BP5), then BP5->HDF5; xy z=32, zy x=64",
+        "command": "CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/large-g10.h5 --cell-size 2e-07,2e-07,2e-07 --grid 128,128,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/large1-g10/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/large1-g10/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/large-g10.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/large1-g10__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/large1-g10__main.bin 0.001 2e-07 2e-07 2e-07 5 4",
         "config": {
           "sha256": "a8ecd5e48fcdebfaf03c3893dda36bd84ac56c058d098a51947ca9403ed1bb85"
         },
-        "cuda_version": "13.4.92",
-        "end_utc": null,
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:58Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh large_g10 field from valid3 out/large_g10.h5; reference is the raw exact-driver large_g10_128.bin scaled to SI at cell 2e-7 (manifest sha 9e2430791195408fd3f259fc0be842ffe341015b7d23e2f6c0f23703c9a66f6a). Config digest is waveB1.sh; harness digest is run_case.sh.",
+        "io_backend": "hdf5",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=0. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single-run"
       }
     },
@@ -348,23 +349,23 @@
         "adios2_version": "2.12.1",
         "axis_rule": "n/a",
         "binary": {
-          "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input in/line_g10.h5 --cell-size 1e-7 --grid 96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --fft-padding 1 --shape tsc --output out/line_g10_h1.bp (and g50/g100 h=1); --cell-size 2.5e-8 --grid 384 --output out/line_g{10,50,100}_h25.bp (h=1/4)",
+        "command": "CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g10-h0.25.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g10-h1.0.h5 ; CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g100-h0.25.h5 ; CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g100-h1.0.h5 ; CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h25.h5 --cell-size 2.5e-08,2.5e-08,2.5e-08 --grid 384,384,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g50-h0.25.h5 ; CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-gamma/g50-h1.0.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_line.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/line-gamma/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g10-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g10-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g100-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g100-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h25.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h0.25.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h0.25.bin 0.001 2.5e-08 2.5e-08 2.5e-08 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/gamma-g50-h1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h1.0.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-gamma__g50-h1.0.bin 0.001 1e-07 1e-07 1e-07 5 12",
         "config": null,
-        "cuda_version": "13.4.92",
-        "end_utc": "2026-11-09T06:59:29Z",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:59Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
         "io_backend": "adios2/BP5",
-        "notes": "Fresh 2026-11-09 jureca-h100 (jrc0880) BP5 campaign figdata2-20261109. h=1 inputs in/line_g{10,50,100}.h5 sha256 cb1f9af86cd05cf304165cc754d1af3819f591b010d288b111d843cb98494c70, 56878f1f7e5aaf4a30fb753f9af8750519f3f3a94795c81b49f61279ada8037b, 787c940ab0495e7b37d81f4f91bdfed68de3fd0f8780a370ae9e05e05c819ad7 with committed ER1b order-12 references d4d79faf99d8bd39fe8e936aac001dc5a4bf6f8edacb7c888ad898707b667bba, a533a40e86ca74cd009e9a0e7bf1512dc00462084cf4676745d74d44d42e9cbb, 2c78eaedf1176600ad9c57a5a378053639769ba98cc472f277167a364fa26888; outputs data.0 sha256 7cd09e8b6f48eb579d6c0fad7a056c350fb9c15cf39aa55a230400c033b1a6a1, 1d0e6b169588ff4a642afbf957676fd5652477d60e62d50d302d77eaa7e03eb1, 633ec111d5d8ad7578256f2d7b9f90969237734e30aacbc16562158a57d74460. h=1/4 uses the standard refined mesh cell 2.5e-8 m, 384^3, references ref_h25std_g{10,50,100}.npz sha256 62fc19a9af754e252f0dd37e0bec56f2b7cfe0238555e020f7a52ca36d43a532, c5a43a0424b936bb02d38badd3f95807bd38d8084d40341b45e8d55ed9898f64, 708a4be24d051e9e196bb137dbb2fd67f8e4553aa434fe02ba27109df46aa679; outputs data.0 sha256 b23c333346b565232ec5ed76eba6d0845cf85f6bbbbe03ab6bb2825d5a73820b, 9d5ca7884880f9e3837f4872a8959fe2c90f30e9aa91f49face8e53b3fde674c, 92d691d6ecf7fd37858880aa177d8999a4449fed6be4f11fe87f0e6c2e78118a. Metric: per-ring worst peak-normalised |mesh-ref|/peak(ref) at d=2/8/48 against the order-12 TSC-convolved continuum. These are the current-model h=1/4 rows (2.524e-1/2.539e-4/6.777e-4 at gamma=10), not the legacy v0.5.0 kRefinement=0.25 values 0.188/6.86e-5/7.11e-4.",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=0,2,3. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": "2026-11-09T06:55:52Z",
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -374,23 +375,23 @@
         "adios2_version": "2.12.1",
         "axis_rule": "n/a",
         "binary": {
-          "sha256": "0ddcbf9a09ef299248ae74ba69747de3bc399a3c0094c10ace3daee2257121b1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input /home/ubuntu/t29-valid/in/mvpaper_{e5,a5}.h5 --cell-size 1e-7 --grid 64 --origin 0,0,0 --velocity-bins {1,4,16,64,256} --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output out/mv_{e5,a5}_b*.bp",
+        "command": "CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 16 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b16.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 256 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b256.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 4 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b4.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-a5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/a5-b64.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 16 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b16.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 256 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b256.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 4 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b4.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/mv-e5.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/multivel/e5-b64.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_line.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/multivel/reduce_spec.json",
         "config": null,
-        "cuda_version": "12.6",
-        "end_utc": "2026-11-09T07:02:40Z",
-        "gpu_model": "Tesla V100-SXM2-32GB",
-        "host": "rosi_v100 (gv001), Tesla V100-SXM2-32GB",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:19Z",
+        "gpu_model": "NVIDIA H100 PCIe 80 GB",
+        "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
         "io_backend": "adios2/BP5",
-        "notes": "Fresh rosi_v100 (Tesla V100-SXM2-32GB) run with the final picBunch default (commit 69bfd77: base order/ray plus exact observer-cell routing, gamma>=100 auto-exact). Reference slices are unchanged; only the picBunch field and derived errors were recomputed.",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=0,1,2. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": "2026-11-09T07:01:43Z",
+        "start_utc": "2026-11-12T12:37:33Z",
         "statistic": "single"
       }
     },
@@ -400,23 +401,23 @@
         "adios2_version": "2.12.1",
         "axis_rule": "n/a",
         "binary": {
-          "sha256": "d6c964ae775dbc2f9c23cc66b81e201388284392fe54c09a3b271de48f4f8275"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "OPENPMD_BACKEND_CONFIG='{\"backend\":\"adios2\"}' picBunch --input in/{line_g1.h5,in/w4b_g1.a4.h5,line_g10.h5,line_g50.h5,line_g100.h5,...} --cell-size 1e-7 --grid 96,96,96 or 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --fft-padding 1 --shape tsc --output out/w4b_g*_a*.bp; python3 w4b/emit_paper_metric.py --refdir /home/ubuntu/er1-20261102/ref --outdir out --csv w4b_paper_metric.csv --summary w4b_paper_metric.json",
+        "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g1.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g1-a1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g1-a4.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g1-a4.h5 ; CUDA_VISIBLE_DEVICES=0 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g10.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g10-a1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g10-a4.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g10-a4.h5 ; CUDA_VISIBLE_DEVICES=3 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g100.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g100-a1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g100-a4.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g100-a4.h5 ; CUDA_VISIBLE_DEVICES=2 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g50.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,96 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g50-a1.h5 ; CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g50-a4.h5 --cell-size 1e-07,1e-07,1e-07 --grid 96,96,384 --origin 0,0,0 --velocity-bins 1 --tolerance 1e-3 --shape tsc --fft-padding 1 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/line-w4b/g50-a4.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_line.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/line-w4b/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g1.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g1-a1.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g1-a1.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g1-a4.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g1-a4.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g1-a4.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g10.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g10-a1.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g10-a1.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g10-a4.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g10-a4.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g10-a4.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g100.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g100-a1.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g100-a1.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g100-a4.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g100-a4.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g100-a4.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g50.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g50-a1.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g50-a1.bin 0.001 1e-07 1e-07 1e-07 5 12 ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/w4b-g50-a4.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g50-a4.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/line-w4b__g50-a4.bin 0.001 1e-07 1e-07 1e-07 5 12",
         "config": null,
-        "cuda_version": "13.4.92",
-        "end_utc": "2026-11-09T07:00:46Z",
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T12:38:19Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
         "io_backend": "adios2/BP5",
-        "notes": "Fresh 2026-11-09 jureca-h100 (jrc0880) BP5 campaign figdata2-20261109 plus the fresh gamma=1 runs. Inputs: in/line_g1.h5 ebea150edbebff7dbf324d4eabb66b1decd5abfe2d919ecc8efe43ee99283b6e, in/w4b_g1.a4.h5 9fd4510da7f53a69c05f4d7824a46a2797f4e3afa215c20b468c7174febad8d2, in/line_g10.h5 cb1f9af86cd05cf304165cc754d1af3819f591b010d288b111d843cb98494c70, in/w4b_g10.a4.h5 4dd14d2f303d47f08f6aeb9ee9a5cb3c7487e302f6ebc01a3062c84c7d11fe46, in/line_g50.h5 56878f1f7e5aaf4a30fb753f9af8750519f3f3a94795c81b49f61279ada8037b, in/w4b_g50.a4.h5 e669c990b643775ee4f730b393eacf89cc9a7cffe600641b739e82b73d84d9cd, in/line_g100.h5 787c940ab0495e7b37d81f4f91bdfed68de3fd0f8780a370ae9e05e05c819ad7, in/w4b_g100.a4.h5 42df5843196b4d1369c709947e18d0a6f1ba136322c6045260da8ec2a3594dd9. Order-12 ER1b references: ref_g1_i0_n1.npz 8b2a32ff3a57bf9673c37bc8df375630369ebc86eb0a4bbb01354a434e932b23, ref_g10 d4d79faf99d8bd39fe8e936aac001dc5a4bf6f8edacb7c888ad898707b667bba, ref_g50 a533a40e86ca74cd009e9a0e7bf1512dc00462084cf4676745d74d44d42e9cbb, ref_g100 2c78eaedf1176600ad9c57a5a378053639769ba98cc472f277167a364fa26888. Output data.0 sha256: gamma1 a1 53e06258e5010389d33b74630d9262d98becda9af7b8a025d696a156371d9261, gamma1 a4 7528455fc03173be0eabf4981af6a4b2fe965589493b40647d238fde556cd411, gamma10 a1 7cd09e8b6f48eb579d6c0fad7a056c350fb9c15cf39aa55a230400c033b1a6a1, gamma10 a4 ca3cbe5820f3c42aae7a4658d96b824446492f413c57e632e84518daf216d6c4, gamma50 a1 1d0e6b169588ff4a642afbf957676fd5652477d60e62d50d302d77eaa7e03eb1, gamma50 a4 114027b900aaf732c7ef58d23284358701a0e3079f9843159a55b9c73d010eda, gamma100 a1 633ec111d5d8ad7578256f2d7b9f90969237734e30aacbc16562158a57d74460, gamma100 a4 927d4d415ba15df6e831d761ffcc8ed22b9422ec815069f26432d72b46f94d35. Reduced CSV w4b_paper_metric.csv sha256 04e170d7f8a690dcfc281c2926d70e48c7aebd9fd09ef1db28a8d8f144197dea. Corrected metric description: PAPER floored metric max(|ref-mesh|/max(|ref|,|mesh|)) over the electric components Ex,Ey,Ez with the per-component floor |ref|>=1e-3 peak(component), d=2..32, aspect 1/4; aspect 4 coincides with aspect 1 to machine precision at padding 1. All four gammas (1/10/50/100) are present.",
+        "notes": "Fresh re-reduction (bunch_* keys added) of the campaign-20261112-t5b raw outputs on jureca-h100, 4x H100 PCIe 80 GB; case bound to CUDA_VISIBLE_DEVICES=0,1,2,3. Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. Only additive bunch_* keys differ from the pre-bunch reduction.",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "path": "docs/paper/scripts/ingest_measurements.py",
           "root": "repo"
         },
-        "start_utc": "2026-11-09T07:00:18Z",
+        "start_utc": "2026-11-12T12:37:41Z",
         "statistic": "single"
       }
     },
@@ -452,24 +453,24 @@
         "adios2_version": "2.12.1",
         "axis_rule": "y",
         "binary": {
-          "sha256": "cdbcd8e64ed206af3399a607802d3e4f4a74e977f57bd4afe1edbe4e75db6da1"
+          "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
         },
-        "command": "picBunch --input in3/bunch_1mrad_200.h5 --cell-size 2e-7 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output out/1mrad_fig.bp (BP5), then BP5->HDF5; xy plane z=8",
+        "command": "CUDA_VISIBLE_DEVICES=0 /home/ubuntu/picbunch-work-20261112/pb/build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.h5 --cell-size 2e-07,2e-07,2e-07 --grid 32,32,16 --origin 0,0,0 --velocity-bins 2048 --tolerance 1e-3 --shape tsc --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/run/var1b-1mrad/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/t4d-harness/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/work/var1b-1mrad/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/inputs/var1b-1mrad.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t4d/ref/var1b-1mrad__main.bin 0.001 2e-07 2e-07 2e-07 5 12",
         "config": {
           "sha256": "905168ac6ff52a950a10d6ceb36c7bb85bba88c8a83e7bfaa6f291a26d11c6d1"
         },
-        "cuda_version": "13.4.92",
-        "end_utc": null,
+        "cuda_version": "13.4.2",
+        "end_utc": "2026-11-12T13:11:58Z",
         "gpu_model": "NVIDIA H100 PCIe 80 GB",
         "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
-        "io_backend": "adios2/BP5",
-        "notes": "Fresh 1mrad field from valid3 out/1mrad_fig.h5 (sha c8b95867..., manifest-recorded). The rendered val_1mrad panels use the fresh pic field; the order-12 reference arrays are the committed arbiter extracted to valid3/refs/slices_var1b_ref.npz (sha 04a468a1...). Config digest is waveBCDE.sh; harness digest is run_case.sh.",
+        "io_backend": "hdf5",
+        "notes": "Fresh var1b re-run on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=0) from the recovered authoritative input (bunch_1mrad_200.h5, sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, case harness commit f27d3d3dc020a64ad9ffd2055b0db49f066eb344, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced slice reproduces the committed peaks to <=7.1e-16 with identical argmax nodes. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
         "openpmd_version": "0.17.1",
         "repeats": 1,
         "script": {
           "sha256": "b704ff01c1e1dd8995bd2c71f57939a47850042134fdabe02a9d3b4c39c7400c"
         },
-        "start_utc": null,
+        "start_utc": "2026-11-12T13:10:46Z",
         "statistic": "single-run"
       }
     }
@@ -519,8 +520,8 @@
     {
       "case_id": "line-w4b",
       "source": {
-        "path": "w4b/w4b_paper_metric.csv",
-        "sha256": "04e170d7f8a690dcfc281c2926d70e48c7aebd9fd09ef1db28a8d8f144197dea"
+        "path": "reduced/line/w4b_rel_error.csv",
+        "sha256": "15daa5c743cfd51853887e3fd6fc70b8b96421e3d1f526c101fedeecd43ba8b1"
       },
       "target": "line/w4b_rel_error.csv",
       "transform": {
@@ -539,7 +540,7 @@
       "case_id": "line-gamma-error",
       "source": {
         "path": "reduced/line/gamma_err_dist.csv",
-        "sha256": "06e413c6437fdc2035d32ee6eebc7fe5238482787dc9b9e811b76b70966c9f48"
+        "sha256": "657bc01a7d0296eb9585ffcf9d5c7919dcd3c54da34932fc2864f03ead6f1484"
       },
       "target": "line/gamma_err_dist.csv",
       "transform": {
@@ -549,12 +550,17 @@
     {
       "case_id": "line-multivel",
       "source": {
-        "path": "reduced/multivel/multivel_energy.npz",
-        "sha256": "c8d4d98c810290cafb17453fc5bed4bde1dc84de27209c46cde9d3be1566a016"
+        "path": "reduced/line/multivel_energy.npz",
+        "sha256": "eb6e35546606b79d2ea3b8917f0538263173ca431443c782131d8543ad15212c"
       },
       "target": "line/multivel_energy.npz",
       "transform": {
         "keys": {
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
           "particles": "particles"
         },
         "kind": "npz_copy"
@@ -563,12 +569,17 @@
     {
       "case_id": "line-multivel",
       "source": {
-        "path": "reduced/multivel/multivel_angular.npz",
-        "sha256": "cf823b19e3c2aebabaf2c80bf1198430c4eed1f44d4a37c738ba44754d7ab755"
+        "path": "reduced/line/multivel_angular.npz",
+        "sha256": "7a9be45833dad3fdb2e766ad483ba00b790254269fe984b64677fdf503cfceb4"
       },
       "target": "line/multivel_angular.npz",
       "transform": {
         "keys": {
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
           "particles": "particles"
         },
         "kind": "npz_copy"
@@ -577,8 +588,8 @@
     {
       "case_id": "line-multivel",
       "source": {
-        "path": "reduced/multivel/multivel_binning.csv",
-        "sha256": "c4df25ab1f2536afeb8877f0db853d2a066851fbf894973fe2329afe59e33ced"
+        "path": "reduced/line/multivel_binning.csv",
+        "sha256": "388c539fc4ed25f50f8866e63670fc646ba563b9d350c6192126dab0c1e60813"
       },
       "target": "line/multivel_binning.csv",
       "transform": {
@@ -589,10 +600,17 @@
       "case_id": "bdata2-forward",
       "source": {
         "path": "campaign/fields/bdata2-forward.npz",
-        "sha256": null
+        "sha256": "ac3260a557ecdb8b3f718c95670260d6068656580832bed68cfd24d31b909a9f"
       },
       "target": "bdata2/forward_slice.npz",
       "transform": {
+        "copy_metadata": [
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
+        ],
         "dataset": "bdata2",
         "kind": "field_export",
         "metadata": {
@@ -620,7 +638,7 @@
       "case_id": "bdata2-forward",
       "source": {
         "path": "campaign/fields/bdata2-forward.npz",
-        "sha256": null
+        "sha256": "ac3260a557ecdb8b3f718c95670260d6068656580832bed68cfd24d31b909a9f"
       },
       "target": "bdata2/forward_sources.npz",
       "transform": {
@@ -634,10 +652,17 @@
       "case_id": "bdata2-fluctuation",
       "source": {
         "path": "campaign/fields/bdata2-fluctuation.npz",
-        "sha256": null
+        "sha256": "f25f201330f13ec655d51e07b9708064bdab81f551b516c968972020d7d8613f"
       },
       "target": "bdata2/fluctuation_slice.npz",
       "transform": {
+        "copy_metadata": [
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
+        ],
         "dataset": "bdata2",
         "kind": "field_export",
         "metadata": {
@@ -664,191 +689,217 @@
     {
       "case_id": "var1b-1mrad",
       "source": {
-        "path": "valid3/out/1mrad_fig.h5",
-        "sha256": "c8b958675b1e4bce823e074d5d937318b44ea90c907be3c2dbdc91e98e998138"
+        "path": "reduced/var1b/slices_var1b.paper.npz",
+        "sha256": "bfb7ff92d6b6e9670fa1dd896b82ef3e4e629d35ee8fd84462f1d8a451527934"
       },
       "target": "var1b/slices_var1b.npz",
       "transform": {
-        "cell": [
-          2e-07,
-          2e-07,
-          2e-07
-        ],
-        "copy_metadata": [
-          "sources"
-        ],
-        "dataset": "var1b",
-        "kind": "field_h5",
-        "metadata": {
-          "case": "var1b",
-          "display": "xy only: rows=y cols=x; coords cell-centred",
-          "ix": 16,
-          "iy": 16,
-          "iz": 8,
-          "label": "1mrad"
+        "keys": {
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
+          "case": "case",
+          "cell": "cell",
+          "comp": "comp",
+          "display": "display",
+          "ix": "ix",
+          "iy": "iy",
+          "iz": "iz",
+          "label": "label",
+          "n": "n",
+          "origin": "origin",
+          "sources": "sources",
+          "xy_Bx_err": "xy_Bx_err",
+          "xy_Bx_pic": "xy_Bx_pic",
+          "xy_Bx_ref": "xy_Bx_ref",
+          "xy_Bx_valid": "xy_Bx_valid",
+          "xy_By_err": "xy_By_err",
+          "xy_By_pic": "xy_By_pic",
+          "xy_By_ref": "xy_By_ref",
+          "xy_By_valid": "xy_By_valid",
+          "xy_Bz_err": "xy_Bz_err",
+          "xy_Bz_pic": "xy_Bz_pic",
+          "xy_Bz_ref": "xy_Bz_ref",
+          "xy_Bz_valid": "xy_Bz_valid",
+          "xy_Ex_err": "xy_Ex_err",
+          "xy_Ex_pic": "xy_Ex_pic",
+          "xy_Ex_ref": "xy_Ex_ref",
+          "xy_Ex_valid": "xy_Ex_valid",
+          "xy_Ey_err": "xy_Ey_err",
+          "xy_Ey_pic": "xy_Ey_pic",
+          "xy_Ey_ref": "xy_Ey_ref",
+          "xy_Ey_valid": "xy_Ey_valid",
+          "xy_Ez_err": "xy_Ez_err",
+          "xy_Ez_pic": "xy_Ez_pic",
+          "xy_Ez_ref": "xy_Ez_ref",
+          "xy_Ez_valid": "xy_Ez_valid"
         },
-        "n": [
-          32,
-          32,
-          16
-        ],
-        "origin": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "plane_index": {
-          "xy": {
-            "axis": "z",
-            "index": 8
-          }
-        },
-        "planes": [
-          "xy"
-        ],
-        "reference": {
-          "kind": "npz",
-          "path": "valid3/refs/slices_var1b_ref.npz"
-        },
-        "style": "var1b"
+        "kind": "npz_copy"
       }
     },
     {
       "case_id": "large1-g1",
       "source": {
-        "path": "valid3/out/large_g1.h5",
-        "sha256": "a9baad5a3c5d87b8859f5ed1e36c830372e3854c1cfc0138e8a9a73d2bc9e3fe"
+        "path": "reduced/large1/slices_g1.npz",
+        "sha256": "54d7942561bb6cdc61680771c9db01eb8e36fbdfa312fe9137e40b53cac2a9e9"
       },
       "target": "large1/slices_g1.npz",
       "transform": {
-        "cell": [
-          2e-07,
-          2e-07,
-          2e-07
-        ],
-        "dataset": "large1",
-        "kind": "field_h5",
-        "metadata": {
-          "array_axes_xy": "y,x",
-          "array_axes_zy": "z,y",
-          "centre": [
-            1.27649588e-05,
-            1.27838583e-05,
-            6.30329885e-06
-          ],
-          "display": "xy: rows=y cols=x; zy: rows=z cols=y; coords cell-centred",
-          "ix": 64,
-          "iy": 64,
-          "iz": 32
+        "keys": {
+          "array_axes_xy": "array_axes_xy",
+          "array_axes_zy": "array_axes_zy",
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
+          "case": "case",
+          "cell": "cell",
+          "centre": "centre",
+          "comp": "comp",
+          "display": "display",
+          "ix": "ix",
+          "iy": "iy",
+          "iz": "iz",
+          "n": "n",
+          "origin": "origin",
+          "xy_Bx_err": "xy_Bx_err",
+          "xy_Bx_pic": "xy_Bx_pic",
+          "xy_Bx_ref": "xy_Bx_ref",
+          "xy_Bx_valid": "xy_Bx_valid",
+          "xy_By_err": "xy_By_err",
+          "xy_By_pic": "xy_By_pic",
+          "xy_By_ref": "xy_By_ref",
+          "xy_By_valid": "xy_By_valid",
+          "xy_Bz_err": "xy_Bz_err",
+          "xy_Bz_pic": "xy_Bz_pic",
+          "xy_Bz_ref": "xy_Bz_ref",
+          "xy_Bz_valid": "xy_Bz_valid",
+          "xy_Ex_err": "xy_Ex_err",
+          "xy_Ex_pic": "xy_Ex_pic",
+          "xy_Ex_ref": "xy_Ex_ref",
+          "xy_Ex_valid": "xy_Ex_valid",
+          "xy_Ey_err": "xy_Ey_err",
+          "xy_Ey_pic": "xy_Ey_pic",
+          "xy_Ey_ref": "xy_Ey_ref",
+          "xy_Ey_valid": "xy_Ey_valid",
+          "xy_Ez_err": "xy_Ez_err",
+          "xy_Ez_pic": "xy_Ez_pic",
+          "xy_Ez_ref": "xy_Ez_ref",
+          "xy_Ez_valid": "xy_Ez_valid",
+          "zy_Bx_err": "zy_Bx_err",
+          "zy_Bx_pic": "zy_Bx_pic",
+          "zy_Bx_ref": "zy_Bx_ref",
+          "zy_Bx_valid": "zy_Bx_valid",
+          "zy_By_err": "zy_By_err",
+          "zy_By_pic": "zy_By_pic",
+          "zy_By_ref": "zy_By_ref",
+          "zy_By_valid": "zy_By_valid",
+          "zy_Bz_err": "zy_Bz_err",
+          "zy_Bz_pic": "zy_Bz_pic",
+          "zy_Bz_ref": "zy_Bz_ref",
+          "zy_Bz_valid": "zy_Bz_valid",
+          "zy_Ex_err": "zy_Ex_err",
+          "zy_Ex_pic": "zy_Ex_pic",
+          "zy_Ex_ref": "zy_Ex_ref",
+          "zy_Ex_valid": "zy_Ex_valid",
+          "zy_Ey_err": "zy_Ey_err",
+          "zy_Ey_pic": "zy_Ey_pic",
+          "zy_Ey_ref": "zy_Ey_ref",
+          "zy_Ey_valid": "zy_Ey_valid",
+          "zy_Ez_err": "zy_Ez_err",
+          "zy_Ez_pic": "zy_Ez_pic",
+          "zy_Ez_ref": "zy_Ez_ref",
+          "zy_Ez_valid": "zy_Ez_valid"
         },
-        "n": [
-          128,
-          128,
-          64
-        ],
-        "origin": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "plane_index": {
-          "xy": {
-            "axis": "z",
-            "index": 32
-          },
-          "zy": {
-            "axis": "x",
-            "index": 64
-          }
-        },
-        "planes": [
-          "xy",
-          "zy"
-        ],
-        "reference": {
-          "kind": "bin6",
-          "path": "valid3/refs/large_g1_128.bin",
-          "raw": true,
-          "shape": [
-            64,
-            128,
-            128
-          ],
-          "zero_below": 1e-12
-        },
-        "style": "large1"
+        "kind": "npz_copy"
       }
     },
     {
       "case_id": "large1-g10",
       "source": {
-        "path": "valid3/out/large_g10.h5",
-        "sha256": "c3042d41171acdea3e8cd43ab7bee500cb2e781db9a099bf668a52b8503627ac"
+        "path": "reduced/large1/slices_g10.npz",
+        "sha256": "8f501a9d93d4fe700d72fffd44b1e39543f1d75c7584cad68bccb4129862ea4a"
       },
       "target": "large1/slices_g10.npz",
       "transform": {
-        "cell": [
-          2e-07,
-          2e-07,
-          2e-07
-        ],
-        "dataset": "large1",
-        "kind": "field_h5",
-        "metadata": {
-          "array_axes_xy": "y,x",
-          "array_axes_zy": "z,y",
-          "centre": [
-            1.27649588e-05,
-            1.27838583e-05,
-            6.30329885e-06
-          ],
-          "display": "xy: rows=y cols=x; zy: rows=z cols=y; coords cell-centred",
-          "ix": 64,
-          "iy": 64,
-          "iz": 32
+        "keys": {
+          "array_axes_xy": "array_axes_xy",
+          "array_axes_zy": "array_axes_zy",
+          "bunch_axis": "bunch_axis",
+          "bunch_gamma": "bunch_gamma",
+          "bunch_pos_m": "bunch_pos_m",
+          "bunch_q_C": "bunch_q_C",
+          "bunch_rho_cell_m": "bunch_rho_cell_m",
+          "case": "case",
+          "cell": "cell",
+          "centre": "centre",
+          "comp": "comp",
+          "display": "display",
+          "ix": "ix",
+          "iy": "iy",
+          "iz": "iz",
+          "n": "n",
+          "origin": "origin",
+          "xy_Bx_err": "xy_Bx_err",
+          "xy_Bx_pic": "xy_Bx_pic",
+          "xy_Bx_ref": "xy_Bx_ref",
+          "xy_Bx_valid": "xy_Bx_valid",
+          "xy_By_err": "xy_By_err",
+          "xy_By_pic": "xy_By_pic",
+          "xy_By_ref": "xy_By_ref",
+          "xy_By_valid": "xy_By_valid",
+          "xy_Bz_err": "xy_Bz_err",
+          "xy_Bz_pic": "xy_Bz_pic",
+          "xy_Bz_ref": "xy_Bz_ref",
+          "xy_Bz_valid": "xy_Bz_valid",
+          "xy_Ex_err": "xy_Ex_err",
+          "xy_Ex_pic": "xy_Ex_pic",
+          "xy_Ex_ref": "xy_Ex_ref",
+          "xy_Ex_valid": "xy_Ex_valid",
+          "xy_Ey_err": "xy_Ey_err",
+          "xy_Ey_pic": "xy_Ey_pic",
+          "xy_Ey_ref": "xy_Ey_ref",
+          "xy_Ey_valid": "xy_Ey_valid",
+          "xy_Ez_err": "xy_Ez_err",
+          "xy_Ez_pic": "xy_Ez_pic",
+          "xy_Ez_ref": "xy_Ez_ref",
+          "xy_Ez_valid": "xy_Ez_valid",
+          "zy_Bx_err": "zy_Bx_err",
+          "zy_Bx_pic": "zy_Bx_pic",
+          "zy_Bx_ref": "zy_Bx_ref",
+          "zy_Bx_valid": "zy_Bx_valid",
+          "zy_By_err": "zy_By_err",
+          "zy_By_pic": "zy_By_pic",
+          "zy_By_ref": "zy_By_ref",
+          "zy_By_valid": "zy_By_valid",
+          "zy_Bz_err": "zy_Bz_err",
+          "zy_Bz_pic": "zy_Bz_pic",
+          "zy_Bz_ref": "zy_Bz_ref",
+          "zy_Bz_valid": "zy_Bz_valid",
+          "zy_Ex_err": "zy_Ex_err",
+          "zy_Ex_pic": "zy_Ex_pic",
+          "zy_Ex_ref": "zy_Ex_ref",
+          "zy_Ex_valid": "zy_Ex_valid",
+          "zy_Ey_err": "zy_Ey_err",
+          "zy_Ey_pic": "zy_Ey_pic",
+          "zy_Ey_ref": "zy_Ey_ref",
+          "zy_Ey_valid": "zy_Ey_valid",
+          "zy_Ez_err": "zy_Ez_err",
+          "zy_Ez_pic": "zy_Ez_pic",
+          "zy_Ez_ref": "zy_Ez_ref",
+          "zy_Ez_valid": "zy_Ez_valid"
         },
-        "n": [
-          128,
-          128,
-          64
-        ],
-        "origin": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "plane_index": {
-          "xy": {
-            "axis": "z",
-            "index": 32
-          },
-          "zy": {
-            "axis": "x",
-            "index": 64
-          }
-        },
-        "planes": [
-          "xy",
-          "zy"
-        ],
-        "reference": {
-          "kind": "bin6",
-          "path": "valid3/refs/large_g10_128.bin",
-          "raw": true,
-          "shape": [
-            64,
-            128,
-            128
-          ]
-        },
-        "style": "large1"
+        "kind": "npz_copy"
       }
     },
     {
       "case_id": "hires-g1p0",
       "source": {
         "path": "campaign/fields/hires-g1p0.npz",
-        "sha256": null
+        "sha256": "a9a4fa96ad3e9d267a5d813bc66179ccd9a6f35f0f514937b25673ebaec6a06a"
       },
       "target": "hires/hi_g1p0.npz",
       "transform": {
@@ -861,7 +912,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -919,7 +975,7 @@
       "case_id": "hires-g1p1",
       "source": {
         "path": "campaign/fields/hires-g1p1.npz",
-        "sha256": null
+        "sha256": "7c2f3631abce13b2093f30cbe731c81f61fb37d4a86a51095d564fb0c763cd90"
       },
       "target": "hires/hi_g1p1.npz",
       "transform": {
@@ -932,7 +988,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -990,7 +1051,7 @@
       "case_id": "hires-g1p5",
       "source": {
         "path": "campaign/fields/hires-g1p5.npz",
-        "sha256": null
+        "sha256": "7d1a8c91a10015640b5c6c80f6cb11abf45a6a48b3143a37b970caacd04355c7"
       },
       "target": "hires/hi_g1p5.npz",
       "transform": {
@@ -1003,7 +1064,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -1061,7 +1127,7 @@
       "case_id": "hires-g2p0",
       "source": {
         "path": "campaign/fields/hires-g2p0.npz",
-        "sha256": null
+        "sha256": "053d49ad4593540c261a865f4137dcbb0e154c9af3dfd48c2d476cc81183395c"
       },
       "target": "hires/hi_g2p0.npz",
       "transform": {
@@ -1074,7 +1140,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -1132,7 +1203,7 @@
       "case_id": "hires-g10",
       "source": {
         "path": "campaign/fields/hires-g10.npz",
-        "sha256": null
+        "sha256": "c020bdf41c37a5a371741bc71003a34d415797b7887607207c7fcbdcd5e1b6f3"
       },
       "target": "hires/hi_g10.npz",
       "transform": {
@@ -1145,7 +1216,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -1203,7 +1279,7 @@
       "case_id": "hires-g50",
       "source": {
         "path": "campaign/fields/hires-g50.npz",
-        "sha256": null
+        "sha256": "426488cdf4cf64df43dbda473c16b2ca08b12bc9703d4d6dedec66153bcb662b"
       },
       "target": "hires/hi_g50.npz",
       "transform": {
@@ -1216,7 +1292,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -1274,7 +1355,7 @@
       "case_id": "hires-g100",
       "source": {
         "path": "campaign/fields/hires-g100.npz",
-        "sha256": null
+        "sha256": "834dad858163004eab51613bdac5c736b267c47421be77c9e795574c5553cc41"
       },
       "target": "hires/hi_g100.npz",
       "transform": {
@@ -1287,7 +1368,12 @@
           "host",
           "picbunch",
           "reference",
-          "err_definition"
+          "err_definition",
+          "bunch_pos_m",
+          "bunch_q_C",
+          "bunch_axis",
+          "bunch_rho_cell_m",
+          "bunch_gamma"
         ],
         "dataset": "hires",
         "kind": "field_export",
@@ -1342,5 +1428,14 @@
       }
     }
   ],
+  "reduction": {
+    "binary_sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6",
+    "build_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
+    "case_harness_commits": {
+      "var1b-1mrad": "f27d3d3dc020a64ad9ffd2055b0db49f066eb344"
+    },
+    "harness_commit": "f8d7f2befd103185f547342e3165485ad7062b96",
+    "note": "Fresh re-reduction on jureca-h100 (4x H100 PCIe 80 GB) from the retained campaign HDF5/BP5 outputs; only additive bunch_* keys differ from the pre-bunch reduction."
+  },
   "schema": "picbunch-measurement-ingest/1"
 }

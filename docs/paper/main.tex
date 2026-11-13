@@ -16,7 +16,7 @@
 \pgfplotsset{compat=1.18}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,backgrounds,shapes.geometric}
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=1in,bottom=78pt]{geometry}
 \usepackage{float}
 \usepackage{caption}
 \usepackage{seqsplit}
@@ -26,6 +26,27 @@
 
 \newcommand{\epsz}{\varepsilon}
 \newcommand{\Rthree}{\mathbb{R}^3}
+
+% Float placement: several slice plates are taller than the default
+% \topfraction allows, so they were deferred and left large white bands.
+\renewcommand{\topfraction}{0.999}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.001}
+\renewcommand{\floatpagefraction}{0.5}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+
+% Shared description of the compact charge-density row that opens each
+% bunch plate (three coordinate planes, one shared colour bar, one
+% marginal-profile axis).  A macro keeps the wording identical across
+% figures and lets the figure labels change independently.
+\newcommand{\densityrow}{%
+The top row is a compact charge-density overview of the same bunch: $|\rho|$
+on a logarithmic scale floored at $10^{-6}$ of the peak, in the three
+coordinate planes on one shared colour bar, together with a marginal bunch
+profile. The \texttt{beam}$\to$ marker gives the propagation direction, and
+panels transverse to it are marked ``beam axis (out of plane)''.}
 
 \title{A free-space convolution on a staggered mesh for the initial field of a uniformly moving particle bunch}
 \author{Ren\'e Widera\\[2pt]
@@ -75,8 +96,12 @@ stock PIConGPU.
 \input{app_derivations}
 \input{app_sweep}
 \input{app_slices}
+\clearpage
 \input{app_multivel}
 
+% Flush pending appendix floats before the reference list so the figure
+% numbers stay in order and the bibliography is the last block.
+\clearpage
 {\footnotesize\bibliography{refs}}
 
 \end{document}

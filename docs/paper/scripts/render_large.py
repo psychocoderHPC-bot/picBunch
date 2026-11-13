@@ -13,8 +13,8 @@ Each dataset is one figure with two panels stacked in the electronic
 appendix: the x-y cut and the z-y cut.  Every panel carries the electric
 block first (field row, error row) and the magnetic block second (field row,
 error row), matching the per-gamma ``gp_*`` convention.  The stationary
-gamma=1 case shows the magnetic field row (identically zero, blank panels)
-and omits the magnetic error row, whose relative error is undefined.
+gamma=1 case keeps the magnetic error row as four fully masked boxes: the
+relative error of an identically zero reference is undefined.
 """
 import os
 import sys
@@ -27,6 +27,7 @@ import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
 import ingest_measurements as ingest  # noqa: E402
+import render_bunch  # noqa: E402
 
 US = 1e6
 DATASET = "large1"
@@ -52,18 +53,22 @@ def _items(d, plane, part, source, gamma, magnitude=True):
             "err": np.abs(axis.to_display(d[f"{plane}_{c}_err"], DATASET,
                                           plane, source)),
             "valid": valid,
+            "floor_valid": np.asarray(d[f"{plane}_{c}_valid"], dtype=bool),
             "title": rf"${c[0]}_{{{c[-1]}}}$",
             "symbol": f"{c[0]}_{{{c[-1]}}}",
         }
-        if float(np.max(np.abs(ref))) == 0.0:
+        zero_ref = (part == "B" and gamma == 1.0) or \
+            float(np.max(np.abs(ref))) == 0.0
+        if zero_ref:
             # The measured array may hold round-off at the 1e-19 T level for a
-            # physically zero component.  Draw a blank panel, not that noise.
+            # physically zero component.  Keep the box and draw it as a
+            # neutral masked panel, never the noise.
             it["arr"] = np.zeros_like(arr)
             it["blank"] = True
-            it["blank_text"] = rf"${it['symbol']}\equiv0$"
-            it["annotation"] = (
-                rf"$\mathbf{{{it['symbol']}}}\equiv0$"
-                f" ({reason}); relative error undefined")
+            it["zero_reason"] = reason
+            it["blank_text"] = fs.zero_field_note(it["symbol"], reason)
+            it["error_blank_text"] = fs.zero_error_note(it["symbol"], reason)
+            it["annotation"] = it["error_blank_text"]
         items.append(it)
     if magnitude:
         pic2 = sum(axis.to_display(d[f"{plane}_{c}_pic"], DATASET, plane,
@@ -71,17 +76,20 @@ def _items(d, plane, part, source, gamma, magnitude=True):
         ref2 = sum(axis.to_display(d[f"{plane}_{c}_ref"], DATASET, plane,
                                    source) ** 2 for c in comps)
         arr = np.maximum(pic2, 0.0)
-        peak = float(np.max(ref2)) if np.max(ref2) > 0 else 0.0
+        peak = 0.0 if (part == "B" and gamma == 1.0) else (
+            float(np.max(ref2)) if np.max(ref2) > 0 else 0.0)
         if peak > 0:
             err = np.abs(pic2 - ref2) / peak
         else:
             err = np.full_like(arr, np.nan)
-        sq = {"arr": arr, "err": err, "valid": valid,
+        sq = {"arr": arr, "err": err, "valid": valid, "floor_valid": valid,
               "title": rf"${part}^2$"}
         if peak == 0.0:
             sq["arr"] = np.zeros_like(arr)
             sq["blank"] = True
-            sq["blank_text"] = rf"${part}^2\equiv0$"
+            sq["blank_text"] = fs.zero_field_note(f"{part}^2", reason)
+            sq["error_blank_text"] = fs.zero_error_note(f"{part}^2", reason)
+            sq["annotation"] = sq["error_blank_text"]
         items.append(sq)
     return items
 
@@ -100,26 +108,48 @@ def _magnitude(d, plane, source):
     return np.sqrt(np.maximum(e2, 0.0))
 
 
+def _large_bunch(case, cell):
+    """The recorded LARGE1 generator: seed 42, 100 particles, sigma 6 cells."""
+    cell = np.asarray(cell, dtype=float)
+    rng = np.random.default_rng(42)
+    centre = np.array([64.0, 64.0, 32.0]) * cell
+    pos = centre + 6.0 * cell * rng.standard_normal((100, 3))
+    gamma = 10.0 if case == "g10" else 1.0
+    beam = "x" if case == "g10" else "stationary"
+    q = np.full(pos.shape[0], -render_bunch.E_CHARGE)
+    return render_bunch.Bunch(
+        pos, q, beam, float(cell[0]), gamma,
+        f"large1/slices_{case}.npz",
+        f"regenerated 100 positions for {case}: default_rng(42), cell 2e-7, "
+        "centre [64,64,32]*cell, pos = centre + 6*cell*N(0,1) "
+        "(campaign gen_inputs.py large(); matches the recorded N=100 input); "
+        "charge -e each; the npz carries no bunch_* keys",
+        pending_fresh_data=True)
+
+
 def build(outdir, case, plane, source):
     d = np.load(source, allow_pickle=True)
     n = [int(v) for v in d["n"]]
     cell = np.asarray(d["cell"], float)
     origin = np.asarray(d["origin"], float)
-    horiz_e, vert_e = axis.coords(DATASET, plane, n, cell, origin,
-                                  centres=False, source=source)
+    horiz_c, vert_c = axis.coords(DATASET, plane, n, cell, origin,
+                                  centres=True, source=source)
     gamma = 10.0 if case == "g10" else 1.0
     rows = []
     for part in ("E", "B"):
         items = _items(d, plane, part, source, gamma)
         rows.append({"kind": "field", "part": part, "items": items})
-        if part == "B" and gamma == 1.0:
-            # B is identically zero at beta=0, so the relative B error is
-            # undefined and the whole error row would be fully masked.  The
-            # per-gamma figures omit it for the same reason.
-            continue
         err_items = [dict(it) for it in items]
         for it in err_items:
             it["title"] = it["title"] + " err"
+            if it.get("blank"):
+                # Keep the box: the whole row is drawn as neutral masked
+                # panels with the reason, never omitted.
+                it["undefined"] = True
+                it["blank_text"] = it.get(
+                    "error_blank_text",
+                    fs.zero_error_note(it.get("symbol", part),
+                                       it.get("zero_reason", "beam axis")))
         rows.append({"kind": "error", "part": part, "items": err_items})
     name = f"large_s{plane}_{case}"
     xl, yl = axis.axis_labels(DATASET, plane, source)
@@ -140,12 +170,16 @@ def build(outdir, case, plane, source):
                                    DATASET, plane, source)),
                                "display_axes": list(axis.display_axes(
                                    DATASET, plane, source))}}
+    bunch = _large_bunch(case, cell)
+    row = render_bunch.build_row(
+        bunch, DATASET, name, plane, origin=d["origin"], n=d["n"],
+        cell=d["cell"], source=source)
     fs.render_split_field_rows(
-        name, outdir, rows, horiz_e * US, vert_e * US,
+        name, outdir, rows, horiz_c * US, vert_c * US,
         xlabel=xl, ylabel=yl, width_frac=1.0,
-        shading="flat", compact=True, manifest=man)
-    horiz_c, vert_c = axis.coords(DATASET, plane, n, cell, origin,
-                                  centres=True, source=source)
+        compact=True, manifest=man,
+        panel_height_scale=fs.APPENDIX_PANEL_HEIGHT_SCALE,
+        **render_bunch.layout_kwargs(row))
     signature = _signature(d, plane, source)
     if gamma == 10.0:
         if not (signature["Bx_max"] == 0.0 and signature["By_max"] > 0.0

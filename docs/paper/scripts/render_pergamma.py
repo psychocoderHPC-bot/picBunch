@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """RENDER5: final per-gamma single-particle figures from the HIRES series.
 
-One figure per velocity case.  In every field row the three signed components
-(E_x,E_y,E_z or B_x,B_y,B_z) share ONE symmetric-log scale and ONE colour bar;
-the squared magnitude (E^2 or B^2) has a DISTINCT linear scale and its own
-colour bar.  Error rows repeat the same split with logarithmic scales.
+One figure per velocity case.  Every field and error row is a uniform
+four-panel block: three signed components (E_x,E_y,E_z or B_x,B_y,B_z) plus
+the squared magnitude (E^2 or B^2), at one shared 27.8 mm square size with one
+shared colour bar.  The squared panel keeps its own six-decade logarithmic
+scale.  Error ranges are data-driven (smallest finite positive error to the
+panel peak); grey marks cells below the shared validity threshold.
 
 Data: the seven HIRES hi_*.npz 128^3/5e-8 m slices only.  Output names are
 gp_g<gamma> with "." replaced by "p" so the paper can include gp_g1p0.pdf ...
@@ -22,39 +24,12 @@ sys.path.insert(0, HERE)
 import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
+import ingest_measurements as ingest  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.text as mtext  # noqa: E402
-import matplotlib.ticker as mticker  # noqa: E402
 
 COMP = ["Ex", "Ey", "Ez", "Bx", "By", "Bz"]
 CI = {c: i for i, c in enumerate(COMP)}
-
-# Masked/undefined pixels get their own light grey, never a colour that the
-# finite ramp also produces.  The magma ramp is truncated at 0.90 so its pale
-# yellow tail (which reads as white in print) is not part of the finite range.
-MASKED_COLOUR = "#cccccc"
-ERR_CMAP_TOP = 0.90
-SQ_FLOOR_RATIO = 1e-6  # log floor for E^2/B^2: 1e-6 of the panel peak
-
-
-def _cmap(name, top=1.0):
-    """Copy a colormap, optionally truncating its top, and set the bad colour."""
-    base = plt.get_cmap(name)
-    if top < 1.0:
-        cmap = mcolors.ListedColormap(base(np.linspace(0.0, top, 256)),
-                                      name=f"{name}_t{int(top * 100)}")
-    else:
-        cmap = base.copy()
-    cmap.set_bad(MASKED_COLOUR)
-    return cmap
-
-
-def _finite_min_distance(cmap, colour=MASKED_COLOUR):
-    """Smallest RGB distance between the finite ramp and the masked colour."""
-    masked = np.asarray(mcolors.to_rgba(colour))[:3]
-    lut = np.asarray(cmap(np.linspace(0.0, 1.0, 256)))[:, :3]
-    return float(np.min(np.sqrt(np.sum((lut - masked) ** 2, axis=1))))
 
 
 def _gamma_of(path):
@@ -129,6 +104,12 @@ def load(path):
         e, v = error(d, plane, k)
         out["err"][k] = e
         out["valid"][k] = v
+    # ONE validity mask per field part, shared by the signed slices, the
+    # squared magnitude and the error panels, so the grey footprint is
+    # identical in all three (the operator's mask-consistency requirement).
+    for part in ("E", "B"):
+        refs = [out["ref"][part + c] for c in "xyz"]
+        out.setdefault("valid_part", {})[part] = ingest.part_valid(refs)
     # A reference component that is exactly zero everywhere (stationary
     # bunch: all B; beam along +y: By) has an undefined relative error: its
     # error panel renders fully masked and carries an in-panel annotation
@@ -154,371 +135,179 @@ def load(path):
     return out
 
 
-def fmt(v):
-    if v == 0:
-        return "0"
-    if not np.isfinite(v):
-        return "n/a"
-    e = int(np.floor(np.log10(abs(v))))
-    m = v / 10.0 ** e
-    if -2 <= e <= 2:
-        return f"{v:.3g}"
-    return f"{m:.2g}e{e}"
-
-
-def log_ticks(vmin, vmax, nmax=3):
-    """Exactly three decade-rounded ticks, as in the shared style module."""
-    vmin = float(max(vmin, 1e-300))
-    vmax = float(max(vmax, vmin * 10.0))
-    lo = 10.0 ** np.floor(np.log10(vmin))
-    hi = 10.0 ** np.ceil(np.log10(vmax))
-    if hi <= lo:
-        hi = lo * 10.0
-    return [lo, float(np.sqrt(lo * hi)), hi]
-
-
 def add_cbar(fig, cax, image, ticks, labels, title):
-    # Numeric ticks sit left of the bar, the rotated quantity label right of
-    # it.  The two columns get separate horizontal slots below; previously
-    # both were on the right and overran the E^2/B^2 panel.
-    cb = fig.colorbar(image, cax=cax)
-    cb.set_ticks(ticks)
-    cb.set_ticklabels(labels)
-    cb.ax.yaxis.set_ticks_position("left")
-    cb.ax.yaxis.set_label_position("right")
-    cb.ax.tick_params(labelsize=figstyle.TICK_PT, labelleft=True,
-                      labelright=False, pad=1.5, length=2)
-    cb.outline.set_linewidth(0.6)
-    cb.set_label(title, fontsize=figstyle.AXIS_LABEL_PT, labelpad=3)
-    return cb
+    """Delegate to the one canonical colour-bar style."""
+    return figstyle.draw_colorbar(fig, image, cax=cax, ticks=ticks,
+                                  ticklabels=labels, label=title)
+
+
+def _display(case, arr, dtype=float):
+    return axis.to_display(np.asarray(arr, dtype), "hires", "xy", case["source"])
+
+
+def _item(case, part, c, j, log):
+    """One raster item in display orientation (the shared renderer draws it)."""
+    symbol = f"{part}_{{{'xyz'[j]}}}"
+    # The stationary magnetic reference is exactly zero by physics; the
+    # measured array can still carry 1e-18 roundoff, so the beta=0 case is
+    # forced rather than tested against an exact zero.
+    zero = (part == "B" and float(case["beta"]) == 0.0) or \
+        float(np.max(np.abs(case["ref"][c]))) == 0.0
+    reason = "stationary" if float(case["beta"]) == 0.0 else "beam axis"
+    v = _display(case, case["valid_part"][part].astype(float)).astype(bool)
+    if log:
+        # The stored error array is the measured data and its min is the
+        # value the floor rule must see.  It is finite on every shared-mask
+        # cell for the three components (only the squared key is recomputed
+        # below), so the grey footprint stays identical to the slice panel.
+        e = _display(case, case["err"][c])
+        item = {"err": e, "valid": v,
+                "floor_valid": _display(case, case["valid"][c].astype(float)).astype(bool),
+                "title": f"${part}_{{{'xyz'[j]}}}$", "symbol": symbol}
+        if zero:
+            item["undefined"] = True
+            item["blank_text"] = figstyle.zero_error_note(symbol, reason)
+            item["annotation"] = item["blank_text"]
+        elif not np.any(v):
+            item["annotation"] = case["undef"].get(c, "no valid pixels")
+        return item
+    arr = np.zeros_like(np.asarray(case["field"][c], float)) if zero \
+        else _display(case, case["field"][c])
+    return {"arr": arr, "valid": v, "title": f"${part}_{{{'xyz'[j]}}}$",
+            "symbol": symbol,
+            "blank": zero,
+            "blank_text": (figstyle.zero_field_note(symbol, reason)
+                           if zero else None),
+            "error_blank_text": (figstyle.zero_error_note(symbol, reason)
+                                 if zero else None),
+            "note": (figstyle.zero_field_note(symbol, reason)
+                     if zero else None)}
+
+
+def _sq_item(case, part, log):
+    key = part + "2"
+    zero = (part == "B" and float(case["beta"]) == 0.0) or \
+        float(np.max(np.abs(case["ref"][key]))) == 0.0
+    v = _display(case, case["valid_part"][part].astype(float)).astype(bool)
+    if log:
+        pic = _display(case, case["field"][key])
+        ref = _display(case, case["ref"][key])
+        peak = float(np.max(np.abs(ref))) if np.isfinite(ref).any() else 0.0
+        e = (np.abs(pic - ref) / peak if peak > 0 else np.zeros_like(pic))
+        # The stored measured array is what the floor diagnosis used; keep it
+        # for the floor rule while the shared-mask recomputation drives the
+        # panel's grey footprint.  Components use their stored array directly.
+        item = {"err": e, "valid": v, "title": f"${part}^2$",
+                "floor_err": _display(case, case["err"][key]),
+                "floor_valid": _display(case, case["valid"][key].astype(float)).astype(bool)}
+        if zero:
+            item["undefined"] = True
+            item["blank_text"] = figstyle.zero_error_note(f"{part}^2",
+                                                          "stationary")
+            item["annotation"] = item["blank_text"]
+        elif not np.any(v):
+            item["annotation"] = "no valid pixels"
+        return item
+    arr = np.zeros_like(np.asarray(case["field"][key], float)) if zero \
+        else _display(case, case["field"][key])
+    return {"arr": arr, "valid": v, "title": f"${part}^2$",
+            "blank": zero,
+            "blank_text": (figstyle.zero_field_note(f"{part}^2", "stationary")
+                           if zero else None),
+            "error_blank_text": (figstyle.zero_error_note(f"{part}^2",
+                                                          "stationary")
+                                 if zero else None),
+            "note": (figstyle.zero_field_note(f"{part}^2", "stationary")
+                     if zero else None)}
 
 
 def draw_case(case, outdir):
-    figstyle.apply_field_style()
-    # The B error row is omitted only when all three reference magnetic
-    # components vanish (stationary bunch, beta=0).  A moving bunch keeps
-    # B_x and B_z nonzero even though its axial B component is zero, so the
-    # row and their error panels must stay.  The decision uses the reference
-    # field, not the measured field, which can carry round-off near 1e-18 T.
+    # N==1 guard: the HIRES cases are single point charges.  A charge-density
+    # "bunch form" row is physically meaningless for one particle, so this
+    # family never draws it and its output stays byte-identical.  (The
+    # distribution families add the row through render_bunch instead.)
+    n_particles = int(np.asarray(case["pos_m"]).reshape(-1, 3).shape[0])
+    if n_particles != 1:
+        raise ValueError(
+            f"render_pergamma expects N==1 point charges, got N={n_particles} "
+            f"for {case['case']}")
+    figstyle.apply_paper_style(kind="field")
+    # The B reference vanishes only for the stationary bunch (beta=0).  The
+    # error row is still drawn: four neutral masked boxes state why.
     bref = [float(np.max(np.abs(case["ref"][c]))) for c in ("Bx", "By", "Bz")]
-    berr_omitted = all(v == 0.0 for v in bref)
-    assert not berr_omitted or float(
+    b_zero = all(v == 0.0 for v in bref)
+    assert not b_zero or float(
         np.max(np.abs(case["ref"]["B2"]))) == 0.0, (
-        f"{case['case']}: B error row omitted but the reference B2 is nonzero")
-    rowkeys = ["Efield", "Eerr", "Bfield"] + (["Berr"] if not berr_omitted
-                                              else [])
-    # Shared square-panel geometry: the same canvas width, panel size and
-    # gaps as render_slices/render_large.  Only the height depends on rows.
-    geo = figstyle.field_layout(
-        len(rowkeys), width_frac=1.0, top_in=figstyle.FIELD_TOP_NOTE_IN,
-        bottom_in=(figstyle.FIELD_BOTTOM_NOTE_IN if berr_omitted
-                   else figstyle.FIELD_BOTTOM_ERR_IN),
-        row_gap_in=figstyle.FIELD_ROW_GAP_IN)
-    fig = plt.figure(figsize=(geo["fig_w_in"], geo["fig_h_in"]))
-    fig.patch.set_facecolor("white")
-    fig.text(0.5, 0.985,
-             "Error rows: grey = masked / no finite error; "
-             "the colour ramp spans finite errors only",
-             ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
-    panel_x = geo["panel_x"]
-    pw, rh = geo["pw"], geo["rh"]
-    cb1, cb2, bw = geo["cb1"], geo["cb2"], geo["bar_width"]
-    rows = {key: geo["row_y"][i] for i, key in enumerate(rowkeys)}
-    x = case["x"]
+        f"{case['case']}: B reference zero but B2 is nonzero")
 
-    x = case["x"]
-    yc = case["y"]
-    dx, dy = x[1] - x[0], yc[1] - yc[0]
-    ext = [yc[0] - dy / 2, yc[-1] + dy / 2, x[0] - dx / 2, x[-1] + dx / 2]
-    xc = np.linspace(ext[0], ext[1], len(yc))
-    yv = np.linspace(ext[2], ext[3], len(x))
-    xticks = [0, 2, 4, 6]
-    yticks = [0, 2, 4, 6]
+    rows = []
+    for part in ("E", "B"):
+        comps = [part + "x", part + "y", part + "z"]
+        fld = [_item(case, part, c, j, False) for j, c in enumerate(comps)]
+        fld.append(_sq_item(case, part, False))
+        rows.append({"kind": "field", "part": part, "items": fld})
+        err = [_item(case, part, c, j, True) for j, c in enumerate(comps)]
+        err.append(_sq_item(case, part, True))
+        if part == "B" and b_zero:
+            symbol = "B"
+            for it in err:
+                it["undefined"] = True
+                it["blank_text"] = figstyle.zero_error_note(symbol,
+                                                            "stationary")
+                it["annotation"] = it["blank_text"]
+            err[3]["blank_text"] = figstyle.zero_error_note(
+                f"{symbol}^2", "stationary")
+            err[3]["annotation"] = err[3]["blank_text"]
+        rows.append({"kind": "error", "part": part, "items": err})
 
-    cmap_comp = _cmap("RdBu_r")
-    cmap_sq = _cmap("viridis")
-    cmap_err = _cmap("magma", ERR_CMAP_TOP)
-    masked_min_distance = _finite_min_distance(cmap_err)
-    assert masked_min_distance > 0.10, (
-        f"finite error ramp reaches the masked colour "
-        f"(min distance {masked_min_distance:.3f})")
+    # One rotated row label per row: every row is a four-panel block.
+    labels = []
+    for r in rows:
+        head = f"{r['part']} field" if r["kind"] == "field" \
+            else f"{r['part']} error"
+        labels.append(f"{head}\n"
+                      rf"$\gamma$={case['gamma']:.4g}, "
+                      rf"$\beta$={case['beta']:.4g}"
+                      f"\nN=1, {case['n']}$^3$")
 
-    info = {"case": case["case"], "gamma": case["gamma"], "beta": case["beta"],
-            "n": case["n"], "cell_m": case["cell_m"], "rows": {}}
-    caxes = []
-    cbars = []
-
-    def draw_row(rowkey, part, log):
-        y0 = rows[rowkey]
-        comps = [f"{part}x", f"{part}y", f"{part}z"]
-        sq = part + "2"
-        if not log:
-            zero = {c: float(np.max(np.abs(case["ref"][c]))) == 0.0
-                    for c in comps}
-            cvals = [np.abs(case["field"][c]) for c in comps if not zero[c]]
-            cvmax = (max(float(np.nanmax(v)) for v in cvals)
-                     if cvals else 0.0)
-            if not np.isfinite(cvmax) or cvmax <= 0:
-                cvmax = 1.0
-            cnorm = mcolors.SymLogNorm(linthresh=max(cvmax * 1e-3, 1e-30),
-                                       vmin=-cvmax, vmax=cvmax, base=10)
-            sq_zero = float(np.max(np.abs(case["ref"][sq]))) == 0.0
-            svmax = (0.0 if sq_zero
-                     else float(np.nanmax(case["field"][sq])))
-            if np.isfinite(svmax) and svmax > 0:
-                svmin = max(svmax * SQ_FLOOR_RATIO, np.finfo(float).tiny)
-                snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
-                sticks = [svmin, np.sqrt(svmin * svmax), svmax]
-                slabels = [fmt(t) for t in sticks]
-                sq_scale = "log"
-                sl = (f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'}"
-                      ", log)")
-            else:
-                snorm = mcolors.Normalize(vmin=0.0, vmax=1.0)
-                sticks = [0.0, 0.5, 1.0]
-                slabels = ["0", fmt(0.5), fmt(1.0)]
-                sq_scale = "linear"
-                sl = f"{part}$^2$ ({'V$^2$/m$^2$' if part == 'E' else 'T$^2$'})"
-            cticks = [-cvmax, 0.0, cvmax]
-            clabels = [fmt(-cvmax), "0", fmt(cvmax)]
-            cl = f"{part} ({'V/m' if part == 'E' else 'T'})"
-        else:
-            ce = [case["err"][c] for c in comps]
-            parts = [a[np.isfinite(a) & (a > 0)] for a in ce]
-            good = np.concatenate(parts) if any(p.size for p in parts) else np.array([])
-            if good.size:
-                cvmin = max(float(good.min()), 1e-16)
-                cvmax = max(float(good.max()), cvmin * 10)
-            else:
-                cvmin, cvmax = 1e-12, 1.0
-            cnorm = mcolors.LogNorm(vmin=cvmin, vmax=cvmax, clip=True)
-            se = case["err"][sq]
-            good = se[np.isfinite(se) & (se > 0)]
-            if good.size:
-                svmin = max(float(good.min()), 1e-16)
-                svmax = max(float(good.max()), svmin * 10)
-            else:
-                svmin, svmax = 1e-12, 1.0
-            snorm = mcolors.LogNorm(vmin=svmin, vmax=svmax, clip=True)
-            sq_scale = "log"
-            cticks = log_ticks(cvmin, cvmax)
-            sticks = log_ticks(svmin, svmax)
-            clabels = [fmt(t) for t in cticks]
-            slabels = [fmt(t) for t in sticks]
-            cl, sl = f"{part} err", f"{part}$^2$ err"
-
-        imgs = []
-        for j, c in enumerate(comps):
-            ax = fig.add_axes([panel_x[j], y0, pw, rh])
-            arr = case["field"][c] if not log else case["err"][c]
-            if not log and zero[c]:
-                # A reference component that is exactly zero everywhere is
-                # blank: the measured field may still hold round-off at the
-                # 1e-18 T level, which must not be drawn as a real field.
-                arr = np.zeros_like(arr)
-            if log:
-                valid = case["valid"][c]
-                Z = axis.to_display(
-                    np.ma.masked_where((~valid) | (~np.isfinite(arr)), arr),
-                    "hires", "xy", case["source"])
-                im = ax.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                               cmap=cmap_err, norm=cnorm,
-                               interpolation="nearest", resample=False)
-                zz = Z
-                try:
-                    ax.contour(xc, yv, zz, levels=[1e-3],
-                               colors=[figstyle.GATE_STYLE["color"]],
-                               linewidths=figstyle.GATE_STYLE["linewidth"],
-                               linestyles=figstyle.GATE_STYLE["linestyle"])
-                except Exception:
-                    pass
-            else:
-                im = ax.imshow(axis.to_display(np.asarray(arr), "hires", "xy",
-                                               case["source"]),
-                               origin="lower", extent=ext, aspect="auto",
-                               cmap=cmap_comp, norm=cnorm,
-                               interpolation="nearest", resample=False)
-            imgs.append(im)
-            if not log and zero[c]:
-                ax.text(0.5, 0.5, rf"${part}_{'xyz'[j]}\equiv0$",
-                        transform=ax.transAxes, ha="center", va="center",
-                        fontsize=figstyle.ANNOT_PT, color="0.25")
-            if log and not np.any(valid):
-                note = case["undef"].get(c, "no valid pixels")
-                # The caption carries the full reason; keep the in-panel note
-                # to the short component identity so it stays inside the axes.
-                note = note.split(" (")[0]
-                ax.text(0.5, 0.5, note, transform=ax.transAxes,
-                        ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
-            ax.set_xticks(xticks)
-            ax.set_yticks(yticks)
-            ax.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
-            if rowkey.endswith("err"):
-                ax.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
-            else:
-                ax.set_xticklabels([])
-            if j == 0:
-                ax.set_ylabel(r"$x$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
-            else:
-                ax.set_yticklabels([])
-            if rowkey.endswith("field"):
-                ax.set_title(f"${part}_{'xyz'[j]}$" if j < 3 else f"${part}^2$",
-                             fontsize=figstyle.TITLE_PT, pad=2)
-            else:
-                ax.set_title("", pad=0)
-
-        axq = fig.add_axes([panel_x[3], y0, pw, rh])
-        arrq = case["field"][sq] if not log else case["err"][sq]
-        if not log and sq_zero:
-            arrq = np.zeros_like(arrq)
-        if log:
-            valid = case["valid"][sq]
-            Z = axis.to_display(
-                np.ma.masked_where((~valid) | (~np.isfinite(arrq)), arrq),
-                "hires", "xy", case["source"])
-            imq = axq.imshow(Z, origin="lower", extent=ext, aspect="auto",
-                             cmap=cmap_err, norm=snorm,
-                             interpolation="nearest", resample=False)
-            try:
-                axq.contour(xc, yv, Z, levels=[1e-3],
-                            colors=[figstyle.GATE_STYLE["color"]],
-                            linewidths=figstyle.GATE_STYLE["linewidth"],
-                            linestyles=figstyle.GATE_STYLE["linestyle"])
-            except Exception:
-                pass
-        else:
-            imq = axq.imshow(axis.to_display(np.asarray(arrq), "hires", "xy",
-                                             case["source"]),
-                             origin="lower", extent=ext, aspect="auto",
-                             cmap=cmap_sq, norm=snorm,
-                             interpolation="nearest", resample=False)
-        if not log and sq_zero:
-            axq.text(0.5, 0.5, rf"${part}^2\equiv0$", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
-        if log and not np.any(case["valid"][sq]):
-            axq.text(0.5, 0.5, "no valid pixels", transform=axq.transAxes,
-                     ha="center", va="center", fontsize=figstyle.ANNOT_PT, color="0.25")
-        axq.set_xticks(xticks)
-        axq.set_yticks(yticks)
-        axq.tick_params(labelsize=figstyle.TICK_PT, length=2, pad=1.5)
-        if rowkey.endswith("err"):
-            axq.set_xlabel(r"$y$ ($\mu$m)", fontsize=figstyle.AXIS_LABEL_PT, labelpad=1)
-        else:
-            axq.set_xticklabels([])
-        axq.set_yticklabels([])
-        if rowkey.endswith("field"):
-            sq_title = (f"${part}^2$ (log)" if sq_scale == "log"
-                        else f"${part}^2$")
-            axq.set_title(sq_title, fontsize=figstyle.TITLE_PT, pad=2)
-        else:
-            axq.set_title("", pad=0)
-
-        assert all(im.norm is cnorm for im in imgs)
-        assert imq.norm is snorm and snorm is not cnorm
-
-        no_valid = log and not any(
-            np.any(case["valid"][k] & np.isfinite(case["err"][k]))
-            for k in comps + [sq])
-        if not no_valid:
-            cax1 = fig.add_axes([cb1, y0, bw, rh])
-            cax2 = fig.add_axes([cb2, y0, bw, rh])
-            caxes.extend([cax1, cax2])
-            cb1o = add_cbar(fig, cax1, imgs[0], cticks, clabels, cl)
-            cb2o = add_cbar(fig, cax2, imq, sticks, slabels, sl)
-            cbars.extend([cb1o, cb2o])
-            assert cb1o.mappable.norm is cnorm
-            assert cb2o.mappable.norm is snorm
-            assert cb1o.mappable.norm is not cb2o.mappable.norm
-
-        # row label: gamma, beta, particle count
-        rl = (f"{part} {'error' if log else 'field'}\n"
-              rf"$\gamma$={case['gamma']:.4g}, $\beta$={case['beta']:.4g}"
-              f"\nN=1, {case['n']}$^3$")
-        fig.text(0.0315, y0 + rh / 2, rl, rotation=90, ha="center", va="center",
-                 fontsize=figstyle.FIG_TEXT_PT, linespacing=1.15)
-
-        info["rows"][rowkey] = {
-            "comp": {"vmin": float(cnorm.vmin), "vmax": float(cnorm.vmax),
-                     "ticks": [float(t) for t in cticks],
-                     "norm": "symlog" if not log else "log",
-                     "linthresh": float(getattr(cnorm, "linthresh", 0.0))},
-            "sq": {"vmin": float(snorm.vmin), "vmax": float(snorm.vmax),
-                   "ticks": [float(t) for t in sticks],
-                   "norm": sq_scale,
-                   "floor_ratio": (SQ_FLOOR_RATIO if sq_scale == "log"
-                                   and not log else None)},
-            "masked_colour": MASKED_COLOUR,
-            "finite_min_masked_distance": masked_min_distance,
-            "shared_components": True,
-            "bar_labels": [cl, sl],
-            "no_valid_pixels": bool(no_valid),
-        }
-
-    for key in rowkeys:
-        draw_row(key, key[0], key.endswith("err"))
-    if berr_omitted:
-        fig.text(0.5, 0.035,
-                 "B error row omitted: the reference B is identically zero "
-                 "at beta=0, so the relative B error is undefined",
-                 ha="center", va="center", fontsize=figstyle.FIG_TEXT_PT)
-
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-
-    # --- assertions ---
-    checks = {}
-    texts = []
-    for t in fig.findobj(mtext.Text):
-        if not t.get_visible() or not t.get_text().strip():
-            continue
-        if t.get_fontsize() > figstyle.BODY_TEXT_PT + 1e-6:
-            raise AssertionError(f"font larger than the 10 pt body text: "
-                                 f"{t.get_text()!r} {t.get_fontsize()} pt")
-        texts.append(t)
-    boxes = [(t.get_text(), t.get_window_extent(renderer)) for t in texts]
-    overlaps = []
-    for i in range(len(boxes)):
-        for j in range(i + 1, len(boxes)):
-            a, b = boxes[i][1], boxes[j][1]
-            ix = min(a.x1, b.x1) - max(a.x0, b.x0)
-            iy = min(a.y1, b.y1) - max(a.y0, b.y0)
-            if ix > 0.5 and iy > 0.5:
-                overlaps.append((boxes[i][0], boxes[j][0], round(ix,1), round(iy,1), [round(v,1) for v in (a.x0,a.y0,a.x1,a.y1)], [round(v,1) for v in (b.x0,b.y0,b.x1,b.y1)]))
-    if overlaps:
-        raise AssertionError(f"text overlap in {case['case']}: {overlaps[:8]}")
-
-    # colour-bar gaps and tick counts
-    panels = []
-    for rowkey in rows:
-        y0 = rows[rowkey]
-        for j, xx in enumerate(panel_x):
-            panels.append((rowkey, j, xx, y0, xx + pw, y0 + rh))
-    for cax, cb in zip(caxes, cbars):
-        b = cax.get_position()
-        left_panels = [p for p in panels if p[4] <= b.x0 + 1e-9]
-        gap = b.x0 - max(p[4] for p in left_panels)
-        assert gap >= 0.008, f"bar too close to panel: {gap}"
-        nt = len([t for t in cb.ax.get_yticklabels() if t.get_text().strip()])
-        assert nt == 3, f"colour bar has {nt} ticks, expected 3"
-    checks["no_text_overlap"] = True
-    checks["components_share_norm_and_bar"] = True
-    checks["squared_scale_distinct_with_own_bar"] = True
-    checks["bars_per_row"] = 2
-    checks["hidden_bar_rows"] = [
-        k for k, v in info["rows"].items() if v.get("no_valid_pixels")]
-    checks["min_font_pt"] = min(t.get_fontsize() for t in texts)
-    checks["max_bar_ticks"] = max(
-        len([t for t in cb.ax.get_yticklabels() if t.get_text().strip()])
-        for cb in cbars)
-    checks["bar_gap_fraction"] = 0.008
-    checks["masked_colour"] = MASKED_COLOUR
-    checks["masked_colour_distinct_from_finite_errors"] = True
-    checks["finite_min_masked_distance"] = masked_min_distance
-    info["checks"] = checks
-
+    xlabel, ylabel = axis.axis_labels("hires", "xy", case["source"])
+    collected = []
+    info = {"case": case["case"], "gamma": case["gamma"],
+            "beta": case["beta"], "n": case["n"],
+            "cell_m": case["cell_m"]}
     g = float(case["gamma"])
     slug = (f"g{g:.1f}" if g < 10 else f"g{g:.0f}").replace(".", "p")
     name = f"gp_{slug}"
+    man = {"case": case["case"], "gamma": case["gamma"],
+           "beta": case["beta"], "split_scale": True,
+           "data": os.path.relpath(case["path"], cases.REPO_ROOT),
+           "raster_panel_mm": figstyle.RASTER_PANEL_MM}
+    bottom_note = None
+    if b_zero:
+        bottom_note = ("B error row: every panel is fully masked because the "
+                       "reference B is identically zero at beta = 0, so the "
+                       "relative B error is undefined")
+    figstyle.render_split_field_rows(
+        name, outdir, rows, case["y"], case["x"],
+        xlabel=xlabel, ylabel=ylabel, width_frac=1.0,
+        top_in=figstyle.FIELD_TOP_NOTE_IN,
+        bottom_in=figstyle.FIELD_BOTTOM_ERR_IN,
+        fixed_ticks=([0, 2, 4, 6], [0, 2, 4, 6]),
+        row_labels=labels,
+        top_note=("Grey marks cells that are not evaluated because the "
+                  "reference field is below threshold"),
+        bottom_note=bottom_note,
+        peak_annotations=False,
+        collect_rows=collected,
+        manifest=man)
+
+    info["rows"] = collected
+    info["checks"] = {
+        "panels_per_row": figstyle.RASTER_NCOL,
+        "colorbars_per_row": 1,
+        "min_font_pt": figstyle.TICK_PT,
+        "masked_colour": figstyle.MASKED_COLOR,
+    }
     pos_um = np.asarray(case["pos_m"], float) * 1e6
     nn = int(case["n"])
     axis_result = axis.assert_beam_axis(
@@ -531,12 +320,6 @@ def draw_case(case, outdir):
                        "z": float(pos_um[2])},
         require_longitudinal_contraction=bool(g >= 10.0))
     info["axis_assertion"] = axis_result
-    man = {"case": case["case"], "gamma": case["gamma"],
-           "beta": case["beta"], "split_scale": True,
-           "assertions": checks,
-           "data": os.path.relpath(case["path"], cases.REPO_ROOT)}
-    man.update(figstyle._layout_manifest(geo))
-    figstyle.save(fig, outdir, name, man, tight=False)
     info["figure"] = name
     return info, name, axis_result
 
@@ -574,18 +357,15 @@ def main(outdir):
     for d in details:
         c = d["checks"]
         lines.append(f"{d['figure']} ({d['case']}): "
-                     f"no_text_overlap={c['no_text_overlap']} "
-                     f"shared_norm_and_bar={c['components_share_norm_and_bar']} "
-                     f"sq_distinct={c['squared_scale_distinct_with_own_bar']} "
-                     f"bars_per_row={c['bars_per_row']} "
+                     f"rows={len(d['rows'])} "
+                     f"panels_per_row={c['panels_per_row']} "
                      f"min_font_pt={c['min_font_pt']} "
-                     f"max_bar_ticks={c['max_bar_ticks']}")
-        for k, v in d["rows"].items():
-            lines.append(f"  {k:6s} comp [{v['comp']['vmin']:.6g}, "
-                         f"{v['comp']['vmax']:.6g}] "
-                         f"ticks={len(v['comp']['ticks'])} | sq "
-                         f"[{v['sq']['vmin']:.6g}, {v['sq']['vmax']:.6g}] "
-                         f"ticks={len(v['sq']['ticks'])}")
+                     f"panel_mm={figstyle.RASTER_PANEL_MM:.2f}")
+        for r in d["rows"]:
+            scales = ", ".join(f"[{lo:.6g}, {hi:.6g}]" for lo, hi in r["norms"])
+            lines.append(f"  {r['kind']:9s} {r['part']} "
+                         f"panels={r['panels']} bars={r['colourbars']} "
+                         f"scales={scales}")
     text = "\n".join(lines) + "\n"
     with open(os.path.join(outdir, "assertions_render5.txt"), "w") as fh:
         fh.write(text)

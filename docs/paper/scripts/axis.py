@@ -34,6 +34,9 @@ PROPAGATION_AXIS = {
     "var1b": "y",
     "hires": "y",
     "large1": "x",
+    # The multi-velocity samples carry the same +y drift as the val_* bunch;
+    # the field cube records beam_axis="+y" (By==0 for the energy-only case).
+    "multivel": "y",
 }
 
 # Physical axes of (array.shape[0], array.shape[1]) in the stored files.
@@ -44,6 +47,14 @@ ARRAY_AXES = {
     ("large1", "xy"): ("y", "x"),
     ("large1", "zy"): ("z", "y"),
     ("hires", "xy"): ("y", "x"),
+    # Transverse x-z view used only by the bunch-form row (not a stored slice).
+    ("bdata2", "xz"): ("z", "x"),
+    ("var1b", "zy"): ("y", "z"),
+    ("var1b", "xz"): ("z", "x"),
+    ("large1", "xz"): ("z", "x"),
+    ("multivel", "xy"): ("y", "x"),
+    ("multivel", "zy"): ("z", "y"),
+    ("multivel", "xz"): ("z", "x"),
 }
 
 # Correct figure layout as (vertical, horizontal) per data set and plane.
@@ -54,6 +65,14 @@ DISPLAY_AXES = {
     ("hires", "xy"): ("x", "y"),
     ("large1", "xy"): ("y", "x"),   # axial-x beam horizontal
     ("large1", "zy"): ("z", "y"),   # axial-x beam out of plane, y horizontal
+    # Transverse x-z view: beam axis (y or x) is out of plane in every family.
+    ("bdata2", "xz"): ("z", "x"),
+    ("var1b", "zy"): ("z", "y"),
+    ("var1b", "xz"): ("z", "x"),
+    ("large1", "xz"): ("z", "x"),
+    ("multivel", "xy"): ("x", "y"),
+    ("multivel", "zy"): ("z", "y"),
+    ("multivel", "xz"): ("z", "x"),
 }
 
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}

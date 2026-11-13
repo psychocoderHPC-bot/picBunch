@@ -21,6 +21,7 @@ import axis  # noqa: E402
 import cases  # noqa: E402
 import figstyle as fs  # noqa: E402
 import ingest_measurements as ingest  # noqa: E402
+import render_bunch  # noqa: E402
 
 US = 1e6
 COMP = {"E": ["Ex", "Ey", "Ez"], "B": ["Bx", "By", "Bz"]}
@@ -88,9 +89,19 @@ def panels(plane_data, part, field_mode):
         rec = plane_data[c]
         f = rec["ref"] if field_mode == "ref" else rec["pic"]
         fields.append(f)
-        items.append({"arr": f, "err": rec["err"], "valid": valid,
-                      "title": rf"${c[0]}_{{{c[1]}}}$",
-                      "symbol": f"{c[0]}_{{{c[1]}}}"})
+        it = {"arr": f, "err": rec["err"], "valid": valid,
+              "floor_valid": rec["valid"],
+              "title": rf"${c[0]}_{{{c[1]}}}$",
+              "symbol": f"{c[0]}_{{{c[1]}}}"}
+        if float(np.max(np.abs(rec["ref"]))) == 0.0:
+            # Identically zero reference component: keep the box in the grid
+            # and draw it as a neutral masked panel.
+            it["arr"] = np.zeros_like(np.asarray(f, float))
+            it["blank"] = True
+            it["blank_text"] = fs.zero_field_note(it["symbol"], "beam axis")
+            it["error_blank_text"] = fs.zero_error_note(it["symbol"],
+                                                        "beam axis")
+        items.append(it)
     f2 = sum(f * f for f in fields)
     r2 = sum(plane_data[c]["ref"] ** 2 for c in comps)
     arr = np.maximum(f2, 0.0)
@@ -99,8 +110,15 @@ def panels(plane_data, part, field_mode):
         err = np.abs(f2 - r2) / peak
     else:
         err = np.full_like(arr, np.nan)
-    items.append({"arr": arr, "err": err, "valid": valid,
-                  "title": rf"${part}^2$"})
+    sq = {"arr": arr, "err": err, "valid": valid, "floor_valid": valid,
+          "title": rf"${part}^2$"}
+    if peak == 0.0:
+        sq["arr"] = np.zeros_like(arr)
+        sq["blank"] = True
+        sq["blank_text"] = fs.zero_field_note(f"{part}^2", "stationary")
+        sq["error_blank_text"] = fs.zero_error_note(f"{part}^2",
+                                                    "stationary")
+    items.append(sq)
     return items
 
 
@@ -129,11 +147,18 @@ def _part_rows(plane_data, part, plane, sources, coord, has_error, use_ref):
                    else part + "2")
             if sym.startswith(part) and sym != part + "2" and float(
                     np.max(np.abs(plane_data[sym]["ref"]))) == 0.0:
-                # Identically-zero reference component: the relative error is
-                # undefined and the panel renders fully masked; annotate it.
-                e["annotation"] = (
-                    rf"$\mathbf{{{e['symbol']}}}\equiv0$"
-                    " (beam axis); relative error undefined")
+                # Identically-zero reference component: keep the box as a
+                # neutral masked panel and say why.
+                e["undefined"] = True
+                e["blank_text"] = fs.zero_error_note(e["symbol"],
+                                                     "beam axis")
+                e["annotation"] = e["blank_text"]
+            elif it.get("blank") and sym == part + "2":
+                e["undefined"] = True
+                e["blank_text"] = it.get(
+                    "error_blank_text",
+                    fs.zero_error_note(f"{part}^2", "stationary"))
+                e["annotation"] = e["blank_text"]
             err_items.append(e)
         rows.append({"kind": "error", "part": part, "items": err_items})
         smask = support_mask(plane, field_items[0]["arr"].shape, sources, coord)
@@ -151,7 +176,7 @@ def _assert_axis(name, plane_data, dataset, plane, source, beam_centroid,
 
 
 def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
-         dataset, source, beam_centroid, use_ref):
+         dataset, source, beam_centroid, use_ref, bunch=None):
     rows, smask = _part_rows(plane_data, part, plane, sources, coord,
                              has_error, use_ref)
     xl, yl = axis.axis_labels(dataset, plane, source)
@@ -159,16 +184,17 @@ def make(outdir, name, plane_data, part, plane, sources, coord, has_error,
            "dataset": dataset, "plane": plane, "part": part,
            "has_error": has_error, "includegraphics_width": 0.92,
            "axis_convention": horizontal_axis_record(dataset, plane, source)}
+    extra = _bunch_layout_kw(bunch)
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
-        width_frac=1.0, support=smask, manifest=man)
+        width_frac=1.0, support=smask, manifest=man, **extra)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
 
 
 def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
-                  dataset, source, beam_centroid, use_ref):
+                  dataset, source, beam_centroid, use_ref, bunch=None):
     """One figure per plane with the electric block first, magnetic second.
 
     ``val_forward`` carries both error rows (E field, E error, B field,
@@ -193,13 +219,30 @@ def make_combined(outdir, name, plane_data, plane, sources, coord, has_error,
            "block_order": block_order, "has_error": has_error,
            "includegraphics_width": 1.0,
            "axis_convention": horizontal_axis_record(dataset, plane, source)}
+    extra = _bunch_layout_kw(bunch)
     fs.render_split_field_rows(
         name, outdir, rows, plane_data["horiz"], plane_data["vert"],
         xlabel=xl, ylabel=yl + ("" if not has_error else "\n"),
         width_frac=1.0, compact=True,
-        support=smask, manifest=man)
+        support=smask, manifest=man, **extra)
     return _assert_axis(name, plane_data, dataset, plane, source,
                         beam_centroid, use_ref)
+
+
+def _bunch_layout_kw(bunch):
+    """Compact field layout used only when the bunch row is present.
+
+    The appendix slice plates place a long caption under a tall field block.
+    ``panel_height_scale`` squeezes only the panel height (the panel width,
+    the placed ``\\linewidth`` and every font token stay fixed), and the
+    trimmed top/row gaps remove whitespace that carried no information.  At
+    the default of the shared style module the layout is unchanged.
+    """
+    if bunch is None:
+        return {}
+    return {"bunch": bunch, "panel_scale": 1.0,
+            "panel_height_scale": fs.APPENDIX_PANEL_HEIGHT_SCALE, "top_in": 0.10,
+            "bottom_in": 0.58, "row_gap_in": 0.30}
 
 
 def _beam_centroid_um(sources_cells, cell):
@@ -214,18 +257,36 @@ def run(outdir):
     fwd_src = os.path.join(src_dir, "forward_slice.npz")
     flc_src = os.path.join(src_dir, "fluctuation_slice.npz")
     fwd_d, fwd = load_bdata(fwd_src)
-    _, flc = load_bdata(flc_src)
+    flc_d, flc = load_bdata(flc_src)
     src = sources_bdata(os.path.join(src_dir, "forward_sources.npz"))
     cell = np.asarray(fwd_d["cell"], float)
+    sources_path = os.path.join(src_dir, "forward_sources.npz")
+    src_full = np.load(sources_path, allow_pickle=False)["sources"]
+    bdata = render_bunch.Bunch(
+        np.asarray(src_full[:, :3], float) * cell,
+        -np.asarray(src_full[:, 6], float) * render_bunch.E_CHARGE,
+        "y", float(cell[0]), 10.0,
+        os.path.relpath(sources_path, cases.REPO_ROOT),
+        "derived from forward_sources.npz: positions sources[:, :3] (cell "
+        "indices) x cell; charge -sources[:,6]*e = -5e-13 C each; the npz "
+        "carries no bunch_* keys", pending_fresh_data=True)
 
     for plane in ("xy", "zy"):
         bc = _beam_centroid_um(src, cell)
+        fwd_row = render_bunch.build_row(
+            bdata, "bdata2", f"val_forward_{plane}", plane,
+            origin=fwd_d["origin"], n=fwd_d["n"], cell=fwd_d["cell"],
+            source=fwd_src)
+        flc_row = render_bunch.build_row(
+            bdata, "bdata2", f"val_fluct_{plane}", plane,
+            origin=flc_d["origin"], n=flc_d["n"], cell=flc_d["cell"],
+            source=flc_src)
         results.append(make_combined(
             outdir, f"val_forward_{plane}", fwd[plane], plane, src, 32.0,
-            True, "bdata2", fwd_src, bc, False))
+            True, "bdata2", fwd_src, bc, False, bunch=fwd_row))
         results.append(make_combined(
             outdir, f"val_fluct_{plane}", flc[plane], plane, src, 32.0,
-            False, "bdata2", flc_src, bc, True))
+            False, "bdata2", flc_src, bc, True, bunch=flc_row))
 
     var_src = cases.data("var1b", "slices_var1b.npz")
     d = np.load(var_src, allow_pickle=False)
@@ -247,13 +308,35 @@ def run(outdir):
                                      var_src).astype(bool),
         }
     srcv = np.asarray(d["sources"], float)
-    # The VAR1b bunch sits at the upper edge of the 32-cell window, so its
-    # particle centroid is not inside the plotted y range; the axis proof for
-    # this case is the structural/field assertion, not the particle centroid.
+    cellv = np.asarray(d["cell"], float)
+    if "bunch_pos_m" in d.files and "bunch_q_C" in d.files:
+        pos_m = np.asarray(d["bunch_pos_m"], float)
+        q_C = np.asarray(d["bunch_q_C"], float)
+        bunch_source = ("bunch_pos_m (metres) and bunch_q_C from the fresh "
+                        "reduced file")
+    else:
+        # Historical var1b sources are stored in the archived input's unit
+        # (unitSI = 1e-7 m), NOT in cell indices.  Convert to metres once.
+        pos_m = srcv * 1e-7
+        q_C = np.full(srcv.shape[0], -32.0e-18 / srcv.shape[0])
+        bunch_source = ("sources[:, :3] * 1e-7 m and -32 aC / N; the file "
+                        "carries no bunch_* keys")
+    # Cell indices for the support outline and the crop.  The density row is
+    # binned on the field lattice (cell = 2e-7 m), so the same metre positions
+    # must be divided by the field cell exactly once.
+    src_cells = pos_m / cellv
+    bvar = render_bunch.Bunch(
+        pos_m, q_C, "y", float(cellv[0]), 10.0,
+        os.path.relpath(var_src, cases.REPO_ROOT),
+        "derived from slices_var1b.npz: %s; cell indices = pos_m / cell" %
+        bunch_source, pending_fresh_data=False)
     for part in ("E", "B"):
+        row = render_bunch.build_row(
+            bvar, "var1b", f"val_1mrad_xy_{part}", "xy",
+            origin=d["origin"], n=d["n"], cell=d["cell"], source=var_src)
         results.append(make(
-            outdir, f"val_1mrad_xy_{part}", xy, part, "xy", srcv, 8.0, True,
-            "var1b", var_src, None, False))
+            outdir, f"val_1mrad_xy_{part}", xy, part, "xy", src_cells, 8.0,
+            True, "var1b", var_src, None, False, bunch=row))
     return results
 
 

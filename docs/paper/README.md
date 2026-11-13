@@ -37,13 +37,14 @@ bibliography database is required. After the sources change, copy
 ## Figures
 
 Every figure PDF in `figs/` is rendered from the recorded measurement
-data at its print width (A4 text block, 6.268 in) so that the 9 pt fonts
+data at its print width (A4 text block, 6.2677 in) so that the 9 pt fonts
 print at 9 pt. The shared style module fixes the canvas width to the
 LaTeX inclusion width, uses Okabe-Ito hues for the gamma encoding, one
 colour bar per row with the quantity and SI unit (E in V/m, B in T, a
-dimensionless relative error), and no text below 9 pt except the compact
-5.5 pt peak label in the combined slice panels (its width is checked against
-22 % of the panel). The audit
+dimensionless relative error), and one font ladder from 10 pt body text down
+to 7 pt annotations and 7.5 pt ticks. The smallest span placed in
+`paper.pdf` is 6.3 pt (a 7 pt mathtext script at the 0.9 script scale).
+The audit
 (`audit_figures.py` in the rework directory, output in `audit/`) records
 for every included figure the printed minimum font size, the colour bars
 per row, the colour-bar labels, and any overlapping text boxes; all

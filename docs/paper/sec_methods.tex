@@ -21,18 +21,17 @@ bunches are mono-energetic: the read-back records
 $\gamma_{\min}=\gamma_{\max}=1$ for the $\gamma=1$ bunch and
 $\gamma_{\min}=\gamma_{\max}=10$ for the $\gamma=10$ bunch.
 
-\begin{table}[t]
-\centering
+\begingroup
 \footnotesize
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.05}
+\begin{longtable}{@{}p{1.9cm}cp{2.2cm}p{2.7cm}p{2.7cm}p{2.7cm}@{}}
 \caption{Configurations of every measured case and the section that uses it.
 The two mid-slice entries give the bunch generation grid; the
 field grid for those cases ($32\times32\times16$ @ $2\times10^{-7}$ m) is
 in the second block. Kinetic energy is $(\gamma-1) m_ec^2$; the
 multi-velocity driver cell size is $10^{-6}$ m.}
-\label{tab:configs}
-\begin{longtable}{@{}p{1.9cm}cp{2.2cm}p{2.7cm}p{2.7cm}p{2.7cm}@{}}
+\label{tab:configs}\\
 \toprule
 case & $N$ & total charge (per-particle weight) & size (cells/axis) & spread & used in \\
 \midrule
@@ -112,7 +111,7 @@ landscape, aspect 4 & 1/10/100 & 1; anisotropic, aspect 4 & axis-aligned, $h\!=\
  multi-velocity, both & 10 / 5.06\,MeV & $3.12\times10^{6}\,e$ ($5\times10^{-13}$\,C) each; $10^{-7}$\,m & $64^3$, JURECA H100 \\
  divergence & 10 / 5.06\,MeV & 1 each; $2\times10^{-7}$\,m & $32\times32\times16$ ($6.4\times6.4\times3.2$), rosi\_v100 \\
 \end{longtable}
-\end{table}
+\endgroup
 
 \subsection{Command and software versions}
 \label{sec:commands}
