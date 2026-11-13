@@ -23,9 +23,9 @@ instead of about 116 s), and `restart/restart.log` ends with
 
 For an open-boundary LWFA checkpoint, the writer now copies the PML slabs from
 the input checkpoint. The rerun on `rosi_v100` used the real checkpoint
-`w7b-20261102/lwfa/gt-run/checkpoints/out_000002.h5` (638976 electrons, eight
+`w7b-20261102/lwfa/gt-run/checkpoints/out_000002.h5` (638976 electrons, twelve
 `Convolutional PML` groups with six datasets each) and the same reduced deck
-(64x128x64, `--periodic 0 0 1`). picBunch copied all eight groups and the restart
+(64x128x64, `--periodic 0 0 1`). picBunch copied all twelve groups and the restart
 exited 0 with
 
 ```
@@ -52,13 +52,11 @@ restart then fails because PIConGPU loads the PML slabs unconditionally, with
 contains PML records for such a deck, or restart with periodic boundaries.
 
 For a deck whose PML has never run, `[picongpu] absorber = "pml"` in the
-configuration is the other option: the writer adds the eight
-`Convolutional PML E/B_{xneg,xpos,yneg,ypos,zneg,zpos}` slab records with the
-zero initial state, so the restart deck's PML loads from rest. The layout (six
-cross components `xy,xz,yx,yz,zx,zy`, full `(Nz,Ny,Nx)` extent, main-field
-geometry, parent E/B units and Yee positions) is fixed by the PIConGPU
-checkpoint contract and is documented in
-[Boundary conditions](configuration.md#boundary-conditions).
+configuration is the other option: the writer adds the twelve `Convolutional
+PML` slab records (six components `E` and `B`, each with a `neg` and a `pos`
+slab record) with the zero initial state, so the restart deck's PML loads from
+rest; the full record layout is documented in [openPMD backend
+selection](openpmd-backends.md#field-absorber-key).
 
 ## Particle species and the id range
 

@@ -81,7 +81,10 @@ loads. `pml` additionally writes the twelve zero-filled `Convolutional PML`
 slab records an open-boundary PIConGPU deck reads on restart: six field
 components `E` and `B`, each with a `neg` and a `pos` slab record
 (`E_xneg`, `E_xpos`, `E_yneg`, `E_ypos`, `E_zneg`, `E_zpos`, and the same six
-for `B`).
+for `B`). Each record carries the six cross components `xy`, `xz`, `yx`, `yz`,
+`zx`, `zy` as full `(Nz, Ny, Nx)` datasets, with the main-field geometry, the
+parent `E`/`B` `unitSI` and unit dimension, and the parent Yee positions
+duplicated across the split components.
 Without those slabs the restart aborts with
 `Key 'Convolutional PML E_xneg' does not exist`. Set `absorber = "pml"` when
 the restart deck uses the convolutional PML: a checkpoint written with
