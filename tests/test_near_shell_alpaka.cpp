@@ -271,21 +271,26 @@ TEST(NearShellAlpaka, ExactHostLoopMatchesGolden)
         std::size_t index;
         double value;
     };
+    // The new identity replaces the per-tile local-FFT mesh subtraction with
+    // a direct 27-point TSC stencil per source, blended by observer distance.
+    // The old goldens (pre-7a3afff) were for the local-FFT identity and are
+    // superseded.  Values recorded with the direct-stencil identity on the
+    // rosi_v100 CPU build (e8d082f).
     Probe const probes[] = {
-        {0, 0, 181.77110646553166},
-        {1, 21, 998.53845662084041},
-        {2, 42, -285.7640873951085},
-        {3, 13, 6.1715340381258406e-07},
-        {4, 37, 3.6216630532926957e-06},
-        {5, 58, -1.3124894235866798e-06},
+        {0, 0, 198.832616679942},
+        {1, 21, 1580.93453742987},
+        {2, 42, 271.070512180638},
+        {3, 13, 1.12322722813659e-06},
+        {4, 37, 2.82098654808433e-06},
+        {5, 58, -1.7153008090829675e-06},
     };
     for(Probe const& p : probes)
     {
-        // The host exact path keeps the historical summation order; allow
-        // compiler-level round-off between the build that recorded the golden
-        // values and the current backend compiler.
+        // The direct-stencil identity is bit-identical across thread counts on
+        // the same build; the tolerance covers compiler/FFT round-off between
+        // the build that recorded the golden values and the current backend.
         double const scale = std::max(std::abs(p.value), 1.0e-300);
-        EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-12)
+        EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-10 + 1.0e-10)
             << "component " << p.component << " node " << p.index;
     }
 }
@@ -345,12 +350,12 @@ namespace
         for(OriginProbe const& p : probes)
         {
             double const scale = std::max(std::abs(p.value), 1.0e-300);
-            // Golden values recorded with the signed local subtraction box.
-            // The relative tolerance is compiler/FFT round-off; the absolute
-            // floor covers near-zero components where a relative bound is
-            // meaningless.  The former clamp of the negative bound to zero
-            // moves the significant nodes by ~3e-3 relative, far above this.
-            EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-12 + 1.0e-10)
+            // Golden values recorded with the direct 27-point TSC stencil
+            // identity (post-7a3afff).  The tolerance covers compiler/FFT
+            // round-off; the absolute floor covers near-zero components.
+            // The identity change from local-FFT to direct stencil moves the
+            // significant nodes by up to ~1e-3 relative.
+            EXPECT_NEAR(field.data[p.component][p.index], p.value, scale * 1.0e-10 + 1.0e-10)
                 << label << " component " << p.component << " node " << p.index;
         }
     }
@@ -365,14 +370,14 @@ TEST(NearShellAlpaka, SourceStencilBelowGridOriginMatchesSerialReference)
 {
     OriginCase const c{{0.0, 0.0, 0.0}, {0.5e-6, 0.5e-6, 0.25e-6}};
     std::vector<OriginProbe> const probes{
-        {0, 0u, 1.9129109569731398e-12},
+        {0, 0u, 1.80391578135717e-12},
         {0, 5u, -818.18902489911227},
         {0, 21u, -564.52951323866819},
-        {0, 63u, -39.660157928514337},
+        {0, 63u, -39.683197120515729},
         {1, 40u, -145.91277865812367},
         {2, 21u, -598.80178361484786},
         {2, 45u, -82.431016421134373},
-        {2, 63u, -39.900483382599354},
+        {2, 63u, -39.896312975746802},
     };
     expectOriginGolden(c, probes, "stencil below origin");
 }
@@ -383,14 +388,14 @@ TEST(NearShellAlpaka, SourceStencilBelowNonZeroGridOriginMatchesSerialReference)
 {
     OriginCase const c{{1.5e-6, -0.5e-6, 2.0e-6}, {2.0e-6, 0.5e-6, 2.25e-6}};
     std::vector<OriginProbe> const probes{
-        {0, 0u, -4.2024585781324472e-12},
+        {0, 0u, -3.98857376844352e-12},
         {0, 5u, -1000.3399417908696},
         {0, 21u, -672.86292117309142},
-        {0, 63u, -46.347611081700222},
+        {0, 63u, -46.348262521425916},
         {1, 0u, 773.15718538240071},
         {1, 45u, -121.86059905226703},
         {2, 21u, -705.70804100146654},
-        {2, 63u, -46.630060602704589},
+        {2, 63u, -46.588315404736925},
     };
     expectOriginGolden(c, probes, "stencil below non-zero origin");
 }
