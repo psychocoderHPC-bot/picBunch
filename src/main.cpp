@@ -1180,7 +1180,6 @@ namespace
         picBunch::Field totalField;
         double metaTime = 0.0;
         double metaTimeUnitSI = 1.0;
-        std::uint64_t metaIteration = 0;
         bool haveMeta = false;
         auto const pipelineStart = Clock::now();
         for(std::size_t chunkIndex = 0; chunkIndex < totalChunks; ++chunkIndex)
@@ -1232,7 +1231,6 @@ namespace
             {
                 metaTime = chunk->time;
                 metaTimeUnitSI = chunk->timeUnitSI;
-                metaIteration = chunk->iteration;
                 haveMeta = true;
             }
 

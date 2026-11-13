@@ -413,7 +413,9 @@ TEST(AlpakaReductions, HelperSerialAndParallelAgreeBitForBit)
     ASSERT_EQ(appliedSingle, 1);
     ASSERT_GE(appliedMany, 1);
     if(workerThreads > 1)
+    {
         EXPECT_EQ(appliedMany, manyThreads);
+    }
     for(std::size_t i = 0; i < parallel.size(); ++i)
     {
         EXPECT_EQ(bits(parallel[i]), bits(single[i])) << "single thread result " << i;
@@ -490,7 +492,9 @@ TEST(AlpakaReductions, ResultsAreThreadCountIndependent)
     ASSERT_EQ(appliedSingle, 1);
     ASSERT_GE(appliedMany, 1);
     if(workerThreads > 1)
+    {
         EXPECT_EQ(appliedMany, manyThreads);
+    }
 #else
     auto const single = run();
     auto const many = run();

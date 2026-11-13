@@ -117,7 +117,9 @@ TEST(VelocityBins, ModelShrinksWithBoxes)
         EXPECT_EQ(binning.count, B);
         EXPECT_GT(binning.modelSum, 0.0);
         if(B > 1u)
+        {
             EXPECT_LT(binning.modelSum, previous);
+        }
         previous = binning.modelSum;
     }
 }

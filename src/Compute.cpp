@@ -2687,7 +2687,6 @@ namespace picBunch
                         static_cast<std::size_t>(outNodes));
                     auto probeAcc = alpaka::onHost::allocUnified<double>(device, std::size_t{2u});
                     alpaka::onHost::memset(queue, probeAcc, std::uint8_t{0});
-                    auto const fldStart = Clock::now();
                     for(int c = 0; c < 6; ++c)
                     {
                         if(parSize > 1 && (c % parSize) != parRank)

@@ -233,7 +233,6 @@ int main(int argc, char** argv)
         // |z1| <= 4.  Angular spread: small-angle tilt (theta_x, theta_y) ~
         // N(0, sigma_theta) each, applied to the unit direction.
         Rng rng(seed);
-        double const u0 = std::sqrt(gamma * gamma - 1.0);
         double const sigmaTheta = angleDegrees * M_PI / 180.0;
         picBunch::Bunch bunch;
         bunch.resize(sources);

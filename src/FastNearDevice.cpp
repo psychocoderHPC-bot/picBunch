@@ -1056,7 +1056,6 @@ namespace picBunch::pbfast
             double const R0[3],
             double const cells[3],
             double const u[3],
-            DeviceParams const& prm,
             double E[3],
             double B[3])
         {
@@ -1183,7 +1182,7 @@ namespace picBunch::pbfast
             double Ebox[3] = {0.0, 0.0, 0.0};
             double Bbox[3] = {0.0, 0.0, 0.0};
             if(singular)
-                dboxTerm(R0, cells, u, prm, Ebox, Bbox);
+                dboxTerm(R0, cells, u, Ebox, Bbox);
 
             double const uu2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
             double const beta[3] = {u[0] / alpaka::math::sqrt(1.0 + uu2), u[1] / alpaka::math::sqrt(1.0 + uu2),

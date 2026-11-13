@@ -38,6 +38,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -74,11 +75,6 @@ namespace picBunch
         bool isBp5Path(std::string const& path)
         {
             return path.size() >= 4u && path.compare(path.size() - 4u, 4u, ".bp5") == 0;
-        }
-
-        bool isH5Path(std::string const& path)
-        {
-            return path.size() >= 3u && path.compare(path.size() - 3u, 3u, ".h5") == 0;
         }
 
         //! Resolve the backend from the requested value and the destination
@@ -153,7 +149,6 @@ namespace picBunch
         //! are written in PIConGPU internal units with the supplied unit
         //! factors, matching the HDF5 writer's generated-species layout.
         void writeParticleSpecies(
-            Series& series,
             Iteration& iteration,
             std::string const& name,
             GeneratedParticles const& generated,
@@ -184,19 +179,19 @@ namespace picBunch
                         + "' needs a positive unit_mass");
             }
             ParticleSpecies species = iteration.particles[name];
-            auto const positionOf = [](Bunch const& b, char const* comp) {
+            auto const positionOf = [](Bunch const& b, std::string_view comp) {
                 return comp == "x" ? b.x
                                    : comp == "y"
                                    ? b.y
                                    : b.z;
             };
-            auto const momentumOf = [](Bunch const& b, char const* comp) {
+            auto const momentumOf = [](Bunch const& b, std::string_view comp) {
                 return comp == "x" ? b.ux
                                    : comp == "y"
                                    ? b.uy
                                    : b.uz;
             };
-            auto const axisOf = [](char const* comp) {
+            auto const axisOf = [](std::string_view comp) {
                 return comp == "x" ? 0 : comp == "y" ? 1 : 2;
             };
             // Record-level particle metadata, identical values to the HDF5
@@ -554,7 +549,6 @@ namespace picBunch
         void copyInputSpecies(
             Series& in,
             long long inStep,
-            Series& out,
             Iteration& outIteration,
             std::string const& species,
             bool float64,
@@ -868,14 +862,14 @@ namespace picBunch
                 if(isGeneratedInput)
                     continue; // consumed by a generated entry; not copied
                 copyInputSpecies(
-                    in, inStep, out, iteration, name, options.float64,
+                    in, inStep, iteration, name, options.float64,
                     [&out]() { out.flush(); });
             }
             std::uint64_t idBase = copiedParticles;
             for(auto const& generated : options.generatedSpecies)
             {
                 writeParticleSpecies(
-                    out, iteration, generated.species, generated,
+                    iteration, generated.species, generated,
                     options.float64, idBase, [&out]() { out.flush(); });
                 idBase += generated.empty
                     ? std::uint64_t{0}
