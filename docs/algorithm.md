@@ -313,7 +313,13 @@ performance claim about `hal`.
   `3.71e-4` stationary, `1.40e-4` moving axial gamma 10 and `1.94e-3` moving
   oblique interior. `exact` is kept for comparison only; it shares a quadrature
   with the driver reference and overestimates moving oblique in-support points by
-  about `10x` at the closest node.
+  about `10x` at the closest node. The fast path now rejects an explicit tile
+  whose half-width exceeds the shell radius (edge above `2 * near_shell_radius`)
+  and an explicit tile above the measured maximum of `4` nodes; `tile = 0` keeps
+  the automatic rule. After the correction it also aborts when the corrected peak
+  E exceeds the uncorrected peak by more than `3x`, naming the radius, tile
+  and fast order. The boundary treatment that produces the measured tile-8 and
+  radius-6 spikes is under investigation; these are guards, not the numerical fix.
 - The FFT padding policy uses a conservative measured bound rather than a
   runtime error estimate, so it never pays for a second transform. Production
   cost/error measurements are recorded above.

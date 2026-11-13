@@ -19,6 +19,16 @@ namespace picBunch
     //! 2022 CODATA electron charge (C, signed).
     inline constexpr double kDeckElectronCharge = -1.602176634e-19;
 
+    /*! Largest explicit near-shell tile edge accepted by the fast path.
+     *
+     * The automatic rule only samples tiles 2 and 4, and the validated
+     * campaigns in the paper and docs/near-shell-scaling.md cover only those
+     * two edges.  Tile 8 is the first measured spike case (35x), so an
+     * explicit tile above 4 leaves the measured envelope.  Zero is always
+     * allowed and selects the automatic rule.
+     */
+    inline constexpr std::size_t kMaxExplicitNearShellTile = 4;
+
     /** Parsed and validated TOML configuration of the placement interface.
      *
      * The ``[picongpu]`` table carries the same independent deck inputs that

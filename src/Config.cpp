@@ -536,7 +536,38 @@ namespace picBunch
             fail("accuracy.near_shell", "expected \"none\", \"exact\", \"fast\" or \"fast-gpu\"");
         if(config.accuracy.nearShellRadius < 0.0 || !std::isfinite(config.accuracy.nearShellRadius))
             fail("accuracy.near_shell_radius", "must be finite and non-negative");
-        // Zero is valid here: it selects the automatic tile rule.
+        // Zero is valid here: it selects the automatic tile rule.  The fast
+        // path additionally rejects an explicit tile that leaves the measured
+        // envelope.  The tile half-width must not exceed the shell radius, so
+        // the tile edge must not exceed the shell diameter (2 * radius).  The
+        // validated tile 4 at the default radius 3 therefore stays valid,
+        // while tile 8 at radius 3 is rejected.
+        std::size_t const tile = config.accuracy.nearShellTile;
+        bool const fastNearShell
+            = config.accuracy.nearShell == "fast" || config.accuracy.nearShell == "fast-gpu";
+        if(fastNearShell && tile != 0u)
+        {
+            if(config.accuracy.nearShellRadius > 0.0
+               && static_cast<double>(tile) > 2.0 * config.accuracy.nearShellRadius)
+                fail(
+                    "accuracy.near_shell_tile",
+                    "explicit fast-path tile " + std::to_string(tile)
+                        + " nodes exceeds twice near_shell_radius "
+                        + std::to_string(config.accuracy.nearShellRadius)
+                        + " (the shell diameter, "
+                        + std::to_string(2.0 * config.accuracy.nearShellRadius)
+                        + " nodes); the tile half-width must not exceed the radius. Use "
+                          "near_shell_tile = 0 (automatic) or raise the radius");
+            if(tile > kMaxExplicitNearShellTile)
+                fail(
+                    "accuracy.near_shell_tile",
+                    "explicit fast-path tile " + std::to_string(tile)
+                        + " nodes exceeds the documented maximum "
+                        + std::to_string(kMaxExplicitNearShellTile)
+                        + " nodes; the validated campaigns cover tiles 2 and 4 and tile 8 "
+                          "is the first measured spike case. Use near_shell_tile = 0 "
+                          "(automatic)");
+        }
 
         // Unknown keys are warnings.  The list is deliberately explicit so a
         // typo is visible instead of silently changing nothing.
