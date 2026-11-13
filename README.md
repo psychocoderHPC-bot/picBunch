@@ -58,7 +58,7 @@ docs/               algorithm and validation notes
 | openPMD-api | system install | HDF5 and/or ADIOS2 backend; the output/input extension selects the backend (see [docs/openpmd-backends.md](docs/openpmd-backends.md)) |
 | HDF5 C API | system install | checkpoint writer; the parallel build matching openPMD is preferred |
 | MPI | system install | only when HDF5 is parallel, for the HDF5 headers |
-| FFTW 3 | system (`fftw3`, `fftw3f`) | host FFT backend |
+| FFTW 3 | system (`fftw3f`, `fftw3`) | host FFT backend; required only when the host FFT path is enabled (the CPU backend). CUDA/HIP use cuFFT/rocFFT |
 | GoogleTest | system first, `FetchContent` fallback | only when `PICBUNCH_BUILD_GTESTS=ON` |
 
 CMake 3.25+ and a C++20 compiler are required. The CUDA build needs CUDA 12.x or newer;
@@ -120,9 +120,53 @@ Two build traps are handled by `CMakeLists.txt`; no extra flags are needed:
 
 Pin a free device before running, for example `HIP_VISIBLE_DEVICES=0`.
 
-Other presets: `hip-gfx1100`, `cpu-debug`. Every preset builds into `build/<preset>/`,
-which is gitignored. The presets set only the backend and architecture; pass compiler and
-dependency paths on the command line.
+Other presets: `cuda-sm80`, `hip-gfx1100`, `cpu-debug`. Every preset builds into
+`build/<preset>/`, which is gitignored. The presets set only the backend and
+architecture; pass compiler and dependency paths on the command line.
+
+### What you may set
+
+These are the supported CMake inputs. Everything in the table is visible in
+`cmake-gui`/`ccmake` and has a docstring.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PICBUNCH_ENABLE_CUDA` | `OFF` | Compile the CUDA backend through alpaka. |
+| `PICBUNCH_ENABLE_HIP` | `OFF` | Compile the HIP backend through alpaka. Rejected together with `PICBUNCH_ENABLE_CUDA`. |
+| `PICBUNCH_ARCH` | `70` (CUDA), `gfx1100` (HIP) | Target architecture: a numeric compute capability (`70`, `sm_80`, `90a`, or a `;` list such as `70;75`) for CUDA, a `gfx` target for HIP. Checked at configure time. Only used when `CMAKE_CUDA_ARCHITECTURES`/`CMAKE_HIP_ARCHITECTURES` is unset. |
+| `PICBUNCH_BUILD_TESTS` | `ON` | Build the smoke test and register the CTest suite. |
+| `PICBUNCH_BUILD_GTESTS` | `ON` | Build the GoogleTest unit tests (system package first, `FetchContent` fallback). |
+| `PICBUNCH_BUILD_BENCH` | `OFF` | Build `picBunchBench`. |
+| `PICBUNCH_ENABLE_MPI` | `OFF` | Rank-parallel read/compute/write. |
+| `PICBUNCH_ENABLE_WARNINGS` | `ON` | Compile picBunch's own targets with the fixed warning set (`-Wall -Wextra`; `-Xcompiler=-Wall,-Wextra` for nvcc). Not applied to the fetched dependencies, and not `-Werror`. |
+| `PICBUNCH_SANITIZE` | `off` | `off`, `thread` or `address`; instruments picBunch's own targets only. |
+| `openPMD_DIR` | discovered | Directory containing `openPMDConfig.cmake`. |
+| `FFTW3_ROOT` | empty | Install prefix of an FFTW 3 build outside the default `pkg-config` search path. |
+
+### What picBunch sets for you
+
+The dependency knobs exist, but they are derived from the two backend switches:
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `alpaka_DEP_CUDA` / `alpaka_DEP_HIP` | follows `PICBUNCH_ENABLE_CUDA` / `PICBUNCH_ENABLE_HIP` | alpaka compiles only the selected device backend. |
+| `alpakaV_DEP_CUFFT` | follows `PICBUNCH_ENABLE_CUDA` | CUDA builds use cuFFT. |
+| `alpakaV_DEP_ROCFFT` | follows `PICBUNCH_ENABLE_HIP` | HIP builds use rocFFT. |
+| `alpakaV_DEP_FFTW` | `ON` for the CPU backend, `OFF` for CUDA/HIP | The host FFTW library is only required where a host FFT is used. |
+| `alpakaV_TESTS`, `alpakaV_DOCS`, `alpaka_*` build switches | `OFF` | The pinned dependencies are built as libraries, without their test/doc targets. |
+| `CMAKE_CUDA_ARCHITECTURES` / `CMAKE_HIP_ARCHITECTURES` | from `PICBUNCH_ARCH` when unset | An explicit `-DCMAKE_CUDA_ARCHITECTURES=...` wins. |
+
+An explicit `-DalpakaV_DEP_FFTW=OFF` (or `=ON`) in the cache always wins over the
+derived default; picBunch never re-enables it. A CUDA build therefore needs no
+host FFTW install at all, and `-DPICBUNCH_ENABLE_CUDA=ON -DalpakaV_DEP_FFTW=OFF`
+is a supported configuration. The default is applied on the first configure of a
+build directory; delete the directory or pass the value explicitly when you
+switch an existing directory from CPU to CUDA/HIP.
+
+Every `alpaka_*` and `alpakaV_*` cache variable is marked `ADVANCED`. They are
+internal knobs of the pinned dependencies, hidden from `cmake-gui`/`ccmake`, and
+not part of the supported interface: configure through the `PICBUNCH_*` switches
+in the first table.
 
 ## Run
 

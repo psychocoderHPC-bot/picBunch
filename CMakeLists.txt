@@ -42,6 +42,11 @@ option(
     "Build MPI support: rank 0 reads and broadcasts; all ranks compute component or tile shares and write disjoint global chunks."
     OFF
 )
+option(
+    PICBUNCH_ENABLE_WARNINGS
+    "Compile picBunch's own targets with the fixed warning set (-Wall -Wextra, and the CUDA equivalent)."
+    ON
+)
 
 set(
     PICBUNCH_ARCH
@@ -59,6 +64,13 @@ set(
 )
 
 set(
+    FFTW3_ROOT
+    "$ENV{FFTW3_ROOT}"
+    CACHE PATH
+    "Install prefix of an FFTW 3 build outside the default search path; adds <prefix>/lib/pkgconfig and <prefix>/lib64/pkgconfig to PKG_CONFIG_PATH."
+)
+
+set(
     PICBUNCH_SANITIZE
     "off"
     CACHE STRING
@@ -66,8 +78,27 @@ set(
 )
 set_property(CACHE PICBUNCH_SANITIZE PROPERTY STRINGS off thread address)
 
-if(PICBUNCH_ENABLE_CUDA AND PICBUNCH_ENABLE_HIP)
-    message(FATAL_ERROR "PICBUNCH_ENABLE_CUDA and PICBUNCH_ENABLE_HIP are mutually exclusive.")
+# ---------------------------------------------------------------------------
+# Backend policy
+#
+# All validation lives in cmake/PicBunchBackends.cmake so that the same rules
+# are available to the script-mode tests.  Validate before any dependency is
+# fetched: a wrong PICBUNCH_ARCH or two device backends at once is a user
+# error that must not cost a network round trip.
+# ---------------------------------------------------------------------------
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PicBunchBackends.cmake)
+
+picbunch_validate_backends("${PICBUNCH_ENABLE_CUDA}" "${PICBUNCH_ENABLE_HIP}")
+if(PICBUNCH_ENABLE_CUDA)
+    picbunch_validate_arch(CUDA "${PICBUNCH_ARCH}")
+elseif(PICBUNCH_ENABLE_HIP)
+    picbunch_validate_arch(HIP "${PICBUNCH_ARCH}")
+elseif(NOT PICBUNCH_ARCH STREQUAL "")
+    message(
+        WARNING
+        "picBunch: PICBUNCH_ARCH='${PICBUNCH_ARCH}' is ignored because neither PICBUNCH_ENABLE_CUDA nor "
+        "PICBUNCH_ENABLE_HIP is ON."
+    )
 endif()
 
 if(PICBUNCH_ENABLE_MPI)
@@ -136,13 +167,76 @@ FetchContent_MakeAvailable(alpaka3)
 
 set(alpakaV_TESTS OFF CACHE BOOL "alpakaVendor tests" FORCE)
 set(alpakaV_DOCS OFF CACHE BOOL "alpakaVendor docs" FORCE)
-set(alpakaV_DEP_FFTW ON CACHE BOOL "alpakaVendor FFTW host backend" FORCE)
+# The host FFT default follows the selected device backend: the CPU backend has
+# no vendor FFT, CUDA uses cuFFT and HIP uses rocFFT.  No FORCE: an explicit
+# -DalpakaV_DEP_FFTW=OFF (or =ON) in the cache always wins over this default.
+picbunch_default_host_fft("${PICBUNCH_ENABLE_CUDA}" "${PICBUNCH_ENABLE_HIP}" _picbunch_fftw_default)
+set(
+    alpakaV_DEP_FFTW
+    ${_picbunch_fftw_default}
+    CACHE BOOL "alpakaVendor FFTW host backend (default: ON for the CPU backend, OFF for CUDA/HIP)"
+)
 set(alpakaV_DEP_OPENBLAS OFF CACHE BOOL "alpakaVendor OpenBLAS host backend" FORCE)
-set(alpakaV_DEP_CUFFT ${PICBUNCH_ENABLE_CUDA} CACHE BOOL "alpakaVendor cuFFT backend" FORCE)
+# The device FFT backends follow PICBUNCH_ENABLE_CUDA/PICBUNCH_ENABLE_HIP and,
+# like the host backend, honour an explicit user value.
+set(
+    alpakaV_DEP_CUFFT
+    ${PICBUNCH_ENABLE_CUDA}
+    CACHE BOOL "alpakaVendor cuFFT backend (default follows PICBUNCH_ENABLE_CUDA)"
+)
 set(alpakaV_DEP_CUBLAS OFF CACHE BOOL "alpakaVendor cuBLAS backend" FORCE)
-set(alpakaV_DEP_ROCFFT ${PICBUNCH_ENABLE_HIP} CACHE BOOL "alpakaVendor rocFFT backend" FORCE)
+set(
+    alpakaV_DEP_ROCFFT
+    ${PICBUNCH_ENABLE_HIP}
+    CACHE BOOL "alpakaVendor rocFFT backend (default follows PICBUNCH_ENABLE_HIP)"
+)
 set(alpakaV_DEP_ROCBLAS OFF CACHE BOOL "alpakaVendor rocBLAS backend" FORCE)
 set(alpakaV_DEP_ONEMKL OFF CACHE BOOL "alpakaVendor oneMKL backend" FORCE)
+picbunch_check_fft_backends("${alpakaV_DEP_FFTW}" "${alpakaV_DEP_CUFFT}" "${alpakaV_DEP_ROCFFT}")
+message(
+    STATUS
+    "picBunch: FFT backends, host FFTW=${alpakaV_DEP_FFTW} cuFFT=${alpakaV_DEP_CUFFT} rocFFT=${alpakaV_DEP_ROCFFT}"
+)
+
+# FFTW is a build requirement only when the host FFT path is used, i.e. when
+# alpakaV_DEP_FFTW is ON.  alpakaVendor itself calls
+# pkg_check_modules(FFTW3 REQUIRED fftw3 fftw3f); probing here first turns that
+# generic failure into a message that names the package and the install command.
+# fftw3 (double) additionally drives the tools/fft-size reference transform and
+# stays optional.
+if(FFTW3_ROOT)
+    set(_picbunch_fftw_pc "${FFTW3_ROOT}/lib/pkgconfig:${FFTW3_ROOT}/lib64/pkgconfig")
+    if(DEFINED ENV{PKG_CONFIG_PATH} AND NOT "$ENV{PKG_CONFIG_PATH}" STREQUAL "")
+        set(ENV{PKG_CONFIG_PATH} "${_picbunch_fftw_pc}:$ENV{PKG_CONFIG_PATH}")
+    else()
+        set(ENV{PKG_CONFIG_PATH} "${_picbunch_fftw_pc}")
+    endif()
+endif()
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    # Double precision FFTW only feeds the tools/fft-size reference transform.
+    pkg_check_modules(PBFFTW3 QUIET fftw3)
+endif()
+if(alpakaV_DEP_FFTW)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PBFFTW3F QUIET fftw3f)
+    endif()
+    if(NOT PBFFTW3F_FOUND)
+        message(
+            FATAL_ERROR
+            "picBunch: the host FFT backend is enabled (alpakaV_DEP_FFTW=ON) but FFTW 3 was not "
+            "found (pkg-config module 'fftw3f'; ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt also "
+            "needs pkg-config itself).\n"
+            "Install it with one of:\n"
+            "  Debian/Ubuntu:  sudo apt-get install libfftw3-dev\n"
+            "  Spack:          spack install fftw\n"
+            "For a non-standard prefix configure with -DFFTW3_ROOT=<prefix> (the directory that "
+            "contains lib/pkgconfig or lib64/pkgconfig) or add it to PKG_CONFIG_PATH.\n"
+            "A CUDA build does not need a host FFT: configure with -DPICBUNCH_ENABLE_CUDA=ON and "
+            "alpakaV_DEP_FFTW=OFF (the default), which uses cuFFT.  HIP uses rocFFT the same way."
+        )
+    endif()
+endif()
 
 FetchContent_Declare(
     alpakaVendor
@@ -233,6 +327,40 @@ if(NOT PICBUNCH_SANITIZE STREQUAL "off")
 endif()
 
 # ---------------------------------------------------------------------------
+# Warnings
+#
+# A fixed set for picBunch's own targets, applied per target so no fetched
+# dependency (alpaka, alpakaVendor, toml++, GoogleTest) inherits it.  The
+# dependency headers are additionally marked SYSTEM, so diagnostics from them
+# stay out of picBunch's translation units.  -Werror is deliberately not part of
+# the set; a compiler update must not break the build.
+# nvcc does not accept -Wall itself, so the CUDA case forwards the flags to the
+# host compiler behind -Xcompiler.
+# ---------------------------------------------------------------------------
+function(picbunch_target_warnings target)
+    if(NOT PICBUNCH_ENABLE_WARNINGS)
+        return()
+    endif()
+    target_compile_options(
+        ${target}
+        PRIVATE
+            $<$<COMPILE_LANGUAGE:C>:-Wall> $<$<COMPILE_LANGUAGE:C>:-Wextra>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall> $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wextra>
+            $<$<COMPILE_LANGUAGE:HIP>:-Wall> $<$<COMPILE_LANGUAGE:HIP>:-Wextra>
+    )
+endfunction()
+
+if(PICBUNCH_ENABLE_WARNINGS)
+    foreach(_picbunch_dependency alpaka alpakaVendor tomlplusplus)
+        if(TARGET ${_picbunch_dependency})
+            set_property(TARGET ${_picbunch_dependency} PROPERTY SYSTEM TRUE)
+        endif()
+    endforeach()
+    message(STATUS "picBunch: warnings enabled for picBunch targets only (-Wall -Wextra)")
+endif()
+
+# ---------------------------------------------------------------------------
 # Library
 #
 # Host sources stay C++20.  Device code is written as ALPAKA_FN_ACC functors
@@ -253,6 +381,7 @@ set(PICBUNCH_SOURCES
 )
 
 add_library(picBunch ${PICBUNCH_SOURCES})
+picbunch_target_warnings(picBunch)
 add_library(picBunch::picBunch ALIAS picBunch)
 # Require the language level on the target itself, not only through the
 # directory-level CMAKE_CXX_STANDARD, so consumers and external harnesses
@@ -288,6 +417,7 @@ add_library(
     src/Placement.cpp
 )
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
+picbunch_target_warnings(picBunchOpenPMD)
 target_compile_features(picBunchOpenPMD PUBLIC cxx_std_20)
 # This host-only layer never initializes an alpaka backend.  It does include
 # alpaka::Vec through the public headers, so satisfy alpaka's finalize guard
@@ -323,6 +453,7 @@ endif()
 # Command line tool
 # ---------------------------------------------------------------------------
 add_executable(picBunchApp src/main.cpp)
+picbunch_target_warnings(picBunchApp)
 target_compile_features(picBunchApp PUBLIC cxx_std_20)
 set_target_properties(picBunchApp PROPERTIES OUTPUT_NAME picBunch)
 target_link_libraries(picBunchApp PRIVATE picBunch::picBunch picBunch::openPMD)
@@ -350,55 +481,66 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Measurement driver for the exact near shell (host-only, no openPMD).
 add_executable(picBunchDfftCheck tools/dfft-check/check.cpp)
+picbunch_target_warnings(picBunchDfftCheck)
 target_compile_features(picBunchDfftCheck PUBLIC cxx_std_20)
 target_link_libraries(picBunchDfftCheck PRIVATE picBunch::picBunch picBunch::openPMD)
 alpaka_finalize(picBunchDfftCheck)
 
 # FFT-extent characterisation driver: replicated pipeline vs an independent
 # FFTW reference, per padded extent (tools/fft-size).
-find_package(PkgConfig QUIET)
-pkg_check_modules(PBFFTW3 REQUIRED fftw3)
-add_library(PBFFTW3_pc INTERFACE)
-target_include_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_INCLUDE_DIRS})
-if(PBFFTW3_LIBRARY_DIRS)
-    target_link_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARY_DIRS})
-endif()
-target_link_libraries(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARIES})
-add_library(PBFFTW3::PBFFTW3 ALIAS PBFFTW3_pc)
+#
+# The driver compares picBunch's own FFT against a plain double-precision FFTW
+# transform, so it needs the fftw3 module (not fftw3f).  That is a development
+# tool, not part of the library: when the module is absent the driver is
+# skipped instead of failing the configure.  A host FFT build already required
+# fftw3f above; Debian's libfftw3-dev ships both.
+if(PBFFTW3_FOUND)
+    add_library(PBFFTW3_pc INTERFACE)
+    target_include_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_INCLUDE_DIRS})
+    if(PBFFTW3_LIBRARY_DIRS)
+        target_link_directories(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARY_DIRS})
+    endif()
+    target_link_libraries(PBFFTW3_pc INTERFACE ${PBFFTW3_LIBRARIES})
+    add_library(PBFFTW3::PBFFTW3 ALIAS PBFFTW3_pc)
 
-# ABI probe: classic FFTW 3.3 plan constructors take a `sign` argument; the
-# newer FFTW-compatible builds (e.g. the MLIR-derived 3.6 on hal) omit it and
-# transform forward.  The driver compiles both forms under one macro.
-include(CheckCXXSourceCompiles)
-set(CMAKE_REQUIRED_INCLUDES ${PBFFTW3_INCLUDE_DIRS})
-set(CMAKE_REQUIRED_LINK_DIRECTORIES ${PBFFTW3_LIBRARY_DIRS})
-set(CMAKE_REQUIRED_LIBRARIES ${PBFFTW3_LIBRARIES})
-check_cxx_source_compiles(
-    "
-    #include <fftw3.h>
-    int main()
-    {
-        int const n[3] = {4, 4, 4};
-        fftw_plan const p = fftw_plan_many_dft_r2c(
-            3, n, 1, nullptr, n, 1, 1, nullptr, n, 1, 1, FFTW_FORWARD, FFTW_ESTIMATE);
-        fftw_destroy_plan(p);
-        return 0;
-    }"
-    PBFFTW3_PLAN_TAKES_SIGN
-)
-unset(CMAKE_REQUIRED_INCLUDES)
-unset(CMAKE_REQUIRED_LINK_DIRECTORIES)
-unset(CMAKE_REQUIRED_LIBRARIES)
-message(STATUS "picBunch: FFTW plan constructor takes sign argument: ${PBFFTW3_PLAN_TAKES_SIGN}")
-add_executable(picBunchFftSizeCheck tools/fft-size/check.cpp)
-target_compile_features(picBunchFftSizeCheck PUBLIC cxx_std_20)
-if(PBFFTW3_PLAN_TAKES_SIGN)
-    target_compile_definitions(picBunchFftSizeCheck PRIVATE PBFFTW3_PLAN_TAKES_SIGN=1)
+    # ABI probe: classic FFTW 3.3 plan constructors take a `sign` argument; the
+    # newer FFTW-compatible builds (e.g. the MLIR-derived 3.6 on hal) omit it and
+    # transform forward.  The driver compiles both forms under one macro.
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${PBFFTW3_INCLUDE_DIRS})
+    set(CMAKE_REQUIRED_LINK_DIRECTORIES ${PBFFTW3_LIBRARY_DIRS})
+    set(CMAKE_REQUIRED_LIBRARIES ${PBFFTW3_LIBRARIES})
+    check_cxx_source_compiles(
+        "
+        #include <fftw3.h>
+        int main()
+        {
+            int const n[3] = {4, 4, 4};
+            fftw_plan const p = fftw_plan_many_dft_r2c(
+                3, n, 1, nullptr, n, 1, 1, nullptr, n, 1, 1, FFTW_FORWARD, FFTW_ESTIMATE);
+            fftw_destroy_plan(p);
+            return 0;
+        }"
+        PBFFTW3_PLAN_TAKES_SIGN
+    )
+    unset(CMAKE_REQUIRED_INCLUDES)
+    unset(CMAKE_REQUIRED_LINK_DIRECTORIES)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    message(STATUS "picBunch: FFTW plan constructor takes sign argument: ${PBFFTW3_PLAN_TAKES_SIGN}")
+    add_executable(picBunchFftSizeCheck tools/fft-size/check.cpp)
+    picbunch_target_warnings(picBunchFftSizeCheck)
+    target_compile_features(picBunchFftSizeCheck PUBLIC cxx_std_20)
+    if(PBFFTW3_PLAN_TAKES_SIGN)
+        target_compile_definitions(picBunchFftSizeCheck PRIVATE PBFFTW3_PLAN_TAKES_SIGN=1)
+    endif()
+    target_link_libraries(picBunchFftSizeCheck PRIVATE picBunch::picBunch PBFFTW3::PBFFTW3)
+    alpaka_finalize(picBunchFftSizeCheck)
+else()
+    message(STATUS "picBunch: picBunchFftSizeCheck skipped (pkg-config module fftw3 not found)")
 endif()
-target_link_libraries(picBunchFftSizeCheck PRIVATE picBunch::picBunch PBFFTW3::PBFFTW3)
-alpaka_finalize(picBunchFftSizeCheck)
 
 add_executable(picBunchNearShellMeasure tools/near-shell/measure_near_shell.cpp)
+picbunch_target_warnings(picBunchNearShellMeasure)
 target_compile_features(picBunchNearShellMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchNearShellMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchNearShellMeasure)
@@ -409,6 +551,7 @@ alpaka_finalize(picBunchNearShellMeasure)
 # needs no CUDA or FFTW.  The near-field headers include alpaka's macro header
 # unconditionally, so the tool needs the header-only alpaka target.
 add_executable(picBunchFastNear52pt tools/verify/pb_fast_near_52pt.cpp)
+picbunch_target_warnings(picBunchFastNear52pt)
 target_compile_features(picBunchFastNear52pt PUBLIC cxx_std_20)
 target_include_directories(picBunchFastNear52pt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(picBunchFastNear52pt PRIVATE alpaka::alpaka)
@@ -420,12 +563,14 @@ alpaka_finalize(picBunchFastNear52pt)
 # so it never links the evaluator under test.  Values are precomputed; the
 # accuracy test only reads the CSV.
 add_executable(picBunchNearShellRayReference tools/near-shell/ray_reference.cpp)
+picbunch_target_warnings(picBunchNearShellRayReference)
 target_compile_features(picBunchNearShellRayReference PUBLIC cxx_std_20)
 
 # Measurement driver for velocity binning: synthetic mixed-velocity bunch,
 # binned fields for a list of box counts, for the continuum reference
 # comparison (tools/velocity-bins/compare_velocity_bins.py).
 add_executable(picBunchVelocityBinsMeasure tools/velocity-bins/measure_velocity_bins.cpp)
+picbunch_target_warnings(picBunchVelocityBinsMeasure)
 target_compile_features(picBunchVelocityBinsMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchVelocityBinsMeasure)
@@ -439,6 +584,7 @@ alpaka_finalize(picBunchVelocityBinsMeasure)
 if(PICBUNCH_BUILD_BENCH)
     find_package(Threads REQUIRED)
     add_executable(picBunchBench tools/bench/bench.cpp)
+    picbunch_target_warnings(picBunchBench)
     target_compile_features(picBunchBench PUBLIC cxx_std_20)
     target_link_libraries(picBunchBench PRIVATE picBunch::picBunch Threads::Threads)
     if(PICBUNCH_ENABLE_MPI)
@@ -456,3 +602,19 @@ if(PICBUNCH_BUILD_BENCH)
     alpaka_finalize(picBunchBench)
     install(TARGETS picBunchBench)
 endif()
+
+# ---------------------------------------------------------------------------
+# Cache visibility
+#
+# Every alpaka_* and alpakaV_* cache variable belongs to a pinned dependency,
+# including the entries the dependencies add themselves.  They are
+# implementation details, not part of picBunch's interface: hide them from
+# cmake-gui/ccmake so the documented PICBUNCH_* switches are the only visible
+# knobs.  This runs last so the entries created by FetchContent are covered too.
+# ---------------------------------------------------------------------------
+get_cmake_property(_picbunch_cache_variables CACHE_VARIABLES)
+foreach(_picbunch_cache_variable IN LISTS _picbunch_cache_variables)
+    if(_picbunch_cache_variable MATCHES "^(alpaka|alpakaV)_")
+        mark_as_advanced(${_picbunch_cache_variable})
+    endif()
+endforeach()

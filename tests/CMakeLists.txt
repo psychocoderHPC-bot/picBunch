@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Rene Widera
 
 add_executable(picBunchSmoke smoke.cpp)
+picbunch_target_warnings(picBunchSmoke)
 target_compile_features(picBunchSmoke PUBLIC cxx_std_20)
 target_link_libraries(picBunchSmoke PRIVATE picBunch::picBunch picBunch::openPMD)
 alpaka_finalize(picBunchSmoke)
@@ -52,6 +53,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_alpaka_readout.cpp
         test_openpmd_wait.cpp
     )
+    picbunch_target_warnings(picBunchUnitTests)
     target_compile_features(picBunchUnitTests PUBLIC cxx_std_20)
     target_include_directories(picBunchUnitTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(
@@ -136,6 +138,7 @@ endif()
 # that uses h5py only (no openPMD binding).  Registered when python3 + h5py are
 # available; otherwise configure prints the manual command.
 add_executable(picBunchWriteSample write_sample.cpp)
+picbunch_target_warnings(picBunchWriteSample)
 target_compile_features(picBunchWriteSample PUBLIC cxx_std_20)
 target_link_libraries(
     picBunchWriteSample
@@ -144,6 +147,7 @@ target_link_libraries(
 alpaka_finalize(picBunchWriteSample)
 
 add_executable(picBunchWriteRestartSample write_restart_sample.cpp)
+picbunch_target_warnings(picBunchWriteRestartSample)
 target_compile_features(picBunchWriteRestartSample PUBLIC cxx_std_20)
 target_link_libraries(
     picBunchWriteRestartSample
@@ -241,3 +245,42 @@ if(picBunchTests)
             RESOURCE_LOCK picBunchGpuDevice
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# Configuration contract
+#
+# The backend policy runs in script mode and needs only cmake.  The configure
+# cases reuse the dependency sources this configure already fetched
+# (FETCHCONTENT_SOURCE_DIR_* plus FETCHCONTENT_FULLY_DISCONNECTED), so they
+# run offline and compile nothing.  They are registered after the device-lock
+# block above on purpose: these tests touch no GPU.
+# ---------------------------------------------------------------------------
+add_test(
+    NAME picBunch.BackendContract
+    COMMAND
+        ${CMAKE_COMMAND} -DPICBUNCH_CMAKE_DIR=${PROJECT_SOURCE_DIR}/cmake -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_backends.cmake
+)
+set_tests_properties(picBunch.BackendContract PROPERTIES TIMEOUT 120 RESOURCE_LOCK picBunchConfigureContract)
+
+set(_picbunch_configure_cases documented-only cuda-conflict cuda-bad-arch hip-bad-arch)
+find_program(PICBUNCH_TEST_NVCC NAMES nvcc)
+if(PICBUNCH_ENABLE_CUDA OR PICBUNCH_TEST_NVCC)
+    list(APPEND _picbunch_configure_cases cuda-fftw-off)
+endif()
+foreach(_picbunch_config_case IN LISTS _picbunch_configure_cases)
+    add_test(
+        NAME picBunch.Configure.${_picbunch_config_case}
+        COMMAND
+            ${CMAKE_COMMAND} -DCASE=${_picbunch_config_case} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -DWORK_DIR=${CMAKE_BINARY_DIR}/configure-contract -DOPENPMD_DIR=${openPMD_DIR}
+            -DGENERATOR=${CMAKE_GENERATOR}
+            -DPB_ALPAKA3_SRC=${alpaka3_SOURCE_DIR} -DPB_ALPAKAVENDOR_SRC=${alpakaVendor_SOURCE_DIR}
+            -DPB_TOMLPLUSPLUS_SRC=${tomlplusplus_SOURCE_DIR} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/configure_case.cmake
+    )
+    set_tests_properties(
+        picBunch.Configure.${_picbunch_config_case}
+        PROPERTIES TIMEOUT 900 RESOURCE_LOCK picBunchConfigureContract
+    )
+endforeach()
