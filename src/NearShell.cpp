@@ -15,6 +15,7 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Kernel.hpp"
 #include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
@@ -155,11 +156,89 @@ namespace picBunch
                       typename std::remove_cvref_t<decltype(std::declval<Span1DConst const&>().getExtents())>::value_type,
                       LocalCellVec::value_type>);
 
+        //! Smooth per-observer near/far blend, distance in PIC cells.
+        inline double hostNearWeight(
+            double const xo[3],
+            double const xs[3],
+            double const cells[3],
+            double radius2,
+            double taper2)
+        {
+            if(radius2 >= 1.0e299)
+                return 1.0;
+            double q2 = 0.0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const d = (xo[a] - xs[a]) / cells[a];
+                q2 += d * d;
+            }
+            if(q2 >= radius2)
+                return 0.0;
+            if(q2 <= taper2)
+                return 1.0;
+            double const t = (radius2 - q2) / (radius2 - taper2);
+            return t * t * (3.0 - 2.0 * t);
+        }
+
+        //! 27-point TSC mesh-near stencil (one component) of one source.
+        //!
+        //! Host mirror of the device ``dmeshComp``; used when the fast host
+        //! evaluator subtracts the mesh term per source instead of through a
+        //! per-tile local FFT.  ``nodeBase`` is the observer node without the
+        //! Yee offset and ``sp`` the node spacing.
+        inline double hostMeshNearComp(
+            double const xs[3],
+            double const urep[3],
+            double const cells[3],
+            double const nodeBase[3],
+            double const sp[3],
+            double const yee[3],
+            int c)
+        {
+            double tau[3];
+            long lo[3];
+            long hi[3];
+            for(int a = 0; a < 3; ++a)
+            {
+                tau[a] = (xs[a] - nodeBase[a]) / sp[a];
+                lo[a] = static_cast<long>(std::ceil(tau[a] - 1.5));
+                hi[a] = static_cast<long>(std::floor(tau[a] + 1.5));
+            }
+            double sum = 0.0;
+            for(long ia = lo[0]; ia <= hi[0]; ++ia)
+            {
+                double const wa = tscShape(static_cast<double>(ia) - tau[0]);
+                if(wa == 0.0)
+                    continue;
+                for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                {
+                    double const wb = wa * tscShape(static_cast<double>(ib) - tau[1]);
+                    if(wb == 0.0)
+                        continue;
+                    for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                    {
+                        double const wc = wb * tscShape(static_cast<double>(ic) - tau[2]);
+                        if(wc == 0.0)
+                            continue;
+                        double const Rx = (yee[0] - static_cast<double>(ia)) * cells[0];
+                        double const Ry = (yee[1] - static_cast<double>(ib)) * cells[1];
+                        double const Rz = (yee[2] - static_cast<double>(ic)) * cells[2];
+                        double field[6];
+                        pointFieldNormalized(Rx, Ry, Rz, urep[0], urep[1], urep[2], field);
+                        sum += wc * field[c];
+                    }
+                }
+            }
+            return sum;
+        }
+
         //! POD arguments of the exact per-tile host kernel.
         struct ExactNearHostArgs
         {
             Span1D correction[6]{};
-            Span1DConst local[6]{};
+            Span1DConst rux{};
+            Span1DConst ruy{};
+            Span1DConst ruz{};
             Span1DConst x{};
             Span1DConst y{};
             Span1DConst z{};
@@ -177,9 +256,9 @@ namespace picBunch
             std::size_t k0{};
             std::size_t n0{};
             std::size_t n1{};
-            LocalOffsetVec localLo{};
-            std::size_t nLocalX{};
-            std::size_t nLocalY{};
+            //! Squared radial near cutoff and taper start, in PIC cells.
+            double nearRadius2{1.0e300};
+            double nearTaper2{1.0e300};
             //! 6, or 3 when the tile is stationary and B is exactly zero.
             std::size_t activeComponents{6u};
             alpaka::Vec<double, 3u> origin{};
@@ -219,15 +298,7 @@ namespace picBunch
                     std::size_t const j = args.j0 + jj;
                     std::size_t const k = args.k0 + kk;
                     std::size_t const gidx = i + args.n0 * (j + args.n1 * k);
-                    std::size_t const li = static_cast<std::size_t>(
-                        static_cast<std::int64_t>(i) - args.localLo[0]);
-                    std::size_t const lj = static_cast<std::size_t>(
-                        static_cast<std::int64_t>(j) - args.localLo[1]);
-                    std::size_t const lk = static_cast<std::size_t>(
-                        static_cast<std::int64_t>(k) - args.localLo[2]);
-                    std::size_t const lidx
-                        = li + args.nLocalX * (lj + args.nLocalY * lk);
-                    double value = -args.local[c][lidx];
+                    double value = 0.0;
 
                     double const x_obs = args.origin[0] + static_cast<double>(i) * args.spacing[0]
                         + kYeeOffset[c][0] * args.cells[0];
@@ -237,12 +308,28 @@ namespace picBunch
                         + kYeeOffset[c][2] * args.cells[2];
                     double const unit = (c < 3) ? kCoulombConstant
                                                 : kCoulombConstant / kSpeedOfLight;
+                    double const nodeBaseArr[3] = {
+                        args.origin[0] + static_cast<double>(i) * args.spacing[0],
+                        args.origin[1] + static_cast<double>(j) * args.spacing[1],
+                        args.origin[2] + static_cast<double>(k) * args.spacing[2]};
+                    double const x_obsArr[3] = {x_obs, y_obs, z_obs};
+                    double const cellsArr[3]
+                        = {args.cells[0], args.cells[1], args.cells[2]};
+                    double const spArr[3]
+                        = {args.spacing[0], args.spacing[1], args.spacing[2]};
+                    double const yeeArr[3]
+                        = {kYeeOffset[c][0], kYeeOffset[c][1], kYeeOffset[c][2]};
                     for(std::size_t q = 0; q < args.nsrc; ++q)
                     {
                         // beta = 0 gives B = 0 exactly; skip those sources in a
                         // mixed tile's B sums.
                         if(c >= 3 && args.ux[q] == 0.0 && args.uy[q] == 0.0
                            && args.uz[q] == 0.0)
+                            continue;
+                        double const xs[3] = {args.x[q], args.y[q], args.z[q]};
+                        double const nearW = hostNearWeight(
+                            x_obsArr, xs, cellsArr, args.nearRadius2, args.nearTaper2);
+                        if(nearW == 0.0)
                             continue;
                         nbref::Vec3 E, B;
                         if(args.useFast)
@@ -268,7 +355,11 @@ namespace picBunch
                                 E,
                                 B);
                         double const component = (c < 3) ? E[c] : B[c - 3];
-                        value += unit * (args.weight[q] * args.charge[q]) * component;
+                        double const urep[3] = {args.rux[q], args.ruy[q], args.ruz[q]};
+                        double const meshComponent = hostMeshNearComp(
+                            xs, urep, cellsArr, nodeBaseArr, spArr, yeeArr, c);
+                        value += unit * nearW * (args.weight[q] * args.charge[q])
+                            * (component - meshComponent);
                     }
                     args.correction[c][gidx] = value;
                 }
@@ -447,6 +538,15 @@ namespace picBunch
 
         Grid const& grid = field.grid;
         double const radius = resolveNearShellRadius(options, nearShell);
+        double nearTaper = 0.5; //!< blend band below the shell radius
+        if(char const* taperText = std::getenv("PICBUNCH_NEAR_TAPER"))
+        {
+            // Diagnostic override used by the N4 prototype comparison; the
+            // shipped default is the 0.5-cell smoothstep above.
+            double const requested = std::atof(taperText);
+            if(requested >= 0.0 && requested <= radius)
+                nearTaper = requested;
+        }
         double const cells[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::size_t const tile
             = resolveNearShellTile(bunch, grid, nearShell, options.cellSize, radius);
@@ -498,6 +598,8 @@ namespace picBunch
         deviceParams.obliqueOrder = explicitObliqueOrder;
         deviceParams.tolerance = options.tolerance;
         deviceParams.exactCellReach = nearShell.exactCellReach;
+        deviceParams.nearRadius2 = radius * radius;
+        deviceParams.nearTaper2 = (radius - nearTaper) * (radius - nearTaper);
         {
             auto const& xi = pbfast::detail::rule(fastSettings.order).x;
             auto const& wi = pbfast::detail::rule(fastSettings.order).w;
@@ -630,9 +732,14 @@ namespace picBunch
                         double dist2 = 0.0;
                         for(int a = 0; a < 3; ++a)
                         {
-                            // Observation points extend half a PIC cell past
-                            // the node box; expand the membership box so the
-                            // per-pair radial blend can see every source.
+                            // The observation points of a tile extend up to
+                            // half a PIC cell past its node box (Yee offsets).
+                            // Expand the membership box by that half cell so
+                            // every source inside the shell of an observation
+                            // point is listed; the per-pair radial blend then
+                            // decides the actual weight.  Without this the tile
+                            // boundary cuts the source set and the field
+                            // inherits a step.
                             double const pad = 0.5 * cells[a];
                             double const d = std::max(
                                 {low[a] - pad - pos[a], 0.0, pos[a] - (high[a] + pad)});
@@ -652,23 +759,23 @@ namespace picBunch
         // are collected and evaluated in one device launch, which removes the
         // per-tile allocator and stream-synchronisation cost that dominated
         // large grids (and lets small tiles be used without paying it).
-        bool const deviceStencil = useFastGpu
-            && (std::getenv("PICBUNCH_NEAR_SHELL_LOCAL_FFT") == nullptr);
+        // The direct 27-point TSC stencil is the only fast path now: the
+        // per-tile local FFT made the correction depend on the tile edge.
+        bool const deviceStencil = true;
         if(deviceStencil && nearBunch.size() > 0xffffffffull)
             throw std::runtime_error(
                 "near shell: the batched device path holds source indices in 32 bits");
         std::vector<std::uint32_t> batchIndices;
         std::vector<pbfast::BatchedTile> batchTiles;
         std::vector<pbfast::DeviceParams> batchParams;
-        std::vector<double> batchRepU;
+        std::vector<double> repU;
         std::uint64_t batchOutSize = 0;
-        if(deviceStencil)
         {
             // Binned representative velocity per full-bunch source, resolved
             // once instead of once per tile.
             VelocityBinning const& meshBin
                 = options.fixedBinning ? *options.fixedBinning : binning;
-            batchRepU.resize(3u * nearBunch.size());
+            repU.resize(3u * nearBunch.size());
             for(std::size_t p = 0; p < nearBunch.size(); ++p)
             {
                 double const coords[3] = {
@@ -682,11 +789,49 @@ namespace picBunch
                         + nearBunch.uy[p] * meshBin.basis[2][1]
                         + nearBunch.uz[p] * meshBin.basis[2][2]};
                 std::size_t const b = meshBin.boxIndex(coords[0], coords[1], coords[2]);
-                batchRepU[3u * p] = meshBin.representativeU[b][0];
-                batchRepU[3u * p + 1u] = meshBin.representativeU[b][1];
-                batchRepU[3u * p + 2u] = meshBin.representativeU[b][2];
+                repU[3u * p] = meshBin.representativeU[b][0];
+                repU[3u * p + 1u] = meshBin.representativeU[b][1];
+                repU[3u * p + 2u] = meshBin.representativeU[b][2];
             }
         }
+
+        // Resolve the evaluator parameters once for the whole bunch.  Sizing
+        // the quadrature and the exact-routing reach from a tile's own source
+        // list makes the correction depend on which sources share a tile, and
+        // that is visible as a ripple locked to the tile grid.
+        double globalMaxU2 = 0.0;
+        double globalMaxGamma = 1.0;
+        double globalMaxObliqueGamma = 0.0;
+        for(std::size_t p = 0; p < nearBunch.size(); ++p)
+        {
+            double const ux = nearBunch.ux[p];
+            double const uy = nearBunch.uy[p];
+            double const uz = nearBunch.uz[p];
+            double const uu2 = ux * ux + uy * uy + uz * uz;
+            globalMaxU2 = std::max(globalMaxU2, uu2);
+            if(uu2 == 0.0)
+                continue;
+            globalMaxGamma = std::max(globalMaxGamma, std::sqrt(1.0 + uu2));
+            double const invLen = 1.0 / std::sqrt(uu2);
+            bool const axial = std::abs(std::abs(ux * invLen) - 1.0) < 1e-12
+                || std::abs(std::abs(uy * invLen) - 1.0) < 1e-12
+                || std::abs(std::abs(uz * invLen) - 1.0) < 1e-12;
+            if(!axial)
+                globalMaxObliqueGamma
+                    = std::max(globalMaxObliqueGamma, std::sqrt(1.0 + uu2));
+        }
+        int const globalActiveComponents = (globalMaxU2 == 0.0) ? 3 : 6;
+        int const globalExactReach = pbfast::resolveExactCellReach(
+            nearShell.exactCellReach, options.tolerance, globalMaxGamma);
+        int const globalRemainderOrder = std::min(
+            pbfast::kQuadratureOrderCap,
+            std::max(
+                requestedFastOrder,
+                pbfast::quadratureOrderFor(
+                    globalMaxGamma, options.tolerance, requestedFastOrder)));
+        int const globalObliqueOrder = autoObliqueOrderPolicy
+            ? pbfast::autoObliqueOrder(globalMaxObliqueGamma)
+            : explicitObliqueOrder;
 
         // Stable in-support reference expects cells (dx,dy,dz); picBunch's
         // node spacing is kRefinement * cellSize with kRefinement == 1.
@@ -739,66 +884,10 @@ namespace picBunch
                     // The host and device dispatches use the same rule; pairs
                     // whose requirement exceeds the cap are routed to the
                     // exact evaluator per (source, node) pair.
-                    double tileMaxGamma = 1.0;
-                    double tileMaxU2 = 0.0;
-                    for(std::size_t q = 0; q < near.size(); ++q)
-                    {
-                        double const uq2 = near.ux[q] * near.ux[q]
-                            + near.uy[q] * near.uy[q] + near.uz[q] * near.uz[q];
-                        tileMaxU2 = std::max(tileMaxU2, uq2);
-                        if(uq2 > 0.0)
-                            tileMaxGamma
-                                = std::max(tileMaxGamma, std::sqrt(1.0 + uq2));
-                    }
-                    // beta = 0 gives B = beta x E = 0 exactly.  A stationary
-                    // tile therefore needs only the three electric components;
-                    // the device kernel skips the three B slots (left at zero)
-                    // and the pair counter reports the reduced component work.
-                    int const activeComponents = (tileMaxU2 == 0.0) ? 3 : 6;
-                    int const exactReach = pbfast::resolveExactCellReach(
-                        nearShell.exactCellReach, options.tolerance, tileMaxGamma);
-                    int const tileRemainderOrder = std::min(
-                        pbfast::kQuadratureOrderCap,
-                        std::max(
-                            requestedFastOrder,
-                            pbfast::quadratureOrderFor(
-                                tileMaxGamma, options.tolerance, requestedFastOrder)));
-
-                    int tileObliqueOrder = explicitObliqueOrder;
-                    if(autoObliqueOrderPolicy)
-                    {
-                        double maxObliqueGamma = 0.0;
-                        for(std::size_t q = 0; q < near.size(); ++q)
-                        {
-                            double const ux = near.ux[q];
-                            double const uy = near.uy[q];
-                            double const uz = near.uz[q];
-                            double const uu2 = ux * ux + uy * uy + uz * uz;
-                            if(uu2 == 0.0)
-                                continue;
-                            double const invLen = 1.0 / std::sqrt(uu2);
-                            bool const axial = std::abs(std::abs(ux * invLen) - 1.0) < 1e-12
-                                || std::abs(std::abs(uy * invLen) - 1.0) < 1e-12
-                                || std::abs(std::abs(uz * invLen) - 1.0) < 1e-12;
-                            if(axial)
-                                continue;
-                            double const pos[3] = {near.x[q], near.y[q], near.z[q]};
-                            bool overlaps = true;
-                            for(int a = 0; a < 3; ++a)
-                            {
-                                double const reach = 1.5 * cells[a];
-                                if(pos[a] < low[a] - reach || pos[a] > high[a] + reach)
-                                {
-                                    overlaps = false;
-                                    break;
-                                }
-                            }
-                            if(!overlaps)
-                                continue;
-                            maxObliqueGamma = std::max(maxObliqueGamma, std::sqrt(1.0 + uu2));
-                        }
-                        tileObliqueOrder = pbfast::autoObliqueOrder(maxObliqueGamma);
-                    }
+                    int const activeComponents = globalActiveComponents;
+                    int const exactReach = globalExactReach;
+                    int const tileRemainderOrder = globalRemainderOrder;
+                    int const tileObliqueOrder = globalObliqueOrder;
                     // The generic fast evaluator reads DeviceParams on every
                     // backend; the host fast fallback reads tileFastSettings.
                     deviceParams.obliqueOrder = tileObliqueOrder;
@@ -1045,15 +1134,25 @@ namespace picBunch
                         // properties are dense 1-D views of length nsrc.  This
                         // scalar host path needs only element alignment.
                         auto const fieldExtents = SpanIndex{correction.data[0].size()};
-                        auto const localExtents = SpanIndex{local.data[0].size()};
                         auto const particleExtents = SpanIndex{near.size()};
                         for(int c = 0; c < 6; ++c)
-                        {
                             exactArgs.correction[c]
                                 = alpaka::makeMdSpan(correction.data[c].data(), fieldExtents);
-                            exactArgs.local[c] = Span1DConst{
-                                alpaka::makeMdSpan(local.data[c].data(), localExtents)};
+                        // Representative (binned) velocity of the selected
+                        // sources, used only for the mesh-near stencil.
+                        std::vector<double> nearRepU(3u * near.size());
+                        for(std::size_t q = 0; q < near.size(); ++q)
+                        {
+                            std::size_t const src = nearIndex[q];
+                            for(int a = 0; a < 3; ++a)
+                                nearRepU[3u * q + static_cast<std::size_t>(a)]
+                                    = repU[3u * src + static_cast<std::size_t>(a)];
                         }
+                        exactArgs.rux = alpaka::makeMdSpan(nearRepU.data(), particleExtents);
+                        exactArgs.ruy = alpaka::makeMdSpan(
+                            nearRepU.data() + near.size(), particleExtents);
+                        exactArgs.ruz = alpaka::makeMdSpan(
+                            nearRepU.data() + 2u * near.size(), particleExtents);
                         exactArgs.x = alpaka::makeMdSpan(near.x.data(), particleExtents);
                         exactArgs.y = alpaka::makeMdSpan(near.y.data(), particleExtents);
                         exactArgs.z = alpaka::makeMdSpan(near.z.data(), particleExtents);
@@ -1071,14 +1170,14 @@ namespace picBunch
                         exactArgs.k0 = k0;
                         exactArgs.n0 = n[0];
                         exactArgs.n1 = n[1];
-                        exactArgs.localLo = LocalOffsetVec{localLo[0], localLo[1], localLo[2]};
+                        exactArgs.nearRadius2 = radius * radius;
+                        exactArgs.nearTaper2
+                            = (radius - nearTaper) * (radius - nearTaper);
                         exactArgs.origin
                             = alpaka::Vec<double, 3u>{origin[0], origin[1], origin[2]};
                         exactArgs.spacing
                             = alpaka::Vec<double, 3u>{spacing[0], spacing[1], spacing[2]};
                         exactArgs.cells = alpaka::Vec<double, 3u>{cells[0], cells[1], cells[2]};
-                        exactArgs.nLocalX = nLocalX;
-                        exactArgs.nLocalY = nLocalY;
                         exactArgs.activeComponents = static_cast<std::size_t>(activeComponents);
                         exactArgs.useFast = useFast;
                         exactArgs.fastSettings = tileFastSettings;
@@ -1101,7 +1200,7 @@ namespace picBunch
                 batchIndices,
                 batchTiles,
                 batchParams,
-                batchRepU,
+                repU,
                 true,
                 n[0],
                 n[1],

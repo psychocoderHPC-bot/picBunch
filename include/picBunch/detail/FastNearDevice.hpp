@@ -55,6 +55,13 @@ namespace picBunch::pbfast
         double tolerance = 1e-3;
         //! Exact routing cell reach; mirrors Settings::exactCellReach.
         int exactCellReach = 0;
+        //! Squared per-observer near cutoff in PIC cells.  A source whose
+        //! distance to the observation point exceeds sqrt(nearRadius2) is left
+        //! to the far mesh; the correction fades smoothly from nearTaper2 to
+        //! nearRadius2.  The default (very large) keeps the historical
+        //! tile-box membership for callers that do not request a radial cut.
+        double nearRadius2 = 1.0e300;
+        double nearTaper2 = 1.0e300;
         //! Components the batched kernel must evaluate for this tile: 6, or 3
         //! when every source is stationary and the magnetic field is exactly
         //! zero.  The packed output always keeps six component slots; the

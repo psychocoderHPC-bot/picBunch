@@ -93,6 +93,9 @@ namespace picBunch::detail
                         double dist2 = 0.0;
                         for(int a = 0; a < 3; ++a)
                         {
+                            // Observation points extend half a cell past the
+                            // node box; the near-set builder uses the same
+                            // expanded box.
                             double const pad = 0.5 * cellSize[a];
                             double const d = std::max(
                                 {low[a] - pad - pos[a], 0.0, pos[a] - (high[a] + pad)});

@@ -1388,6 +1388,39 @@ namespace picBunch::pbfast
             return sum;
         }
 
+        //! Smooth per-observer near/far blend in PIC-cell units.
+        //!
+        //! The correction is the difference between the exact TSC-convolved
+        //! field and the mesh field of one source.  It is only meaningful when
+        //! that source is close to the observation point; at large distance the
+        //! two terms cancel and their difference is pure round-off.  A tile box
+        //! based source list also contains sources that are far from most of the
+        //! tile's nodes; blending them in creates a tile-edge step.  This weight
+        //! makes the correction depend on the observer distance only, so the
+        //! assembled field no longer sees the tile boundary.
+        ALPAKA_FN_INLINE ALPAKA_FN_ACC double dnearWeight(
+            double const xo[3],
+            double const xs[3],
+            double const cells[3],
+            DeviceParams const& prm)
+        {
+            if(prm.nearRadius2 >= 1.0e299)
+                return 1.0;
+            double q2 = 0.0;
+            for(int a = 0; a < 3; ++a)
+            {
+                double const d = (xo[a] - xs[a]) / cells[a];
+                q2 += d * d;
+            }
+            if(q2 >= prm.nearRadius2)
+                return 0.0;
+            if(q2 <= prm.nearTaper2)
+                return 1.0;
+            double const t
+                = (prm.nearRadius2 - q2) / (prm.nearRadius2 - prm.nearTaper2);
+            return t * t * (3.0 - 2.0 * t);
+        }
+
         // ---- kernel --------------------------------------------------------
 
         //! Fast near-field accumulation kernel.
@@ -1510,13 +1543,16 @@ namespace picBunch::pbfast
                         double const uArr[3] = {u[0], u[1], u[2]};
                         double const urepArr[3] = {urep[0], urep[1], urep[2]};
                         double const x_obsArr[3] = {x_obs[0], x_obs[1], x_obs[2]};
+                        double const nearW = dnearWeight(x_obsArr, x_srcArr, cellArr, prm);
+                        if(nearW == 0.0)
+                            continue;
                         double E[3], B[3];
                         dshapeField(x_obsArr, x_srcArr, uArr, cellArr, prm, E, B);
                         double comp = c < 3 ? E[c] : B[c - 3];
                         if(stencilMesh)
                             comp -= dmeshComp(x_srcArr, urepArr, cellArr, nodeBaseArr, sp, prm.delta[c], c);
                         double const unit = c < 3 ? prm.unitE : prm.unitB;
-                        sum += unit * qw * comp;
+                        sum += unit * qw * (nearW * comp);
                     }
                     // {component, node}: component is the slow index, the node
                     // the x-fastest one; the span's pitches encode the old
@@ -1631,6 +1667,9 @@ namespace picBunch::pbfast
                         if(c >= 3 && uArr[0] == 0.0 && uArr[1] == 0.0 && uArr[2] == 0.0)
                             continue;
                         double const urepArr[3] = {a.rex[q], a.rey[q], a.rez[q]};
+                        double const nearW = dnearWeight(x_obsArr, x_srcArr, a.cells, prm);
+                        if(nearW == 0.0)
+                            continue;
                         double E[3], B[3];
                         dshapeField(x_obsArr, x_srcArr, uArr, a.cells, prm, E, B);
                         double comp = c < 3 ? E[c] : B[c - 3];
@@ -1644,7 +1683,7 @@ namespace picBunch::pbfast
                                 prm.delta[c],
                                 c);
                         double const unit = c < 3 ? prm.unitE : prm.unitB;
-                        sum += unit * a.wq[q] * comp;
+                        sum += unit * a.wq[q] * (nearW * comp);
                     }
                     std::uint64_t const dst
                         = t.outOffset + static_cast<std::uint64_t>(c) * nodes + node;
