@@ -15,6 +15,10 @@
 // ``floor(cells + 1e-9)``.  It compares the on-disk records with an independent
 // reference implementation bit for bit, so a later vectorisation of the loop
 // cannot silently change rounding or patch order.
+//
+// Both the input fixture and the output checks use the HDF5 C API on purpose:
+// the test pins the exact on-disk bytes, dtypes and patch order produced by the
+// openPMD writer, so it must not round-trip through the abstraction it verifies.
 
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
@@ -141,12 +145,68 @@ namespace
         H5Tclose(type);
     }
 
+    void writeDoubleAttribute(hid_t object, char const* name, double value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUInt32Attribute(hid_t object, char const* name, std::uint32_t value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_UINT32, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_UINT32, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUnitSI(hid_t dataset, double unit)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeRecordAttributes(
+        hid_t record,
+        std::array<double, 7> const& unitDimension,
+        bool macroWeighted,
+        double weightingPower)
+    {
+        hsize_t dimensions[1] = {7};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(record, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unitDimension[0]);
+        H5Aclose(attribute);
+        H5Sclose(space);
+        writeDoubleAttribute(record, "weightingPower", weightingPower);
+        writeUInt32Attribute(record, "macroWeighted", macroWeighted ? 1u : 0u);
+        writeDoubleAttribute(record, "timeOffset", 0.0);
+    }
+
     void writeInputSpecies(std::filesystem::path const& path)
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         ASSERT_GE(file, 0);
+        // The openPMD reader requires the series attributes; the fixture is a
+        // plain openPMD 1.x tree written without openPMD-api.
+        writeStringAttribute(file, "openPMD", "1.1.0");
+        writeStringAttribute(file, "iterationEncoding", "groupBased");
+        writeStringAttribute(file, "iterationFormat", "%T");
+        writeStringAttribute(file, "basePath", "/data/%T/");
+        writeStringAttribute(file, "meshesPath", "fields/");
+        writeStringAttribute(file, "particlesPath", "particles/");
+        writeUInt32Attribute(file, "openPMDextension", 1);
         hid_t data = H5Gcreate2(file, "data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t iteration = H5Gcreate2(data, "0", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeDoubleAttribute(iteration, "dt", 1.0);
+        writeDoubleAttribute(iteration, "time", 0.0);
+        writeDoubleAttribute(iteration, "timeUnitSI", 1.0);
         hid_t particles
             = H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t species
@@ -154,10 +214,13 @@ namespace
         writeStringAttribute(species, "sourceMarker", "preserved");
         hid_t position
             = H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeRecordAttributes(position, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
         hid_t momentum
             = H5Gcreate2(species, "momentum", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeRecordAttributes(momentum, {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
         hid_t offset
             = H5Gcreate2(species, "positionOffset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeRecordAttributes(offset, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
         for(int a = 0; a < 3; ++a)
         {
             std::string const axis(1, kComponentName[a]);
@@ -166,12 +229,18 @@ namespace
             hid_t dataset = createDataset(offset, axis.c_str(), H5T_STD_I32LE, {1});
             std::int32_t const stored = a;
             H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+            writeUnitSI(dataset, 1.0);
             H5Dclose(dataset);
         }
         H5Gclose(position);
         H5Gclose(momentum);
         H5Gclose(offset);
-        writeFloatComponent(species, "weighting", 1.0f);
+        hid_t weighting = createDataset(species, "weighting", H5T_IEEE_F32LE, {1});
+        float const weight = 1.0f;
+        H5Dwrite(weighting, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &weight);
+        writeUnitSI(weighting, 1.0);
+        writeRecordAttributes(weighting, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
+        H5Dclose(weighting);
         hid_t patches
             = H5Gcreate2(species, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t count = createDataset(patches, "numParticles", H5T_STD_U64LE, {1});
@@ -334,7 +403,7 @@ TEST(OpenPmdWait, ParticleSlotFillIsBitIdenticalToReference)
     options.unitBField = 1.0;
     options.float64 = true;
     options.generatedSpecies = {generated};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     std::size_t const count = generated.bunch.size();
     // Reference: assign each particle to the first patch that contains its
@@ -440,8 +509,8 @@ TEST(OpenPmdWait, ParticleSlotFillIsBitIdenticalToReference)
         }
     }
     auto const storedWeighting = readDoubleDataset(file, (prefix + "weighting").c_str());
-    auto const storedCharge = readDoubleDataset(file, (prefix + "charge/charge").c_str());
-    auto const storedMass = readDoubleDataset(file, (prefix + "mass/mass").c_str());
+    auto const storedCharge = readDoubleDataset(file, (prefix + "charge").c_str());
+    auto const storedMass = readDoubleDataset(file, (prefix + "mass").c_str());
     ASSERT_EQ(storedWeighting.size(), count);
     ASSERT_EQ(storedCharge.size(), count);
     ASSERT_EQ(storedMass.size(), count);

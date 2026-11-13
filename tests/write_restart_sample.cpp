@@ -59,6 +59,32 @@ namespace
         H5Sclose(space);
     }
 
+    void writeUnitSI(hid_t dataset, double unit)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeRecordAttributes(
+        hid_t record,
+        std::array<double, 7> const& unitDimension,
+        bool macroWeighted,
+        double weightingPower)
+    {
+        hsize_t dimensions[1] = {7};
+        hid_t space = H5Screate_simple(1, dimensions, nullptr);
+        hid_t attribute = H5Acreate2(record, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unitDimension[0]);
+        H5Aclose(attribute);
+        H5Sclose(space);
+        writeDoubleAttribute(record, "weightingPower", weightingPower);
+        writeUInt32Attribute(record, "macroWeighted", macroWeighted ? 1u : 0u);
+        writeDoubleAttribute(record, "timeOffset", 0.0);
+    }
+
     void writeParticleInput(std::filesystem::path const& path)
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
@@ -82,6 +108,13 @@ namespace
         for(char const* record : {"position", "momentum", "positionOffset"})
         {
             hid_t group = H5Gcreate2(species, record, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            std::string const recordName(record);
+            if(recordName == "position")
+                writeRecordAttributes(group, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
+            else if(recordName == "momentum")
+                writeRecordAttributes(group, {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
+            else
+                writeRecordAttributes(group, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
             for(char const* axis : {"x", "y", "z"})
             {
                 bool const integer = std::string(record) == "positionOffset";
@@ -97,6 +130,7 @@ namespace
                     float const value = std::string(record) == "position" ? 0.5f : 0.0f;
                     H5Dwrite(dataset, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &value);
                 }
+                writeUnitSI(dataset, 1.0);
                 H5Dclose(dataset);
             }
             H5Gclose(group);
@@ -104,16 +138,21 @@ namespace
         hid_t weighting = create(species, "weighting", H5T_IEEE_F32LE, 1);
         float const weight = 1.0f;
         H5Dwrite(weighting, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &weight);
+        writeUnitSI(weighting, 1.0);
+        writeRecordAttributes(
+            weighting, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
         H5Dclose(weighting);
 
         hid_t patches = H5Gcreate2(species, "particlePatches", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t count = create(patches, "numParticles", H5T_STD_U64LE, 1);
         uint64_t const one = 1;
         H5Dwrite(count, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &one);
+        writeUnitSI(count, 1.0);
         H5Dclose(count);
         hid_t offsetCount = create(patches, "numParticlesOffset", H5T_STD_U64LE, 1);
         uint64_t const zero = 0;
         H5Dwrite(offsetCount, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &zero);
+        writeUnitSI(offsetCount, 1.0);
         H5Dclose(offsetCount);
         H5Gclose(patches);
 
@@ -172,7 +211,7 @@ int main(int argc, char** argv)
     options.nextId = 1;
     try
     {
-        picBunch::writePicOnGPUCheckpoint(field, options);
+        picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
     }
     catch(std::exception const& error)
     {

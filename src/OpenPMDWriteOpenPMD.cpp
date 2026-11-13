@@ -45,11 +45,11 @@
 
 namespace
 {
-    // Mirrors the constant in OpenPMDWrite.cpp (which is file-local there).
+    // Shared by the CLI and the configured checkpoint path.
     char const* const kFloat64Warning
-        = "float64 particle records are written; a stock PIConGPU cannot load "
-          "them. Re-run with float32 (the default) for a restart-compatible "
-          "checkpoint.";
+        = "precision=float64: stock PIConGPU cannot load double particle records; "
+          "the restart fails with 'Type conversion during chunk loading not yet implemented!'. "
+          "Use precision=float32 for a stock single-precision PIConGPU.";
 } // namespace
 
 namespace picBunch
@@ -143,6 +143,14 @@ namespace picBunch
         template<typename T_Rc>
         T_Rc& allocate1D(T_Rc& rc, Datatype type, std::size_t length)
         {
+            if(length == 0u)
+            {
+                // resetDataset() with a zero extent makes the HDF5 backend
+                // emit an empty group.  makeEmpty() emits the standard openPMD
+                // constant/empty record representation (shape = [0]).
+                rc.makeEmpty(type, 1u);
+                return rc;
+            }
             Dataset dataset(type, {static_cast<std::uint64_t>(length)});
             rc.resetDataset(std::move(dataset));
             return rc;
@@ -276,6 +284,13 @@ namespace picBunch
                 patchCount[q] = static_cast<std::uint64_t>(owned[q].size());
                 running += patchCount[q];
             }
+            // Store particles patch by patch: every patch owns a contiguous
+            // slot range, so each output record is a concatenation of the
+            // owned particles in patch order.
+            std::vector<std::size_t> order;
+            order.reserve(count);
+            for(auto const& patchParticles : owned)
+                order.insert(order.end(), patchParticles.begin(), patchParticles.end());
 
             // position / positionOffset / momentum / weighting / id / charge /
             // mass records.  Positions and momenta are converted to PIConGPU
@@ -359,68 +374,87 @@ namespace picBunch
                 std::array<double, 7>{0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0},
                 false,
                 1.0);
+            // Store a floating-point record in the configured precision.  The
+            // dataset was allocated with fieldDatatype(float64), so a float
+            // buffer must not be handed to a DOUBLE component.
+            auto storeFloating = [&](RecordComponent& rc, std::vector<double> const& values) {
+                // The converted buffer must outlive flushAfterStore().
+                std::vector<float> conv;
+                if(float64)
+                {
+                    rc.storeChunkRaw(values.data(), Offset{0u}, Extent{count});
+                }
+                else
+                {
+                    conv.reserve(values.size());
+                    for(double const v : values)
+                        conv.push_back(static_cast<float>(v));
+                    rc.storeChunkRaw(conv.data(), Offset{0u}, Extent{count});
+                }
+                flushAfterStore();
+            };
             if(count > 0)
             {
             for(char const* comp : xyz)
             {
                 int const axis = axisOf(comp);
                 RecordComponent posRc = species["position"][comp];
-                std::vector<float> data;
+                std::vector<double> data;
                 data.reserve(count);
-                for(std::size_t p = 0; p < count; ++p)
+                for(std::size_t slot = 0; slot < count; ++slot)
                 {
+                    std::size_t const p = order[slot];
                     // PIConGPU stores position as the sub-cell offset
                     // (cells - cellIndex), not the absolute cell index.
                     double const cells = (positionOf(bunch, comp)[p]
                                           - generated.domainOrigin[axis])
                                          / generated.cellSize[axis];
-                    data.push_back(static_cast<float>(
-                        cells - std::floor(cells + 1e-9)));
+                    data.push_back(cells - std::floor(cells + 1e-9));
                 }
-                posRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                storeFloating(posRc, data);
             }
             for(char const* comp : xyz)
             {
                 int const axis = axisOf(comp);
                 RecordComponent offRc = species["positionOffset"][comp];
                 std::vector<std::int32_t> data(count, 0);
-                for(std::size_t p = 0; p < count; ++p)
-                    data[p] = static_cast<std::int32_t>(
+                for(std::size_t slot = 0; slot < count; ++slot)
+                {
+                    std::size_t const p = order[slot];
+                    data[slot] = static_cast<std::int32_t>(
                         std::floor((positionOf(bunch, comp)[p]
                                     - generated.domainOrigin[axis])
-                                    / generated.cellSize[axis] + 1e-9)
-                        - generated.patchOffset[axis]);
+                                    / generated.cellSize[axis] + 1e-9));
+                }
                 offRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
                 flushAfterStore();
             }
             for(char const* comp : xyz)
             {
                 RecordComponent momRc = species["momentum"][comp];
-                std::vector<float> data;
+                std::vector<double> data;
                 data.reserve(count);
-                for(std::size_t p = 0; p < count; ++p)
+                for(std::size_t slot = 0; slot < count; ++slot)
                 {
+                    std::size_t const p = order[slot];
                     double const restMass = !bunch.restMass.empty() && bunch.restMass[p] > 0.0
                         ? bunch.restMass[p]
                         : generated.fallbackMass;
                     // PIConGPU openPMD momentum is the macro-particle momentum
                     // in units of unitMassSpeed: u*m*c*weight/unitMassSpeed.
-                    data.push_back(static_cast<float>(
+                    data.push_back(
                         momentumOf(bunch, comp)[p] * restMass * bunch.weight[p]
-                        * picBunch::kSpeedOfLight / generated.unitMassSpeed));
+                        * picBunch::kSpeedOfLight / generated.unitMassSpeed);
                 }
-                momRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                storeFloating(momRc, data);
             }
             // weighting (scalar record)
             {
                 RecordComponent wRc = species["weighting"][RecordComponent::SCALAR];
-                std::vector<float> data(count);
-                for(std::size_t p = 0; p < count; ++p)
-                    data[p] = static_cast<float>(bunch.weight[p]);
-                wRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                std::vector<double> data(count);
+                for(std::size_t slot = 0; slot < count; ++slot)
+                    data[slot] = bunch.weight[order[slot]];
+                storeFloating(wRc, data);
             }
             // id: global particle ids, disjoint across generated species and
             // spanning [idBase, idBase+count).  Scalar ULONGLONG record, as in
@@ -437,24 +471,23 @@ namespace picBunch
             // unitSI carries the TOML factor), as in the HDF5 writer.
             {
                 RecordComponent chRc = species["charge"][RecordComponent::SCALAR];
-                std::vector<float> data(count);
-                for(std::size_t p = 0; p < count; ++p)
-                    data[p] = static_cast<float>(bunch.charge[p] / generated.unitCharge);
-                chRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                std::vector<double> data(count);
+                for(std::size_t slot = 0; slot < count; ++slot)
+                    data[slot] = bunch.charge[order[slot]] / generated.unitCharge;
+                storeFloating(chRc, data);
             }
             {
                 RecordComponent maRc = species["mass"][RecordComponent::SCALAR];
-                std::vector<float> data(count);
-                for(std::size_t p = 0; p < count; ++p)
+                std::vector<double> data(count);
+                for(std::size_t slot = 0; slot < count; ++slot)
                 {
+                    std::size_t const p = order[slot];
                     double const restMass = !bunch.restMass.empty() && bunch.restMass[p] > 0.0
                         ? bunch.restMass[p]
                         : generated.fallbackMass;
-                    data[p] = static_cast<float>(restMass / generated.unitMass);
+                    data[slot] = restMass / generated.unitMass;
                 }
-                maRc.storeChunkRaw(data.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                storeFloating(maRc, data);
             }
             } // if(count > 0)
 
@@ -545,14 +578,298 @@ namespace picBunch
             for(auto const length : ext)
                 count *= length;
             std::vector<double> buf(count);
-            inRc.loadChunkRaw(buf.data(), Offset(ext.size(), 0u), ext);
-            in.flush();
+            if(count == 0u)
+                return buf;
+            Offset const offset(ext.size(), 0u);
+            // loadChunkRaw requires the caller buffer to match the on-disk
+            // datatype exactly; the source precision may differ from the
+            // requested output precision, so convert after loading.
+            // The raw buffer must stay alive until ``in.flush()`` executes the
+            // queued read; flush before the switch-local buffer is destroyed.
+            switch(inRc.getDatatype())
+            {
+            case Datatype::FLOAT:
+            {
+                std::vector<float> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            case Datatype::DOUBLE:
+                inRc.loadChunkRaw(buf.data(), offset, ext);
+                in.flush();
+                break;
+            case Datatype::INT:
+            {
+                std::vector<std::int32_t> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            case Datatype::UINT:
+            {
+                std::vector<std::uint32_t> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            case Datatype::LONGLONG:
+            {
+                std::vector<std::int64_t> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            case Datatype::ULONGLONG:
+            {
+                std::vector<std::uint64_t> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            default:
+                throw std::runtime_error(
+                    "openPMD checkpoint writer: unsupported particle record datatype");
+            }
             return buf;
+        }
+
+        //! Copy user attributes that are not structural openPMD metadata.
+        //! Unknown or read-only keys are skipped: the goal is to preserve
+        //! custom species/mesh attributes (for example PIConGPU's
+        //! ``sourceMarker``), not to overwrite the writer's own metadata.
+        void copyAttributes(
+            openPMD::Attributable const& src,
+            openPMD::Attributable& dst)
+        {
+            static std::set<std::string> const skip{
+                "position",
+                "unitSI",
+                "unitDimension",
+                "macroWeighted",
+                "weightingPower",
+                "timeOffset",
+                "axisLabels",
+                "dataOrder",
+                "geometry",
+                "gridSpacing",
+                "gridGlobalOffset",
+                "gridUnitSI",
+                "fieldSmoothing"};
+            for(auto const& key : src.attributes())
+            {
+                if(skip.count(key) != 0u)
+                    continue;
+                auto const attribute = src.getAttribute(key);
+                try
+                {
+                    switch(attribute.dtype)
+                    {
+                    case Datatype::CHAR:
+                        dst.setAttribute(key, attribute.get<char>());
+                        break;
+                    case Datatype::UCHAR:
+                        dst.setAttribute(key, attribute.get<unsigned char>());
+                        break;
+                    case Datatype::SCHAR:
+                        dst.setAttribute(key, attribute.get<signed char>());
+                        break;
+                    case Datatype::SHORT:
+                        dst.setAttribute(key, attribute.get<short>());
+                        break;
+                    case Datatype::INT:
+                        dst.setAttribute(key, attribute.get<int>());
+                        break;
+                    case Datatype::LONG:
+                        dst.setAttribute(key, attribute.get<long>());
+                        break;
+                    case Datatype::LONGLONG:
+                        dst.setAttribute(key, attribute.get<long long>());
+                        break;
+                    case Datatype::USHORT:
+                        dst.setAttribute(key, attribute.get<unsigned short>());
+                        break;
+                    case Datatype::UINT:
+                        dst.setAttribute(key, attribute.get<unsigned int>());
+                        break;
+                    case Datatype::ULONG:
+                        dst.setAttribute(key, attribute.get<unsigned long>());
+                        break;
+                    case Datatype::ULONGLONG:
+                        dst.setAttribute(key, attribute.get<unsigned long long>());
+                        break;
+                    case Datatype::FLOAT:
+                        dst.setAttribute(key, attribute.get<float>());
+                        break;
+                    case Datatype::DOUBLE:
+                        dst.setAttribute(key, attribute.get<double>());
+                        break;
+                    case Datatype::STRING:
+                        dst.setAttribute(key, attribute.get<std::string>());
+                        break;
+                    case Datatype::VEC_FLOAT:
+                        dst.setAttribute(key, attribute.get<std::vector<float>>());
+                        break;
+                    case Datatype::VEC_DOUBLE:
+                        dst.setAttribute(key, attribute.get<std::vector<double>>());
+                        break;
+                    case Datatype::VEC_INT:
+                        dst.setAttribute(key, attribute.get<std::vector<int>>());
+                        break;
+                    case Datatype::VEC_UINT:
+                        dst.setAttribute(key, attribute.get<std::vector<unsigned int>>());
+                        break;
+                    case Datatype::VEC_ULONGLONG:
+                        dst.setAttribute(
+                            key, attribute.get<std::vector<unsigned long long>>());
+                        break;
+                    case Datatype::VEC_STRING:
+                        dst.setAttribute(key, attribute.get<std::vector<std::string>>());
+                        break;
+                    case Datatype::BOOL:
+                        dst.setAttribute(key, attribute.get<bool>());
+                        break;
+                    default:
+                        break;
+                    }
+                }
+                catch(std::exception const&)
+                {
+                    // A reserved attribute that openPMD refuses to set is
+                    // already covered by the explicit metadata above.
+                }
+            }
+        }
+
+        //! Copy one record component byte-for-byte at its on-disk datatype.
+        template<typename T_Component>
+        void copyRecordComponent(
+            Series& in,
+            Series& out,
+            T_Component& src,
+            T_Component& dst)
+        {
+            Extent const ext = src.getExtent();
+            std::uint64_t count = 1u;
+            for(auto const length : ext)
+                count *= length;
+            Offset const offset(ext.size(), 0u);
+            Datatype const datatype = src.getDatatype();
+            dst.resetDataset(Dataset(datatype, ext));
+            auto copy = [&](auto value) {
+                using T = decltype(value);
+                std::vector<T> buffer(static_cast<std::size_t>(count));
+                src.loadChunkRaw(buffer.data(), offset, ext);
+                in.flush();
+                dst.storeChunkRaw(buffer.data(), offset, ext);
+                out.flush();
+            };
+            switch(datatype)
+            {
+            case Datatype::FLOAT:
+                copy(static_cast<float>(0));
+                break;
+            case Datatype::DOUBLE:
+                copy(static_cast<double>(0));
+                break;
+            case Datatype::CHAR:
+                copy(static_cast<char>(0));
+                break;
+            case Datatype::UCHAR:
+                copy(static_cast<unsigned char>(0));
+                break;
+            case Datatype::SCHAR:
+                copy(static_cast<signed char>(0));
+                break;
+            case Datatype::SHORT:
+                copy(static_cast<short>(0));
+                break;
+            case Datatype::USHORT:
+                copy(static_cast<unsigned short>(0));
+                break;
+            case Datatype::INT:
+                copy(static_cast<std::int32_t>(0));
+                break;
+            case Datatype::UINT:
+                copy(static_cast<std::uint32_t>(0));
+                break;
+            case Datatype::LONG:
+                copy(static_cast<long>(0));
+                break;
+            case Datatype::ULONG:
+                copy(static_cast<unsigned long>(0));
+                break;
+            case Datatype::LONGLONG:
+                copy(static_cast<std::int64_t>(0));
+                break;
+            case Datatype::ULONGLONG:
+                copy(static_cast<std::uint64_t>(0));
+                break;
+            default:
+                throw std::runtime_error(
+                    "openPMD checkpoint writer: unsupported copied record datatype");
+            }
+            copyAttributes(src, dst);
+        }
+
+        template<typename T_Record>
+        void copyRecord(Series& in, Series& out, T_Record& src, T_Record& dst)
+        {
+            copyAttributes(src, dst);
+            for(auto const& entry : src)
+            {
+                std::string const& key = entry.first;
+                auto srcComponent = src[key];
+                auto dstComponent = dst[key];
+                copyRecordComponent(in, out, srcComponent, dstComponent);
+            }
+        }
+
+        //! Copy one input mesh (a PML slab) including its component metadata.
+        void copyMesh(Series& in, Series& out, Mesh& src, Mesh& dst)
+        {
+            dst.setGeometry(src.geometry());
+            dst.setDataOrder(src.dataOrder());
+            dst.setAxisLabels(src.axisLabels());
+            dst.setGridSpacing(src.gridSpacing<double>());
+            dst.setGridGlobalOffset(src.gridGlobalOffset());
+            dst.setGridUnitSI(src.gridUnitSI());
+            dst.setUnitDimension(src.unitDimension());
+            copyAttributes(src, dst);
+            for(auto const& entry : src)
+            {
+                std::string const& key = entry.first;
+                MeshRecordComponent srcComponent = src[key];
+                MeshRecordComponent dstComponent = dst[key];
+                std::vector<double> const sourcePosition
+                    = srcComponent.position<double>();
+                double const sourceUnitSI = srcComponent.unitSI();
+                copyRecordComponent(in, out, srcComponent, dstComponent);
+                dstComponent.setUnitSI(sourceUnitSI);
+                // The first component flush installs openPMD's default scalar
+                // ``position`` attribute (one-element dataspace).  Remove it
+                // and recreate it from the source vector so the PML slab keeps
+                // its three-component position metadata.
+                dstComponent.deleteAttribute("position");
+                dstComponent.setPosition(sourcePosition);
+                out.flush();
+            }
         }
 
         void copyInputSpecies(
             Series& in,
             long long inStep,
+            Series& out,
             Iteration& outIteration,
             std::string const& species,
             bool float64,
@@ -560,8 +877,27 @@ namespace picBunch
         {
             ParticleSpecies inSpecies = in.snapshots()[inStep].particles[species];
             ParticleSpecies outSpecies = outIteration.particles[species];
+            copyAttributes(inSpecies, outSpecies);
             char const* const xyz[3] = {"x", "y", "z"};
             std::uint64_t count = 0;
+            auto storeFloating = [&](RecordComponent& rc, std::vector<double> const& values) {
+                if(values.empty())
+                    return;
+                // The converted buffer must outlive flushAfterStore().
+                std::vector<float> conv;
+                if(float64)
+                {
+                    rc.storeChunkRaw(values.data(), Offset{0u}, Extent{values.size()});
+                }
+                else
+                {
+                    conv.reserve(values.size());
+                    for(double const v : values)
+                        conv.push_back(static_cast<float>(v));
+                    rc.storeChunkRaw(conv.data(), Offset{0u}, Extent{values.size()});
+                }
+                flushAfterStore();
+            };
             for(char const* comp : xyz)
             {
                 RecordComponent inRc = inSpecies["position"][comp];
@@ -571,12 +907,19 @@ namespace picBunch
                 double const unitSI = inRc.getAttribute("unitSI").get<double>();
                 outRc.setUnitSI(unitSI);
                 outRc.setAttribute("position", std::vector<double>{0.0, 0.0, 0.0});
-                std::vector<float> conv;
-                conv.reserve(count);
-                for(double const v : buf)
-                    conv.push_back(static_cast<float>(v));
-                outRc.storeChunkRaw(conv.data(), Offset{0u}, Extent{count});
-                flushAfterStore();
+                storeFloating(outRc, buf);
+            }
+            // Momentum is part of a restart checkpoint; the legacy HDF5 writer
+            // rewrote it to the configured precision.  Keep the input unitSI.
+            for(char const* comp : xyz)
+            {
+                RecordComponent inRc = inSpecies["momentum"][comp];
+                std::uint64_t c = 0;
+                std::vector<double> const buf = loadRecordComponent(in, inRc, c);
+                RecordComponent outRc = outSpecies["momentum"][comp];
+                allocate1D(outRc, fieldDatatype(float64), c);
+                outRc.setUnitSI(inRc.getAttribute("unitSI").get<double>());
+                storeFloating(outRc, buf);
             }
             for(char const* comp : xyz)
             {
@@ -586,11 +929,14 @@ namespace picBunch
                 RecordComponent outRc = outSpecies["positionOffset"][comp];
                 allocate1D(outRc, Datatype::INT, c);
                 outRc.setUnitSI(1.0);
-                std::vector<std::int32_t> conv(c);
-                for(std::uint64_t i = 0; i < c; ++i)
-                    conv[i] = static_cast<std::int32_t>(buf[i]);
-                outRc.storeChunkRaw(conv.data(), Offset{0u}, Extent{c});
-                flushAfterStore();
+                if(c != 0u)
+                {
+                    std::vector<std::int32_t> conv(c);
+                    for(std::uint64_t i = 0; i < c; ++i)
+                        conv[i] = static_cast<std::int32_t>(buf[i]);
+                    outRc.storeChunkRaw(conv.data(), Offset{0u}, Extent{c});
+                    flushAfterStore();
+                }
             }
             // weighting (scalar).  An input written by h5py may store the
             // scalar as a "value" dataset inside the record group instead of
@@ -606,12 +952,21 @@ namespace picBunch
                     = outSpecies["weighting"][RecordComponent::SCALAR];
                 allocate1D(outRc, fieldDatatype(float64), c);
                 outRc.setUnitSI(1.0);
-                std::vector<float> conv;
-                conv.reserve(c);
-                for(double const v : buf)
-                    conv.push_back(static_cast<float>(v));
-                outRc.storeChunkRaw(conv.data(), Offset{0u}, Extent{c});
-                flushAfterStore();
+                storeFloating(outRc, buf);
+            }
+            // particlePatches is part of the restart contract; copy every
+            // record and component of the input species verbatim.
+            ParticlePatches inPatches = inSpecies.particlePatches;
+            if(inPatches.numPatches() != 0u)
+            {
+                ParticlePatches outPatches = outSpecies.particlePatches;
+                for(auto const& entry : inPatches)
+                {
+                    std::string const& key = entry.first;
+                    PatchRecord srcRecord = inPatches[key];
+                    PatchRecord dstRecord = outPatches[key];
+                    copyRecord(in, out, srcRecord, dstRecord);
+                }
             }
         }
 
@@ -637,6 +992,39 @@ namespace picBunch
             namespace fs = std::filesystem;
             bool const adios = backend == CheckpointBackend::Adios2;
             fs::create_directories(fs::path(finalName).parent_path());
+
+            // Open the input Series before creating the output so a missing
+            // required species fails without leaving a checkpoint behind.
+            Series in(options.inputFile, Access::READ_ONLY, std::string{});
+            long long const inStep = static_cast<long long>(options.inputIteration);
+            auto inIteration = in.snapshots()[inStep];
+            std::vector<std::string> inSpeciesNames;
+            std::set<std::string> inputSpecies;
+            for(auto const& kv : inIteration.particles)
+            {
+                inSpeciesNames.push_back(kv.first);
+                inputSpecies.insert(kv.first);
+            }
+            for(auto const& requested : options.requiredInputSpecies)
+            {
+                if(inputSpecies.count(requested) == 0u)
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: input has no particle species '"
+                        + requested + "'");
+            }
+            for(auto const& generated : options.generatedSpecies)
+            {
+                if(generated.empty)
+                    continue;
+                std::string const inputName = generated.inputSpecies.empty()
+                    ? generated.species
+                    : generated.inputSpecies;
+                if(inputSpecies.count(inputName) == 0u)
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: generated species '"
+                        + generated.species + "' reads input species '" + inputName
+                        + "', which is absent from the input iteration");
+            }
 
             // File-based iteration layout: <dir>/<prefix>_%06T.<ext>.
             std::string const pattern
@@ -684,13 +1072,6 @@ namespace picBunch
             setUnitIfKnown("unit_energy", options.unitEnergy);
             setUnitIfKnown("unit_mass", options.unitMass);
             setUnitIfKnown("unit_charge", options.unitCharge);
-
-            // Open the input Series (BP5 or HDF5) in read-only mode to
-            // enumerate and copy species.  BP5 inputs are read through ADIOS2;
-            // HDF5 inputs through the HDF5 backend.  The input extension is
-            // auto-detected by openPMD from the path.
-            Series in(options.inputFile, Access::READ_ONLY, std::string{});
-            long long const inStep = static_cast<long long>(options.inputIteration);
 
             // Fields group metadata.  The openPMD meshes container maps to the
             // ``meshesPath`` ("fields/") group, so the field-group attributes
@@ -925,31 +1306,24 @@ namespace picBunch
 
             out.flush();
 
-            // Enumerate the input species before the id provider so the
-            // generated id range starts after every copied particle.
-            std::vector<std::string> inSpeciesNames;
-            auto inIteration = in.snapshots()[inStep];
-            for(auto const& kv : inIteration.particles)
-                inSpeciesNames.push_back(kv.first);
-            std::set<std::string> generatedInputs;
+            // A same-name generated entry overwrites the raw input group and
+            // therefore skips the copy.  A renamed entry (input "b" -> output
+            // "e") still copies "b" raw.
+            std::set<std::string> overwrittenInputs;
             for(auto const& generated : options.generatedSpecies)
             {
-                std::string inputName = generated.empty
-                    ? std::string{}
-                    : generated.inputSpecies.empty()
+                if(generated.empty)
+                    continue;
+                std::string const inputName = generated.inputSpecies.empty()
                     ? generated.species
                     : generated.inputSpecies;
-                if(!inputName.empty())
-                    generatedInputs.insert(inputName);
+                if(inputName == generated.species)
+                    overwrittenInputs.insert(inputName);
             }
             std::uint64_t copiedParticles = 0;
             for(auto const& name : inSpeciesNames)
             {
-                bool isGenerated = generatedInputs.count(name) != 0u;
-                for(auto const& g : options.generatedSpecies)
-                    if(g.species == name)
-                        isGenerated = true;
-                if(isGenerated)
+                if(overwrittenInputs.count(name) != 0u)
                     continue;
                 Extent const ext
                     = inIteration.particles[name]["position"]["x"].getExtent();
@@ -995,23 +1369,52 @@ namespace picBunch
                 out.flush();
             }
 
-            // Particles: copy the non-generated input species, then write the
-            // generated/empty ones.
+            // Particles: copy the non-overwritten input species, then write
+            // the generated/empty ones.  A renamed generated entry keeps its
+            // raw input group.
             for(auto const& name : inSpeciesNames)
             {
-                bool isGeneratedInput = generatedInputs.count(name) != 0u;
-                bool isGeneratedOut
-                    = false;
-                for(auto const& g : options.generatedSpecies)
-                    if(g.species == name)
-                        isGeneratedOut = true;
-                if(isGeneratedOut)
-                    continue; // written below
-                if(isGeneratedInput)
-                    continue; // consumed by a generated entry; not copied
+                if(overwrittenInputs.count(name) != 0u)
+                    continue; // written as a generated species below
                 copyInputSpecies(
-                    in, inStep, iteration, name, options.float64,
+                    in, inStep, out, iteration, name, options.float64,
                     [&out]() { out.flush(); });
+            }
+
+            // PML state is part of a PIConGPU checkpoint and is loaded by an
+            // open-boundary restart.  Copy every Convolutional PML mesh from
+            // the input checkpoint instead of synthesizing it.
+            for(auto const& entry : inIteration.meshes)
+            {
+                std::string const& name = entry.first;
+                if(name.rfind("Convolutional PML ", 0u) != 0u)
+                    continue;
+                Mesh srcMesh = inIteration.meshes[name];
+                Mesh dstMesh = iteration.meshes[name];
+                copyMesh(in, out, srcMesh, dstMesh);
+                std::cerr << "picBunch: copied Convolutional PML record '" << name << "'\n";
+            }
+
+            // Missing patch metadata is non-fatal but may make PIConGPU
+            // reject the restart; record every affected species on the root.
+            std::string restartWarning;
+            for(auto const& name : inSpeciesNames)
+            {
+                if(overwrittenInputs.count(name) != 0u)
+                    continue;
+                if(inIteration.particles[name].particlePatches.numPatches() == 0u)
+                {
+                    if(!restartWarning.empty())
+                        restartWarning += "; ";
+                    restartWarning += "species '" + name
+                        + "' has no particlePatches metadata";
+                }
+            }
+            if(!restartWarning.empty())
+            {
+                std::cerr << "picBunch: warning: " << restartWarning
+                          << "; PIConGPU may reject the restart\n";
+                out.setAttribute("picBunchRestartWarning", restartWarning);
             }
             std::uint64_t idBase = copiedParticles;
             for(auto const& generated : options.generatedSpecies)

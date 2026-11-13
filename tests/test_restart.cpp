@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -77,6 +78,24 @@ namespace
         H5Tclose(type);
     }
 
+    void writeDoubleAttribute(hid_t object, char const* name, double value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUInt32Attribute(hid_t object, char const* name, std::uint32_t value)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(object, name, H5T_NATIVE_UINT32, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_UINT32, &value);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
     void writeStringArrayAttribute(hid_t object, char const* name, std::vector<std::string> const& values)
     {
         hid_t type = H5Tcopy(H5T_C_S1);
@@ -110,6 +129,33 @@ namespace
         hid_t space = H5Screate_simple(1, dimensions, nullptr);
         hid_t attribute = H5Acreate2(object, "unitDimension", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
         H5Awrite(attribute, H5T_NATIVE_DOUBLE, &values[0]);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeUnitSI(hid_t dataset, double unit)
+    {
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(dataset, "unitSI", H5T_NATIVE_DOUBLE, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_DOUBLE, &unit);
+        H5Aclose(attribute);
+        H5Sclose(space);
+    }
+
+    void writeRecordAttributes(
+        hid_t record,
+        std::array<double, 7> const& unitDimension,
+        bool macroWeighted,
+        double weightingPower)
+    {
+        writeUnitDimension(record, unitDimension);
+        writeDoubleAttribute(record, "weightingPower", weightingPower);
+        writeUInt32Attribute(record, "macroWeighted", macroWeighted ? 1u : 0u);
+        float const timeOffset = 0.0f;
+        hid_t space = H5Screate(H5S_SCALAR);
+        hid_t attribute = H5Acreate2(
+            record, "timeOffset", H5T_NATIVE_FLOAT, space, H5P_DEFAULT, H5P_DEFAULT);
+        H5Awrite(attribute, H5T_NATIVE_FLOAT, &timeOffset);
         H5Aclose(attribute);
         H5Sclose(space);
     }
@@ -195,19 +241,33 @@ namespace
         std::vector<std::string> const& speciesNames = std::vector<std::string>{"electrons"})
     {
         hid_t file = H5Fcreate(path.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        // The openPMD reader requires the series attributes; the fixture is a
+        // plain openPMD 1.x tree written without openPMD-api.
+        writeStringAttribute(file, "openPMD", "1.1.0");
+        writeStringAttribute(file, "iterationEncoding", "groupBased");
+        writeStringAttribute(file, "iterationFormat", "%T");
+        writeStringAttribute(file, "basePath", "/data/%T/");
+        writeStringAttribute(file, "meshesPath", "fields/");
+        writeStringAttribute(file, "particlesPath", "particles/");
+        writeUInt32Attribute(file, "openPMDextension", 1);
         H5Gcreate2(file, "data", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t iteration = H5Gcreate2(file, "data/0", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeDoubleAttribute(iteration, "dt", 1.0);
+        writeDoubleAttribute(iteration, "time", 0.0);
+        writeDoubleAttribute(iteration, "timeUnitSI", 1.0);
         hid_t particles = H5Gcreate2(iteration, "particles", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         for(auto const& speciesName : speciesNames)
         {
             hid_t species = H5Gcreate2(particles, speciesName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
             writeStringAttribute(species, "sourceMarker", "preserved");
-            writeScalarDouble(species, "particleShape", 1.0);
 
             char const* axes = "xyz";
             hid_t position = H5Gcreate2(species, "position", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writeRecordAttributes(position, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
             hid_t momentum = H5Gcreate2(species, "momentum", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writeRecordAttributes(momentum, {1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
             hid_t offset = H5Gcreate2(species, "positionOffset", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            writeRecordAttributes(offset, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, false, 0.0);
             for(int a = 0; a < 3; ++a)
             {
                 std::string const axis(1, axes[a]);
@@ -218,6 +278,7 @@ namespace
                     hid_t dataset = create(offset, axis.c_str(), H5T_IEEE_F64LE, {1});
                     double const stored = static_cast<double>(a);
                     H5Dwrite(dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                    writeUnitSI(dataset, 1.0);
                     H5Dclose(dataset);
                 }
                 else
@@ -227,20 +288,32 @@ namespace
                     hid_t dataset = create(offset, axis.c_str(), H5T_STD_I32LE, {1});
                     int32_t const stored = a;
                     H5Dwrite(dataset, H5T_NATIVE_INT32, H5S_ALL, H5S_ALL, H5P_DEFAULT, &stored);
+                    writeUnitSI(dataset, 1.0);
                     H5Dclose(dataset);
                 }
             }
             H5Gclose(position);
             H5Gclose(momentum);
             H5Gclose(offset);
-            if(doubleParticles)
             {
-                hid_t weighting = H5Gcreate2(species, "weighting", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-                writeDoubleComponent(weighting, "weighting", 1.0);
-                H5Gclose(weighting);
+                hid_t weighting = doubleParticles
+                    ? create(species, "weighting", H5T_IEEE_F64LE, {1})
+                    : create(species, "weighting", H5T_IEEE_F32LE, {1});
+                if(doubleParticles)
+                {
+                    double const weight = 1.0;
+                    H5Dwrite(weighting, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &weight);
+                }
+                else
+                {
+                    float const weight = 1.0f;
+                    H5Dwrite(weighting, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &weight);
+                }
+                writeUnitSI(weighting, 1.0);
+                writeRecordAttributes(
+                    weighting, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, true, 1.0);
+                H5Dclose(weighting);
             }
-            else
-                writeFloatComponent(species, "weighting", 1.0f);
 
             if(withPatches)
             {
@@ -277,11 +350,23 @@ namespace
         hid_t attribute = H5Aopen(object, name, H5P_DEFAULT);
         EXPECT_GE(attribute, 0) << "missing attribute " << name;
         hid_t type = H5Aget_type(attribute);
-        char* value = nullptr;
-        H5Aread(attribute, type, &value);
-        std::string result = value != nullptr ? value : "";
-        if(value != nullptr)
-            H5free_memory(value);
+        std::string result;
+        if(H5Tis_variable_str(type) > 0)
+        {
+            char* value = nullptr;
+            H5Aread(attribute, type, &value);
+            result = value != nullptr ? value : "";
+            if(value != nullptr)
+                H5free_memory(value);
+        }
+        else
+        {
+            // openPMD writes fixed-length strings; read them into a byte buffer.
+            std::size_t const size = H5Tget_size(type);
+            std::vector<char> value(size + 1u, '\0');
+            H5Aread(attribute, type, value.data());
+            result.assign(value.data());
+        }
         H5Tclose(type);
         H5Aclose(attribute);
         return result;
@@ -386,6 +471,48 @@ namespace
         return values;
     }
 
+    //! An empty openPMD component is either a zero-length dataset or a
+    //! constant record group carrying ``shape = [0]``.
+    void expectEmptyComponent(hid_t file, std::string const& path)
+    {
+        hid_t dataset = H5Dopen2(file, path.c_str(), H5P_DEFAULT);
+        if(dataset >= 0)
+        {
+            hid_t space = H5Dget_space(dataset);
+            hssize_t const points = H5Sget_simple_extent_npoints(space);
+            EXPECT_EQ(points, 0) << path;
+            H5Sclose(space);
+            H5Dclose(dataset);
+            return;
+        }
+        auto const shapeOf = [&](std::string const& objectPath)
+            -> std::optional<std::uint64_t> {
+            hid_t object = H5Oopen(file, objectPath.c_str(), H5P_DEFAULT);
+            if(object < 0)
+                return std::nullopt;
+            std::optional<std::uint64_t> shape;
+            if(H5Aexists(object, "shape") > 0)
+            {
+                hid_t attribute = H5Aopen(object, "shape", H5P_DEFAULT);
+                std::uint64_t value = 1;
+                H5Aread(attribute, H5T_NATIVE_UINT64, &value);
+                H5Aclose(attribute);
+                shape = value;
+            }
+            H5Oclose(object);
+            return shape;
+        };
+        auto shape = shapeOf(path);
+        if(!shape)
+        {
+            std::size_t const slash = path.find_last_of('/');
+            if(slash != std::string::npos)
+                shape = shapeOf(path.substr(0, slash));
+        }
+        ASSERT_TRUE(shape.has_value()) << path;
+        EXPECT_EQ(*shape, 0u) << path;
+    }
+
     picBunch::Field makeField()
     {
         picBunch::Field field;
@@ -480,7 +607,7 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     options.unitBField = 29522.962355927582;
     options.nextId = 1;
 
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000002.h5";
     ASSERT_TRUE(std::filesystem::exists(path));
@@ -648,7 +775,7 @@ TEST(Restart, IterationUnitAttributesMatchDerivedUnits)
     options.unitEnergy = deck.unitEnergy;
     options.unitMass = deck.unitMass;
     options.unitCharge = deck.unitCharge;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     hid_t file = H5Fopen(
         (directory / "checkpoint_000002.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -700,7 +827,7 @@ TEST(Restart, WriterCopiesEverySpeciesAndUsesGlobalIdRange)
     options.unitBField = 1.0;
     // Lower bound below the real particle count: the writer must never store it.
     options.nextId = 1;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000002.h5";
     ASSERT_TRUE(std::filesystem::exists(path));
@@ -760,7 +887,7 @@ TEST(Restart, WriterRejectsMissingRequestedSpecies)
     options.unitBField = 1.0;
     try
     {
-        picBunch::writePicOnGPUCheckpoint(field, options);
+        picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
         FAIL() << "expected an error for the absent species";
     }
     catch(std::runtime_error const& error)
@@ -790,7 +917,7 @@ TEST(Restart, WriterReportsMissingParticlePatches)
     options.unitEField = 1.0;
     options.unitBField = 1.0;
     options.nextId = 1;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000000.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -808,10 +935,10 @@ TEST(Restart, WriterRejectsMissingUnits)
     picBunch::PicOnGPUWriteOptions options;
     options.inputFile = "unused.h5";
     options.unitEField = 0.0;
-    EXPECT_THROW(picBunch::writePicOnGPUCheckpoint(field, options), std::invalid_argument);
+    EXPECT_THROW(picBunch::writePicOnGPUCheckpointOpenPMD(field, options), std::invalid_argument);
     options.unitEField = 1.0;
     options.unitBField = -1.0;
-    EXPECT_THROW(picBunch::writePicOnGPUCheckpoint(field, options), std::invalid_argument);
+    EXPECT_THROW(picBunch::writePicOnGPUCheckpointOpenPMD(field, options), std::invalid_argument);
 }
 
 TEST(Restart, WriterCopiesPmlRecordsVerbatim)
@@ -836,7 +963,7 @@ TEST(Restart, WriterCopiesPmlRecordsVerbatim)
     options.unitEField = 1.0;
     options.unitBField = 1.0;
     options.nextId = 1;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000002.h5";
     hid_t sourceFile = H5Fopen(input.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -931,7 +1058,7 @@ TEST(Restart, WriterEmitsOnePatchPerRankOverlapWithDisjointOffsets)
         {{0, 0, 0}, {5, 5, 3}},
         {{0, 0, 2}, {5, 5, 2}}};
     options.generatedSpecies = {generated};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     auto const path = directory / "checkpoint_000007.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -980,7 +1107,7 @@ TEST(Restart, WriterPinsFloat32ParticleDtypes)
     options.unitEField = 1.0;
     options.unitBField = 1.0;
     options.nextId = 1;
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000002.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1065,7 +1192,7 @@ TEST(Restart, GeneratedMomentumUsesPIConGPUMacroWeighting)
     generated.unitMass = mass;
     generated.fallbackMass = mass;
     options.generatedSpecies = {generated};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     auto const path = directory / "checkpoint_000004.h5";
     // The PIConGPU convention is macro momentum: raw = u*m*c*w/unitMassSpeed,
@@ -1143,7 +1270,7 @@ TEST(Restart, GeneratedPatchesAreContiguousForInterleavedInput)
         {{0, 0, 0}, {5, 5, 2}},
         {{0, 0, 2}, {5, 5, 2}}};
     options.generatedSpecies = {generated};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     auto const path = directory / "checkpoint_000005.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1238,7 +1365,7 @@ TEST(Restart, WriterGivesTwoGeneratedSpeciesDisjointIdRanges)
     options.generatedSpecies = {
         generatedBunch("a", 2u, 0.0),
         generatedBunch("b", 3u, 10.0)};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     auto const path = directory / "checkpoint_000006.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1287,7 +1414,7 @@ TEST(Restart, WriterEmitsZeroParticleEmptySpeciesWithoutCharge)
     empty.unitMass = picBunch::kElectronMass;
     empty.fallbackMass = picBunch::kElectronMass;
     options.generatedSpecies = {generatedB, empty};
-    picBunch::writePicOnGPUCheckpoint(field, options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
 
     auto const path = directory / "checkpoint_000007.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1302,8 +1429,7 @@ TEST(Restart, WriterEmitsZeroParticleEmptySpeciesWithoutCharge)
             "weighting", "id", "charge/charge", "mass/mass"})
     {
         std::string const pathInFile = std::string("data/7/particles/e/") + record;
-        EXPECT_EQ(H5Lexists(file, pathInFile.c_str(), H5P_DEFAULT), 1) << record;
-        EXPECT_EQ(datasetPoints(file, pathInFile.c_str()), 0u) << record;
+        expectEmptyComponent(file, pathInFile);
     }
     // One domain-covering patch row with zero particles.
     EXPECT_EQ(
@@ -1362,7 +1488,7 @@ TEST(Restart, RenamedGeneratedSpeciesKeepsTheRawInputCopy)
     picBunch::GeneratedParticles renamed = generatedBunch("e", 2u, 3.0);
     renamed.inputSpecies = "b";
     options.generatedSpecies = {renamed};
-    picBunch::writePicOnGPUCheckpoint(makeField(), options);
+    picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
 
     auto const path = directory / "checkpoint_000008.h5";
     hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
