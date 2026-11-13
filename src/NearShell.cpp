@@ -15,6 +15,8 @@
 #include "picBunch/NearShell.hpp"
 
 #include "picBunch/Compute.hpp"
+
+#include "picBunch/detail/FieldGuard.hpp"
 #include "picBunch/Kernel.hpp"
 #include "picBunch/VelocityMoments.hpp"
 #include "picBunch/detail/FastNear.hpp"
@@ -33,6 +35,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -1268,6 +1271,17 @@ namespace picBunch
                     .count());
         if(nearShell.exactPairs)
             *nearShell.exactPairs = static_cast<std::size_t>(pairs);
+        {
+            // The assembled near-shell field of a charged bunch is never
+            // identically zero either; see detail/FieldGuard.hpp.
+            std::ostringstream description;
+            description << "path=near-shell, near_shell="
+                        << (fastMode ? "fast" : "exact") << ", grid=" << grid.n[0] << "x"
+                        << grid.n[1] << "x" << grid.n[2] << " nodes, fft_padding="
+                        << grid.fftPadding << ", particles=" << bunch.size() << ", layout="
+                        << (parSize > 1 ? "distributed" : "replicated");
+            detail::abortOnEmptyChargedField(field, detail::totalCharge(bunch), description.str());
+        }
         return field;
     }
 
