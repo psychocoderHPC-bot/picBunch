@@ -46,6 +46,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_mpi_failure.cpp
         test_near_shell_accuracy.cpp
         test_near_shell_guard.cpp
+        test_near_shell_none.cpp
         test_near_shell_alpaka.cpp
         test_fastnear_poly.cpp
         test_fastnear_consistency.cpp

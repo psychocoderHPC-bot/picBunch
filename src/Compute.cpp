@@ -19,6 +19,7 @@
 #include "picBunch/detail/FftPlanCache.hpp"
 #include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/detail/SpectrumNorm.hpp"
+#include "picBunch/detail/ZeroFieldGuard.hpp"
 #include "picBunch/VelocityMoments.hpp"
 
 #include <alpaka/alpaka.hpp>
@@ -44,6 +45,7 @@
 #    include <omp.h>
 #endif
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -222,7 +224,13 @@ namespace picBunch
                     };
                     std::uint32_t const key = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx
                         + wrap(cx, Mx);
-                    alpaka::onAcc::atomicAdd(acc, &counts[key], 1u);
+                    // The histogram is shifted by one slot, exactly like the
+                    // host path below (``++cursor[key + 1]``).  The prefix sum
+                    // then yields the *start* of each cell's range; without the
+                    // shift it yields the end, the scatter writes past the
+                    // ordered buffer and every deposit range is shifted by one
+                    // bin.  The array has paddedCells + 1 entries for this.
+                    alpaka::onAcc::atomicAdd(acc, &counts[key + 1u], 1u);
                 }
             }
         };
@@ -1757,6 +1765,39 @@ namespace picBunch
         Field field;
         field.grid = grid;
 
+        // Post-condition shared by every return path below: a bunch with a
+        // non-zero total charge must not deliver an identically zero field.
+        // The charge sum and the context string are built once; only the
+        // all-zero test runs per path.
+        double const totalCharge = [&] {
+            double sum = 0.0;
+            for(std::size_t p = 0; p < bunch.size(); ++p)
+                sum += bunch.weight[p] * bunch.charge[p];
+            return sum;
+        }();
+        auto const guardContext = [&](char const* path) {
+            char const* shell = "none";
+            switch(options.nearShell.mode)
+            {
+            case NearShellOptions::Mode::Exact:
+                shell = "exact";
+                break;
+            case NearShellOptions::Mode::Fast:
+                shell = "fast";
+                break;
+            case NearShellOptions::Mode::FastGpu:
+                shell = "fast-gpu";
+                break;
+            case NearShellOptions::Mode::None:
+                break;
+            }
+            std::ostringstream context;
+            context << path << ", near_shell " << shell << ", N=" << bunch.size()
+                    << ", velocity_boxes=" << binCount << ", grid=" << grid.n[0] << "x"
+                    << grid.n[1] << "x" << grid.n[2];
+            return context.str();
+        };
+
         StageTimes localTimes;
         StageTimes& times = stageTimes ? *stageTimes : localTimes;
         times = StageTimes{};
@@ -2893,7 +2934,13 @@ namespace picBunch
                 }
             }
             if(vmField)
+            {
+                detail::enforceNonZeroField(
+                    *vmField,
+                    totalCharge,
+                    guardContext("velocity-moment"));
                 return *vmField;
+            }
         }
 
         if(useDistributed)
@@ -3224,6 +3271,7 @@ namespace picBunch
             }
             times.fftMs += dfft.fftMilliseconds();
             times.transposeMs += dfft.transposeMilliseconds();
+            detail::enforceNonZeroField(field, totalCharge, guardContext("distributed"));
             return field;
         }
 
@@ -3471,6 +3519,7 @@ namespace picBunch
             for(int c = 0; c < 6; ++c)
                 par->allreduceSum(field.data[c].data(), field.data[c].size());
 
+        detail::enforceNonZeroField(field, totalCharge, guardContext("replicated"));
         return field;
     }
 } // namespace picBunch
