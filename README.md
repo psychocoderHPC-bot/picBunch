@@ -364,9 +364,12 @@ essentially single-velocity, meaning its charge-weighted relative `|u|` spread i
 mean direction. That covers cold gamma-1101 beams with mrad-to-1-degree divergence, where
 the `gamma * Delta_theta` worst case asks for millions of boxes even though one velocity
 class is the physical model. The run prints one line naming the measured spread and
-divergence and reports the one-box `modelError`, which can exceed `--tolerance`. A
-non-default `--max-velocity-bins` disables this fallback, so an explicit infeasible cap
-still exits non-zero with the message above.
+divergence and reports the one-box `modelError`; that estimate can exceed `--tolerance`,
+and when it does the run proceeds with a warning rather than claiming the target is met
+(a genuinely monoenergetic beam, e.g. the operator's gamma-1101, 4.2 mrad case, has a
+one-box estimate of `1.33e+01` and still runs). A non-default `--max-velocity-bins`
+disables this fallback, so an explicit infeasible cap still exits non-zero with the
+message above.
 The single-velocity case is detected within `1e-12` relative and returns one box, so its
 field is bitwise the unbinned field.
 
@@ -477,11 +480,13 @@ faster in CLI wall (`1.85 s` against `35.46 s`).
 The angular regime is not supported at `1e-3`. A 5 degree per-axis angular spread
 measures `0.421` at 16 boxes and `0.295` at 64 against the TSC-convolved continuum
 reference (`docs/measurements/velocity_bin_calibration.csv`) and does not reach the
-target. On the gate's 1-degree-divergence bunch the auto binning policy at the default cap
-uses the one-box single-velocity fallback instead of requiring `8388608` boxes; the
-fallback line reports the one-box estimate, which exceeds `1e-3`, and the run proceeds.
-A 5 degree angular spread is outside the `50 mrad` criterion and still splits or fails as
-before.
+target. A cold gamma-1101 beam (the operator's bunch: charge-weighted `|u|` spread
+`1.69%`, maximum divergence `25.3 mrad`) is inside the one-box criterion, so the auto
+policy at the default cap uses one box instead of requiring `8388608`. The fallback line
+reports the one-box estimate, which exceeds `1e-3`, and the run proceeds with a warning:
+the binning model is conservative for such a beam, so the honest reading is that one box
+is the physical model and the tolerance is relaxed, not met. A 5 degree angular spread is
+outside the `50 mrad` criterion and still splits or fails as before.
 
 The per-term controls are:
 
