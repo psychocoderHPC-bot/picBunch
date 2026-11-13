@@ -385,6 +385,64 @@ TEST(Config, StrictAcceptsNearShellFastOrder)
     EXPECT_TRUE(config.warnings.empty());
 }
 
+TEST(Config, FastPathTileIsBoundedByRadiusAndMeasuredMaximum)
+{
+    ConfigTest fixture;
+    auto withFast = [](std::string tile, std::string radius) {
+        std::string text = fullConfig;
+        auto replace = [&text](std::string const& from, std::string const& to) {
+            auto const pos = text.find(from);
+            EXPECT_NE(pos, std::string::npos) << from;
+            text.replace(pos, from.size(), to);
+        };
+        replace("near_shell = \"exact\"", "near_shell = \"fast\"");
+        replace("near_shell_radius = 4.0", "near_shell_radius = " + radius);
+        replace("near_shell_tile = 8", "near_shell_tile = " + tile);
+        return text;
+    };
+    auto rejected = [&fixture](std::string const& name, std::string const& text) {
+        try
+        {
+            (void)picBunch::loadConfig(fixture.write(name, text));
+            ADD_FAILURE() << name << " was accepted";
+            return std::string{};
+        }
+        catch(std::exception const& error)
+        {
+            return std::string(error.what());
+        }
+    };
+
+    // Tile 8 at radius 3 is the measured 35x spike case.
+    std::string message = rejected("fast-tile8.toml", withFast("8", "3.0"));
+    EXPECT_NE(message.find("near_shell_tile"), std::string::npos);
+    EXPECT_NE(message.find("8"), std::string::npos);
+    EXPECT_NE(message.find("3.0"), std::string::npos);
+
+    // Tile 16 at radius 3 is far outside every validated campaign.
+    message = rejected("fast-tile16.toml", withFast("16", "3.0"));
+    EXPECT_NE(message.find("near_shell_tile"), std::string::npos);
+    EXPECT_NE(message.find("16"), std::string::npos);
+
+    // A tile inside the diameter bound but above the measured maximum is
+    // rejected by the documented-maximum rule.
+    message = rejected("fast-tile8-max.toml", withFast("8", "4.0"));
+    EXPECT_NE(message.find("documented maximum"), std::string::npos);
+    EXPECT_NE(message.find("8"), std::string::npos);
+    EXPECT_NE(message.find("4"), std::string::npos);
+
+    // The validated production combination stays accepted.
+    auto const production
+        = picBunch::loadConfig(fixture.write("fast-production.toml", withFast("4", "3.0")));
+    EXPECT_EQ(production.accuracy.nearShellTile, 4u);
+
+    // Zero keeps the automatic rule, with either an explicit or a derived radius.
+    auto const automatic
+        = picBunch::loadConfig(fixture.write("fast-auto.toml", withFast("0", "0.0")));
+    EXPECT_EQ(automatic.accuracy.nearShellTile, 0u);
+    EXPECT_DOUBLE_EQ(automatic.accuracy.nearShellRadius, 0.0);
+}
+
 TEST(Config, ParsesNearShellObliqueOrder)
 {
     ConfigTest fixture;

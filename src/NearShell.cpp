@@ -19,6 +19,7 @@
 #include "picBunch/detail/FastNear.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/NearReference.hpp"
+#include "picBunch/detail/NearShellGuard.hpp"
 #include "picBunch/detail/NearTileEstimate.hpp"
 
 #include <alpaka/alpaka.hpp>
@@ -1141,9 +1142,20 @@ namespace picBunch
                 par->allreduceSum(correction.data[c].data(), correction.data[c].size());
             par->allreduceSum(pairs);
         }
+        bool const fastMode = nearShell.mode == NearShellOptions::Mode::Fast
+            || nearShell.mode == NearShellOptions::Mode::FastGpu;
+        detail::NearShellPeak const uncorrectedPeak
+            = fastMode ? detail::nearShellPeak(field) : detail::NearShellPeak{};
         for(int c = 0; c < 6; ++c)
             for(std::size_t i = 0; i < field.data[c].size(); ++i)
                 field.data[c][i] += correction.data[c][i];
+        if(fastMode)
+            detail::enforceNearShellPeak(
+                uncorrectedPeak,
+                detail::nearShellPeak(field),
+                radius,
+                tile,
+                requestedFastOrder);
         if(parRank == 0)
             std::fprintf(
                 stderr,

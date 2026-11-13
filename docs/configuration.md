@@ -152,7 +152,20 @@ the input checkpoint. `patch_count = 1` is the previous layout.
 | `near_shell` | no | `"none"` (default), `"fast"` (accurate near-source evaluator), or `"exact"` (Lorentz-contracted adaptive reference; about `1e-4` axial and `1e-3` oblique at gamma 10, about `2%` at the closest axial node). |
 | `near_shell_radius` | no | Shell radius in PIC cells; `0` (default) derives it from `tolerance`. |
 | `near_shell_exact_cells` | no | Exact s-space routing of the fast near field. `-2` (default) is automatic: the observer-containing TSC support cell is exact, the rest keeps the order-5 remainder. `-1` forces legacy quadrature, `0` selects the observer cell only, `1` adds the six face-adjacent cells, `2` selects every in-support cell. A tolerance `<= 1e-4` makes the automatic policy full-support exact, and a tile with gamma `>= 100` is always full exact. The observer-cell default is neutral to 9% cheaper than base on the CPU and costs 0-1% on the GPU on-node workload; the GPU spread 12-cell cloud pays up to 30% because the per-source exact branch diverges whole warps. In-support L2 accuracy improves roughly twofold (static `1.80e-3 -> 5.74e-4`, axial gamma 10 E `9.35e-3 -> 3.14e-3`, B `3.55e-2 -> 2.35e-3`). The full-support mode is the accuracy reference for in-support points; it costs `0.93-1.19x` base on the CPU, `1.0-1.04x` on the GPU on-node workload, and `0.90-2.17x` on the GPU spread cloud. |
-| `near_shell_tile` | no | Tile edge in nodes. `0` (default) selects the automatic rule: a sampled near-set estimate picks `2` when its (source, node) pair count is below `1/(1.25*1.05)` of the tile-4 count, otherwise `4`. The `1.25` is the measured tile-4/tile-2 pair throughput on the V100 dense campaign and `1.05` is a safety margin. An explicit positive value always wins; the compute stage logs the chosen edge. |
+| `near_shell_tile` | no | Tile edge in nodes. `0` (default) selects the automatic rule: a sampled near-set estimate picks `2` when its (source, node) pair count is below `1/(1.25*1.05)` of the tile-4 count, otherwise `4`. The `1.25` is the measured tile-4/tile-2 pair throughput on the V100 dense campaign and `1.05` is a safety margin. An explicit positive value always wins; the compute stage logs the chosen edge. On the fast/fast-gpu path an explicit tile is bounded: its half-width must not exceed `near_shell_radius` (so the edge must not exceed twice the radius), and the edge must not exceed the documented maximum of `4` nodes. |
+
+The fast/fast-gpu path is guarded against unphysical near-shell outputs. `tile = 0`
+is the safe default and keeps the automatic rule. An explicit tile whose half-width
+exceeds the shell radius (tile edge above twice `near_shell_radius`) is rejected, as
+is an explicit tile above `4` nodes: the automatic rule and every validated campaign
+cover only tiles `2` and `4`, and tile `8` at the default radius `3` is the first
+measured spike case (35x the stable peak). A larger tile is therefore rejected at
+configuration time instead of producing a spike. In addition, after the correction
+the fast path compares the corrected peak E against the uncorrected mesh field
+and aborts if the correction raises that peak by more than `3x`; the message names
+the radius, tile and fast order. The underlying boundary treatment of the near shell
+is under investigation, so these guards turn a silent spike into a diagnosable
+failure rather than claiming a numerical fix.
 
 The accuracy target is not an end-to-end guarantee. The README error-budget table
 separates mesh/deposit, velocity binning, near quadrature, far tail and output

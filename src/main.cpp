@@ -556,6 +556,32 @@ namespace
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
+        // The fast path rejects an explicit tile that leaves the measured
+        // envelope.  0 is the automatic rule and always allowed.  The tile
+        // half-width must not exceed the shell radius, so the edge must not
+        // exceed the shell diameter; this keeps the validated tile 4 at the
+        // default radius 3 valid and rejects tile 8 at radius 3.
+        if((args.nearShell == "fast" || args.nearShell == "fast-gpu")
+           && args.nearShellTile != 0u)
+        {
+            if(args.nearShellRadius > 0.0
+               && static_cast<double>(args.nearShellTile) > 2.0 * args.nearShellRadius)
+                throw std::invalid_argument(
+                    "--near-shell-tile " + std::to_string(args.nearShellTile)
+                    + " exceeds twice --near-shell-radius "
+                    + std::to_string(args.nearShellRadius)
+                    + " (the shell diameter, "
+                    + std::to_string(2.0 * args.nearShellRadius)
+                    + " nodes); the tile half-width must not exceed the radius. Use "
+                      "--near-shell-tile auto or raise --near-shell-radius");
+            if(args.nearShellTile > picBunch::kMaxExplicitNearShellTile)
+                throw std::invalid_argument(
+                    "--near-shell-tile " + std::to_string(args.nearShellTile)
+                    + " exceeds the documented maximum "
+                    + std::to_string(picBunch::kMaxExplicitNearShellTile)
+                    + " nodes; the validated campaigns cover tiles 2 and 4 and tile 8 is "
+                      "the first measured spike case. Use --near-shell-tile auto");
+        }
         // 0 is the automatic rule; any explicit positive value is an override.
         if(args.nearShellExactCells < -2 || args.nearShellExactCells > 2)
             throw std::invalid_argument("--near-shell-exact-cells must be in [-2, 2]");
