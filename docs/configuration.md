@@ -190,7 +190,7 @@ must be set to `pml` whenever the restarting deck uses the convolutional PML:
 | --- | --- | --- |
 | `none` (default) | E, B, idProvider, particles only. | Periodic boundaries (`--periodic 1 1 1`), or any deck that loads no auxiliary field state. |
 | `exponential` | Identical to `none`. The exponential absorber stores no field state; PIConGPU reads its parameters back from the compiled `fieldAbsorber.param` on restart. | `--fieldAbsorber exponential` decks. |
-| `pml` | The previous tree plus eight zero-filled slab records: `fields/Convolutional PML E_{xneg,xpos,yneg,ypos,zneg,zpos}` and `fields/Convolutional PML B_{...}`. Each record carries the six cross components `xy, xz, yx, yz, zx, zy` as full `(Nz, Ny, Nx)` datasets in the checkpoint precision, with the main-field geometry, the parent E/B `unitSI` and unit dimension, and the parent Yee positions duplicated across the split components. | `--fieldAbsorber pml` decks. |
+| `pml` | The previous tree plus the twelve zero-filled `Convolutional PML` slab records: six components `E` and `B`, each with a `neg` and a `pos` slab record (`E_xneg`…`E_zpos`, and the same six for `B`); the full per-record layout is in [openPMD backend selection](openpmd-backends.md#field-absorber-key). | `--fieldAbsorber pml` decks. |
 
 The PML records are all zero. picBunch computes a free-space field and has no
 PML state, and the PML auxiliary fields of a deck that has not run are exactly

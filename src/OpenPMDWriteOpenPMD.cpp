@@ -1188,12 +1188,12 @@ namespace picBunch
 
             // Convolutional PML auxiliary state (absorber = "pml" only).
             //
-            // A PIConGPU deck built with --fieldAbsorber pml loads eight slab
-            // records on restart, "Convolutional PML E_<slab>" and
-            // "Convolutional PML B_<slab>" for the six slab names xneg, xpos,
-            // yneg, ypos, zneg, zpos (getPmlSlabName in the openPMD plugin's
-            // RestartFieldLoader), each with the six cross components xy, xz,
-            // yx, yz, zx, zy.  The layout matches the PIConGPU writer: full
+            // The loop below writes twelve slab records, one per record/slab
+            // pair: "Convolutional PML E" and "Convolutional PML B" for the six
+            // slab names xneg, xpos, yneg, ypos, zneg, zpos (getPmlSlabName in
+            // the openPMD plugin's RestartFieldLoader), each with the six
+            // cross components xy, xz, yx, yz, zx, zy (12 * 6 = 72 components
+            // in total).  The layout matches the PIConGPU writer: full
             // domain extent (Nz,Ny,Nx) like E and B, axisLabels z,y,x,
             // dataOrder C, geometry cartesian, gridSpacing/gridGlobalOffset/
             // gridUnitSI from the main field, unitDimension of the parent E or
