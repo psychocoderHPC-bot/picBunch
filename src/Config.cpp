@@ -266,6 +266,19 @@ namespace picBunch
                 fail("picongpu.precision", "expected \"float32\" or \"float64\"");
         }
 
+        if(auto const* node = picongpu.get("absorber"))
+        {
+            std::string const absorber = asString(*node, "picongpu.absorber");
+            if(absorber == "none" || absorber == "exponential" || absorber == "pml")
+                config.picongpu.absorber = absorber;
+            else
+                fail(
+                    "picongpu.absorber",
+                    "expected \"none\", \"exponential\" or \"pml\"; "
+                    "\"pml\" writes the convolutional PML slab records a "
+                    "--fieldAbsorber pml restart deck requires");
+        }
+
         config.domain.cells = asCells(require(domain, "cells"), "domain.cells");
         // The physical cell size may live in [picongpu] (new schema) or in
         // [domain] (legacy).  Both are the same deck value; if both are given
@@ -544,6 +557,7 @@ namespace picBunch
              "picongpu.unit_speed",
              "picongpu.step",
              "picongpu.precision",
+             "picongpu.absorber",
              "picongpu.species",
              "picongpu.output_species",
              "picongpu.empty_species"},

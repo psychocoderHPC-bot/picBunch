@@ -58,6 +58,11 @@ namespace picBunch
             double dt = 0.0; //!< stored dt, equal to ``deltaT`` (seconds)
             std::uint64_t step = 0;
             bool float64 = false;
+            //! Field-absorber kind of the deck that restarts the checkpoint:
+            //! ``"none"`` (default), ``"exponential"`` or ``"pml"``.  Only
+            //! ``"pml"`` changes the emitted checkpoint: it writes the eight
+            //! convolutional-PML slab records the deck's restart loader needs.
+            std::string absorber = "none";
             //! Ordered input species names read from ``--input``.  The scalar
             //! TOML form (a single string) parses to a one-entry list.
             std::vector<std::string> species;

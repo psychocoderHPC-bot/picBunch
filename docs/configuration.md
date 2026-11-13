@@ -47,6 +47,7 @@ unit_bfield = unit_mass / (unit_time * unit_charge)
 | `speed_of_light` | no | `SI::SPEED_OF_LIGHT_SI` in m/s. Default `2.99792458e8`. Override only if the deck does. |
 | `step` | yes | Checkpoint step in `[0, 999999]`; also the file suffix. |
 | `precision` | no | `"float32"` (default) or `"float64"`, applied uniformly to every field component and every particle property record. `positionOffset` stays int32 and `id` stays uint64. |
+| `absorber` | no | Field-absorber kind of the deck that restarts the checkpoint, mirroring the deck's `--fieldAbsorber`: `"none"` (default), `"exponential"` or `"pml"`. An unknown value is rejected. See [Boundary conditions](#boundary-conditions). |
 | `species` | yes | Species to read from `--input` and write to the checkpoint. A string (the historical form, one entry) or an ordered array of strings. Each entry is read, placed with the same `[placement]` block, field-computed and summed. |
 | `output_species` | no | Optional array of output group names, positionally aligned with `species`. Its length must equal `species`; omitted or empty means "the output name equals the input name" for every entry. |
 | `empty_species` | no | Optional array of deck species written as checkpoint-only groups with zero particles. They are **never** read from `--input`. A name may not also appear in `species` or `output_species`. |
@@ -165,6 +166,35 @@ a measured few-percent residual at the closest axial node.
 | key | required | meaning |
 | --- | --- | --- |
 | `backend` | no | `"auto"` (default), `"adios2"` or `"hdf5"`. `auto` derives the backend from `--destination`: a `.bp5` directory selects the ADIOS2/BP5 backend and a `.h5` directory selects the HDF5 backend. Both backends are written through the same openPMD-Series writer, so both produce the same tree: one full-shape `(Nz, Ny, Nx)` record component per field component, identical geometry and unit attributes, and the same particle records. PIConGPU selects the container with `--checkpoint.openPMD.ext bp5` (or `h5`). |
+
+## Boundary conditions
+
+`[picongpu] absorber` selects the boundary-condition contract of the emitted
+checkpoint. It mirrors the deck's `--fieldAbsorber` for the boundary kinds and
+must be set to `pml` whenever the restarting deck uses the convolutional PML:
+
+| `absorber` | checkpoint content | restarting deck |
+| --- | --- | --- |
+| `none` (default) | E, B, idProvider, particles only. | Periodic boundaries (`--periodic 1 1 1`), or any deck that loads no auxiliary field state. |
+| `exponential` | Identical to `none`. The exponential absorber stores no field state; PIConGPU reads its parameters back from the compiled `fieldAbsorber.param` on restart. | `--fieldAbsorber exponential` decks. |
+| `pml` | The previous tree plus eight zero-filled slab records: `fields/Convolutional PML E_{xneg,xpos,yneg,ypos,zneg,zpos}` and `fields/Convolutional PML B_{...}`. Each record carries the six cross components `xy, xz, yx, yz, zx, zy` as full `(Nz, Ny, Nx)` datasets in the checkpoint precision, with the main-field geometry, the parent E/B `unitSI` and unit dimension, and the parent Yee positions duplicated across the split components. | `--fieldAbsorber pml` decks. |
+
+The PML records are all zero. picBunch computes a free-space field and has no
+PML state, and the PML auxiliary fields of a deck that has not run are exactly
+zero (PIConGPU resets the slab buffers at startup, see `Field::reset` in
+`include/picongpu/fields/absorber/pml/Field.hpp`). A checkpoint written right
+after initialization therefore stores zeros in these slabs, and restoring them
+is the faithful initial condition. The slabs describe the same grid as E and B;
+only the deck's compiled PML parameters (`fieldAbsorber.param`) and boundary
+choice determine how the slabs evolve after restart.
+
+A restart of an open-boundary deck without these records fails with
+`Key 'Convolutional PML E_yneg' does not exist (read-only)`. Workarounds for a
+deck that does not need the PML: restart with periodic boundaries, or switch
+the deck to the exponential absorber.
+
+The boundary-condition matrix of the full placement interface (periodic,
+exponential, PML) is documented in [PIConGPU restart checkpoints](picongpu-restart.md).
 
 ## Large domains under MPI
 

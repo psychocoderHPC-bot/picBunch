@@ -52,6 +52,15 @@ restart then fails because PIConGPU loads the PML slabs unconditionally, with
 `Key 'Convolutional PML E_xneg' does not exist`. Use an input checkpoint that
 contains PML records for such a deck, or restart with periodic boundaries.
 
+For a deck whose PML has never run, `[picongpu] absorber = "pml"` in the
+configuration is the other option: the writer adds the eight
+`Convolutional PML E/B_{xneg,xpos,yneg,ypos,zneg,zpos}` slab records with the
+zero initial state, so the restart deck's PML loads from rest. The layout (six
+cross components `xy,xz,yx,yz,zx,zy`, full `(Nz,Ny,Nx)` extent, main-field
+geometry, parent E/B units and Yee positions) is fixed by the PIConGPU
+checkpoint contract and is documented in
+[Boundary conditions](configuration.md#boundary-conditions).
+
 ## Particle species and the id range
 
 A PIConGPU restart loads every compiled species that is present in

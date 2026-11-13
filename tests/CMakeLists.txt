@@ -33,6 +33,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_physics.cpp
         test_padding.cpp
         test_restart.cpp
+        test_restart_pml.cpp
         test_audit.cpp
         test_margin.cpp
         test_config.cpp
