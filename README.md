@@ -882,11 +882,15 @@ one rank. These limits are algorithmic and I/O limits, not accuracy effects.
 ### Multi-rank particle patches
 
 `placement.patch_count = N` splits the generated particle patch along z into `N`
-rank-overlap regions. Neighbouring regions overlap by one cell; particle ownership stays
-disjoint. The writer assigns each particle to the first patch that contains its cell,
-reorders the records so each patch owns a contiguous range, and writes cumulative
-`numParticlesOffset`. `patch_count = 1` keeps the previous single-patch layout. Use
-`placement.patch = "domain"` for a restart.
+adjacent, non-overlapping regions that cover the base region exactly once, matching a
+PIConGPU checkpoint's per-rank patch table. The writer assigns each particle to the one
+patch that contains its cell, reorders the records so each patch owns a contiguous
+range, and writes cumulative `numParticlesOffset`. Every checkpoint species carries the
+complete `particlePatches` table (`numParticles`, `numParticlesOffset`, and the vector
+records `offset`/`extent` with x/y/z components); a copied input species without patch
+metadata gets one domain-covering patch instead of an incomplete table.
+`patch_count = 1` keeps the single-patch layout. Use `placement.patch = "domain"` for a
+restart.
 
 **Tail margin and far-tail evaluation.** The field outside the bunch does not vanish; it
 decays as `1/r^2`. The code first solves the multipole bound for the smallest centre distance
