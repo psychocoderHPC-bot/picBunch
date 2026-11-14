@@ -1970,6 +1970,11 @@ namespace picBunch::pbfast
         for(std::size_t i = 0; i <= ntiles; ++i)
             dwork.data()[i] = workOffset[i];
         auto dout = allocD(static_cast<std::size_t>(outSize));
+        // The batched kernel accumulates with atomicAdd, so the accumulator
+        // must start at zero; unified memory from allocUnified is not
+        // initialized, and a stale value would pollute the first atomic add.
+        for(std::size_t i = 0; i < outSize; ++i)
+            dout.data()[i] = 0.0;
 
         BatchedArgs args;
         args.out = dout.data();
