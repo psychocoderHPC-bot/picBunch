@@ -271,8 +271,18 @@ namespace picBunch
      * ``CheckpointBackend``).  Every field component is one full-shape
      * ``(Nz, Ny, Nx)`` record component.
      *
+     * The writer is collective.  Every rank calls it, opens the Series on
+     * ``MPI_COMM_WORLD`` and creates the same datasets in the same order.
+     * Each rank then stores only its own z-slab at its global offset (the
+     * distributed FFT slab, or an even split of a replicated field), so no
+     * rank allocates the full domain.  The particle records and
+     * ``checkpoints.txt`` are written by rank 0 only.  An MPI run with an
+     * openPMD build that has no MPI backend fails instead of writing one file
+     * per rank.
+     *
      * @throws std::invalid_argument or std::runtime_error on missing units,
-     *         a field that does not match the grid, or an openPMD failure.
+     *         a field that does not match the grid, an openPMD failure, or a
+     *         multi-rank run without openPMD MPI support.
      */
     void writePicOnGPUCheckpointOpenPMD(
         Field const& field,

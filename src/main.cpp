@@ -958,20 +958,9 @@ namespace
                 "field layout: %s\n",
                 distributedLayout ? "distributed (one z-slab per rank)"
                                   : "replicated (full field on every rank)");
-        // The checkpoint writer needs the full field.  A distributed run
-        // gathers the rank-local z-slabs on rank 0 (no rank ever allocated the
-        // full box during the transform) and writes one full-shape record
-        // component per field component.  A replicated run already owns it.
-        if(totalField.zSlab)
-        {
-            auto const gatherStart = Clock::now();
-            picBunch::mpiGatherFieldSlabs(totalField, 0);
-            if(root)
-                std::printf(
-                    "checkpoint gather: %d z-slab(s) onto rank 0 in %.3f ms\n",
-                    size,
-                    elapsedMs(gatherStart));
-        }
+        // The checkpoint writer is collective: every rank creates the same
+        // full-shape datasets and stores only its own z-slab, so no gather and
+        // no full-field allocation is needed on any rank.
 
         picBunch::PicOnGPUWriteOptions restart;
         restart.step = config.picongpu.step;
@@ -1012,42 +1001,26 @@ namespace
                         : picBunch::CheckpointBackend::Hdf5;
         }
 
-        // Both the HDF5 and the ADIOS2/BP5 backend go through the openPMD
-        // writer, so the two outputs carry the same tree and the same
-        // full-shape per-component field records.  Only rank 0 writes: it
-        // holds the gathered (or replicated) full field and the particle
-        // records, and a single Series avoids duplicate collective chunks.
-        std::string writerMessage;
+        // Both the HDF5 and the ADIOS2/BP5 backend go through the same
+        // collective openPMD writer: every rank creates the full-shape
+        // datasets and stores only its own z-slab, while rank 0 writes the
+        // replicated particle records and checkpoints.txt.
+        auto const writerStart = Clock::now();
+        picBunch::writePicOnGPUCheckpointOpenPMD(totalField, restart);
         if(root)
         {
-            try
-            {
-                auto const writerStart = Clock::now();
-                picBunch::writePicOnGPUCheckpointOpenPMD(totalField, restart);
-                std::printf(
-                    "writer wall (checkpoint, rank 0): %.3f ms\n",
-                    elapsedMs(writerStart));
-                std::printf(
-                    "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
-                    static_cast<unsigned long long>(config.picongpu.step),
-                    args.destination->c_str(),
-                    config.picongpu.float64 ? "float64" : "float32",
-                    config.picongpu.float64 ? "float64" : "float32");
-            }
-            catch(std::exception const& error)
-            {
-                writerMessage = error.what();
-            }
-            catch(...)
-            {
-                writerMessage = "unknown exception in the checkpoint writer";
-            }
+            std::printf(
+                "writer wall (checkpoint, %d rank%s): %.3f ms\n",
+                size,
+                size == 1 ? "" : "s",
+                elapsedMs(writerStart));
+            std::printf(
+                "wrote checkpoint step %llu to %s (%s particle records, %s fields)\n",
+                static_cast<unsigned long long>(config.picongpu.step),
+                args.destination->c_str(),
+                config.picongpu.float64 ? "float64" : "float32",
+                config.picongpu.float64 ? "float64" : "float32");
         }
-        // Publish the root writer outcome so peers cannot wait forever.
-        int const writerStatus = picBunch::mpiBroadcastRootSetupStatus(writerMessage, 0);
-        if(writerStatus != 0)
-            throw std::runtime_error(
-                writerMessage.empty() ? "checkpoint writer failed" : writerMessage);
         return 0;
     }
 
@@ -1415,6 +1388,9 @@ int main(int argc, char** argv)
         catch(std::exception const& error)
         {
             std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+            // The configured path may fail inside the collective checkpoint
+            // writer; a local return would strand the peers.
+            picBunch::mpiAbort(1);
             return 1;
         }
     }
@@ -1999,7 +1975,7 @@ int main(int argc, char** argv)
         }
 
         // ---------------------------------------------------------------- writer
-        if(args.restartFormat == "picongpu" && root)
+        if(args.restartFormat == "picongpu")
         {
             std::vector<char const*> missing;
             if(!args.unitLength)
@@ -2043,12 +2019,13 @@ int main(int argc, char** argv)
             auto const writerStart = Clock::now();
             picBunch::writePicOnGPUCheckpointOpenPMD(field, restart);
             times.writerMs = elapsedMs(writerStart);
-            std::printf(
-                "wrote PIConGPU restart checkpoint %s/%s_%06llu.h5 (step %llu)\n",
-                args.outputDir.c_str(),
-                restart.prefix.c_str(),
-                static_cast<unsigned long long>(restart.step),
-                static_cast<unsigned long long>(restart.step));
+            if(root)
+                std::printf(
+                    "wrote PIConGPU restart checkpoint %s/%s_%06llu.h5 (step %llu)\n",
+                    args.outputDir.c_str(),
+                    restart.prefix.c_str(),
+                    static_cast<unsigned long long>(restart.step),
+                    static_cast<unsigned long long>(restart.step));
         }
         else if(args.output)
         {

@@ -223,9 +223,11 @@ message.
 The rank count lowers the per-process memory, not the aggregate. The
 distributed path holds three complex arrays over the padded box
 (`3 * M^3 * 16 B` total across ranks), so the device, not the host, sets the
-first large-domain limit. The writer gathers the rank-local z-slabs on rank 0
-and emits one full-shape record component per field component, so the
-checkpoint tree is independent of the rank count.
+first large-domain limit. The checkpoint writer is collective: every rank
+opens the openPMD Series on `MPI_COMM_WORLD`, creates the same full-shape
+datasets, and stores only its own z-slab at its global offset. No rank gathers
+or allocates the full field, and the checkpoint tree is independent of the rank
+count. Particle records and `checkpoints.txt` stay on rank 0.
 
 ## Chunked field computation is not supported
 
