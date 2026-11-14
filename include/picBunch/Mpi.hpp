@@ -55,6 +55,12 @@ namespace picBunch
             double* recv,
             int const* recvCounts,
             int const* recvDispls) const override;
+        void allgatherv(
+            double const* send,
+            int sendCount,
+            double* recv,
+            int const* recvCounts,
+            int const* recvDispls) const override;
     };
 
     //! Broadcast every particle array and the per-particle metadata from root.

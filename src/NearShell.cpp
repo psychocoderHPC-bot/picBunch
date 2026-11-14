@@ -480,14 +480,6 @@ namespace picBunch
 
         ComputeOptions plain = options;
         plain.nearShell = NearShellOptions{};
-        // The per-tile subtraction and the returned field are full-grid host
-        // arrays; the near shell therefore keeps the replicated mesh path even
-        // when the outer call supplied a distributed context.
-        plain.fftMode = FftMode::Replicated;
-        // The base mesh field is itself component-parallel when a distributed
-        // context is supplied, and computeField already reduced the six arrays
-        // onto every rank.  The near-shell tiles below are then partitioned so
-        // each rank touches only its own output nodes.
         if(!options.fixedBinning)
             plain.fixedBinning = binning;
         // Pin the Taylor centre of the velocity-moment path to the full-bunch
@@ -540,6 +532,51 @@ namespace picBunch
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
         Grid const& grid = field.grid;
+
+        // The per-tile subtraction consumes the base field as a full-grid host
+        // array on every rank, so the padded FFT grid must fit under the
+        // replicated per-rank cap (2^28 nodes, see makeGrid).  When it does
+        // not, the base mesh already ran in the distributed z-slab transform,
+        // which keeps only Mx*My*Mz/size nodes per rank; gather the slabs back
+        // into a replicated full field before the tiled loop below.  The
+        // distributed read-out redistributes the output so every rank owns the
+        // same balanced contiguous writer z-slab (Compute.cpp), which is the
+        // split mirrored here.
+        if(field.zSlab)
+        {
+            std::size_t const plane = grid.n[0] * grid.n[1];
+            std::size_t const totalPlanes = grid.n[2];
+            int const size = parSize;
+            for(int c = 0; c < 6; ++c)
+            {
+                std::size_t const local = field.slabCount * plane;
+                std::vector<double> recv(totalPlanes * plane);
+                std::vector<int> counts(size), displs(size);
+                std::size_t const base = totalPlanes / static_cast<std::size_t>(size);
+                std::size_t const rem = totalPlanes % static_cast<std::size_t>(size);
+                for(int r = 0; r < size; ++r)
+                {
+                    std::size_t const begin
+                        = static_cast<std::size_t>(r) * base
+                          + std::min(static_cast<std::size_t>(r), rem);
+                    std::size_t const count
+                        = base + (static_cast<std::size_t>(r) < rem ? 1u : 0u);
+                    counts[r] = static_cast<int>(count * plane);
+                    displs[r] = static_cast<int>(begin * plane);
+                }
+                par->allgatherv(
+                    field.data[c].data(),
+                    static_cast<int>(local),
+                    recv.data(),
+                    counts.data(),
+                    displs.data());
+                field.data[c].swap(recv);
+            }
+            field.zSlab = false;
+            field.slabOffset = 0u;
+            field.slabCount = totalPlanes;
+        }
+
         double const radius = resolveNearShellRadius(options, nearShell);
         double nearTaper = 0.5; //!< blend band below the shell radius
         if(char const* taperText = std::getenv("PICBUNCH_NEAR_TAPER"))

@@ -44,6 +44,22 @@ namespace picBunch
         {
         }
 
+        /*! All-gather variable-sized double blocks so that every rank holds the
+         * concatenation of every rank's ``send`` block.
+         *
+         * ``recv`` must be sized to the sum of all ``recvCounts``.  The default
+         * (single-rank) context copies the local block.  The MPI backend maps
+         * this to ``MPI_Allgatherv``.
+         */
+        virtual void allgatherv(
+            double const* /*send*/,
+            int /*sendCount*/,
+            double* /*recv*/,
+            int const* /*recvCounts*/,
+            int const* /*recvDispls*/) const
+        {
+        }
+
         [[nodiscard]] bool distributed() const
         {
             return size > 1;

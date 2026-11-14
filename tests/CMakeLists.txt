@@ -54,6 +54,8 @@ if(PICBUNCH_BUILD_GTESTS)
         test_mpi_readout.cpp
         test_alpaka_readout.cpp
         test_openpmd_wait.cpp
+        test_checkpoint_field_units.cpp
+        test_multirank_field_equality.cpp
     )
     picbunch_target_warnings(picBunchUnitTests)
     target_compile_features(picBunchUnitTests PUBLIC cxx_std_20)
@@ -72,7 +74,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency)
+    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -126,6 +128,28 @@ if(PICBUNCH_BUILD_GTESTS)
                 COMMAND
                     ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MpiReadout.*
+            )
+            # The distributed transform must deliver the same field as the
+            # replicated one on every rank, for a rank count that does not
+            # divide the grid.  A normalisation defect that scales with the
+            # rank count shows up here immediately.
+            add_test(
+                NAME picBunch.MultiRankFieldN1
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 1 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MultiRankField.*
+            )
+            add_test(
+                NAME picBunch.MultiRankFieldN2
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MultiRankField.*
+            )
+            add_test(
+                NAME picBunch.MultiRankFieldN3
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 3 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MultiRankField.*
             )
         endif()
     else()
