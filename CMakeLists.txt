@@ -455,6 +455,15 @@ endif()
 # ---------------------------------------------------------------------------
 # Command line tool
 # ---------------------------------------------------------------------------
+add_executable(picBunchFieldProbe tools/fieldprobe/fieldprobe.cpp)
+picbunch_target_warnings(picBunchFieldProbe)
+target_compile_features(picBunchFieldProbe PUBLIC cxx_std_20)
+target_link_libraries(picBunchFieldProbe PRIVATE picBunch::picBunch picBunch::openPMD)
+if(PICBUNCH_ENABLE_MPI)
+    target_link_libraries(picBunchFieldProbe PRIVATE MPI::MPI_CXX)
+endif()
+alpaka_finalize(picBunchFieldProbe)
+
 add_executable(picBunchApp src/main.cpp)
 picbunch_target_warnings(picBunchApp)
 target_compile_features(picBunchApp PUBLIC cxx_std_20)
