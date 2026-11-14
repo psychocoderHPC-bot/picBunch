@@ -141,14 +141,17 @@ Two caveats that cost a wrong plane in a prior production run:
   distinct `--openPMD.file`), or write the full domain once and slice the fields
   afterwards with `h5py` / the openPMD-api.
 
-- **Do not pad a range token with a leading or trailing comma to "keep the
-  position" of the fixed axis.** The range string is split on `,` with
+- **Always write exactly three tokens, one per physical axis, x then y then
+  z.** A range is only correct if it has a token in every position; a range
+  with fewer than three tokens assigns the first token to x, the second to y,
+  and treats z as `:`. The range string is split on `,` with
   `std::sregex_token_iterator`, which does not emit empty tokens, and the parser
-  then skips any empty slice it does encounter. An empty token is therefore
-  dropped and the remaining tokens shift down to the lower dimension indices:
-  `:,10:11,:` is parsed as if the x token were `10:11` and would fix x, not y.
-  Write the full three-token range with the two non-fixed axes as explicit `:`
-  (as in the table above) so every token lands on the intended axis.
+  then skips any empty slice it does encounter. A missing token is therefore
+  dropped and every following token shifts to the lower dimension index: the
+  two-token range `10:11,:` fixes x (the first token) and leaves y as `:`, and
+  the three-token range `,:,10:11` fixes z (the third token) with y as `:`,
+  so a range meant to fix y writes the wrong plane unless it is written as
+  `:,10:11,:`.
 
 A ready-to-copy production pair for a `640 x 1536 x 640` (x, y, z) grid
 (restart step 10, cell `1.772e-7` m), run as two separate jobs from the same
