@@ -56,6 +56,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_openpmd_wait.cpp
         test_checkpoint_field_units.cpp
         test_multirank_field_equality.cpp
+        test_multirank_patches.cpp
     )
     picbunch_target_warnings(picBunchUnitTests)
     target_compile_features(picBunchUnitTests PUBLIC cxx_std_20)
@@ -150,6 +151,21 @@ if(PICBUNCH_BUILD_GTESTS)
                 COMMAND
                     ${MPIEXEC_EXECUTABLE} -n 3 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MultiRankField.*
+            )
+            # The checkpoint's particlePatches table must be complete and
+            # disjoint for any rank count.  The test writes collectively and
+            # checks the records, components, counts and offset/extent tiling.
+            add_test(
+                NAME picBunch.MultiRankPatchesN2
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MultiRankPatches.*
+            )
+            add_test(
+                NAME picBunch.MultiRankPatchesN4
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=MultiRankPatches.*
             )
         endif()
     else()

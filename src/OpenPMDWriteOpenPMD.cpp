@@ -333,6 +333,75 @@ namespace picBunch
             return rc;
         }
 
+        /*! Write one complete ``particlePatches`` table.
+         *
+         * PIConGPU's restart loader reads ``numParticles``, ``numParticlesOffset``,
+         * and the vector records ``offset``/``extent`` (components x,y,z) and
+         * aborts with ``Key 'offset' does not exist (read-only)`` when any of
+         * them is missing.  Write all of them as one unit and flush once: a
+         * flush in the middle of building a record tree can drop records that
+         * are added afterwards on the HDF5 and ADIOS2 backends.  This is the
+         * single writer for generated and copied species, so every checkpoint
+         * carries the same structure for any rank count.
+         *
+         * All arrays have one entry per patch.  ``counts.sum()`` is the
+         * species particle count and ``particleOffsets`` is cumulative, so the
+         * patch-owned particle ranges tile the record exactly once.
+         */
+        void writeParticlePatchTable(
+            ParticlePatches& pp,
+            std::uint64_t nPatches,
+            std::vector<std::uint64_t> const& counts,
+            std::vector<std::uint64_t> const& particleOffsets,
+            std::array<std::vector<std::uint64_t>, 3> const& patchOffsets,
+            std::array<std::vector<std::uint64_t>, 3> const& patchExtents,
+            bool writeData,
+            std::function<void()> const& flushAfterStore)
+        {
+            auto const patchUd
+                = std::array<double, 7>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            // PatchRecord only exposes a map-form setUnitDimension; setting the
+            // attribute directly keeps the explicit [0,0,0,0,0,0,0]
+            // (asMap would drop all zeros).  unitDimension belongs on the
+            // record, not the x/y/z components.
+            auto setRecordUd = [&patchUd](PatchRecord& rec) {
+                rec.setAttribute("unitDimension", patchUd);
+            };
+            auto store = [&](PatchRecordComponent& component,
+                             std::vector<std::uint64_t> const& values) {
+                allocate1D(component, Datatype::ULONGLONG, nPatches);
+                component.setUnitSI(1.0);
+                if(writeData && !values.empty())
+                    component.storeChunk(
+                        ownedChunk(values.data(), values.size()),
+                        Offset{0u},
+                        Extent{nPatches});
+            };
+
+            PatchRecordComponent numPr = pp["numParticles"][RecordComponent::SCALAR];
+            store(numPr, counts);
+            PatchRecordComponent numOffRc
+                = pp["numParticlesOffset"][RecordComponent::SCALAR];
+            store(numOffRc, particleOffsets);
+            setRecordUd(pp["numParticles"]);
+            setRecordUd(pp["numParticlesOffset"]);
+
+            char const* const xyz[3] = {"x", "y", "z"};
+            for(std::size_t axis = 0u; axis < 3u; ++axis)
+            {
+                PatchRecordComponent offRc = pp["offset"][xyz[axis]];
+                store(offRc, patchOffsets[axis]);
+                PatchRecordComponent extRc = pp["extent"][xyz[axis]];
+                store(extRc, patchExtents[axis]);
+            }
+            setRecordUd(pp["offset"]);
+            setRecordUd(pp["extent"]);
+            // One collective flush for the whole table.  Flushing between the
+            // records drops the later ones on some backends (seen when a
+            // species is copied from an input checkpoint).
+            flushAfterStore();
+        }
+
         //! One particle species written from the output Series API.  ``bunch``
         //! is the placed bunch (SI metres, dimensionless momenta); the records
         //! are written in PIConGPU internal units with the supplied unit
@@ -681,73 +750,34 @@ namespace picBunch
             }
             } // if(count > 0)
 
-            // particlePatches metadata (identical values to the HDF5 writer).
-            // unitDimension lives on the record, unitSI=1 on each component;
-            // the HDF5 writer puts unitDimension on the numParticles /
-            // numParticlesOffset / offset / extent *groups*, not on x/y/z.
+            // particlePatches metadata.  One record per patch, covering the
+            // patch regions exactly once; the shared writer also serves the
+            // copied-species path below.
             {
                 ParticlePatches pp = species.particlePatches;
                 std::uint64_t const nPatches = patches.size();
-                auto const patchUd
-                    = std::array<double, 7>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-                // PatchRecord only exposes a map-form setUnitDimension; setting
-                // the attribute directly keeps the explicit [0,0,0,0,0,0,0]
-                // (asMap would drop all zeros).  unitDimension belongs on the
-                // record, not the x/y/z components.
-                auto setRecordUd = [&patchUd](PatchRecord& rec) {
-                    rec.setAttribute("unitDimension", patchUd);
-                };
-                PatchRecordComponent numPr = pp["numParticles"][RecordComponent::SCALAR];
-                allocate1D(numPr, Datatype::ULONGLONG, nPatches);
-                numPr.setUnitSI(1.0);
                 std::vector<std::uint64_t> numData(patches.size());
-                for(std::size_t q = 0; q < patches.size(); ++q)
-                    numData[q] = patchCount[q];
-                if(writeData)
-                    numPr.storeChunk(ownedChunk(numData.data(), numData.size()), Offset{0u}, Extent{nPatches});
-                flushAfterStore();
-                PatchRecordComponent numOffRc
-                    = pp["numParticlesOffset"][RecordComponent::SCALAR];
-                allocate1D(numOffRc, Datatype::ULONGLONG, nPatches);
-                numOffRc.setUnitSI(1.0);
                 std::vector<std::uint64_t> offData(patches.size());
-                for(std::size_t q = 0; q < patches.size(); ++q)
-                    offData[q] = patchOffset[q];
-                if(writeData)
-                    numOffRc.storeChunk(
-                        ownedChunk(offData.data(), offData.size()),
-                        Offset{0u},
-                        Extent{nPatches});
-                setRecordUd(pp["numParticles"]);
-                setRecordUd(pp["numParticlesOffset"]);
-                char const* const xyzc[3] = {"x", "y", "z"};
-                for(char const* comp : xyzc)
+                std::array<std::vector<std::uint64_t>, 3> od;
+                std::array<std::vector<std::uint64_t>, 3> ed;
+                for(std::size_t axis = 0u; axis < 3u; ++axis)
                 {
-                    int const axis = axisOf(comp);
-                    PatchRecordComponent offRc = pp["offset"][comp];
-                    allocate1D(offRc, Datatype::ULONGLONG, nPatches);
-                    offRc.setUnitSI(1.0);
-                    std::vector<std::uint64_t> od(patches.size());
-                    for(std::size_t q = 0; q < patches.size(); ++q)
-                        od[q] = static_cast<std::uint64_t>(patches[q].offset[axis]);
-                    if(writeData)
-                        offRc.storeChunk(ownedChunk(od.data(), od.size()), Offset{0u}, Extent{nPatches});
-                    flushAfterStore();
-                    PatchRecordComponent extRc = pp["extent"][comp];
-                    allocate1D(extRc, Datatype::ULONGLONG, nPatches);
-                    extRc.setUnitSI(1.0);
-                    std::vector<std::uint64_t> ed(patches.size());
-                    for(std::size_t q = 0; q < patches.size(); ++q)
-                        ed[q] = static_cast<std::uint64_t>(patches[q].extent[axis]);
-                    if(writeData)
-                        extRc.storeChunk(ownedChunk(ed.data(), ed.size()), Offset{0u}, Extent{nPatches});
-                    flushAfterStore();
+                    od[axis].resize(patches.size());
+                    ed[axis].resize(patches.size());
                 }
-                // unitDimension belongs on the record, not the x/y/z components
-                // (as in the HDF5 / PIConGPU writer).  Set it after the
-                // components exist so the record is a valid non-empty record.
-                setRecordUd(pp["offset"]);
-                setRecordUd(pp["extent"]);
+                for(std::size_t q = 0; q < patches.size(); ++q)
+                {
+                    numData[q] = patchCount[q];
+                    offData[q] = patchOffset[q];
+                    for(std::size_t axis = 0u; axis < 3u; ++axis)
+                    {
+                        od[axis][q] = static_cast<std::uint64_t>(patches[q].offset[axis]);
+                        ed[axis][q] = static_cast<std::uint64_t>(patches[q].extent[axis]);
+                    }
+                }
+                writeParticlePatchTable(
+                    pp, nPatches, numData, offData, od, ed, writeData,
+                    flushAfterStore);
             }
         }
 
@@ -820,9 +850,27 @@ namespace picBunch
                     buf[i] = static_cast<double>(raw[i]);
                 break;
             }
+            case Datatype::LONG:
+            {
+                std::vector<long> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
             case Datatype::LONGLONG:
             {
                 std::vector<std::int64_t> raw(count);
+                inRc.loadChunkRaw(raw.data(), offset, ext);
+                in.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    buf[i] = static_cast<double>(raw[i]);
+                break;
+            }
+            case Datatype::ULONG:
+            {
+                std::vector<unsigned long> raw(count);
                 inRc.loadChunkRaw(raw.data(), offset, ext);
                 in.flush();
                 for(std::size_t i = 0; i < count; ++i)
@@ -840,7 +888,8 @@ namespace picBunch
             }
             default:
                 throw std::runtime_error(
-                    "openPMD checkpoint writer: unsupported particle record datatype");
+                    std::string("openPMD checkpoint writer: unsupported particle record datatype ")
+                    + datatypeToString(inRc.getDatatype()));
             }
             return buf;
         }
@@ -949,101 +998,6 @@ namespace picBunch
                     // A reserved attribute that openPMD refuses to set is
                     // already covered by the explicit metadata above.
                 }
-            }
-        }
-
-        //! Copy one record component byte-for-byte at its on-disk datatype.
-        template<typename T_Component>
-        void copyRecordComponent(
-            Series& in,
-            Series& out,
-            T_Component& src,
-            T_Component& dst,
-            bool writeData)
-        {
-            Extent const ext = src.getExtent();
-            std::uint64_t const count = extentCount(ext);
-            Offset const offset(ext.size(), 0u);
-            Datatype const datatype = src.getDatatype();
-            dst.resetDataset(Dataset(datatype, ext));
-            auto copy = [&](auto value) {
-                using T = decltype(value);
-                if(writeData)
-                {
-                    std::vector<T> buffer(static_cast<std::size_t>(count));
-                    src.loadChunkRaw(buffer.data(), offset, ext);
-                    in.flush();
-                    dst.storeChunk(ownedChunk(buffer.data(), buffer.size()), offset, ext);
-                }
-                else
-                {
-                    in.flush();
-                }
-                out.flush();
-            };
-            switch(datatype)
-            {
-            case Datatype::FLOAT:
-                copy(static_cast<float>(0));
-                break;
-            case Datatype::DOUBLE:
-                copy(static_cast<double>(0));
-                break;
-            case Datatype::CHAR:
-                copy(static_cast<char>(0));
-                break;
-            case Datatype::UCHAR:
-                copy(static_cast<unsigned char>(0));
-                break;
-            case Datatype::SCHAR:
-                copy(static_cast<signed char>(0));
-                break;
-            case Datatype::SHORT:
-                copy(static_cast<short>(0));
-                break;
-            case Datatype::USHORT:
-                copy(static_cast<unsigned short>(0));
-                break;
-            case Datatype::INT:
-                copy(static_cast<std::int32_t>(0));
-                break;
-            case Datatype::UINT:
-                copy(static_cast<std::uint32_t>(0));
-                break;
-            case Datatype::LONG:
-                copy(static_cast<long>(0));
-                break;
-            case Datatype::ULONG:
-                copy(static_cast<unsigned long>(0));
-                break;
-            case Datatype::LONGLONG:
-                copy(static_cast<std::int64_t>(0));
-                break;
-            case Datatype::ULONGLONG:
-                copy(static_cast<std::uint64_t>(0));
-                break;
-            default:
-                throw std::runtime_error(
-                    "openPMD checkpoint writer: unsupported copied record datatype");
-            }
-            copyAttributes(src, dst);
-        }
-
-        template<typename T_Record>
-        void copyRecord(
-            Series& in,
-            Series& out,
-            T_Record& src,
-            T_Record& dst,
-            bool writeData)
-        {
-            copyAttributes(src, dst);
-            for(auto const& entry : src)
-            {
-                std::string const& key = entry.first;
-                auto srcComponent = src[key];
-                auto dstComponent = dst[key];
-                copyRecordComponent(in, out, srcComponent, dstComponent, writeData);
             }
         }
 
@@ -1199,11 +1153,11 @@ namespace picBunch
         void copyInputSpecies(
             Series& in,
             long long inStep,
-            Series& out,
             Iteration& outIteration,
             std::string const& species,
             bool float64,
             bool writeData,
+            Idx3 const& globalN,
             std::function<void()> flushAfterStore)
         {
             ParticleSpecies inSpecies = in.snapshots()[inStep].particles[species];
@@ -1297,20 +1251,167 @@ namespace picBunch
                 outRc.setUnitSI(1.0);
                 storeFloating(outRc, buf);
             }
-            // particlePatches is part of the restart contract; copy every
-            // record and component of the input species verbatim.
+            // particlePatches is part of the restart contract.  Rewrite the
+            // complete table instead of copying the input records verbatim:
+            // PIConGPU requires all four records (numParticles,
+            // numParticlesOffset, offset, extent) with x/y/z components for
+            // every patch, and an input may be a plain particle dump without
+            // patch metadata.  A missing or incomplete input table is replaced
+            // by one domain-covering patch, which every rank maps into its
+            // local domain on restart.
             ParticlePatches inPatches = inSpecies.particlePatches;
-            if(inPatches.numPatches() != 0u)
+            std::uint64_t nPatches = 0;
+            bool complete = true;
+            try
             {
-                ParticlePatches outPatches = outSpecies.particlePatches;
-                for(auto const& entry : inPatches)
+                nPatches = inPatches.numPatches();
+            }
+            catch(std::exception const&)
+            {
+                nPatches = 0u;
+            }
+            if(nPatches == 0u)
+                complete = false;
+            else
+            {
+                complete = inPatches.contains("numParticlesOffset");
+                for(char const* comp : xyz)
                 {
-                    std::string const& key = entry.first;
-                    PatchRecord srcRecord = inPatches[key];
-                    PatchRecord dstRecord = outPatches[key];
-                    copyRecord(in, out, srcRecord, dstRecord, writeData);
+                    complete = complete
+                        && inPatches.contains("offset")
+                        && inPatches.contains("extent");
+                    if(!complete)
+                        break;
+                    PatchRecord offRecord = inPatches["offset"];
+                    PatchRecord extRecord = inPatches["extent"];
+                    complete = complete && offRecord.contains(comp)
+                        && extRecord.contains(comp);
                 }
             }
+
+            // Patch metadata is tiny: read it on every rank so every rank
+            // makes the same fallback decision (the write itself stays on the
+            // checkpoint owner).  A table whose counts do not add up to the
+            // particle record cannot be expressed as disjoint patch ranges.
+            std::array<std::vector<std::uint64_t>, 3> patchOffsets;
+            std::array<std::vector<std::uint64_t>, 3> patchExtents;
+            std::vector<std::uint64_t> patchCounts;
+            std::vector<std::uint64_t> patchParticleOffsets;
+            if(complete)
+            {
+                patchCounts.assign(nPatches, 0u);
+                patchParticleOffsets.assign(nPatches, 0u);
+                for(std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    patchOffsets[axis].assign(nPatches, 0u);
+                    patchExtents[axis].assign(nPatches, 0u);
+                }
+                auto readPatchComponent = [&](PatchRecordComponent component,
+                                              std::vector<std::uint64_t>& values) {
+                    std::uint64_t c = 0;
+                    std::vector<double> const buf
+                        = loadRecordComponent(in, component, c, true);
+                    for(std::uint64_t q = 0; q < nPatches; ++q)
+                        values[static_cast<std::size_t>(q)]
+                            = static_cast<std::uint64_t>(buf[static_cast<std::size_t>(q)]);
+                };
+                readPatchComponent(
+                    inPatches["numParticles"][RecordComponent::SCALAR],
+                    patchCounts);
+                std::uint64_t cumulative = 0u;
+                for(std::uint64_t q = 0; q < nPatches; ++q)
+                {
+                    patchParticleOffsets[static_cast<std::size_t>(q)] = cumulative;
+                    cumulative += patchCounts[static_cast<std::size_t>(q)];
+                }
+                if(cumulative != count)
+                    complete = false;
+                for(std::size_t axis = 0u; axis < 3u && complete; ++axis)
+                {
+                    readPatchComponent(
+                        inPatches["offset"][xyz[axis]], patchOffsets[axis]);
+                    readPatchComponent(
+                        inPatches["extent"][xyz[axis]], patchExtents[axis]);
+                }
+                // A zero extent describes no cells.  Particle dumps sometimes
+                // carry such placeholder patches; they cannot address a local
+                // domain, so replace the whole table with the domain patch.
+                for(std::size_t q = 0; q < nPatches && complete; ++q)
+                    for(std::size_t axis = 0u; axis < 3u; ++axis)
+                        if(patchExtents[axis][static_cast<std::size_t>(q)] == 0u)
+                            complete = false;
+                // The table must cover the output domain exactly once.  A
+                // picBunch table is a set of z-slabs over the full x/y domain;
+                // anything else (a particle dump for another grid, or a
+                // decomposition that is not expressible as z-slabs here) is
+                // replaced by one domain patch, which every rank maps into its
+                // local domain on restart.
+                std::vector<std::pair<std::uint64_t, std::uint64_t>> zRanges;
+                zRanges.reserve(static_cast<std::size_t>(nPatches));
+                for(std::uint64_t q = 0; q < nPatches && complete; ++q)
+                {
+                    for(std::size_t axis = 0u; axis < 2u; ++axis)
+                    {
+                        if(patchOffsets[axis][static_cast<std::size_t>(q)] != 0u
+                           || patchExtents[axis][static_cast<std::size_t>(q)]
+                               != static_cast<std::uint64_t>(globalN[axis]))
+                        {
+                            complete = false;
+                            break;
+                        }
+                    }
+                    if(!complete)
+                        break;
+                    std::uint64_t const lo
+                        = patchOffsets[2][static_cast<std::size_t>(q)];
+                    std::uint64_t const hi
+                        = lo + patchExtents[2][static_cast<std::size_t>(q)];
+                    if(hi < lo)
+                        complete = false;
+                    else
+                        zRanges.emplace_back(lo, hi);
+                }
+                if(complete)
+                {
+                    std::sort(zRanges.begin(), zRanges.end());
+                    std::uint64_t covered = 0u;
+                    for(auto const& [lo, hi] : zRanges)
+                    {
+                        if(lo != covered)
+                        {
+                            complete = false;
+                            break;
+                        }
+                        covered = hi;
+                    }
+                    if(covered != static_cast<std::uint64_t>(globalN[2]))
+                        complete = false;
+                }
+            }
+            std::uint64_t tablePatches = nPatches;
+            if(!complete)
+            {
+                // One patch owns the whole species and covers the domain.
+                tablePatches = 1u;
+                patchCounts.assign(1u, count);
+                patchParticleOffsets.assign(1u, 0u);
+                for(std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    patchOffsets[axis].assign(1u, 0u);
+                    patchExtents[axis].assign(
+                        1u, static_cast<std::uint64_t>(globalN[axis]));
+                }
+            }
+            ParticlePatches outPatches = outSpecies.particlePatches;
+            writeParticlePatchTable(
+                outPatches,
+                tablePatches,
+                patchCounts,
+                patchParticleOffsets,
+                patchOffsets,
+                patchExtents,
+                writeData,
+                flushAfterStore);
         }
 
         void publishPicOnGPUOpenPMD(
@@ -1794,7 +1895,8 @@ namespace picBunch
                 if(overwrittenInputs.count(name) != 0u)
                     continue; // written as a generated species below
                 copyInputSpecies(
-                    in, inStep, out, iteration, name, options.float64, rank == 0,
+                    in, inStep, iteration, name, options.float64, rank == 0,
+                    Idx3{nx, ny, nz},
                     [&out]() { out.flush(); });
             }
 
@@ -1826,13 +1928,13 @@ namespace picBunch
                     if(!restartWarning.empty())
                         restartWarning += "; ";
                     restartWarning += "species '" + name
-                        + "' has no particlePatches metadata";
+                        + "' has no complete particlePatches metadata";
                 }
             }
             if(!restartWarning.empty())
             {
                 std::cerr << "picBunch: warning: " << restartWarning
-                          << "; PIConGPU may reject the restart\n";
+                          << "; writing one domain-covering patch per species\n";
                 out.setAttribute("picBunchRestartWarning", restartWarning);
             }
             std::uint64_t idBase = copiedParticles;

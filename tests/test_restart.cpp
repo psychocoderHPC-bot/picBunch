@@ -1084,6 +1084,180 @@ TEST(Restart, WriterEmitsOnePatchPerRankOverlapWithDisjointOffsets)
     std::filesystem::remove_all(directory);
 }
 
+TEST(Restart, CopiedSpeciesGetsCompleteDomainPatchWithoutInputMetadata)
+{
+    // A plain particle dump has no particlePatches (or only the two counters).
+    // PIConGPU still needs offset/extent, so the writer must synthesize one
+    // domain-covering patch instead of emitting an incomplete record tree.
+    for(bool const withPatches : {false, true})
+    {
+        auto const directory = temporaryDirectory()
+            / (withPatches ? "copied_incomplete" : "copied_nopatches");
+        std::filesystem::remove_all(directory);
+        std::filesystem::create_directories(directory);
+        auto const input = directory / "input.h5";
+        writeParticleInput(input, withPatches);
+
+        picBunch::PicOnGPUWriteOptions options;
+        options.step = withPatches ? 9u : 8u;
+        options.directory = directory.string();
+        options.inputFile = input.string();
+        options.inputIteration = 0;
+        options.requiredInputSpecies = {"electrons"};
+        options.timeUnitSI = 1.0;
+        options.unitLength = 1.0;
+        options.unitEField = 1.0;
+        options.unitBField = 1.0;
+        picBunch::writePicOnGPUCheckpointOpenPMD(makeField(), options);
+
+        auto const path = directory
+            / ("checkpoint_00000" + std::to_string(options.step) + ".h5");
+        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        ASSERT_GE(file, 0);
+        std::string const base = "data/" + std::to_string(options.step)
+            + "/particles/electrons/particlePatches/";
+        // All four records, with x/y/z for the vector records.
+        for(char const* record : {"numParticles", "numParticlesOffset"})
+        {
+            std::string const name = base + record;
+            EXPECT_EQ(H5Lexists(file, name.c_str(), H5P_DEFAULT), 1) << name;
+        }
+        for(char const* record : {"offset", "extent"})
+            for(char const* axis : {"x", "y", "z"})
+            {
+                std::string const name = base + record + "/" + axis;
+                EXPECT_EQ(H5Lexists(file, name.c_str(), H5P_DEFAULT), 1) << name;
+            }
+        auto const counts = readUint64Vector(file, (base + "numParticles").c_str());
+        auto const particleOffsets
+            = readUint64Vector(file, (base + "numParticlesOffset").c_str());
+        ASSERT_EQ(counts.size(), 1u);
+        ASSERT_EQ(particleOffsets.size(), 1u);
+        EXPECT_EQ(counts[0], 1u);
+        EXPECT_EQ(particleOffsets[0], 0u);
+        // The fallback patch covers the whole checkpoint grid (x,y,z).
+        std::array<std::uint64_t, 3> const extent{4u, 5u, 6u};
+        char const* const axes[3] = {"x", "y", "z"};
+        for(int a = 0; a < 3; ++a)
+        {
+            std::string const axis(axes[a]);
+            auto const offset = readUint64Vector(file, (base + "offset/" + axis).c_str());
+            auto const length = readUint64Vector(file, (base + "extent/" + axis).c_str());
+            ASSERT_EQ(offset.size(), 1u) << axis;
+            ASSERT_EQ(length.size(), 1u) << axis;
+            EXPECT_EQ(offset[0], 0u) << axis;
+            EXPECT_EQ(length[0], extent[static_cast<std::size_t>(a)]) << axis;
+        }
+        H5Fclose(file);
+        std::filesystem::remove_all(directory);
+    }
+}
+
+TEST(Restart, CopiedSpeciesPreservesCompletePatchTable)
+{
+    auto const root = temporaryDirectory() / "copied_complete";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    auto const input = root / "input.h5";
+    writeParticleInput(input, false);
+    // The patch table below tiles the 5x5x4 domain, so the writer's global
+    // grid must describe the same domain for the table to be accepted.
+    picBunch::Field field = makeField();
+    field.grid.n = {5, 5, 4};
+    for(int c = 0; c < 6; ++c)
+    {
+        field.data[c].assign(field.grid.size(), 0.0);
+        for(std::size_t l = 0; l < field.grid.size(); ++l)
+            field.data[c][l] = 0.0625 * static_cast<double>(c) + 1.0e-2 * static_cast<double>(l);
+    }
+
+    // Build a source checkpoint with two disjoint patches tiling z.
+    picBunch::PicOnGPUWriteOptions source;
+    source.step = 10;
+    source.directory = (root / "source").string();
+    source.inputFile = input.string();
+    source.inputIteration = 0;
+    source.requiredInputSpecies = {"electrons"};
+    source.timeUnitSI = 1.0;
+    source.unitLength = 1.0;
+    source.unitEField = 1.0;
+    source.unitBField = 1.0;
+
+    picBunch::GeneratedParticles generated;
+    generated.species = "electrons";
+    generated.bunch = twoParticles();
+    generated.bunch.z = {0.5, 2.5};
+    generated.domainOrigin = {0.0, 0.0, 0.0};
+    generated.cellSize = {1.0, 1.0, 1.0};
+    generated.patchOffset = {0, 0, 0};
+    generated.patchExtent = {5, 5, 4};
+    generated.unitMassSpeed = 1.0;
+    generated.unitCharge = 1.0;
+    generated.unitMass = 1.0;
+    generated.fallbackMass = 1.0;
+    generated.patches = {
+        {{0, 0, 0}, {5, 5, 2}},
+        {{0, 0, 2}, {5, 5, 2}}};
+    source.generatedSpecies = {generated};
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, source);
+
+    auto const sourcePath = root / "source" / "checkpoint_000010.h5";
+    hid_t sourceFile = H5Fopen(sourcePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(sourceFile, 0);
+    std::string const sourceBase = "data/10/particles/electrons/particlePatches/";
+    auto const counts = readUint64Vector(sourceFile, (sourceBase + "numParticles").c_str());
+    auto const particleOffsets
+        = readUint64Vector(sourceFile, (sourceBase + "numParticlesOffset").c_str());
+    std::array<std::vector<std::uint64_t>, 3> offsets;
+    std::array<std::vector<std::uint64_t>, 3> extents;
+    char const* const axes[3] = {"x", "y", "z"};
+    for(int a = 0; a < 3; ++a)
+    {
+        offsets[static_cast<std::size_t>(a)]
+            = readUint64Vector(sourceFile, (sourceBase + "offset/" + axes[a]).c_str());
+        extents[static_cast<std::size_t>(a)]
+            = readUint64Vector(sourceFile, (sourceBase + "extent/" + axes[a]).c_str());
+    }
+    ASSERT_EQ(counts.size(), 2u);
+    ASSERT_EQ(particleOffsets.size(), 2u);
+    EXPECT_EQ(counts[0] + counts[1], 2u);
+    H5Fclose(sourceFile);
+
+    // Copy the species into a second checkpoint.
+    picBunch::PicOnGPUWriteOptions copy;
+    copy.step = 11;
+    copy.directory = (root / "copy").string();
+    copy.inputFile = sourcePath.string();
+    copy.inputIteration = 10;
+    copy.requiredInputSpecies = {"electrons"};
+    copy.timeUnitSI = 1.0;
+    copy.unitLength = 1.0;
+    copy.unitEField = 1.0;
+    copy.unitBField = 1.0;
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, copy);
+
+    auto const copyPath = root / "copy" / "checkpoint_000011.h5";
+    hid_t file = H5Fopen(copyPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    std::string const base = "data/11/particles/electrons/particlePatches/";
+    EXPECT_EQ(
+        readUint64Vector(file, (base + "numParticles").c_str()), counts);
+    EXPECT_EQ(
+        readUint64Vector(file, (base + "numParticlesOffset").c_str()),
+        particleOffsets);
+    for(int a = 0; a < 3; ++a)
+    {
+        EXPECT_EQ(
+            readUint64Vector(file, (base + "offset/" + axes[a]).c_str()),
+            offsets[static_cast<std::size_t>(a)]);
+        EXPECT_EQ(
+            readUint64Vector(file, (base + "extent/" + axes[a]).c_str()),
+            extents[static_cast<std::size_t>(a)]);
+    }
+    H5Fclose(file);
+    std::filesystem::remove_all(root);
+}
+
 TEST(Restart, WriterPinsFloat32ParticleDtypes)
 {
     auto const directory = temporaryDirectory() / "checkpoints_dtypes";

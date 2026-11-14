@@ -410,26 +410,22 @@ TEST(Placement, PatchCountSplitsTheRegionWithCumulativeCoverage)
 
     auto const placed = picBunch::placeBunch(bunch, config);
     ASSERT_EQ(placed.patches.size(), 4u);
-    // The z slices tile the domain; neighbours overlap by one cell and the
-    // union covers [0, 32).  x/y stay at the full domain patch.
+    // The z slices partition the domain exactly once, matching PIConGPU's
+    // per-rank patch table: adjacent half-open ranges, no gap, no overlap.
     EXPECT_EQ(placed.patches.front().offset[2], 0);
     EXPECT_EQ(placed.patches.back().offset[2] + static_cast<std::int64_t>(
                   placed.patches.back().extent[2]), 32);
+    std::uint64_t covered = 0u;
     for(std::size_t q = 0; q < placed.patches.size(); ++q)
     {
         EXPECT_EQ(placed.patches[q].offset[0], 0);
         EXPECT_EQ(placed.patches[q].extent[0], 10u);
         EXPECT_EQ(placed.patches[q].extent[1], 12u);
-        if(q + 1u < placed.patches.size())
-        {
-            auto const& current = placed.patches[q];
-            auto const& next = placed.patches[q + 1u];
-            EXPECT_LE(
-                current.offset[2] + static_cast<std::int64_t>(current.extent[2]),
-                next.offset[2] + static_cast<std::int64_t>(next.extent[2]));
-            EXPECT_LE(next.offset[2], current.offset[2] + static_cast<std::int64_t>(current.extent[2]));
-        }
+        EXPECT_EQ(placed.patches[q].offset[2], static_cast<std::int64_t>(covered));
+        EXPECT_GT(placed.patches[q].extent[2], 0u);
+        covered += placed.patches[q].extent[2];
     }
+    EXPECT_EQ(covered, 32u);
 }
 
 TEST(Placement, OutOfDomainIsRejectedWithoutClipping)
