@@ -177,6 +177,33 @@ namespace picBunch
             std::copy_n(send + sendDispls[0], sendCounts[0], recv + recvDispls[0]);
     }
 
+    void MpiParallelContext::allgatherv(
+        double const* send,
+        int sendCount,
+        double* recv,
+        int const* recvCounts,
+        int const* recvDispls) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            MPI_Allgatherv(
+                send,
+                sendCount,
+                MPI_DOUBLE,
+                recv,
+                recvCounts,
+                recvDispls,
+                MPI_DOUBLE,
+                MPI_COMM_WORLD);
+            return;
+        }
+#endif
+        // Single rank: the only block is rank 0's own contribution.
+        if(sendCount > 0)
+            std::copy_n(send, static_cast<std::size_t>(sendCount), recv);
+    }
+
     void mpiBroadcastBunch(Bunch& bunch, int root)
     {
 #if defined(PICBUNCH_ENABLE_MPI)

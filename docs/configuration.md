@@ -206,6 +206,15 @@ A restart of an open-boundary deck without these records fails with
 deck that does not need the PML: restart with periodic boundaries, or switch
 the deck to the exponential absorber.
 
+**PML vs exponential for large grids.** The twelve zero-filled PML slab records
+add 72 datasets (two records `E` and `B` times six slabs times six cross
+components), each at the full domain extent. For a 640x1536x640 grid in float32
+this is 168.8 GB on top of the 14.1 GB for the six main field components
+(182.8 GB total versus 14.1 GB without PML). Use `absorber = "exponential"`
+(deck `--fieldAbsorber exponential`) for large grids unless the physics
+requires the convolutional PML; the exponential absorber stores no field state
+and the checkpoint stays at the main-field size.
+
 The boundary-condition matrix of the full placement interface (periodic,
 exponential, PML) is documented in [PIConGPU restart checkpoints](picongpu-restart.md).
 
