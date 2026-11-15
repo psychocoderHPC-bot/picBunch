@@ -35,10 +35,11 @@ precision = "float32"
 # Each keeps the full domain extent but stores only the face rim, so the PML
 # slabs start from rest without carrying the whole volume.
 #absorber = "none"
-# Rim thickness in cells of those PML records, matching the deck's
+# Rim thickness in positive cells of those PML records, matching the deck's
 # fieldAbsorber.param NUM_CELLS. One integer applies to every face; six
 # integers are xneg, xpos, yneg, ypos, zneg, zpos. Default 12 (PIConGPU's
-# THICKNESS); the writer clamps it to the grid extent of the face axis.
+# THICKNESS). An explicit value larger than the corresponding grid axis is
+# rejected; a restart must use the same or a smaller thickness.
 #pml_thickness = 12
 # Species to read from --input and write into the checkpoint.  A string is the
 # one-entry historical form.  An array is an ordered input list: each entry is

@@ -253,8 +253,9 @@ namespace picBunch
         /*! PML thickness in cells per face, in the PIConGPU ``NUM_CELLS``
           * order (xneg, xpos, yneg, ypos, zneg, zpos).  Only used when
           * ``absorber == "pml"``.  It must match the restarting deck's
-          * compiled ``fieldAbsorber.param``; the writer clamps it to the grid
-          * extent of the face axis.
+          * compiled ``fieldAbsorber.param``.  An explicit value larger than
+          * the face-axis extent is rejected at configuration time; the
+          * default is clamped for a grid smaller than 12.
           */
         std::array<std::size_t, 6> pmlThickness{12, 12, 12, 12, 12, 12};
         /*! Checkpoint output backend (see ``CheckpointBackend``).
