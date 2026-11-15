@@ -27,6 +27,21 @@ namespace picBunch
 {
     namespace detail
     {
+        /*! PROVISIONAL per-rank padded node limit for the distributed FFT.
+         *
+         * This is a vendor FFT capability, not an arithmetic property of our
+         * code: after the 64-bit widening every offset, count, pitch and plan
+         * distance below is ``std::size_t``.  Whether the classic cuFFT ``int``
+         * plan parameters, the element-based ``idist``/``istride`` or cuFFT's
+         * own element ceiling set a tighter wall is under audit; when that
+         * report lands, set the final number here and change nothing else.
+         *
+         * The current value is a placeholder on the classic 32-bit element
+         * count boundary.  It is deliberately not used to shrink a
+         * decomposition: it only refuses a size that cannot be represented.
+         */
+        inline constexpr std::size_t kMaxDistributedNodesPerRank = std::size_t{1} << 31;
+
         //! Balanced contiguous split of ``total`` items over ``size`` ranks.
         inline std::pair<std::uint32_t, std::uint32_t> slabRange(
             std::uint32_t total,
@@ -106,6 +121,22 @@ namespace picBunch
                 m_chunkSize = std::max(
                     static_cast<std::size_t>(Mx) * m_nz,
                     static_cast<std::size_t>(Mz) * m_nx);
+
+                // Hard safety net around the vendor capability (see
+                // kMaxDistributedNodesPerRank).  Nothing below this guard
+                // needs it: the arithmetic is 64-bit and the MPI transfer is
+                // chunked, so only a genuinely unrepresentable slab is refused.
+                if(workSize > kMaxDistributedNodesPerRank
+                   || spectrumSize > kMaxDistributedNodesPerRank)
+                    throw std::runtime_error(
+                        "DistributedFft3D: rank " + std::to_string(parallel->rank) + " of "
+                        + std::to_string(parallel->size) + " requires "
+                        + std::to_string(std::max(workSize, spectrumSize))
+                        + " padded nodes per rank (work " + std::to_string(workSize)
+                        + ", spectrum " + std::to_string(spectrumSize)
+                        + "), above the per-rank limit of "
+                        + std::to_string(kMaxDistributedNodesPerRank)
+                        + " padded nodes (vendor FFT capability, pending audit)");
 
                 // The alpakaVendor plan layout stores the batch in the extents'
                 // 32-bit value type, so a batched transform cannot represent
