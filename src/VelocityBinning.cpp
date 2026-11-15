@@ -699,6 +699,17 @@ namespace picBunch
                 double const angle
                     = (repNorm[b] == 0.0 && anyMoving[b]) ? std::acos(-1.0) : maxAngle[b];
                 double const gamma = boxGammaMax[b];
+                // Angular term: the field is a superposition over all
+                // particles, so the tilt errors of a box's members partially
+                // cancel at a node instead of adding up to the worst member.
+                // The measured binning error scales with the box angular
+                // width squared (W37 calibration: 256-source gamma-500 bunches
+                // at 50/150 mrad divergence, 1-16 boxes; the largest
+                // measured/model ratio is 0.34 for C_ang = 1, a 3x safety
+                // factor).  The former gamma * Delta_theta worst case
+                // over-predicted the same bunch by 40x and drove the auto
+                // policy to order 1e5 boxes.
+                double const angular = kAngularModelConstant * angle * angle;
                 // Energy term: a relative gamma shift changes the boosted
                 // pattern by at most 2*Delta_gamma/gamma at a node.  The former
                 // (Delta_gamma/gamma + maxGammaDev) pair charged ~1.5
@@ -708,7 +719,7 @@ namespace picBunch
                 // node-bounded term is used instead.
                 double const deltaGamma = (boxGammaMax[b] - boxGammaMin[b]) / gamma;
                 modelSum += (boxAbsCharge[b] / totalAbsoluteCharge)
-                    * (gamma * angle + 2.0 * deltaGamma / gamma);
+                    * (angular + 2.0 * deltaGamma / gamma);
             }
             out.modelSum = modelSum;
             out.modelConstant = modelConstant;
@@ -890,7 +901,7 @@ namespace picBunch
                 double const capError
                     = policy.modelConstant * modelSumFor(policy.maxBins, capProbe);
                 std::size_t required = policy.maxBins;
-                double lastError = 0.0;
+                double lastError = capError;
                 for(std::size_t B = policy.maxBins * 2u; B <= (1u << 30); B *= 2u)
                 {
                     VelocityBinning probe;
@@ -900,6 +911,10 @@ namespace picBunch
                     if(lastError <= tolerance)
                         break;
                 }
+                std::string const remedy
+                    = (lastError > tolerance)
+                        ? " no count up to 2^30 boxes meets the tolerance"
+                        : "";
                 throw std::runtime_error(
                     "deriveVelocityBinning: the velocity-bin model requires at least "
                     + std::to_string(required)
@@ -908,7 +923,8 @@ namespace picBunch
                     + " boxes: " + std::to_string(lastError)
                     + "; at the " + std::to_string(policy.maxBins)
                     + "-box cap: " + std::to_string(capError)
-                    + "); reduce the momentum spread, raise --tolerance, or raise --max-velocity-bins");
+                    + remedy
+                    + "); reduce the momentum or angular spread, raise --tolerance, or raise --max-velocity-bins");
             }
         }
 

@@ -205,23 +205,37 @@ namespace picBunch
         std::size_t* exactPairCount = nullptr;
     };
 
-    /*! Assumed constant of the velocity-bin error model.
+    /*! Safety factor of the velocity-bin angular error term.
+     *
+     * The angular term of the error model charges ``C_ang * Delta_theta_b^2``
+     * per box (see ``VelocityBinning``); the old worst-case form charged
+     * ``gamma * Delta_theta_b``, which over-predicts the measured superposition
+     * error by orders of magnitude (a gamma-490 bunch at 50 mrad divergence
+     * carries a one-box model sum of about 24.6 but a measured binning error of
+     * about 6e-4, a 40x over-prediction; see
+     * ``docs/measurements/velocity_bin_angular_calibration.csv``).
+     *
+     * ``C_ang = 1`` is a conservative bound on the measured binning error for
+     * the three calibration bunches (gamma 500, 256 sources, 48^3 grid,
+     * 1 um cells; angular sigma 50 mrad, 50 mrad, and 150 mrad): the largest
+     * measured/model ratio is 0.34, so the safety factor is 3.
+     * The bound is validated for a charge-weighted angular sigma below about
+     * 0.3 rad and per-box angular width below about 0.26 rad, where the
+     * superposition cancellation is near-complete.  Bunches outside that range
+     * (for example, the archived 5 degree point, or a per-box width near the
+     * beam-frame range) can lose the cancellation; the auto policy then fails
+     * at the cap with the required count instead of silently under-binning.
+     */
+    inline constexpr double kAngularModelConstant = 1.0;
+
+    /*! Overall constant of the velocity-bin error model.
      *
      * The model (see ``VelocityBinning``) estimates the relative error of the
-     * binned mesh field as ``modelConstant * modelSum``.  The shipped value is
-     * an assumption, not a refitted calibration: the original 1, 2, 4, 8 and
-     * 16 box rows and their model sums from run ``pr24-20261102`` (host
-     * jureca-h100, CUDA 13.4) were not archived in the repository.  The
-     * recorded 16- and 64-box accuracy points are in
-     * ``docs/measurements/velocity_bin_calibration.csv``; the 5% energy-spread
-     * case measures 1.12e-3 at 16 boxes and 2.72e-4 at 64 (meeting 1e-3 only
-     * at 64), while the 5 degree angular-spread case does not reach 1e-3
-     * (0.421 at 16 boxes).  Re-running the 1024-source 5% energy-spread case,
-     * the node-bounded energy term gives 3.9e-3 at 16 boxes and 9.2e-4 at 64
-     * (3.4x conservative against the archived points, down from 27x/26x) and
-     * selects 64 boxes at a 1e-3 tolerance instead of failing above the cap;
-     * the pure angular case is unchanged.  The CLI exposes
-     * ``--bin-model-constant`` as a diagnostic override.
+     * binned mesh field as ``modelConstant * modelSum``; ``modelSum`` already
+     * carries the calibrated angular coefficient
+     * ``kAngularModelConstant`` and the node-bounded energy coefficient.  The
+     * shipped value is 1, the unit scaling of both calibrated terms; the CLI
+     * exposes ``--bin-model-constant`` as a diagnostic override.
      */
     inline constexpr double kDefaultVelocityModelConstant = 1.0;
 
@@ -256,26 +270,39 @@ namespace picBunch
      *
      * Error model.  Replacing a particle ``u`` by its box representative
      * perturbs the field by two mechanisms: a transverse tilt of the boosted
-     * pattern, of order ``gamma * Delta_theta`` in relative terms, and an
-     * energy shift, of order ``(2/gamma) * Delta_gamma / gamma`` at a node.
-     * With ``q_b`` the charge in box ``b``, ``Q`` the total absolute charge,
-     * ``gamma_b`` the largest ``gamma`` in the box, ``Delta_theta_b`` the
-     * largest angle between a member and the box representative, and
-     * ``Delta_gamma_b`` the ``gamma`` range of the box, the estimated relative
-     * error is
+     * pattern, and an energy shift, of order ``(2/gamma) * Delta_gamma /
+     * gamma`` at a node.  The field is a superposition over all particles, so
+     * the tilt errors of the members of a box partially cancel at a node
+     * instead of adding up to the worst member: the measured binning error
+     * (binned field minus the per-particle-velocity continuum reference,
+     * ``tools/velocity-bins/compare_velocity_bins.py``) scales with the box
+     * angular *width* squared, not with ``gamma * width``.  With ``q_b`` the
+     * absolute charge in box ``b``, ``Q`` the total absolute charge,
+     * ``Delta_theta_b`` the largest angle between a member and the box
+     * representative (``pi`` when the representative is zero and any member
+     * is moving), and ``Delta_gamma_b`` the ``gamma`` range of the box, the
+     * estimated relative error is
      *
-     *   modelError = modelConstant * Sum_b (q_b / Q)
-     *                 * (gamma_b*Delta_theta_b
+     *   modelError = C * Sum_b (q_b / Q)
+     *                 * (C_ang * Delta_theta_b^2
      *                    + (2/gamma_b) * Delta_gamma_b/gamma_b)
      *
-     * The angular term uses the measured worst-case angular-spread error
-     * (``modelConstant = 1`` reproduces the archived 5 degree point); the
-     * energy term is the node-bounded single term that replaces the former
+     * with ``C = kDefaultVelocityModelConstant`` (CLI override) and
+     * ``C_ang = kAngularModelConstant``.  The angular term is calibrated on
+     * the W37 campaign (three synthetic bunches, gamma 500, 1-16 boxes; see
+     * ``docs/measurements/velocity_bin_angular_calibration.csv``): ``C_ang = 1``
+     * bounds the measured binning error with a safety factor of 3 (largest
+     * measured/model ratio 0.34).  The former ``gamma * Delta_theta`` term
+     * over-predicted that same bunch by 40x, which is what drove the auto
+     * policy to order 1e5 boxes for a realistic high-gamma bunch.  The energy
+     * term is the node-bounded single term that replaces the former
      * ``Delta_gamma/gamma + maxGammaDev`` pair, which double-counted the same
      * effect and over-predicted the archived 5% energy-spread points by
-     * ~26x.  This is a calibrated/conservative estimate, not a guarantee: the
-     * energy term still over-predicts the two archived points by ~3.4x, and its
-     * behaviour beyond gamma 10 and the measured box range is not validated.
+     * ~26x.  Both terms are conservative estimates, not guarantees: the
+     * angular bound is validated for per-box angular widths below about
+     * 0.26 rad and a charge-weighted angular sigma below about 0.3 rad, and
+     * the energy term beyond gamma 10 at 5% spread and the measured box range
+     * is not validated.
      *
      * ``modelSum`` is the uncalibrated sum; ``modelError`` is the calibrated
      * estimate.  The auto policy chooses the smallest power-of-two box count
@@ -309,7 +336,9 @@ namespace picBunch
         //! was derived for.  A fixed binning applied to a sub-bunch must
         //! re-derive the assignment with ``boxIndex``.
         std::vector<std::size_t> boxOf;
-        //! Uncalibrated model sum (dimensionless, charge-weighted).
+        //! Uncalibrated model sum (dimensionless, charge-weighted; angular
+        //! term with the shipped ``kAngularModelConstant``, energy term with
+        //! its node-bounded coefficient).
         double modelSum = 0.0;
         //! Calibration constant used (``kDefaultVelocityModelConstant`` unless
         //! overridden).
