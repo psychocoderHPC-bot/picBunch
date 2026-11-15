@@ -1301,16 +1301,15 @@ namespace picBunch
                 std::vector<double> const sourcePosition
                     = srcComponent.position<double>();
                 double const sourceUnitSI = srcComponent.unitSI();
+                // Set the three-component Yee position before the first flush:
+                // openPMD otherwise installs a default scalar ``position``
+                // attribute and the only way to replace its shape is
+                // deleteAttribute, which the ADIOS2 backend rejects.
+                dstComponent.setPosition(sourcePosition);
                 copyMeshComponent(
                     in, out, srcComponent, dstComponent, globalN, collective,
                     pmlFace, sparseOutput, datasetOptions);
                 dstComponent.setUnitSI(sourceUnitSI);
-                // The first component flush installs openPMD's default scalar
-                // ``position`` attribute (one-element dataspace).  Remove it
-                // and recreate it from the source vector so the PML slab keeps
-                // its three-component position metadata.
-                dstComponent.deleteAttribute("position");
-                dstComponent.setPosition(sourcePosition);
                 out.flush();
             }
         }

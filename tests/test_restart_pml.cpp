@@ -896,3 +896,281 @@ TEST(Restart, PmlThicknessMismatchRejected)
     }
     std::filesystem::remove_all(root);
 }
+
+// ---------------------------------------------------------------------------
+// ADIOS2/BP5 sparse rim.  BP5 has no HDF5 chunk grid and no fill-value
+// metadata: the interior is simply never stored.  PIConGPU's
+// RestartFieldLoader zeroes its host buffer and then loads only the per-face
+// rim chunk, so the unwritten interior must leave that buffer untouched.  A
+// backend that materialised the interior (or returned garbage) would corrupt
+// the consumer's zeroed field; this test is the regression for that claim.
+TEST(Restart, PmlAbsorberWritesSparseRimChunksAdios2)
+{
+#if !(defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2)
+    GTEST_SKIP() << "openPMD was built without the ADIOS2 backend";
+#else
+    auto const directory = temporaryDirectory() / "checkpoints_pml_sparse_bp5";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input.h5";
+    writeParticleInput(input);
+
+    auto const field = makeSparseField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.time = 2.5e-13;
+    options.timeUnitSI = 1.0;
+    options.dt = 1.0e-15;
+    options.unitLength = 1.0;
+    options.unitEField = 2.0;
+    options.unitBField = 4.0;
+    options.nextId = 1;
+    options.absorber = "pml";
+    options.backend = picBunch::CheckpointBackend::Adios2;
+    std::size_t constexpr thickness = 4u;
+    options.pmlThickness = {thickness, thickness, thickness, thickness, thickness, thickness};
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
+
+    std::size_t const nx = field.grid.n[0];
+    std::size_t const ny = field.grid.n[1];
+    std::size_t const nz = field.grid.n[2];
+    auto const path = directory / "checkpoint_000002.bp5";
+    ASSERT_TRUE(std::filesystem::is_directory(path)) << path;
+
+    char const* const slabs[6] = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+    char const* const components[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
+    char const* const records[2] = {"Convolutional PML E", "Convolutional PML B"};
+
+    std::size_t const iz = nz - 2u * thickness;
+    std::size_t const iy = ny - 2u * thickness;
+    std::size_t const ix = nx - 2u * thickness;
+    ASSERT_GT(iz * iy * ix, 0u);
+
+    openPMD::Series series(path.string(), openPMD::Access::READ_ONLY);
+    auto iteration = series.iterations[2];
+    for(int r = 0; r < 2; ++r)
+        for(int s = 0; s < 6; ++s)
+        {
+            auto const face = testFace(static_cast<std::size_t>(s), thickness, nz, ny, nx);
+            std::array<std::size_t, 3> faceBegin{};
+            std::array<std::size_t, 3> faceExtent{};
+            faceBox(face, nz, ny, nx, faceBegin, faceExtent);
+            std::size_t const count = faceExtent[0] * faceExtent[1] * faceExtent[2];
+            std::string const record = std::string(records[r]) + "_" + slabs[s];
+            for(int c = 0; c < 6; ++c)
+            {
+                auto rc = iteration.meshes[record][components[c]];
+                auto const extent = rc.getExtent();
+                ASSERT_EQ(extent.size(), 3u) << record << "/" << components[c];
+                // The extent is still the full global domain.
+                EXPECT_EQ(extent[0], nz) << record << "/" << components[c];
+                EXPECT_EQ(extent[1], ny) << record << "/" << components[c];
+                EXPECT_EQ(extent[2], nx) << record << "/" << components[c];
+                // The in-memory PML state is zero; the rim chunk is stored at
+                // its global offset and reads back bit for bit.
+                std::vector<float> faceValues(count, 0.0f);
+                rc.loadChunkRaw(
+                    faceValues.data(),
+                    openPMD::Offset{
+                        static_cast<openPMD::Offset::value_type>(faceBegin[0]),
+                        static_cast<openPMD::Offset::value_type>(faceBegin[1]),
+                        static_cast<openPMD::Offset::value_type>(faceBegin[2])},
+                    openPMD::Extent{
+                        static_cast<openPMD::Extent::value_type>(faceExtent[0]),
+                        static_cast<openPMD::Extent::value_type>(faceExtent[1]),
+                        static_cast<openPMD::Extent::value_type>(faceExtent[2])});
+                series.flush();
+                for(std::size_t i = 0; i < count; ++i)
+                    ASSERT_EQ(faceValues[i], 0.0f) << record << "/" << components[c];
+                // Consumer emulation: zero the destination, then load only the
+                // interior chunk.  An unwritten BP5 region must leave it zero.
+                std::vector<float> interior(iz * iy * ix, 0.0f);
+                rc.loadChunkRaw(
+                    interior.data(),
+                    openPMD::Offset{
+                        static_cast<openPMD::Offset::value_type>(thickness),
+                        static_cast<openPMD::Offset::value_type>(thickness),
+                        static_cast<openPMD::Offset::value_type>(thickness)},
+                    openPMD::Extent{
+                        static_cast<openPMD::Extent::value_type>(iz),
+                        static_cast<openPMD::Extent::value_type>(iy),
+                        static_cast<openPMD::Extent::value_type>(ix)});
+                series.flush();
+                for(std::size_t i = 0; i < interior.size(); ++i)
+                    ASSERT_EQ(interior[i], 0.0f) << record << "/" << components[c];
+            }
+        }
+    std::filesystem::remove_all(temporaryDirectory());
+#endif
+}
+
+
+// ---------------------------------------------------------------------------
+// ADIOS2/BP5 copy path with non-zero rim values: a sparse input stays sparse,
+// the rim chunks read back bit for bit at their global offsets, and the
+// consumer's zeroed destination keeps a zero interior.  The HDF5 source is
+// injected with the in-memory rim values exactly like the HDF5-only test.
+TEST(Restart, PmlCopyPreservesSparseRimAdios2)
+{
+#if !(defined(openPMD_HAVE_ADIOS2) && openPMD_HAVE_ADIOS2)
+    GTEST_SKIP() << "openPMD was built without the ADIOS2 backend";
+#else
+    auto const root = temporaryDirectory() / "pml_copy_bp5";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(root);
+    auto const input = root / "input.h5";
+    writeParticleInput(input);
+
+    auto const field = makeSparseField();
+    picBunch::PicOnGPUWriteOptions base;
+    base.step = 2;
+    base.directory = (root / "source").string();
+    base.inputFile = input.string();
+    base.inputIteration = 0;
+    base.time = 2.5e-13;
+    base.timeUnitSI = 1.0;
+    base.dt = 1.0e-15;
+    base.unitLength = 1.0;
+    base.unitEField = 2.0;
+    base.unitBField = 4.0;
+    base.nextId = 1;
+    base.absorber = "pml";
+    std::size_t constexpr thickness = 4u;
+    base.pmlThickness = {thickness, thickness, thickness, thickness, thickness, thickness};
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, base);
+
+    std::size_t const nx = field.grid.n[0];
+    std::size_t const ny = field.grid.n[1];
+    std::size_t const nz = field.grid.n[2];
+    auto const sourcePath = root / "source" / "checkpoint_000002.h5";
+
+    // In-memory rim values injected into the HDF5 source checkpoint.
+    auto writeSlab = [](std::filesystem::path const& path,
+                        char const* record,
+                        char const* component,
+                        std::array<hsize_t, 3> const& start,
+                        std::array<hsize_t, 3> const& count,
+                        float value) {
+        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+        ASSERT_GE(file, 0);
+        std::string const datasetPath
+            = std::string("data/2/fields/") + record + "/" + component;
+        hid_t dataset = H5Dopen2(file, datasetPath.c_str(), H5P_DEFAULT);
+        ASSERT_GE(dataset, 0) << datasetPath;
+        hid_t space = H5Dget_space(dataset);
+        ASSERT_GE(
+            H5Sselect_hyperslab(
+                space, H5S_SELECT_SET, start.data(), nullptr, count.data(), nullptr),
+            0);
+        hsize_t memoryDims[3] = {count[0], count[1], count[2]};
+        hid_t memory = H5Screate_simple(3, memoryDims, nullptr);
+        std::vector<float> values(
+            static_cast<std::size_t>(count[0] * count[1] * count[2]), value);
+        ASSERT_GE(
+            H5Dwrite(
+                dataset, H5T_NATIVE_FLOAT, memory, space, H5P_DEFAULT, values.data()),
+            0);
+        H5Sclose(memory);
+        H5Sclose(space);
+        H5Dclose(dataset);
+        H5Fclose(file);
+    };
+    writeSlab(
+        sourcePath, "Convolutional PML E_xneg", "xy",
+        {0, 0, 0}, {nz, ny, thickness}, 1.5f);
+    writeSlab(
+        sourcePath, "Convolutional PML B_yneg", "yz",
+        {0, 0, 0}, {nz, thickness, nx}, 2.5f);
+
+    picBunch::PicOnGPUWriteOptions copy = base;
+    copy.step = 3;
+    copy.directory = (root / "copy").string();
+    copy.inputFile = sourcePath.string();
+    copy.inputIteration = 2;
+    copy.requiredInputSpecies = {};
+    copy.absorber = "none";
+    copy.backend = picBunch::CheckpointBackend::Adios2;
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, copy);
+
+    auto const copyPath = root / "copy" / "checkpoint_000003.bp5";
+    ASSERT_TRUE(std::filesystem::is_directory(copyPath)) << copyPath;
+
+    std::size_t const iz = nz - 2u * thickness;
+    std::size_t const iy = ny - 2u * thickness;
+    std::size_t const ix = nx - 2u * thickness;
+    ASSERT_GT(iz * iy * ix, 0u);
+
+    openPMD::Series series(copyPath.string(), openPMD::Access::READ_ONLY);
+    auto iteration = series.iterations[3];
+    //! Zero the consumer's destination, load only the interior (must stay
+    //! zero), then load the six face rims at their global offsets into the
+    //! buffer and compare the reconstruction with the in-memory array.
+    auto const verify = [&](char const* record,
+                            char const* component,
+                            auto const& expected) {
+        std::string const name = std::string(record) + "/" + component;
+        auto rc = iteration.meshes[record][component];
+        auto const extent = rc.getExtent();
+        ASSERT_EQ(extent.size(), 3u) << name;
+        EXPECT_EQ(extent[0], nz) << name;
+        EXPECT_EQ(extent[1], ny) << name;
+        EXPECT_EQ(extent[2], nx) << name;
+        std::vector<float> full(nz * ny * nx, 0.0f);
+        // The consumer zero-filled its host field first.
+        std::vector<float> interior(iz * iy * ix, 0.0f);
+        rc.loadChunkRaw(
+            interior.data(),
+            openPMD::Offset{
+                static_cast<openPMD::Offset::value_type>(thickness),
+                static_cast<openPMD::Offset::value_type>(thickness),
+                static_cast<openPMD::Offset::value_type>(thickness)},
+            openPMD::Extent{
+                static_cast<openPMD::Extent::value_type>(iz),
+                static_cast<openPMD::Extent::value_type>(iy),
+                static_cast<openPMD::Extent::value_type>(ix)});
+        series.flush();
+        for(std::size_t i = 0; i < interior.size(); ++i)
+            ASSERT_EQ(interior[i], 0.0f) << name;
+        for(int s = 0; s < 6; ++s)
+        {
+            auto const face = testFace(static_cast<std::size_t>(s), thickness, nz, ny, nx);
+            std::array<std::size_t, 3> begin{};
+            std::array<std::size_t, 3> ext{};
+            faceBox(face, nz, ny, nx, begin, ext);
+            std::size_t const count = ext[0] * ext[1] * ext[2];
+            std::vector<float> chunk(count, 0.0f);
+            rc.loadChunkRaw(
+                chunk.data(),
+                openPMD::Offset{
+                    static_cast<openPMD::Offset::value_type>(begin[0]),
+                    static_cast<openPMD::Offset::value_type>(begin[1]),
+                    static_cast<openPMD::Offset::value_type>(begin[2])},
+                openPMD::Extent{
+                    static_cast<openPMD::Extent::value_type>(ext[0]),
+                    static_cast<openPMD::Extent::value_type>(ext[1]),
+                    static_cast<openPMD::Extent::value_type>(ext[2])});
+            series.flush();
+            std::size_t i = 0;
+            for(std::size_t z = begin[0]; z < begin[0] + ext[0]; ++z)
+                for(std::size_t y = begin[1]; y < begin[1] + ext[1]; ++y)
+                    for(std::size_t x = begin[2]; x < begin[2] + ext[2]; ++x)
+                        full[(z * ny + y) * nx + x] = chunk[i++];
+        }
+        for(std::size_t z = 0; z < nz; ++z)
+            for(std::size_t y = 0; y < ny; ++y)
+                for(std::size_t x = 0; x < nx; ++x)
+                    ASSERT_EQ(full[(z * ny + y) * nx + x], expected(z, y, x))
+                        << name << " at " << z << "," << y << "," << x;
+    };
+    verify("Convolutional PML E_xneg", "xy", [&](std::size_t, std::size_t, std::size_t x) {
+        return x < thickness ? 1.5f : 0.0f;
+    });
+    verify("Convolutional PML B_yneg", "yz", [&](std::size_t, std::size_t y, std::size_t) {
+        return y < thickness ? 2.5f : 0.0f;
+    });
+    std::filesystem::remove_all(temporaryDirectory());
+#endif
+}
