@@ -38,6 +38,11 @@ option(PICBUNCH_ENABLE_CUDA "Compile the CUDA backend through alpaka (NVIDIA GPU
 option(PICBUNCH_ENABLE_HIP "Compile the HIP backend through alpaka (AMD GPUs)." OFF)
 option(PICBUNCH_BUILD_GTESTS "Build the GoogleTest unit tests (system package or FetchContent)." ON)
 option(
+    PICBUNCH_LARGE_MPI_TESTS
+    "Register the >4 GiB per-rank distributed FFT boundary tests (one 32 GB GPU per rank; set PICBUNCH_LARGE_FFT_GPUS)."
+    OFF
+)
+option(
     PICBUNCH_ENABLE_MPI
     "Build MPI support: rank 0 reads and broadcasts; all ranks compute component or tile shares and write disjoint global chunks."
     OFF

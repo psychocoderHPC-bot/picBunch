@@ -13,10 +13,12 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -25,6 +27,18 @@ namespace picBunch
 {
     namespace detail
     {
+        /*! Largest per-rank padded node count the distributed FFT accepts.
+         *
+         * This comes from the vendor FFT element ceiling, not from any byte
+         * offset: cuFFT documents 4 G elements per transform, i.e. 2^32 complex
+         * nodes, memory permitting.  The pinned alpakaVendor calls
+         * cufftMakePlanMany64 with long long parameters and rocFFT with size_t,
+         * so no plan value narrows and no vendor-side check is needed here.  All
+         * offsets, counts and pitches in this path are 64-bit; the guard only
+         * refuses a size past the vendor ceiling.
+         */
+        inline constexpr std::size_t kMaxDistributedNodesPerRank = std::size_t{1} << 32;
+
         //! Balanced contiguous split of ``total`` items over ``size`` ranks.
         inline std::pair<std::uint32_t, std::uint32_t> slabRange(
             std::uint32_t total,
@@ -105,6 +119,31 @@ namespace picBunch
                     static_cast<std::size_t>(Mx) * m_nz,
                     static_cast<std::size_t>(Mz) * m_nx);
 
+                // Hard safety net around the vendor element ceiling (see
+                // kMaxDistributedNodesPerRank).  Nothing below this guard needs
+                // it: the arithmetic is 64-bit and the MPI transfer is chunked,
+                // so only a slab past the vendor ceiling is refused.
+                if(workSize > kMaxDistributedNodesPerRank
+                   || spectrumSize > kMaxDistributedNodesPerRank)
+                    throw std::runtime_error(
+                        "DistributedFft3D: rank " + std::to_string(parallel->rank) + " of "
+                        + std::to_string(parallel->size) + " requires "
+                        + std::to_string(std::max(workSize, spectrumSize))
+                        + " padded nodes per rank (work " + std::to_string(workSize)
+                        + ", spectrum " + std::to_string(spectrumSize)
+                        + "), above the vendor element ceiling of "
+                        + std::to_string(kMaxDistributedNodesPerRank) + " nodes per transform");
+
+                // The plan batch is stored in the 32-bit extent value type used
+                // here.  With the guard above, Mx >= 2 and Mz >= 2 keep both
+                // batches below 2^31, so this cast cannot truncate.
+                auto const batchX = static_cast<std::uint32_t>(
+                    static_cast<std::uint64_t>(My) * m_nz);
+                auto const batchZ = static_cast<std::uint32_t>(
+                    static_cast<std::uint64_t>(m_nx) * My);
+
+                // The scalar std::size_t count already creates a Vec<size_t,1>
+                // extent, so these buffers and their pitches are 64-bit.
                 m_work.emplace(alpaka::onHost::allocUnified<Complex>(device, workSize));
                 m_send.emplace(alpaka::onHost::allocUnified<Complex>(device, m_chunkSize));
                 m_recv.emplace(alpaka::onHost::allocUnified<Complex>(device, m_chunkSize));
@@ -128,7 +167,7 @@ namespace picBunch
                     device,
                     alpaka::fft::Transform::c2c,
                     Extents1{Mx},
-                    static_cast<std::uint32_t>(My * m_nz),
+                    batchX,
                     zeroStride,
                     zeroStride,
                     Mx * sizeof(Complex),
@@ -154,7 +193,7 @@ namespace picBunch
                     device,
                     alpaka::fft::Transform::c2c,
                     Extents1{Mz},
-                    static_cast<std::uint32_t>(m_nx * My),
+                    batchZ,
                     yStride,
                     yStride,
                     sizeof(Complex),
@@ -170,7 +209,7 @@ namespace picBunch
                         return alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mx}}
                             .c2c()
                             .inPlace()
-                            .batch(My * m_nz)
+                            .batch(batchX)
                             .distances(Mx * sizeof(Complex), Mx * sizeof(Complex))
                             .build(device);
                     });
@@ -193,7 +232,7 @@ namespace picBunch
                         return alpaka::fft::onHost::PlanBuilder<Complex, Extents1>{Extents1{Mz}}
                             .c2c()
                             .inPlace()
-                            .batch(m_nx * My)
+                            .batch(batchZ)
                             .strides(
                                 static_cast<std::size_t>(m_nx) * My * sizeof(Complex),
                                 static_cast<std::size_t>(m_nx) * My * sizeof(Complex))
@@ -264,16 +303,21 @@ namespace picBunch
             //! Element-wise ``spectrum *= kernelSpectrum``.
             void multiply()
             {
-                auto const count = static_cast<std::uint32_t>(m_nx * m_My * m_Mz);
+                // The per-rank spectrum is up to 2^31 complex nodes, so the
+                // element count and the byte pitches must be 64-bit.  With
+                // 32-bit pitches the MdSpan byte offset wrapped at 4 GiB,
+                // re-multiplying the low spectrum and leaving the high end
+                // untouched (the large-grid field corruption).
+                std::size_t const count = static_cast<std::size_t>(m_nx) * m_My * m_Mz;
                 // Multiply the kernel spectrum in place so the source spectrum
                 // survives for the remaining components.
                 // Packed two-double layout: {complex index, re/im}. The pitches
                 // keep the byte strides (x-fastest, re/im interleaved).
-                using PackedIndex2 = alpaka::Vec<std::uint32_t, 2u>;
+                using PackedIndex2 = alpaka::Vec<std::size_t, 2u>;
                 auto const extents = PackedIndex2{count, 2u};
-                auto const pitches = alpaka::Vec<std::uint32_t, 2u>{
-                    static_cast<std::uint32_t>(2u * sizeof(double)),
-                    static_cast<std::uint32_t>(sizeof(double))};
+                auto const pitches = alpaka::Vec<std::size_t, 2u>{
+                    2u * sizeof(double),
+                    sizeof(double)};
                 auto a = alpaka::makeMdSpan(
                     reinterpret_cast<double*>(m_kernel->data()),
                     extents,
@@ -293,8 +337,24 @@ namespace picBunch
                               typename std::remove_cvref_t<
                                   decltype(std::declval<decltype(b) const&>().getExtents())>::value_type,
                               PackedIndex2::value_type>);
+                // The MdSpan byte offsets are size_t only if the pitch type is
+                // size_t; pin it so a future edit cannot silently narrow it.
+                static_assert(std::is_same_v<
+                              typename std::remove_cvref_t<decltype(a)>::index_type,
+                              std::size_t>);
+                static_assert(std::is_same_v<
+                              typename std::remove_cvref_t<decltype(b)>::index_type,
+                              std::size_t>);
+                std::uint32_t const frame = 64u;
+                std::size_t const blocks = (count + frame - 1u) / frame;
+                if(blocks > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+                    throw std::runtime_error(
+                        "DistributedFft3D: spectrum multiply requires "
+                        + std::to_string(blocks) + " blocks on rank "
+                        + std::to_string(m_parallel->rank)
+                        + ", above the 32-bit kernel launch grid");
                 m_queue.enqueue(
-                    alpaka::onHost::FrameSpec{(count + 63u) / 64u, 64u},
+                    alpaka::onHost::FrameSpec{static_cast<std::uint32_t>(blocks), frame},
                     MultiplyKernel{},
                     a,
                     b,
@@ -357,6 +417,7 @@ namespace picBunch
                 return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
             }
 
+
         public:
             //! Element-wise complex product in the packed two-double layout.
             struct MultiplyKernel
@@ -366,19 +427,15 @@ namespace picBunch
                     TAcc const& acc,
                     alpaka::concepts::IMdSpan auto a,
                     alpaka::concepts::IMdSpan auto const& b,
-                    std::uint32_t count) const
+                    std::size_t count) const
                 {
                     for(auto [l] : alpaka::onAcc::makeIdxMap(
                             acc,
                             alpaka::onAcc::worker::threadsInGrid,
                             alpaka::IdxRange{count}))
                     {
-                        auto const re = alpaka::Vec{
-                            static_cast<std::uint32_t>(l),
-                            std::uint32_t{0u}};
-                        auto const im = alpaka::Vec{
-                            static_cast<std::uint32_t>(l),
-                            std::uint32_t{1u}};
+                        auto const re = alpaka::Vec{l, std::size_t{0u}};
+                        auto const im = alpaka::Vec{l, std::size_t{1u}};
                         double const ar = a[re];
                         double const ai = a[im];
                         double const br = b[re];
@@ -426,48 +483,183 @@ namespace picBunch
                 m_backRecvCounts.assign(static_cast<std::size_t>(size), 0);
                 m_backRecvDispls.assign(static_cast<std::size_t>(size), 0);
 
-                long long sendPos = 0;
-                long long recvPos = 0;
-                long long backSendPos = 0;
-                long long backRecvPos = 0;
+                // Counts and displacements are double elements (two per
+                // complex node) and stay 64-bit.  MPI_Alltoallv only accepts
+                // int, so alltoallvChunked() splits a slice into windows whose
+                // offsets still fit int instead of refusing a large slab.
+                std::size_t sendPos = 0;
+                std::size_t recvPos = 0;
+                std::size_t backSendPos = 0;
+                std::size_t backRecvPos = 0;
                 for(int r = 0; r < size; ++r)
                 {
                     auto const z = slabRange(m_Mz, size, r);
                     auto const x = slabRange(m_Mx, size, r);
                     auto const sz = static_cast<std::size_t>(r);
                     // Forward: one y slice, dest r gets all local z and its x range.
-                    m_sendCounts[sz] = static_cast<int>(
-                        static_cast<long long>(m_nz) * x.second * 2ll);
-                    m_sendDispls[sz] = static_cast<int>(sendPos);
-                    sendPos += static_cast<long long>(m_nz) * x.second * 2ll;
+                    m_sendCounts[sz] = static_cast<std::size_t>(m_nz) * x.second * 2u;
+                    m_sendDispls[sz] = sendPos;
+                    sendPos += m_sendCounts[sz];
                     // Receive from r: our local x, all of r's z planes.
-                    m_recvCounts[sz] = static_cast<int>(
-                        static_cast<long long>(m_nx) * z.second * 2ll);
-                    m_recvDispls[sz] = static_cast<int>(recvPos);
-                    recvPos += static_cast<long long>(m_nx) * z.second * 2ll;
+                    m_recvCounts[sz] = static_cast<std::size_t>(m_nx) * z.second * 2u;
+                    m_recvDispls[sz] = recvPos;
+                    recvPos += m_recvCounts[sz];
 
                     // Backward: dest r owns its z range.
-                    m_backSendCounts[sz] = static_cast<int>(
-                        static_cast<long long>(m_nx) * z.second * 2ll);
-                    m_backSendDispls[sz] = static_cast<int>(backSendPos);
-                    backSendPos += static_cast<long long>(m_nx) * z.second * 2ll;
-                    m_backRecvCounts[sz] = static_cast<int>(
-                        static_cast<long long>(x.second) * m_nz * 2ll);
-                    m_backRecvDispls[sz] = static_cast<int>(backRecvPos);
-                    backRecvPos += static_cast<long long>(x.second) * m_nz * 2ll;
+                    m_backSendCounts[sz] = static_cast<std::size_t>(m_nx) * z.second * 2u;
+                    m_backSendDispls[sz] = backSendPos;
+                    backSendPos += m_backSendCounts[sz];
+                    m_backRecvCounts[sz] = static_cast<std::size_t>(x.second) * m_nz * 2u;
+                    m_backRecvDispls[sz] = backRecvPos;
+                    backRecvPos += m_backRecvCounts[sz];
                 }
-                long long const forwardSend = static_cast<long long>(m_Mx) * m_nz * 2ll;
-                long long const forwardRecv = static_cast<long long>(m_nx) * m_Mz * 2ll;
-                long long const backwardSend = static_cast<long long>(m_nx) * m_Mz * 2ll;
-                long long const backwardRecv = static_cast<long long>(m_Mx) * m_nz * 2ll;
+                std::size_t const forwardSend = static_cast<std::size_t>(m_Mx) * m_nz * 2u;
+                std::size_t const forwardRecv = static_cast<std::size_t>(m_nx) * m_Mz * 2u;
+                std::size_t const backwardSend = static_cast<std::size_t>(m_nx) * m_Mz * 2u;
+                std::size_t const backwardRecv = static_cast<std::size_t>(m_Mx) * m_nz * 2u;
                 if(sendPos != forwardSend || recvPos != forwardRecv || backSendPos != backwardSend
                    || backRecvPos != backwardRecv)
                     throw std::runtime_error("DistributedFft3D: inconsistent transpose counts");
-                if(forwardSend > static_cast<long long>(std::numeric_limits<int>::max())
-                   || forwardRecv > static_cast<long long>(std::numeric_limits<int>::max()))
-                    throw std::runtime_error(
-                        "DistributedFft3D: a transpose slice exceeds the MPI int count range");
             }
+
+            //! ``MPI_Alltoallv`` with 64-bit slices, transferred in int windows.
+            /*!
+             * Counts and displacements are double elements and may exceed
+             * ``INT_MAX``.  MPI_Alltoallv cannot express that in one call, so a
+             * large slice is split into per-peer windows of at most
+             * ``window`` elements.  Both sides derive the window lengths from
+             * the same pairwise count (a send block and the matching receive
+             * block have equal lengths), pack the window compactly and use
+             * advancing offsets that always fit int.  The transfer is never
+             * refused and the domain is never reduced.
+             *
+             * The common case (total slice <= window) goes straight to MPI with
+             * the original layout and no copy.  Window length is bounded by
+             * ``INT_MAX / (2 * ranks)`` so the packed window total fits int for
+             * any rank count.
+             */
+            void alltoallvChunked(
+                double* send,
+                std::vector<std::size_t> const& sendCounts,
+                std::vector<std::size_t> const& sendDispls,
+                double* recv,
+                std::vector<std::size_t> const& recvCounts,
+                std::vector<std::size_t> const& recvDispls)
+            {
+                std::size_t const size = sendCounts.size();
+                auto const end = [](std::vector<std::size_t> const& counts,
+                                    std::vector<std::size_t> const& displs) {
+                    std::size_t total = 0u;
+                    for(std::size_t r = 0; r < counts.size(); ++r)
+                        total = std::max(total, displs[r] + counts[r]);
+                    return total;
+                };
+                std::size_t const sendTotal = end(sendCounts, sendDispls);
+                std::size_t const recvTotal = end(recvCounts, recvDispls);
+                std::size_t const total = std::max(sendTotal, recvTotal);
+
+                // Largest window that keeps every count, displacement and the
+                // packed window total inside int.
+                std::size_t const intMax
+                    = static_cast<std::size_t>(std::numeric_limits<int>::max());
+                std::size_t window = intMax / (2u * std::max<std::size_t>(size, 1u));
+                window = std::max<std::size_t>(window, 1u);
+                // Test hook: a tiny window forces many chunk calls on a small
+                // grid, so the window scheduling is covered without a huge
+                // slice.  Any positive value is correct.
+                if(char const* text = std::getenv("PICBUNCH_FFT_TRANSPOSE_WINDOW"))
+                {
+                    long long const parsed = std::strtoll(text, nullptr, 10);
+                    if(parsed > 0)
+                        window = std::min<std::size_t>(
+                            static_cast<std::size_t>(parsed),
+                            window);
+                }
+
+                // MPI_Alltoallv takes int.  Never narrow silently: the window
+                // bound keeps these values inside int, and this check rejects
+                // loudly if the bound or a count ever exceeds it.
+                auto const checkedInt = [&](std::size_t value, char const* what) {
+                    if(value > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                        throw std::runtime_error(
+                            std::string{"DistributedFft3D: "} + what + " requires "
+                            + std::to_string(value) + " doubles on rank "
+                            + std::to_string(m_parallel->rank)
+                            + " but MPI_Alltoallv counts are limited to "
+                            + std::to_string(std::numeric_limits<int>::max()));
+                    return static_cast<int>(value);
+                };
+                std::vector<int> sc(size, 0);
+                std::vector<int> sd(size, 0);
+                std::vector<int> rc(size, 0);
+                std::vector<int> rd(size, 0);
+
+                if(total <= window)
+                {
+                    for(std::size_t r = 0; r < size; ++r)
+                    {
+                        sc[r] = checkedInt(sendCounts[r], "transpose send");
+                        sd[r] = checkedInt(sendDispls[r], "transpose send displacement");
+                        rc[r] = checkedInt(recvCounts[r], "transpose receive");
+                        rd[r] = checkedInt(recvDispls[r], "transpose receive displacement");
+                    }
+                    m_parallel->alltoallv(send, sc.data(), sd.data(), recv, rc.data(), rd.data());
+                    return;
+                }
+
+                // Compact staging for one window.  Allocated once; the chunked
+                // path is only taken by a slice above ~2^31 doubles.
+                std::vector<double> sendChunk;
+                std::vector<double> recvChunk;
+                for(std::size_t base = 0u; base < total; base += window)
+                {
+                    std::size_t sendPacked = 0u;
+                    std::size_t recvPacked = 0u;
+                    for(std::size_t r = 0; r < size; ++r)
+                    {
+                        std::size_t const sendLen
+                            = std::min(window, sendCounts[r] > base ? sendCounts[r] - base : 0u);
+                        sc[r] = checkedInt(sendLen, "transpose window send");
+                        sd[r] = checkedInt(sendPacked, "transpose window send displacement");
+                        sendPacked += sendLen;
+                        std::size_t const recvLen
+                            = std::min(window, recvCounts[r] > base ? recvCounts[r] - base : 0u);
+                        rc[r] = checkedInt(recvLen, "transpose window receive");
+                        rd[r] = checkedInt(recvPacked, "transpose window receive displacement");
+                        recvPacked += recvLen;
+                    }
+                    if(sendChunk.size() < sendPacked)
+                        sendChunk.resize(sendPacked);
+                    if(recvChunk.size() < recvPacked)
+                        recvChunk.resize(recvPacked);
+                    for(std::size_t r = 0; r < size; ++r)
+                    {
+                        if(sc[r] == 0)
+                            continue;
+                        std::memcpy(
+                            sendChunk.data() + sd[r],
+                            send + sendDispls[r] + base,
+                            static_cast<std::size_t>(sc[r]) * sizeof(double));
+                    }
+                    m_parallel->alltoallv(
+                        sendChunk.data(),
+                        sc.data(),
+                        sd.data(),
+                        recvChunk.data(),
+                        rc.data(),
+                        rd.data());
+                    for(std::size_t r = 0; r < size; ++r)
+                    {
+                        if(rc[r] == 0)
+                            continue;
+                        std::memcpy(
+                            recv + recvDispls[r] + base,
+                            recvChunk.data() + rd[r],
+                            static_cast<std::size_t>(rc[r]) * sizeof(double));
+                    }
+                }
+            }
+
 
             void forwardTo(Buffer& destination)
             {
@@ -481,13 +673,13 @@ namespace picBunch
                 for(std::uint32_t y = 0; y < m_My; ++y)
                 {
                     packForward(y);
-                    m_parallel->alltoallv(
+                    alltoallvChunked(
                         reinterpret_cast<double*>(m_send->data()),
-                        m_sendCounts.data(),
-                        m_sendDispls.data(),
+                        m_sendCounts,
+                        m_sendDispls,
                         reinterpret_cast<double*>(m_recv->data()),
-                        m_recvCounts.data(),
-                        m_recvDispls.data());
+                        m_recvCounts,
+                        m_recvDispls);
                     unpackForward(y, destination);
                 }
                 m_transposeMs += elapsed(t1);
@@ -509,7 +701,9 @@ namespace picBunch
                     for(std::uint32_t zl = 0; zl < m_nz; ++zl)
                     {
                         Complex const* src = m_work->data()
-                            + static_cast<std::size_t>(m_Mx) * (y + m_My * zl) + x.first;
+                            + static_cast<std::size_t>(m_Mx)
+                                * (static_cast<std::size_t>(y) + static_cast<std::size_t>(m_My) * zl)
+                            + x.first;
                         std::memcpy(
                             dst + static_cast<std::size_t>(zl) * x.second,
                             src,
@@ -529,7 +723,9 @@ namespace picBunch
                     for(std::uint32_t zl = 0; zl < z.second; ++zl)
                     {
                         Complex* dst = destination.data()
-                            + static_cast<std::size_t>(m_nx) * (y + m_My * (z.first + zl));
+                            + static_cast<std::size_t>(m_nx)
+                                * (static_cast<std::size_t>(y)
+                                   + static_cast<std::size_t>(m_My) * (z.first + zl));
                         std::memcpy(
                             dst,
                             src + static_cast<std::size_t>(zl) * m_nx,
@@ -549,20 +745,22 @@ namespace picBunch
                     for(std::uint32_t zl = 0; zl < z.second; ++zl)
                     {
                         Complex const* src = m_kernel->data()
-                            + static_cast<std::size_t>(m_nx) * (y + m_My * (z.first + zl));
+                            + static_cast<std::size_t>(m_nx)
+                                * (static_cast<std::size_t>(y)
+                                   + static_cast<std::size_t>(m_My) * (z.first + zl));
                         std::memcpy(
                             dst + static_cast<std::size_t>(zl) * m_nx,
                             src,
                             static_cast<std::size_t>(m_nx) * sizeof(Complex));
                     }
                 }
-                m_parallel->alltoallv(
+                alltoallvChunked(
                     reinterpret_cast<double*>(m_send->data()),
-                    m_backSendCounts.data(),
-                    m_backSendDispls.data(),
+                    m_backSendCounts,
+                    m_backSendDispls,
                     reinterpret_cast<double*>(m_recv->data()),
-                    m_backRecvCounts.data(),
-                    m_backRecvDispls.data());
+                    m_backRecvCounts,
+                    m_backRecvDispls);
                 for(int r = 0; r < m_parallel->size; ++r)
                 {
                     auto const x = slabRange(m_Mx, m_parallel->size, r);
@@ -571,7 +769,9 @@ namespace picBunch
                     for(std::uint32_t zl = 0; zl < m_nz; ++zl)
                     {
                         Complex* dst = m_work->data()
-                            + static_cast<std::size_t>(m_Mx) * (y + m_My * zl) + x.first;
+                            + static_cast<std::size_t>(m_Mx)
+                                * (static_cast<std::size_t>(y) + static_cast<std::size_t>(m_My) * zl)
+                            + x.first;
                         std::memcpy(
                             dst,
                             src + static_cast<std::size_t>(zl) * x.second,
@@ -598,14 +798,14 @@ namespace picBunch
             std::shared_ptr<Plan> m_xPlan;
             std::shared_ptr<Plan> m_yPlan;
             std::shared_ptr<Plan> m_zPlan;
-            std::vector<int> m_sendCounts;
-            std::vector<int> m_sendDispls;
-            std::vector<int> m_recvCounts;
-            std::vector<int> m_recvDispls;
-            std::vector<int> m_backSendCounts;
-            std::vector<int> m_backSendDispls;
-            std::vector<int> m_backRecvCounts;
-            std::vector<int> m_backRecvDispls;
+            std::vector<std::size_t> m_sendCounts;
+            std::vector<std::size_t> m_sendDispls;
+            std::vector<std::size_t> m_recvCounts;
+            std::vector<std::size_t> m_recvDispls;
+            std::vector<std::size_t> m_backSendCounts;
+            std::vector<std::size_t> m_backSendDispls;
+            std::vector<std::size_t> m_backRecvCounts;
+            std::vector<std::size_t> m_backRecvDispls;
             double m_fftMs = 0.0;
             double m_transposeMs = 0.0;
         };

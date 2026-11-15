@@ -77,7 +77,7 @@ namespace
         std::size_t const ny = field.grid.n[1];
         std::size_t const nz = field.grid.n[2];
         std::size_t const plane = nx * ny;
-        std::vector<double> out(6u * nz * plane);
+        std::vector<double> out(6u * nz * plane, 0.0);
         for(int c = 0; c < 6; ++c)
         {
             if(!field.zSlab)
@@ -87,17 +87,19 @@ namespace
             }
             else
             {
-                std::vector<double> full(nz * plane, 0.0);
-                std::size_t const local = field.slabCount * plane;
-                std::vector<int> counts(1), displs(1);
-                counts[0] = static_cast<int>(local);
-                displs[0] = static_cast<int>(field.slabOffset * plane);
-                par->allgatherv(field.data[c].data(), static_cast<int>(local), full.data(),
-                                counts.data(), displs.data());
-                std::copy(full.begin(), full.end(),
-                          out.begin() + static_cast<std::size_t>(c) * nz * plane);
+                // The per-rank output slabs are disjoint, so a global sum
+                // reconstructs the full field.  The previous allgatherv passed
+                // one-element counts/displs arrays to a multi-rank collective,
+                // an out-of-bounds read that segfaulted at two ranks.
+                std::copy(field.data[c].begin(), field.data[c].end(),
+                          out.begin() + static_cast<std::size_t>(c) * nz * plane
+                              + field.slabOffset * plane);
             }
         }
+        // Replicated fields already hold every node on every rank; only the
+        // disjoint distributed slabs need the reduction.
+        if(field.zSlab && par != nullptr)
+            par->allreduceSum(out.data(), out.size());
         return out;
     }
 } // namespace
@@ -120,5 +122,46 @@ TEST(MultiRankField, DistributedMatchesReplicatedOnEveryRank)
         maxDiff = std::max(maxDiff, std::abs(reference[l] - distributed[l]));
     EXPECT_LT(maxDiff, 1.0e-12 * scale)
         << "distributed vs replicated max difference " << maxDiff
+        << " (rank " << parallel.rank << " of " << parallel.size << ")";
+}
+
+namespace
+{
+    //! Set and restore one environment variable for a test.
+    struct ScopedEnv
+    {
+        char const* name;
+        ~ScopedEnv()
+        {
+            ::unsetenv(name);
+        }
+    };
+} // namespace
+
+TEST(MultiRankField, ChunkedTransposeMatchesReplicated)
+{
+    // MPI_Alltoallv only takes int counts and displacements.  The distributed
+    // transpose honours a larger 64-bit slice by chunking it into windows; a
+    // tiny window forces that scheduling on this small grid, and the result
+    // must still equal the replicated reference.  A regression that drops or
+    // duplicates a window changes the field.
+    ScopedEnv const windowGuard{"PICBUNCH_FFT_TRANSPOSE_WINDOW"};
+    ::setenv("PICBUNCH_FFT_TRANSPOSE_WINDOW", "7", 1);
+
+    picBunch::Bunch const bunch = makeBunch();
+    picBunch::MpiParallelContext parallel;
+    picBunch::ParallelContext const* par = &parallel;
+
+    std::vector<double> const reference
+        = computeFlat(bunch, makeOptions(picBunch::FftMode::Replicated), nullptr);
+    std::vector<double> const chunked
+        = computeFlat(bunch, makeOptions(picBunch::FftMode::Distributed), par);
+    ASSERT_EQ(reference.size(), chunked.size());
+    double const scale = std::max(1.0, reference[0]);
+    double maxDiff = 0.0;
+    for(std::size_t l = 0; l < reference.size(); ++l)
+        maxDiff = std::max(maxDiff, std::abs(reference[l] - chunked[l]));
+    EXPECT_LT(maxDiff, 1.0e-12 * scale)
+        << "chunked transpose vs replicated max difference " << maxDiff
         << " (rank " << parallel.rank << " of " << parallel.size << ")";
 }
