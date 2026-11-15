@@ -86,7 +86,12 @@ for `B`). Each record carries the six cross components `xy`, `xz`, `yx`, `yz`,
 per-face chunk at a global offset, but only the rim of `pml_thickness` cells
 (default 12, or six values in the `NUM_CELLS` face order) is written. The
 main-field geometry, the parent `E`/`B` `unitSI` and unit dimension, and the
-parent Yee positions are duplicated across the split components.
+parent Yee positions are duplicated across the split components. Each PML
+record also carries a scalar `picBunchPmlThickness` attribute with the number
+of cells stored along the face normal. On copy, picBunch compares it with the
+configured `pml_thickness` and aborts when the requested rim is thicker,
+because the extra cells are unwritten; a thinner request copies a subset of
+the stored rim.
 Without those slabs the restart aborts with
 `Key 'Convolutional PML E_xneg' does not exist`. Set `absorber = "pml"` when
 the restart deck uses the convolutional PML: a checkpoint written with

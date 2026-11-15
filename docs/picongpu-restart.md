@@ -46,7 +46,11 @@ unchanged. The copy keeps the record's full extent and re-writes only the face
 rim chunk, so a sparse PIConGPU source stays sparse. The writer replaces the
 record geometry with the main-field geometry and never synthesizes PML state.
 `[picongpu] pml_thickness` must match the input deck; see
-[configuration](configuration.md#boundary-conditions).
+[configuration](configuration.md#boundary-conditions). The stored thickness is
+recorded as the `picBunchPmlThickness` attribute on each PML record. PIConGPU's
+`RestartFieldLoader` does not read it (the deck thickness is compiled into
+`fieldAbsorber.param`), so a direct restart still needs a matching deck;
+picBunch's copy path validates the attribute before writing.
 
 When the input checkpoint has no PML records, the writer keeps its previous
 behaviour and writes only E, B and `picongpu_idProvider`. An open-boundary

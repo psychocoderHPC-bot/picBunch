@@ -206,7 +206,10 @@ non-negative integer for every face or six integers in the PIConGPU `NUM_CELLS`
 order `xneg, xpos, yneg, ypos, zneg, zpos` (default 12, the PIConGPU
 `THICKNESS`). The value must match the restarting deck's compiled
 `fieldAbsorber.param`; the writer clamps it to the grid extent of the face
-axis, so a thickness at or above that extent writes the whole face.
+axis, so a thickness at or above that extent writes the whole face. The
+writer records the stored thickness as `picBunchPmlThickness` on each PML
+record and, on copy, rejects a `pml_thickness` larger than the input's stored
+rim; a smaller value is allowed.
 
 A restart of an open-boundary deck without these records fails with
 `Key 'Convolutional PML E_yneg' does not exist (read-only)`. Workarounds for a
