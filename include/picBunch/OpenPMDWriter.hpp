@@ -239,14 +239,24 @@ namespace picBunch
         /*! Field-absorber kind of the PIConGPU deck that restarts this
           * checkpoint: ``"none"`` (default), ``"exponential"`` or ``"pml"``.
           *
-          * Only ``"pml"`` changes the emitted tree: it adds the eight
+          * Only ``"pml"`` changes the emitted tree: it adds the twelve
           * convolutional-PML slab records a ``--fieldAbsorber pml`` deck loads
-          * on restart.  See ``writePicOnGPUCheckpointOpenPMD`` for the layout.
+          * on restart.  Each record keeps the full ``(Nz, Ny, Nx)`` extent but
+          * stores only the rim chunk of its face, so the interior is left
+          * unwritten (HDF5 fill value zero) instead of being zero-filled.
+          * See ``writePicOnGPUCheckpointOpenPMD`` for the layout.
           * ``"exponential"`` is accepted because an exponential deck never
           * stores auxiliary field state; a PIConGPU restart reads it back from
           * the compiled parameters, so no checkpoint record is needed.
           */
         std::string absorber = "none";
+        /*! PML thickness in cells per face, in the PIConGPU ``NUM_CELLS``
+          * order (xneg, xpos, yneg, ypos, zneg, zpos).  Only used when
+          * ``absorber == "pml"``.  It must match the restarting deck's
+          * compiled ``fieldAbsorber.param``; the writer clamps it to the grid
+          * extent of the face axis.
+          */
+        std::array<std::size_t, 6> pmlThickness{12, 12, 12, 12, 12, 12};
         /*! Checkpoint output backend (see ``CheckpointBackend``).
          *
          * ``Auto`` (the default) derives the backend from the output path and

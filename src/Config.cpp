@@ -5,6 +5,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -110,6 +111,36 @@ namespace picBunch
                     fail(key, "every entry must be positive");
                 result[a] = static_cast<std::size_t>(value);
             }
+            return result;
+        }
+
+        //! PML thickness per face (PIConGPU NUM_CELLS order).
+        //!
+        //! Accepts one non-negative integer (applied to every face) or an array
+        //! of six non-negative integers ordered xneg, xpos, yneg, ypos, zneg,
+        //! zpos.  Zero disables the face.
+        std::array<std::size_t, 6> asPmlThickness(toml::node const& node, std::string const& key)
+        {
+            std::array<std::size_t, 6> result{};
+            auto put = [&](std::int64_t value, std::size_t face) {
+                if(value < 0)
+                    fail(key, "every thickness must be a non-negative integer");
+                result[face] = static_cast<std::size_t>(value);
+            };
+            if(auto const scalar = node.value<std::int64_t>())
+            {
+                for(std::size_t face = 0; face < result.size(); ++face)
+                    put(*scalar, face);
+                return result;
+            }
+            auto const* array = node.as_array();
+            if(array == nullptr || array->size() != result.size())
+                fail(
+                    key,
+                    "expected a non-negative integer or an array of six non-negative "
+                    "integers (xneg, xpos, yneg, ypos, zneg, zpos)");
+            for(std::size_t face = 0; face < result.size(); ++face)
+                put(asInteger((*array)[face], key), face);
             return result;
         }
 
@@ -280,6 +311,10 @@ namespace picBunch
                     "\"pml\" writes the convolutional PML slab records a "
                     "--fieldAbsorber pml restart deck requires");
         }
+
+        if(auto const* node = picongpu.get("pml_thickness"))
+            config.picongpu.pmlThickness
+                = asPmlThickness(*node, "picongpu.pml_thickness");
 
         config.domain.cells = asCells(require(domain, "cells"), "domain.cells");
         // The physical cell size may live in [picongpu] (new schema) or in
@@ -591,6 +626,7 @@ namespace picBunch
              "picongpu.step",
              "picongpu.precision",
              "picongpu.absorber",
+             "picongpu.pml_thickness",
              "picongpu.species",
              "picongpu.output_species",
              "picongpu.empty_species"},

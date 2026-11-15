@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: Rene Widera
 //
 // Group: convolutional PML auxiliary state of the PIConGPU checkpoint writer.
-// With absorber = "pml" the writer adds the eight slab records a PIConGPU PML
+// With absorber = "pml" the writer adds the twelve slab records a PIConGPU PML
 // deck loads on restart (zero initial state, main-field geometry, parent
-// units and Yee positions); the default and "exponential" keep the previous
-// tree.  Verified against the raw HDF5 layout.
+// units and Yee positions); only the face rim is stored, while the dataset
+// extent stays the full domain.  The default and "exponential" keep the
+// previous tree.  Verified against the raw HDF5 layout and the openPMD
+// slab-view read path.
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Config.hpp"
@@ -13,10 +15,13 @@
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/Types.hpp"
 
+#include <openPMD/openPMD.hpp>
+
 #include <hdf5.h>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -191,6 +196,58 @@ namespace
         H5Sclose(space);
         H5Dclose(dataset);
         return values;
+    }
+    //! Larger grid so every face rim leaves a non-empty interior.
+    picBunch::Field makeSparseField()
+    {
+        picBunch::Field field;
+        field.grid.n = {24, 20, 16}; // nx, ny, nz
+        field.grid.spacing = {0.5, 1.5, 2.5};
+        field.grid.origin = {1.0, 2.0, 3.0};
+        field.grid.fftPadding = 2;
+        for(int c = 0; c < 6; ++c)
+        {
+            field.data[c].resize(field.grid.size());
+            for(std::size_t l = 0; l < field.grid.size(); ++l)
+                field.data[c][l] = 0.0625 * static_cast<double>(c);
+        }
+        return field;
+    }
+
+    //! PIConGPU PML face geometry for slab 0..5 (xneg..zpos).
+    struct TestFace
+    {
+        std::size_t axis;
+        std::size_t begin;
+        std::size_t size;
+    };
+
+    TestFace testFace(
+        std::size_t slab,
+        std::size_t thickness,
+        std::size_t nz,
+        std::size_t ny,
+        std::size_t nx)
+    {
+        std::size_t const axis = slab < 2u ? 2u : (slab < 4u ? 1u : 0u);
+        std::size_t const n = axis == 2u ? nx : (axis == 1u ? ny : nz);
+        std::size_t const size = std::min(thickness, n);
+        return {axis, slab % 2u == 0u ? 0u : n - size, size};
+    }
+
+    //! Global [z, y, x] begin and extent of one face.
+    void faceBox(
+        TestFace const& face,
+        std::size_t nz,
+        std::size_t ny,
+        std::size_t nx,
+        std::array<std::size_t, 3>& begin,
+        std::array<std::size_t, 3>& extent)
+    {
+        begin = {0u, 0u, 0u};
+        extent = {nz, ny, nx};
+        begin[face.axis] = face.begin;
+        extent[face.axis] = face.size;
     }
 } // namespace
 
@@ -402,4 +459,288 @@ TEST(Restart, PmlAbsorberFloat64UsesDoubleSlabs)
     H5Dclose(dataset);
     H5Fclose(file);
     std::filesystem::remove_all(temporaryDirectory());
+}
+
+// ---------------------------------------------------------------------------
+// Sparse-chunk layout: the extent stays (nz, ny, nx), but only the rim chunk of
+// each face is written.  The interior is left unwritten and reads as HDF5's
+// default fill value zero; a PIConGPU-style slab-view load returns zeros.
+TEST(Restart, PmlAbsorberWritesSparseRimChunks)
+{
+    auto const directory = temporaryDirectory() / "checkpoints_pml_sparse";
+    std::filesystem::remove_all(temporaryDirectory());
+    std::filesystem::create_directories(temporaryDirectory());
+    auto const input = temporaryDirectory() / "input.h5";
+    writeParticleInput(input);
+
+    auto const field = makeSparseField();
+    picBunch::PicOnGPUWriteOptions options;
+    options.step = 2;
+    options.directory = directory.string();
+    options.inputFile = input.string();
+    options.inputIteration = 0;
+    options.time = 2.5e-13;
+    options.timeUnitSI = 1.0;
+    options.dt = 1.0e-15;
+    options.unitLength = 1.0;
+    options.unitEField = 2.0;
+    options.unitBField = 4.0;
+    options.nextId = 1;
+    options.absorber = "pml";
+    std::size_t constexpr thickness = 3u;
+    options.pmlThickness = {thickness, thickness, thickness, thickness, thickness, thickness};
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
+
+    std::size_t const nx = field.grid.n[0];
+    std::size_t const ny = field.grid.n[1];
+    std::size_t const nz = field.grid.n[2];
+    auto const path = directory / "checkpoint_000002.h5";
+    char const* const slabs[6] = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+    char const* const components[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
+    char const* const records[2] = {"Convolutional PML E", "Convolutional PML B"};
+
+    hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    for(int r = 0; r < 2; ++r)
+        for(int s = 0; s < 6; ++s)
+        {
+            auto const face = testFace(static_cast<std::size_t>(s), thickness, nz, ny, nx);
+            std::array<std::size_t, 3> chunkBegin{};
+            std::array<std::size_t, 3> chunkExtent{};
+            faceBox(face, nz, ny, nx, chunkBegin, chunkExtent);
+            // The HDF5 chunk is one rim plane; its grid aligns with the dataset
+            // origin, so a positive face allocates only rim planes.
+            std::array<std::size_t, 3> expectedChunk{nz, ny, nx};
+            expectedChunk[face.axis] = 1u;
+            std::string const base
+                = std::string("data/2/fields/") + records[r] + "_" + slabs[s];
+            for(int c = 0; c < 6; ++c)
+            {
+                std::string const componentPath = base + "/" + components[c];
+                hid_t dataset = H5Dopen2(file, componentPath.c_str(), H5P_DEFAULT);
+                ASSERT_GE(dataset, 0) << componentPath;
+                hid_t space = H5Dget_space(dataset);
+                hsize_t dims[3] = {0, 0, 0};
+                ASSERT_EQ(H5Sget_simple_extent_dims(space, dims, nullptr), 3);
+                // (a) extent is still the full global domain.
+                EXPECT_EQ(dims[0], nz) << componentPath;
+                EXPECT_EQ(dims[1], ny) << componentPath;
+                EXPECT_EQ(dims[2], nx) << componentPath;
+                // (b) only rim planes are allocated; one chunk per plane.
+                hid_t plist = H5Dget_create_plist(dataset);
+                hsize_t chunkDims[3] = {0, 0, 0};
+                ASSERT_EQ(H5Pget_chunk(plist, 3, chunkDims), 3) << componentPath;
+                EXPECT_EQ(chunkDims[0], expectedChunk[0]) << componentPath;
+                EXPECT_EQ(chunkDims[1], expectedChunk[1]) << componentPath;
+                EXPECT_EQ(chunkDims[2], expectedChunk[2]) << componentPath;
+                hsize_t chunks = 0;
+                ASSERT_GE(H5Dget_num_chunks(dataset, space, &chunks), 0);
+                EXPECT_EQ(chunks, face.size) << componentPath;
+                hsize_t bytes = 0;
+                for(hsize_t chunk = 0; chunk < chunks; ++chunk)
+                {
+                    hsize_t offset[3] = {0, 0, 0};
+                    unsigned filterMask = 0;
+                    haddr_t address = 0;
+                    hsize_t size = 0;
+                    ASSERT_GE(
+                        H5Dget_chunk_info(
+                            dataset, space, chunk, offset, &filterMask, &address, &size),
+                        0);
+                    // Every allocated plane lies inside the face rim.
+                    EXPECT_GE(offset[face.axis], chunkBegin[face.axis]) << componentPath;
+                    EXPECT_LT(offset[face.axis], chunkBegin[face.axis] + face.size)
+                        << componentPath;
+                    for(std::size_t axis = 0; axis < 3u; ++axis)
+                    {
+                        if(axis != face.axis)
+                        {
+                            EXPECT_EQ(offset[axis], 0u) << componentPath;
+                        }
+                    }
+                    bytes = size;
+                }
+                EXPECT_EQ(
+                    bytes, chunkDims[0] * chunkDims[1] * chunkDims[2] * sizeof(float))
+                    << componentPath;
+                H5Pclose(plist);
+                H5Sclose(space);
+                H5Dclose(dataset);
+            }
+        }
+    H5Fclose(file);
+
+    // (c) PIConGPU's slab-view call pattern and (d) the unwritten interior.
+    openPMD::Series series(path.string(), openPMD::Access::READ_ONLY);
+    auto iteration = series.iterations[2];
+    for(int r = 0; r < 2; ++r)
+        for(int s = 0; s < 6; ++s)
+        {
+            auto const face = testFace(static_cast<std::size_t>(s), thickness, nz, ny, nx);
+            std::array<std::size_t, 3> faceBegin{};
+            std::array<std::size_t, 3> faceExtent{};
+            faceBox(face, nz, ny, nx, faceBegin, faceExtent);
+            std::string const record
+                = std::string(records[r]) + "_" + slabs[s];
+            for(int c = 0; c < 6; ++c)
+            {
+                auto rc = iteration.meshes[record][components[c]];
+                auto data = rc.loadChunk<float>(
+                    openPMD::Offset{faceBegin[0], faceBegin[1], faceBegin[2]},
+                    openPMD::Extent{faceExtent[0], faceExtent[1], faceExtent[2]});
+                series.flush();
+                std::size_t const count = faceExtent[0] * faceExtent[1] * faceExtent[2];
+                for(std::size_t i = 0; i < count; ++i)
+                    ASSERT_EQ(data.get()[i], 0.0f) << record << "/" << components[c];
+            }
+        }
+    // (d) the interior is never written.  PIConGPU's RestartFieldLoader zeroes
+    // its host buffer (`field.getHostBuffer().setValue(0.0)`) and then loads
+    // only the per-face rim chunk.  openPMD 0.17 sets H5D_FILL_TIME_NEVER, so a
+    // generic read of an unallocated chunk leaves the caller buffer untouched;
+    // the consumer's zero-fill is what makes the interior zero.  Emulate that
+    // exact sequence: start from a zeroed interior and read it back (the
+    // unallocated chunks leave it untouched at zero).
+    {
+        auto rc = iteration.meshes["Convolutional PML E_xneg"]["xy"];
+        std::size_t const iz = nz - 2 * thickness;
+        std::size_t const iy = ny - 2 * thickness;
+        std::size_t const ix = nx - 2 * thickness;
+        ASSERT_GT(iz * iy * ix, 0u);
+        std::vector<float> interior(iz * iy * ix, 0.0f);
+        rc.loadChunkRaw(
+            interior.data(),
+            openPMD::Offset{thickness, thickness, thickness},
+            openPMD::Extent{iz, iy, ix});
+        series.flush();
+        for(float const value : interior)
+            ASSERT_EQ(value, 0.0f);
+    }
+    std::filesystem::remove_all(temporaryDirectory());
+}
+
+// ---------------------------------------------------------------------------
+// Copy path: an input checkpoint with sparse, non-zero PML rim values is copied
+// as rim chunks (not densified) and the values survive bit for bit.
+TEST(Restart, PmlCopyPreservesSparseRim)
+{
+    auto const root = temporaryDirectory();
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    auto const input = root / "input.h5";
+    writeParticleInput(input);
+
+    auto const field = makeSparseField();
+    picBunch::PicOnGPUWriteOptions base;
+    base.step = 2;
+    base.directory = (root / "source").string();
+    base.inputFile = input.string();
+    base.inputIteration = 0;
+    base.time = 2.5e-13;
+    base.timeUnitSI = 1.0;
+    base.dt = 1.0e-15;
+    base.unitLength = 1.0;
+    base.unitEField = 2.0;
+    base.unitBField = 4.0;
+    base.nextId = 1;
+    base.absorber = "pml";
+    std::size_t constexpr thickness = 3u;
+    base.pmlThickness = {thickness, thickness, thickness, thickness, thickness, thickness};
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, base);
+
+    std::size_t const nx = field.grid.n[0];
+    std::size_t const ny = field.grid.n[1];
+    std::size_t const nz = field.grid.n[2];
+    auto const sourcePath = root / "source" / "checkpoint_000002.h5";
+
+    // Inject non-zero values into the x-rim of E_xneg/xy and the y-rim of
+    // B_yneg/yz of the source checkpoint.
+    auto writeSlab = [](std::filesystem::path const& path,
+                        char const* record,
+                        char const* component,
+                        std::array<hsize_t, 3> const& start,
+                        std::array<hsize_t, 3> const& count,
+                        float value) {
+        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+        ASSERT_GE(file, 0);
+        std::string const datasetPath
+            = std::string("data/2/fields/") + record + "/" + component;
+        hid_t dataset = H5Dopen2(file, datasetPath.c_str(), H5P_DEFAULT);
+        ASSERT_GE(dataset, 0) << datasetPath;
+        hid_t space = H5Dget_space(dataset);
+        ASSERT_GE(
+            H5Sselect_hyperslab(
+                space, H5S_SELECT_SET, start.data(), nullptr, count.data(), nullptr),
+            0);
+        hsize_t memoryDims[3] = {count[0], count[1], count[2]};
+        hid_t memory = H5Screate_simple(3, memoryDims, nullptr);
+        std::vector<float> values(
+            static_cast<std::size_t>(count[0] * count[1] * count[2]), value);
+        ASSERT_GE(
+            H5Dwrite(
+                dataset, H5T_NATIVE_FLOAT, memory, space, H5P_DEFAULT, values.data()),
+            0);
+        H5Sclose(memory);
+        H5Sclose(space);
+        H5Dclose(dataset);
+        H5Fclose(file);
+    };
+    writeSlab(
+        sourcePath, "Convolutional PML E_xneg", "xy",
+        {0, 0, 0}, {nz, ny, thickness}, 1.5f);
+    writeSlab(
+        sourcePath, "Convolutional PML B_yneg", "yz",
+        {0, 0, 0}, {nz, thickness, nx}, 2.5f);
+
+    picBunch::PicOnGPUWriteOptions copy = base;
+    copy.step = 3;
+    copy.directory = (root / "copy").string();
+    copy.inputFile = sourcePath.string();
+    copy.inputIteration = 2;
+    copy.requiredInputSpecies = {};
+    copy.absorber = "none";
+    picBunch::writePicOnGPUCheckpointOpenPMD(field, copy);
+
+    auto const copyPath = root / "copy" / "checkpoint_000003.h5";
+    hid_t file = H5Fopen(copyPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    ASSERT_GE(file, 0);
+    {
+        std::string const path = "data/3/fields/Convolutional PML E_xneg/xy";
+        hid_t dataset = H5Dopen2(file, path.c_str(), H5P_DEFAULT);
+        ASSERT_GE(dataset, 0);
+        hid_t space = H5Dget_space(dataset);
+        hsize_t dims[3] = {0, 0, 0};
+        ASSERT_EQ(H5Sget_simple_extent_dims(space, dims, nullptr), 3);
+        EXPECT_EQ(dims[0], nz);
+        EXPECT_EQ(dims[1], ny);
+        EXPECT_EQ(dims[2], nx);
+        hsize_t chunks = 0;
+        ASSERT_GE(H5Dget_num_chunks(dataset, space, &chunks), 0);
+        EXPECT_EQ(chunks, thickness);
+        auto const values = readFloatDataset(file, path.c_str());
+        ASSERT_EQ(values.size(), nz * ny * nx);
+        for(std::size_t z = 0; z < nz; ++z)
+            for(std::size_t y = 0; y < ny; ++y)
+                for(std::size_t x = 0; x < nx; ++x)
+                {
+                    float const expected = x < thickness ? 1.5f : 0.0f;
+                    EXPECT_EQ(values[(z * ny + y) * nx + x], expected);
+                }
+        H5Sclose(space);
+        H5Dclose(dataset);
+    }
+    {
+        std::string const path = "data/3/fields/Convolutional PML B_yneg/yz";
+        auto const values = readFloatDataset(file, path.c_str());
+        ASSERT_EQ(values.size(), nz * ny * nx);
+        for(std::size_t z = 0; z < nz; ++z)
+            for(std::size_t y = 0; y < ny; ++y)
+                for(std::size_t x = 0; x < nx; ++x)
+                {
+                    float const expected = y < thickness ? 2.5f : 0.0f;
+                    EXPECT_EQ(values[(z * ny + y) * nx + x], expected);
+                }
+    }
+    H5Fclose(file);
+    std::filesystem::remove_all(root);
 }
