@@ -466,7 +466,7 @@ namespace picBunch
                 TAcc const& acc,
                 alpaka::concepts::IMdSpan auto a,
                 alpaka::concepts::IMdSpan auto const& b,
-                std::uint32_t count) const
+                std::size_t count) const
             {
                 for(auto [l] : alpaka::onAcc::makeIdxMap(
                         acc,
@@ -474,14 +474,14 @@ namespace picBunch
                         alpaka::IdxRange{count}))
                 {
                     // Packed half-spectrum: re at [l,0], im at [l,1].
-                    double const ar = a[alpaka::Vec{l, 0u}];
-                    double const ai = a[alpaka::Vec{l, 1u}];
-                    double const br = b[alpaka::Vec{l, 0u}];
-                    double const bi = b[alpaka::Vec{l, 1u}];
+                    double const ar = a[alpaka::Vec{l, std::size_t{0u}}];
+                    double const ai = a[alpaka::Vec{l, std::size_t{1u}}];
+                    double const br = b[alpaka::Vec{l, std::size_t{0u}}];
+                    double const bi = b[alpaka::Vec{l, std::size_t{1u}}];
                     double const re = ar * br - ai * bi;
                     double const im = ar * bi + ai * br;
-                    a[alpaka::Vec{l, 0u}] = re;
-                    a[alpaka::Vec{l, 1u}] = im;
+                    a[alpaka::Vec{l, std::size_t{0u}}] = re;
+                    a[alpaka::Vec{l, std::size_t{1u}}] = im;
                 }
             }
         };
@@ -645,7 +645,7 @@ namespace picBunch
                 alpaka::concepts::IMdSpan auto out,
                 alpaka::concepts::IMdSpan auto a,
                 alpaka::concepts::IMdSpan auto const& b,
-                std::uint32_t count) const
+                std::size_t count) const
             {
                 for(auto [l] : alpaka::onAcc::makeIdxMap(
                         acc,
@@ -653,14 +653,14 @@ namespace picBunch
                         alpaka::IdxRange{count}))
                 {
                     // Packed half-spectrum: re at [l,0], im at [l,1].
-                    double const ar = a[alpaka::Vec{l, 0u}];
-                    double const ai = a[alpaka::Vec{l, 1u}];
-                    double const br = b[alpaka::Vec{l, 0u}];
-                    double const bi = b[alpaka::Vec{l, 1u}];
-                    double const orr = out[alpaka::Vec{l, 0u}];
-                    double const ori = out[alpaka::Vec{l, 1u}];
-                    out[alpaka::Vec{l, 0u}] = orr + ar * br - ai * bi;
-                    out[alpaka::Vec{l, 1u}] = ori + ar * bi + ai * br;
+                    double const ar = a[alpaka::Vec{l, std::size_t{0u}}];
+                    double const ai = a[alpaka::Vec{l, std::size_t{1u}}];
+                    double const br = b[alpaka::Vec{l, std::size_t{0u}}];
+                    double const bi = b[alpaka::Vec{l, std::size_t{1u}}];
+                    double const orr = out[alpaka::Vec{l, std::size_t{0u}}];
+                    double const ori = out[alpaka::Vec{l, std::size_t{1u}}];
+                    out[alpaka::Vec{l, std::size_t{0u}}] = orr + ar * br - ai * bi;
+                    out[alpaka::Vec{l, std::size_t{1u}}] = ori + ar * bi + ai * br;
                 }
             }
         };
@@ -814,6 +814,15 @@ namespace picBunch
          * allocated by the pipeline, so reject it before any allocation.
          */
         constexpr std::size_t kMaxNodesPerAxis = 1u << 20;
+        /*! Replicated-path padded-node cap.
+         *
+         * Deliberately unchanged while the limit audit runs.  The replicated
+         * real-space views are 3-D doubles with 32-bit byte pitches, so their
+         * own byte-offset limit is 2^29 padded nodes; the historical 2^28
+         * assumed 16-byte complex elements there.  The final replicated number
+         * is part of the same audit as the vendor FFT limit and will be set
+         * here in one place.
+         */
         constexpr std::size_t kMaxPaddedNodes = 1u << 28;
 
         /*! Tolerance -> FFT padding.  Padding 1 is never selected: it is a
@@ -1644,15 +1653,16 @@ namespace picBunch
 
         // Reject an infeasible grid before the first allocation.  Both the
         // per-axis and the padded total are checked; the product is formed in
-        // 64-bit with an explicit overflow guard.  The replicated path keeps
-        // the historical 2^28-node cap; a distributed context may exceed it by
-        // up to the aggregate per-rank budget, because the slab decomposition
-        // keeps only M^3/size nodes per rank.
+        // 64-bit with an explicit overflow guard.
+        //
+        // The two FFT layouts have different limits:
+        //  * replicated: each rank holds the whole padded box, capped at
+        //    kMaxPaddedNodes (pending the limit audit, see above);
+        //  * distributed: every offset, count and pitch is 64-bit and the MPI
+        //    transfer is chunked, so the only limit is what a vendor plan
+        //    parameter can express (int, see kVendorPlanIntLimit).
         bool const canDistribute = options.parallel && options.parallel->distributed()
             && options.fftMode != FftMode::Replicated;
-        std::uint64_t maxPadded = static_cast<std::uint64_t>(kMaxPaddedNodes);
-        if(canDistribute)
-            maxPadded *= static_cast<std::uint64_t>(options.parallel->size) * 8u;
         std::uint64_t padded = 1u;
         for(int a = 0; a < 3; ++a)
         {
@@ -1663,15 +1673,54 @@ namespace picBunch
                     + " is infeasible (per-axis limit " + std::to_string(kMaxNodesPerAxis)
                     + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
             std::uint64_t const axisPadded = static_cast<std::uint64_t>(grid.n[a]) * padding;
-            if(axisPadded != 0u && padded > maxPadded / axisPadded)
+            if(axisPadded != 0u
+               && padded > std::numeric_limits<std::uint64_t>::max() / axisPadded)
                 throw std::runtime_error(
                     "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
                     + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
                     + " with padding " + std::to_string(padding)
-                    + " is infeasible (limit " + std::to_string(maxPadded)
-                    + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
+                    + " is infeasible (node count exceeds the 64-bit range)");
             padded *= axisPadded;
         }
+        if(canDistribute)
+        {
+            // The vendor plan parameters are int, so the batch a batched
+            // transform asks for must fit.  The balanced z-split gives the
+            // largest rank ceil(Mz / ranks) planes; this is a representability
+            // check, never a reason to shrink the domain or add ranks.
+            int const ranks = options.parallel->size;
+            auto const ceilDiv = [](std::uint64_t value, int divisor) {
+                return (value + static_cast<std::uint64_t>(divisor) - 1u)
+                    / static_cast<std::uint64_t>(divisor);
+            };
+            std::uint64_t const Mx = static_cast<std::uint64_t>(grid.n[0]) * padding;
+            std::uint64_t const My = static_cast<std::uint64_t>(grid.n[1]) * padding;
+            std::uint64_t const Mz = static_cast<std::uint64_t>(grid.n[2]) * padding;
+            std::uint64_t const batch
+                = std::max(My * ceilDiv(Mz, ranks), ceilDiv(Mx, ranks) * My);
+            std::uint64_t const limit
+                = static_cast<std::uint64_t>(detail::kVendorPlanIntLimit);
+            if(batch > limit)
+                throw std::runtime_error(
+                    "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
+                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
+                    + " with padding " + std::to_string(padding) + " is infeasible: rank "
+                    + std::to_string(options.parallel->rank) + " needs a vendor FFT batch of "
+                    + std::to_string(batch) + " elements (worst of "
+                    + std::to_string(ranks) + " ranks), above the vendor plan-parameter limit of "
+                    + std::to_string(limit)
+                    + " (the cuFFT plan parameters are int); the padded box is "
+                    + std::to_string(padded) + " nodes");
+        }
+        else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
+            throw std::runtime_error(
+                "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
+                + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
+                + " with padding " + std::to_string(padding)
+                + " is infeasible on rank "
+                + std::to_string(options.parallel ? options.parallel->rank : 0)
+                + " (replicated limit " + std::to_string(kMaxPaddedNodes)
+                + " padded nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
         return grid;
     }
 
@@ -1812,7 +1861,23 @@ namespace picBunch
             grid.spacing[2] / kRefinement};
 
         std::uint64_t const paddedNodes = static_cast<std::uint64_t>(Mx) * My * Mz;
-        std::uint32_t const spectrumCount = Mz * My * CP;
+        // Form the packed half-spectrum count in 64 bits: Mz*My*CP used to be
+        // a 32-bit product, which wrapped before the feasibility guard could
+        // see it on the distributed path.
+        std::size_t const spectrumCount
+            = static_cast<std::size_t>(Mz) * static_cast<std::size_t>(My) * CP;
+        // The full-grid (replicated and velocity-moment) kernels launch one
+        // thread per packed spectrum element; the launch grid is 32-bit.
+        // Resolved lazily so a distributed-only run never hits this limit.
+        std::size_t const spectrumBlocks = (spectrumCount + 63u) / 64u;
+        auto const checkedSpectrumFrame = [&]() -> std::uint32_t {
+            if(spectrumBlocks > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+                throw std::runtime_error(
+                    "computeField: packed spectrum of " + std::to_string(spectrumCount)
+                    + " nodes needs " + std::to_string(spectrumBlocks)
+                    + " blocks, above the 32-bit kernel launch grid");
+            return static_cast<std::uint32_t>(spectrumBlocks);
+        };
 
         // Resolve the FFT path before any FFT buffer or plan is acquired.  The
         // distributed branch owns only slab-sized arrays; the full-grid real
@@ -1848,7 +1913,7 @@ namespace picBunch
         // Packed half-spectrum view: Complex is two adjacent doubles.  The last
         // MdSpan dimension is the fastest one, so the {count, 2} view with index
         // {l, 0} / {l, 1} lands on element 2*l / 2*l+1 (re / im).
-        using PackedSpectrumIndex = alpaka::Vec<std::uint32_t, 2u>;
+        using PackedSpectrumIndex = alpaka::Vec<std::size_t, 2u>;
         auto const packedSpectrumExtents = PackedSpectrumIndex{spectrumCount, 2u};
         static_assert(std::is_same_v<
                       std::remove_cvref_t<decltype(packedSpectrumExtents)>::value_type,
@@ -2616,13 +2681,19 @@ namespace picBunch
                     auto kernelPlaneData = alpaka::onHost::allocUnified<double>(
                         device,
                         nTerms3 * planeStride);
+                    auto const planeExtents = alpaka::Vec<std::size_t, 3u>{Mz, My, Mx};
+                    auto const planePitches = alpaka::Vec<std::size_t, 3u>{
+                        static_cast<std::size_t>(Mx) * My * sizeof(double),
+                        static_cast<std::size_t>(Mx) * sizeof(double),
+                        sizeof(double)};
                     auto planeView = [&](std::size_t a) {
                         return alpaka::makeMdSpan(
                             kernelPlaneData.data() + a * planeStride,
-                            realExt);
+                            planeExtents,
+                            planePitches);
                     };
-                    auto const kernelPlaneExtents = alpaka::Vec<std::uint32_t, 4u>{
-                        static_cast<std::uint32_t>(nTerms3),
+                    auto const kernelPlaneExtents = alpaka::Vec<std::size_t, 4u>{
+                        nTerms3,
                         Mz,
                         My,
                         Mx};
@@ -2646,13 +2717,17 @@ namespace picBunch
                         auto launch = [&](auto tag) {
                             constexpr Shape S = decltype(tag)::value;
                             auto const particleExtents = alpaka::Vec<std::uint32_t, 1u>{N};
-                            auto const rhoExtents = alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx};
+                            auto const rhoExtents = alpaka::Vec<std::size_t, 3u>{Mz, My, Mx};
+                            auto const rhoPitches = alpaka::Vec<std::size_t, 3u>{
+                                static_cast<std::size_t>(Mx) * My * sizeof(double),
+                                static_cast<std::size_t>(Mx) * sizeof(double),
+                                sizeof(double)};
                             static_assert(std::is_same_v<
                                           std::remove_cvref_t<decltype(particleExtents)>::value_type,
                                           std::uint32_t>);
                             static_assert(std::is_same_v<
                                           std::remove_cvref_t<decltype(rhoExtents)>::value_type,
-                                          std::uint32_t>);
+                                          std::size_t>);
                             queue.enqueue(
                                 alpaka::onHost::FrameSpec{(N + 63u) / 64u, 64u},
                                 MomentDepositKernel<S>{},
@@ -2664,7 +2739,7 @@ namespace picBunch
                                 alpaka::makeMdSpan(puz.data(), particleExtents),
                                 alpaka::makeMdSpan(pq.data(), particleExtents),
                                 N,
-                                alpaka::makeMdSpan(rhoReal.data(), rhoExtents),
+                                alpaka::makeMdSpan(rhoReal.data(), rhoExtents, rhoPitches),
                                 0u,
                                 Mz,
                                 Mx,
@@ -2761,7 +2836,7 @@ namespace picBunch
                                 kernelSpec);
                             if(inFull)
                                 queue.enqueue(
-                                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                                    alpaka::onHost::FrameSpec{checkedSpectrumFrame(), 64u},
                                     SpectrumAccumulateKernel{},
                                     packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
                                     packedSpectrum(reinterpret_cast<double*>(
@@ -2773,7 +2848,7 @@ namespace picBunch
                             if(inOrder3)
                             {
                                 queue.enqueue(
-                                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                                    alpaka::onHost::FrameSpec{checkedSpectrumFrame(), 64u},
                                     SpectrumAccumulateKernel{},
                                     packedSpectrum(reinterpret_cast<double*>(o3Spec.data())),
                                     packedSpectrum(reinterpret_cast<double*>(
@@ -2818,7 +2893,7 @@ namespace picBunch
                         // deliberately SIMD-safe, so the tests pin a <= 1 ulp /
                         // <= 2e-15 tolerance instead of bit-exactness.
                         auto const readoutExtents
-                            = alpaka::Vec<std::uint32_t, 3u>{outNz, outNy, outNx};
+                            = alpaka::Vec<std::size_t, 3u>{outNz, outNy, outNx};
                         auto const outPitches = alpaka::Vec<std::size_t, 3u>{
                             static_cast<std::size_t>(outNx) * outNy * sizeof(double),
                             static_cast<std::size_t>(outNx) * sizeof(double),
@@ -2948,7 +3023,9 @@ namespace picBunch
             Extents3 const slabFrame = Extents3::fill(4u);
             // The work buffer is a x-fastest Complex z-slab; both the kernel
             // build (real part) and the gather (real part) index it as a 3-D span.
-            auto const slabWorkExtents = alpaka::Vec<std::uint32_t, 3u>{nz, My, Mx};
+            // 64-bit extents: the slab can exceed 2^28 complex nodes, and the
+            // extent type decides the width of the MdSpan byte arithmetic.
+            auto const slabWorkExtents = alpaka::Vec<std::size_t, 3u>{nz, My, Mx};
             auto const slabWorkPitches = alpaka::Vec<std::size_t, 3u>{
                 static_cast<std::size_t>(Mx) * My * sizeof(Complex),
                 static_cast<std::size_t>(Mx) * sizeof(Complex),
@@ -2959,7 +3036,7 @@ namespace picBunch
                 slabWorkPitches);
             using SlabWorkView = std::remove_cvref_t<decltype(slabWorkView)>;
             using SlabWorkViewExtents = typename MdSpanExtents<SlabWorkView>::type;
-            static_assert(std::is_same_v<typename SlabWorkViewExtents::value_type, std::uint32_t>);
+            static_assert(std::is_same_v<typename SlabWorkViewExtents::value_type, std::size_t>);
             // The distributed kernel spectrum is the z-local (x-slabbed)
             // spectrum of this rank.  The kernel cache stores and restores
             // exactly this layout; the multidimensional shape fields in the
@@ -3141,9 +3218,16 @@ namespace picBunch
                 else
                     depositDevice(
                         members[b],
+                        // 64-bit byte pitches: a per-rank slab above 4 GiB used
+                        // to wrap the 32-bit MdSpan byte offset here and in the
+                        // binned TSC path, dropping charge into the wrong plane.
                         alpaka::makeMdSpan(
                             dfft.work(),
-                            alpaka::Vec<std::uint32_t, 3u>{nz, My, Mx}),
+                            alpaka::Vec<std::size_t, 3u>{nz, My, Mx},
+                            alpaka::Vec<std::size_t, 3u>{
+                                static_cast<std::size_t>(Mx) * My * sizeof(Complex),
+                                static_cast<std::size_t>(Mx) * sizeof(Complex),
+                                sizeof(Complex)}),
                         zOffset,
                         nz);
                 times.depositMs += elapsedMs(depositStart);
@@ -3232,16 +3316,25 @@ namespace picBunch
                     // therefore never dereferences the unified FFT slab.
                     if(localCount > 0u)
                     {
+                        std::size_t const stagedBlocks = (stagedCount + 63u) / 64u;
+                        if(stagedBlocks
+                           > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+                            throw std::runtime_error(
+                                "computeField: distributed read-out needs "
+                                + std::to_string(stagedBlocks)
+                                + " blocks, above the 32-bit kernel launch grid");
                         queue.enqueue(
                             alpaka::onHost::FrameSpec{
-                                static_cast<std::uint32_t>((stagedCount + 63u) / 64u),
+                                static_cast<std::uint32_t>(stagedBlocks),
                                 64u},
                             SlabGatherScaleKernel{},
                             slabWorkView,
+                            // 64-bit index and pitch: the staging buffer can
+                            // pass 4 GiB at a large output slab.
                             alpaka::makeMdSpan(
                                 slabStagingDev.data(),
-                                alpaka::Vec<std::uint32_t, 1u>{
-                                    static_cast<std::uint32_t>(stagedCapacity)}),
+                                alpaka::Vec<std::size_t, 1u>{stagedCapacity},
+                                alpaka::Vec<std::size_t, 1u>{sizeof(double)}),
                             outNx,
                             outNy,
                             localCount,
@@ -3353,9 +3446,16 @@ namespace picBunch
                 alpaka::onHost::wait(queue);
                 depositDevice(
                     members[b],
+                    // 64-bit extents and pitches: 8 bytes per padded node and
+                    // a box at the replicated cap is 2 GiB, so a 32-bit byte
+                    // offset would be one bit away from wrapping.
                     alpaka::makeMdSpan(
                         rhoReal.data(),
-                        alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx}),
+                        alpaka::Vec<std::size_t, 3u>{Mz, My, Mx},
+                        alpaka::Vec<std::size_t, 3u>{
+                            static_cast<std::size_t>(Mx) * My * sizeof(double),
+                            static_cast<std::size_t>(Mx) * sizeof(double),
+                            sizeof(double)}),
                     0u,
                     Mz);
             }
@@ -3367,15 +3467,21 @@ namespace picBunch
             alpaka::onHost::wait(queue);
             times.fftMs += elapsedMs(fftStart);
 
+            auto const realPitches = alpaka::Vec<std::size_t, 3u>{
+                static_cast<std::size_t>(Mx) * My * sizeof(double),
+                static_cast<std::size_t>(Mx) * sizeof(double),
+                sizeof(double)};
             auto kernelRealView = alpaka::makeMdSpan(
                 kernelReal.data(),
-                alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx});
+                alpaka::Vec<std::size_t, 3u>{Mz, My, Mx},
+                realPitches);
             auto outRealView = alpaka::makeMdSpan(
                 outReal.data(),
-                alpaka::Vec<std::uint32_t, 3u>{Mz, My, Mx});
+                alpaka::Vec<std::size_t, 3u>{Mz, My, Mx},
+                realPitches);
             using OutRealView = std::remove_cvref_t<decltype(outRealView)>;
             using OutRealViewExtents = typename MdSpanExtents<OutRealView>::type;
-            static_assert(std::is_same_v<typename OutRealViewExtents::value_type, std::uint32_t>);
+            static_assert(std::is_same_v<typename OutRealViewExtents::value_type, std::size_t>);
 
             Vec3 const uRep{
                 binning.representativeU[b][0],
@@ -3452,7 +3558,7 @@ namespace picBunch
                 // product of two packed half-spectra; Complex<double> is two adjacent doubles
                 static_assert(sizeof(Complex) == 2u * sizeof(double), "unexpected Complex layout");
                 queue.enqueue(
-                    alpaka::onHost::FrameSpec{(spectrumCount + 63u) / 64u, 64u},
+                    alpaka::onHost::FrameSpec{checkedSpectrumFrame(), 64u},
                     MultiplySpectrumKernel{},
                     packedSpectrum(reinterpret_cast<double*>(kernelSpec.data())),
                     packedSpectrum(reinterpret_cast<double*>(rhoSpec.data())),
@@ -3474,10 +3580,10 @@ namespace picBunch
                 // functor is deliberately SIMD-safe, so the tests pin a
                 // <= 1 ulp / <= 2e-15 tolerance, independent of executor threads.
                 std::uint32_t const outCount = static_cast<std::uint32_t>(outNodes);
-                auto const compactExtents = alpaka::Vec<std::uint32_t, 1u>{outCount};
+                auto const compactExtents = alpaka::Vec<std::size_t, 1u>{outNodes};
                 static_assert(std::is_same_v<
                               std::remove_cvref_t<decltype(compactExtents)>::value_type,
-                              std::uint32_t>);
+                              std::size_t>);
                 queue.enqueue(
                     alpaka::onHost::FrameSpec{(outCount + 63u) / 64u, 64u},
                     detail::CompactGatherKernel{},

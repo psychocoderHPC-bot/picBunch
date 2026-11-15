@@ -1445,14 +1445,16 @@ namespace picBunch::pbfast
         // {nodes*sizeof(double), sizeof(double)} with no row padding.  The
         // allocation is at least double-aligned (allocUnified), which is all
         // the span contract needs.
+        // 64-bit extents and pitches: the particle arrays can pass 2^28
+        // elements, and the view types decide the MdSpan byte arithmetic.
         using Span1D = alpaka::MdSpan<
             double,
-            alpaka::Vec<std::uint32_t, 1u>,
-            alpaka::Vec<std::uint32_t, 1u>,
+            alpaka::Vec<std::size_t, 1u>,
+            alpaka::Vec<std::size_t, 1u>,
             alpaka::Alignment<>>;
         using SpanAcc = alpaka::MdSpan<
             double,
-            alpaka::Vec<std::uint32_t, 2u>,
+            alpaka::Vec<std::size_t, 2u>,
             alpaka::Vec<std::size_t, 2u>,
             alpaka::Alignment<>>;
         static_assert(alpaka::concepts::IMdSpan<Span1D>);
@@ -1461,11 +1463,11 @@ namespace picBunch::pbfast
         static_assert(std::is_same_v<
                       typename std::remove_cvref_t<
                           decltype(std::declval<Span1D const&>().getExtents())>::value_type,
-                      std::uint32_t>);
+                      std::size_t>);
         static_assert(std::is_same_v<
                       typename std::remove_cvref_t<
                           decltype(std::declval<SpanAcc const&>().getExtents())>::value_type,
-                      std::uint32_t>);
+                      std::size_t>);
 
         struct FastNearKernel
         {
@@ -1748,9 +1750,11 @@ namespace picBunch::pbfast
         }
 
         template<typename T>
-        auto alloc1(Context& ctx, std::uint32_t n)
+        auto alloc1(Context& ctx, std::size_t n)
         {
-            return alpaka::onHost::allocUnified<T>(ctx.device, alpaka::Vec<std::uint32_t, 1u>{n});
+            // 64-bit extent: the particle and accumulator arrays can pass 2^28
+            // elements, and the extent type decides the MdSpan offset width.
+            return alpaka::onHost::allocUnified<T>(ctx.device, alpaka::Vec<std::size_t, 1u>{n});
         }
     } // namespace
 
@@ -1796,7 +1800,7 @@ namespace picBunch::pbfast
         auto prux = alloc1<double>(ctx, n);
         auto pruy = alloc1<double>(ctx, n);
         auto pruz = alloc1<double>(ctx, n);
-        auto dout = alloc1<double>(ctx, static_cast<std::uint32_t>(6 * nodes));
+        auto dout = alloc1<double>(ctx, std::size_t{6} * nodes);
         for(std::uint32_t i = 0; i < n; ++i)
         {
             px.data()[i] = near.x[i];
@@ -1827,9 +1831,9 @@ namespace picBunch::pbfast
         // are dense 1-D views; the accumulator is the dense {6, nodes} view
         // (x-fastest node, component as slow index) over the flat 6*nodes
         // buffer, with explicit pitches so no padding is introduced.
-        auto const particleExtents = alpaka::Vec<std::uint32_t, 1u>{n};
+        auto const particleExtents = alpaka::Vec<std::size_t, 1u>{n};
         auto const accExtents
-            = alpaka::Vec<std::uint32_t, 2u>{6u, static_cast<std::uint32_t>(nodes)};
+            = alpaka::Vec<std::size_t, 2u>{6u, nodes};
         auto const accPitches = alpaka::Vec<std::size_t, 2u>{
             static_cast<std::size_t>(nodes) * sizeof(double),
             sizeof(double)};
@@ -1932,7 +1936,7 @@ namespace picBunch::pbfast
         Context& ctx = context();
         std::size_t const n = all.size();
         auto const allocD = [&](std::size_t count) {
-            return alloc1<double>(ctx, static_cast<std::uint32_t>(count));
+            return alloc1<double>(ctx, count);
         };
         auto dx = allocD(n);
         auto dy = allocD(n);
