@@ -161,14 +161,18 @@ file are dropped silently, with no warning. The instance count comes from
 maximum of the `period` and `pluginConfig` counts), not from the other vectors.
 
 Omitting any option from a group is equally silent. Each option is a separate
-positional vector indexed by writer id, so a writer whose id lies past the end
-of a vector takes that option's default. For `--openPMD.range` the default is
-`:,:,:`. A missing `range` on any writer therefore reassigns the plane
+positional vector indexed by writer id. A writer whose id lies past the end of a
+vector takes that option's registered default when it has one. `range`, `file`
+and `ext` have scalar defaults (`:,:,:`, `simData` and the openPMD default
+extension). `source` instead defaults to the comma-joined
+`species_all, fields_all`, and `period`/`pluginConfig` have no default and set
+the writer count. A missing `range` on any writer therefore reassigns the plane
 selection: every later writer reads the range intended for the next writer, and
 the last field writer falls back to the full domain. On the production deck this
-wrote an 11 GB full-domain field dump instead of the requested plane. A range is read by the field writers only,
-so the particle writer's own `:,:,:` selects nothing, but that placeholder still
-has to be present to keep the field writer indices aligned.
+silently wrote the full domain instead of the requested plane. A range is read
+by the field writers only, so the particle writer's own `:,:,:` selects nothing,
+but that placeholder still has to be present to keep the field writer indices
+aligned.
 
 **Write exactly three tokens, one per physical axis, x then y then z.** A range
 is only correct if it has a token in every position; a range with fewer than
@@ -214,7 +218,7 @@ stored shapes were `[1, 168, 384]` for the y-x plane (z fixed) and
 
 The grouping is positional in the plugin code. The option accessor returns the
 stored value at the writer id, or the option default when that id was not
-supplied (`include/picongpu/plugins/multi/Option.hpp:177-189`):
+supplied (`include/picongpu/plugins/multi/Option.hpp:177-190`):
 
 ```cpp
 T_ValueType get(uint32_t idx) const
@@ -223,10 +227,12 @@ T_ValueType get(uint32_t idx) const
     {
         if(!m_hasDefaultValue)
             throw std::runtime_error(
-                std::string("There is no default value defined for the option " + getName()
-                            + " and idx is out of range"));
+                std::string(
+                    "There is no default value defined for the option " + getName()
+                    + " and idx is out of range"));
         return m_defaultValue;
     }
+
     return StorageType::operator[](idx);
 }
 ```
@@ -239,15 +245,21 @@ auto res = std::max({pluginConfig.size(), notifyPeriod.size(), pluginConfigForbi
 ```
 
 `Master` then creates one instance per id
-(`include/picongpu/plugins/multi/Master.hpp:116-122`), and each instance reads
-its own index (`include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:411-417`):
+(`include/picongpu/plugins/multi/Master.hpp:119-127`), and each instance reads
+its own index (`include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:411-418`):
 
 ```cpp
 else if(commandLineParameter->optionDefined(id))
+{
     res.** targetInConfigObject = commandLineParameter->get(id);
+}
 else if(commandLineParameter->hasDefault())
+{
     res.** targetInConfigObject = commandLineParameter->getDefault();
+}
 ```
 
 `--openPMD.range` is registered with default `:,:,:` at
 `include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:220-221` and `:518`.
+`--openPMD.source` is registered with default `species_all, fields_all` at
+`:223`.
