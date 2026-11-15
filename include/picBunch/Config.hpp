@@ -77,8 +77,9 @@ namespace picBunch
             //! ``NUM_CELLS`` order (xneg, xpos, yneg, ypos, zneg, zpos).
             //! Only used with ``absorber = "pml"``.  The value must match the
             //! restarting deck's compiled ``fieldAbsorber.param``; it sets the
-            //! thickness of the rim chunk written for each PML record and is
-            //! clamped to the grid extent of the face axis.
+            //! thickness of the rim chunk written for each PML record.  An
+            //! explicit value larger than the face-axis extent is rejected;
+            //! the default is clamped for a grid smaller than 12.
             std::array<std::size_t, 6> pmlThickness{12, 12, 12, 12, 12, 12};
             //! Ordered input species names read from ``--input``.  The scalar
             //! TOML form (a single string) parses to a one-entry list.

@@ -202,14 +202,23 @@ only the deck's compiled PML parameters (`fieldAbsorber.param`) and boundary
 choice determine how the slabs evolve after restart.
 
 `[picongpu] pml_thickness` sets the rim thickness in cells. It accepts one
-non-negative integer for every face or six integers in the PIConGPU `NUM_CELLS`
+positive integer for every face or six integers in the PIConGPU `NUM_CELLS`
 order `xneg, xpos, yneg, ypos, zneg, zpos` (default 12, the PIConGPU
 `THICKNESS`). The value must match the restarting deck's compiled
-`fieldAbsorber.param`; the writer clamps it to the grid extent of the face
-axis, so a thickness at or above that extent writes the whole face. The
-writer records the stored thickness as `picBunchPmlThickness` on each PML
-record and, on copy, rejects a `pml_thickness` larger than the input's stored
-rim; a smaller value is allowed.
+`fieldAbsorber.param`. An explicit value larger than the corresponding grid
+axis is rejected; the default is clamped to the axis, so a grid smaller than
+12 still loads. A restart must use the same or a smaller thickness: the
+writer records the stored value as `picBunchPmlThickness` on each PML record,
+and the copy path rejects a `pml_thickness` larger than the input's stored
+rim. A smaller value reads a subset of the stored rim and is allowed.
+
+```toml
+[picongpu]
+# One value for all six faces.
+pml_thickness = 12
+# Or per face, in NUM_CELLS order xneg, xpos, yneg, ypos, zneg, zpos.
+# pml_thickness = [12, 12, 12, 12, 12, 12]
+```
 
 A restart of an open-boundary deck without these records fails with
 `Key 'Convolutional PML E_yneg' does not exist (read-only)`. Workarounds for a

@@ -533,40 +533,44 @@ TEST(Config, AbsorberKeyRejectsUnknownValue)
         std::runtime_error);
 }
 
-TEST(Config, PmlThicknessParsesScalarAndArray)
+TEST(Config, PmlThicknessDefaultsAndValidation)
 {
     ConfigTest fixture;
-    std::string text = fullConfig;
-    text.replace(
-        text.find("precision = \"float64\""), 21,
-        "precision = \"float64\"\npml_thickness = 8");
-    auto const scalar = picBunch::loadConfig(fixture.write("pml-scalar.toml", text));
+    // Absent key: the historical default, unchanged configurations keep working.
+    auto const defaults
+        = picBunch::loadConfig(fixture.write("pml-default.toml", fullConfig));
+    for(std::size_t face = 0; face < 6; ++face)
+        EXPECT_EQ(defaults.picongpu.pmlThickness[face], 12u);
+
+    auto const withKey = [&](std::string const& name, std::string const& value) {
+        std::string text = fullConfig;
+        text.replace(
+            text.find("precision = \"float64\""), 21,
+            "precision = \"float64\"\npml_thickness = " + value);
+        return fixture.write(name, text);
+    };
+    // A scalar applies to all six faces.
+    auto const scalar = picBunch::loadConfig(withKey("pml-scalar.toml", "8"));
     for(std::size_t face = 0; face < 6; ++face)
         EXPECT_EQ(scalar.picongpu.pmlThickness[face], 8u);
 
-    text = fullConfig;
-    text.replace(
-        text.find("precision = \"float64\""), 21,
-        "precision = \"float64\"\npml_thickness = [1, 2, 3, 4, 5, 6]");
-    auto const array = picBunch::loadConfig(fixture.write("pml-array.toml", text));
+    // A six-entry array is honoured in xneg..zpos order.
+    auto const array = picBunch::loadConfig(
+        withKey("pml-array.toml", "[1, 2, 3, 4, 5, 6]"));
     EXPECT_EQ(
         array.picongpu.pmlThickness, (std::array<std::size_t, 6>{1, 2, 3, 4, 5, 6}));
 
-    text = fullConfig;
-    text.replace(
-        text.find("precision = \"float64\""), 21,
-        "precision = \"float64\"\npml_thickness = [1, 2, 3]");
-    EXPECT_THROW(
-        (void)picBunch::loadConfig(fixture.write("pml-bad.toml", text)),
-        std::runtime_error);
-
-    text = fullConfig;
-    text.replace(
-        text.find("precision = \"float64\""), 21,
-        "precision = \"float64\"\npml_thickness = -1");
-    EXPECT_THROW(
-        (void)picBunch::loadConfig(fixture.write("pml-negative.toml", text)),
-        std::runtime_error);
+    // Invalid: wrong length, non-positive, and larger than an axis extent
+    // (fullConfig domain cells are 32, 24, 16).
+    std::vector<std::string> const badValues{
+        "[1, 2, 3]", "0", "-1", "33", "[4, 4, 25, 4, 4, 4]"};
+    for(std::size_t i = 0; i < badValues.size(); ++i)
+    {
+        auto const path
+            = withKey("pml-bad-" + std::to_string(i) + ".toml", badValues[i]);
+        EXPECT_THROW((void)picBunch::loadConfig(path), std::runtime_error)
+            << badValues[i];
+    }
 }
 
 namespace
