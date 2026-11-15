@@ -533,6 +533,42 @@ TEST(Config, AbsorberKeyRejectsUnknownValue)
         std::runtime_error);
 }
 
+TEST(Config, PmlThicknessParsesScalarAndArray)
+{
+    ConfigTest fixture;
+    std::string text = fullConfig;
+    text.replace(
+        text.find("precision = \"float64\""), 21,
+        "precision = \"float64\"\npml_thickness = 8");
+    auto const scalar = picBunch::loadConfig(fixture.write("pml-scalar.toml", text));
+    for(std::size_t face = 0; face < 6; ++face)
+        EXPECT_EQ(scalar.picongpu.pmlThickness[face], 8u);
+
+    text = fullConfig;
+    text.replace(
+        text.find("precision = \"float64\""), 21,
+        "precision = \"float64\"\npml_thickness = [1, 2, 3, 4, 5, 6]");
+    auto const array = picBunch::loadConfig(fixture.write("pml-array.toml", text));
+    EXPECT_EQ(
+        array.picongpu.pmlThickness, (std::array<std::size_t, 6>{1, 2, 3, 4, 5, 6}));
+
+    text = fullConfig;
+    text.replace(
+        text.find("precision = \"float64\""), 21,
+        "precision = \"float64\"\npml_thickness = [1, 2, 3]");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("pml-bad.toml", text)),
+        std::runtime_error);
+
+    text = fullConfig;
+    text.replace(
+        text.find("precision = \"float64\""), 21,
+        "precision = \"float64\"\npml_thickness = -1");
+    EXPECT_THROW(
+        (void)picBunch::loadConfig(fixture.write("pml-negative.toml", text)),
+        std::runtime_error);
+}
+
 namespace
 {
     void replaceOnce(std::string& text, std::string const& needle, std::string const& replacement)

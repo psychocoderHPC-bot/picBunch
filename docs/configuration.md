@@ -190,7 +190,7 @@ must be set to `pml` whenever the restarting deck uses the convolutional PML:
 | --- | --- | --- |
 | `none` (default) | E, B, idProvider, particles only. | Periodic boundaries (`--periodic 1 1 1`), or any deck that loads no auxiliary field state. |
 | `exponential` | Identical to `none`. The exponential absorber stores no field state; PIConGPU reads its parameters back from the compiled `fieldAbsorber.param` on restart. | `--fieldAbsorber exponential` decks. |
-| `pml` | The previous tree plus the twelve zero-filled `Convolutional PML` slab records: six components `E` and `B`, each with a `neg` and a `pos` slab record (`E_xneg`…`E_zpos`, and the same six for `B`); the full per-record layout is in [openPMD backend selection](openpmd-backends.md#field-absorber-key). | `--fieldAbsorber pml` decks. |
+| `pml` | The previous tree plus the twelve `Convolutional PML` records: six components `E` and `B`, each with a `neg` and a `pos` slab record (`E_xneg`…`E_zpos`, and the same six for `B`). Each dataset keeps the full `(Nz, Ny, Nx)` extent but only stores the face rim of `pml_thickness` cells; the full per-record layout is in [openPMD backend selection](openpmd-backends.md#field-absorber-key). | `--fieldAbsorber pml` decks. |
 
 The PML records are all zero. picBunch computes a free-space field and has no
 PML state, and the PML auxiliary fields of a deck that has not run are exactly
@@ -201,19 +201,35 @@ is the faithful initial condition. The slabs describe the same grid as E and B;
 only the deck's compiled PML parameters (`fieldAbsorber.param`) and boundary
 choice determine how the slabs evolve after restart.
 
+`[picongpu] pml_thickness` sets the rim thickness in cells. It accepts one
+non-negative integer for every face or six integers in the PIConGPU `NUM_CELLS`
+order `xneg, xpos, yneg, ypos, zneg, zpos` (default 12, the PIConGPU
+`THICKNESS`). The value must match the restarting deck's compiled
+`fieldAbsorber.param`; the writer clamps it to the grid extent of the face
+axis, so a thickness at or above that extent writes the whole face.
+
 A restart of an open-boundary deck without these records fails with
 `Key 'Convolutional PML E_yneg' does not exist (read-only)`. Workarounds for a
 deck that does not need the PML: restart with periodic boundaries, or switch
 the deck to the exponential absorber.
 
-**PML vs exponential for large grids.** The twelve zero-filled PML slab records
-add 72 datasets (two records `E` and `B` times six slabs times six cross
-components), each at the full domain extent. For a 640x1536x640 grid in float32
-this is 168.8 GB on top of the 14.1 GB for the six main field components
-(182.8 GB total versus 14.1 GB without PML). Use `absorber = "exponential"`
-(deck `--fieldAbsorber exponential`) for large grids unless the physics
-requires the convolutional PML; the exponential absorber stores no field state
-and the checkpoint stays at the main-field size.
+**PML size.** The twelve PML records add 72 datasets (two records `E` and `B`
+times six slabs times six cross components). Each dataset keeps the full
+`(Nz, Ny, Nx)` extent, because `RestartFieldLoader` loads a per-face chunk at a
+global offset, but only the face rim is stored. For a 640x1536x640 grid in
+float32 the dense PML volume would be 168.8 GiB; with thickness 12 the rim is
+about 2.6 GiB (the rim fraction grows linearly with `pml_thickness`) on top of
+14.1 GiB for the six main field components.
+
+Both backends write the rim as sparse blocks. openPMD 0.17 sets HDF5's
+`H5D_FILL_TIME_NEVER` and ADIOS2 leaves unwritten blocks untouched, so a
+generic full-domain read of the interior is undefined. PIConGPU's
+`RestartFieldLoader` zeroes its host buffer and then loads only the allocated
+per-face chunk, which is exact; the writer targets that consumer. If another
+reader needs a defined interior, set `pml_thickness` to the face-axis extent so
+the whole face is written (the checkpoint returns to the main-field size plus
+the PML volume). Otherwise `absorber = "exponential"` stores no field state at
+all.
 
 The boundary-condition matrix of the full placement interface (periodic,
 exponential, PML) is documented in [PIConGPU restart checkpoints](picongpu-restart.md).

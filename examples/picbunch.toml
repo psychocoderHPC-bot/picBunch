@@ -30,10 +30,16 @@ step = 0
 precision = "float32"
 # Field-absorber kind of the deck that restarts the checkpoint, matching the
 # deck's --fieldAbsorber. "none" (default) and "exponential" leave the
-# checkpoint unchanged; "pml" adds the eight zero-filled "Convolutional PML
-# E/B_{xneg,xpos,yneg,ypos,zneg,zpos}" slab records a PML deck loads on
-# restart, so the PML slabs start from rest.
+# checkpoint unchanged; "pml" adds the twelve zero-filled "Convolutional PML
+# E/B_{xneg,xpos,yneg,ypos,zneg,zpos}" records a PML deck loads on restart.
+# Each keeps the full domain extent but stores only the face rim, so the PML
+# slabs start from rest without carrying the whole volume.
 #absorber = "none"
+# Rim thickness in cells of those PML records, matching the deck's
+# fieldAbsorber.param NUM_CELLS. One integer applies to every face; six
+# integers are xneg, xpos, yneg, ypos, zneg, zpos. Default 12 (PIConGPU's
+# THICKNESS); the writer clamps it to the grid extent of the face axis.
+#pml_thickness = 12
 # Species to read from --input and write into the checkpoint.  A string is the
 # one-entry historical form.  An array is an ordered input list: each entry is
 # read, placed and field-computed, and the six field components are summed.

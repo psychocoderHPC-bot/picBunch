@@ -981,6 +981,7 @@ namespace
         restart.unitCharge = config.picongpu.unitCharge;
         restart.float64 = config.picongpu.float64;
         restart.absorber = config.picongpu.absorber;
+        restart.pmlThickness = config.picongpu.pmlThickness;
         restart.generatedSpecies = std::move(generatedSpecies);
         restart.backend = config.checkpoint.backend == "adios2"
             ? picBunch::CheckpointBackend::Adios2

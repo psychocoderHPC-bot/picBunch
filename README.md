@@ -1056,7 +1056,9 @@ that the named species is present and never drops the others. `--picongpu-dt` se
 stored `dt`. The single `picongpu_idProvider` range covers the particles of every copied
 species (`nextId` is at least their total count). When the input checkpoint contains
 `Convolutional PML ...` records, the writer copies those records from the input instead of
-recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
+recomputing them; the copy keeps the full dataset extent and re-writes only the face rim
+chunk, so a sparse PIConGPU source stays sparse. See
+[docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
