@@ -124,3 +124,44 @@ TEST(MultiRankField, DistributedMatchesReplicatedOnEveryRank)
         << "distributed vs replicated max difference " << maxDiff
         << " (rank " << parallel.rank << " of " << parallel.size << ")";
 }
+
+namespace
+{
+    //! Set and restore one environment variable for a test.
+    struct ScopedEnv
+    {
+        char const* name;
+        ~ScopedEnv()
+        {
+            ::unsetenv(name);
+        }
+    };
+} // namespace
+
+TEST(MultiRankField, ChunkedTransposeMatchesReplicated)
+{
+    // MPI_Alltoallv only takes int counts and displacements.  The distributed
+    // transpose honours a larger 64-bit slice by chunking it into windows; a
+    // tiny window forces that scheduling on this small grid, and the result
+    // must still equal the replicated reference.  A regression that drops or
+    // duplicates a window changes the field.
+    ScopedEnv const windowGuard{"PICBUNCH_FFT_TRANSPOSE_WINDOW"};
+    ::setenv("PICBUNCH_FFT_TRANSPOSE_WINDOW", "7", 1);
+
+    picBunch::Bunch const bunch = makeBunch();
+    picBunch::MpiParallelContext parallel;
+    picBunch::ParallelContext const* par = &parallel;
+
+    std::vector<double> const reference
+        = computeFlat(bunch, makeOptions(picBunch::FftMode::Replicated), nullptr);
+    std::vector<double> const chunked
+        = computeFlat(bunch, makeOptions(picBunch::FftMode::Distributed), par);
+    ASSERT_EQ(reference.size(), chunked.size());
+    double const scale = std::max(1.0, reference[0]);
+    double maxDiff = 0.0;
+    for(std::size_t l = 0; l < reference.size(); ++l)
+        maxDiff = std::max(maxDiff, std::abs(reference[l] - chunked[l]));
+    EXPECT_LT(maxDiff, 1.0e-12 * scale)
+        << "chunked transpose vs replicated max difference " << maxDiff
+        << " (rank " << parallel.rank << " of " << parallel.size << ")";
+}

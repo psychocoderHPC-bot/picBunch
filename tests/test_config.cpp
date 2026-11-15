@@ -868,10 +868,10 @@ near_shell = "none"
 TEST(Config, MultiRankTomlCapScalesByRankCount)
 {
     // The medium case 440x800x480 at 2e-7 m has a padded box of 1.352e9 nodes,
-    // above the single-rank 2^28 cap.  A TOML-derived configuration with two
-    // ranks keeps only 676M nodes per rank, below the 2^31 per-rank limit, and
-    // must be accepted; the 880x1600x960 case needs 5.4e9 per rank and must be
-    // rejected.
+    // above the single-rank replicated cap (2^29 padded nodes).  With two ranks
+    // both the medium and the 880x1600x960 case (5.4e9 nodes per rank) are
+    // legal distributed decompositions and must be accepted: the replicated
+    // cap applies only when one rank holds the whole padded box.
     ConfigTest fixture;
     auto const medium = picBunch::loadConfig(fixture.write("medium.toml", capConfig(440, 800, 480)));
     auto const options = optionsFromConfig(medium);
@@ -891,53 +891,76 @@ TEST(Config, MultiRankTomlCapScalesByRankCount)
     EXPECT_NO_THROW(accepted = picBunch::makeGrid(bunch, pair));
     EXPECT_EQ(accepted.n, (picBunch::Idx3{440, 800, 480}));
 
-    // 880x1600x960 cells pad to 1.081e10 nodes, above the two-rank budget.
-    auto const tooBig = picBunch::loadConfig(fixture.write("big.toml", capConfig(880, 1600, 960)));
-    picBunch::ComputeOptions big = optionsFromConfig(tooBig);
+    // 880x1600x960 cells pad to 1.081e10 nodes, i.e. 5.4e9 per rank.  The
+    // replicated cap is a whole-box rule, so two distributed ranks must accept
+    // it: the distributed path has no node budget after the 64-bit fix.
+    auto const large = picBunch::loadConfig(fixture.write("big.toml", capConfig(880, 1600, 960)));
+    picBunch::ComputeOptions big = optionsFromConfig(large);
     picBunch::Bunch const bigBunch = centredParticle(big);
     big.parallel = &twoRanks;
-    EXPECT_THROW((void)picBunch::makeGrid(bigBunch, big), std::runtime_error);
+    EXPECT_NO_THROW((void)picBunch::makeGrid(bigBunch, big));
 }
 
-TEST(Config, DistributedPaddedNodeLimitIsPerRank)
+TEST(Config, DistributedPathHasNoPaddedNodeBudget)
 {
-    // The distributed FFT limit is a per-rank node count, not the replicated
-    // 2^28 whole-box cap: 336x640x352 pads to 672*1280*704 = 605,552,640
-    // nodes, i.e. 302,776,320 per rank at two ranks.  That is above 2^28 and
-    // must be accepted; the boundary case that used to corrupt the field
-    // (measured max|E| 7.53e+25 instead of 5.67e+07 V/m) is this one.
+    // The distributed path must accept any legal decomposition, including a
+    // per-rank slab far above the former 2^28 byte-offset stand-in.  All its
+    // offsets and counts are 64-bit and the transpose transfer is chunked, so
+    // a node budget would be an artificial cap.
     ConfigTest fixture;
+    FakeParallelContext const twoRanks(2);
+
+    // 336x640x352 pads to 672*1280*704 = 605,552,640 nodes, i.e. 302,776,320
+    // per rank: above the replicated 2^29 cap and the boundary that used to
+    // corrupt the field (measured max|E| 7.53e+25 instead of 5.67e+07 V/m).
     auto const near = picBunch::loadConfig(fixture.write("near.toml", capConfig(336, 640, 352)));
     picBunch::ComputeOptions options = optionsFromConfig(near);
-    picBunch::Bunch const bunch = centredParticle(options);
-    FakeParallelContext const twoRanks(2);
     options.parallel = &twoRanks;
-    EXPECT_NO_THROW({
-        picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
-        EXPECT_EQ(grid.n, (picBunch::Idx3{336, 640, 352}));
-    });
+    {
+        picBunch::Bunch const bunch = centredParticle(options);
+        EXPECT_NO_THROW({
+            picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+            EXPECT_EQ(grid.n, (picBunch::Idx3{336, 640, 352}));
+        });
+    }
 
-    // 1200x1600x1000 pads to 2400*3200*2000 = 1.536e10 nodes, i.e. 7.68e9 per
-    // rank: above the 2^31 per-rank limit.  The error must name the rank, the
-    // required size and the limit instead of wrapping an index.
-    auto const tooBig = picBunch::loadConfig(
-        fixture.write("per-rank-big.toml", capConfig(1200, 1600, 1000)));
-    picBunch::ComputeOptions big = optionsFromConfig(tooBig);
-    big.parallel = &twoRanks;
-    picBunch::Bunch const bigBunch = centredParticle(big);
+    // 880x1600x960 pads to 1.081e10 nodes, i.e. 5.4e9 per rank at two ranks:
+    // twenty times the old 2^28 cap and above every per-rank node budget a
+    // previous guard could have imposed.  It is a legal decomposition and must
+    // be accepted.
+    auto const large = picBunch::loadConfig(fixture.write("large.toml", capConfig(880, 1600, 960)));
+    picBunch::ComputeOptions largeOptions = optionsFromConfig(large);
+    largeOptions.parallel = &twoRanks;
+    {
+        picBunch::Bunch const bunch = centredParticle(largeOptions);
+        EXPECT_NO_THROW({
+            picBunch::Grid const grid = picBunch::makeGrid(bunch, largeOptions);
+            EXPECT_EQ(grid.n, (picBunch::Idx3{880, 1600, 960}));
+        }) << "a legal large distributed decomposition must not need more ranks";
+    }
+
+    // The only representation limit left is the vendor plan batch, which the
+    // alpakaVendor layout stores in 32 bits.  This grid pads to
+    // 128 x 2^21 x 2^21 and needs 2^21 * 2^20 = 2^41 batch lines on the worst
+    // rank.  The error must name that limit, the requested size and the rank.
+    auto const impossible = picBunch::loadConfig(
+        fixture.write("batch-overflow.toml", capConfig(64, 1048576, 1048576)));
+    picBunch::ComputeOptions impossibleOptions = optionsFromConfig(impossible);
+    impossibleOptions.parallel = &twoRanks;
+    picBunch::Bunch const impossibleBunch = centredParticle(impossibleOptions);
     try
     {
-        (void)picBunch::makeGrid(bigBunch, big);
-        FAIL() << "a grid above the per-rank distributed limit was accepted";
+        (void)picBunch::makeGrid(impossibleBunch, impossibleOptions);
+        FAIL() << "a grid whose vendor FFT batch cannot be represented was accepted";
     }
     catch(std::runtime_error const& error)
     {
         std::string const message = error.what();
         EXPECT_NE(message.find("infeasible"), std::string::npos) << message;
-        EXPECT_NE(message.find("per rank"), std::string::npos) << message;
-        EXPECT_NE(message.find("2147483648"), std::string::npos) << message;
+        EXPECT_NE(message.find("vendor FFT batch"), std::string::npos) << message;
+        EXPECT_NE(message.find("4294967295"), std::string::npos) << message;
         EXPECT_NE(message.find("rank 0"), std::string::npos) << message;
-        EXPECT_NE(message.find("7680000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("2199023255552"), std::string::npos) << message;
     }
 }
 

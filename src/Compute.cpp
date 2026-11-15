@@ -814,7 +814,19 @@ namespace picBunch
          * allocated by the pipeline, so reject it before any allocation.
          */
         constexpr std::size_t kMaxNodesPerAxis = 1u << 20;
-        constexpr std::size_t kMaxPaddedNodes = 1u << 28;
+        /*! Replicated-path padded-node limit, re-derived after the 64-bit fix.
+         *
+         * The replicated branch keeps its real-space deposit, kernel and
+         * read-out views as 3-D ``double`` views with 32-bit byte pitches
+         * (``My*Mx*sizeof(double)``), so the last addressable element is at
+         * ``8 * paddedNodes`` bytes.  A 32-bit byte offset therefore caps the
+         * padded box at 2^32 / 8 = 2^29 nodes.  The complex arrays are reached
+         * through 64-bit pitched packed views and 64-bit vendor plans, so they
+         * are not the binding constraint.  The historical 2^28 value assumed a
+         * 16-byte complex element in those views and was one bit too
+         * conservative.
+         */
+        constexpr std::size_t kMaxPaddedNodes = 1u << 29;
 
         /*! Tolerance -> FFT padding.  Padding 1 is never selected: it is a
          * diagnostic mode whose periodic-image artefact (measured 4.0e-2 for the
@@ -1647,15 +1659,12 @@ namespace picBunch
         // 64-bit with an explicit overflow guard.
         //
         // The two FFT layouts have different true limits:
-        //  * replicated: each rank holds the whole padded box and every array
-        //    access uses a 32-bit byte offset, so the node count is capped at
-        //    kMaxPaddedNodes (2^28 double nodes = 2 GiB per array);
-        //  * distributed: each rank holds only its z-slab, so the limit is a
-        //    per-rank node count.  kMaxDistributedNodesPerRank keeps every
-        //    rank-local element count, vendor plan batch and mdSpan extent in
-        //    the remaining 32-bit index space; all byte offsets are 64-bit.
-        //    The exact MPI_Alltoallv int-count limit is checked when the
-        //    transpose tables are built.
+        //  * replicated: each rank holds the whole padded box in double views
+        //    whose byte pitches are 32-bit, so the padded node count is capped
+        //    at kMaxPaddedNodes = 2^29 (8 bytes per padded node, 2^32 bytes);
+        //  * distributed: every offset and count is 64-bit, the MPI transfer is
+        //    chunked, and only the vendor plan batch stays 32-bit.  There is no
+        //    per-rank node budget; the batch is checked against its real limit.
         bool const canDistribute = options.parallel && options.parallel->distributed()
             && options.fftMode != FftMode::Replicated;
         std::uint64_t padded = 1u;
@@ -1679,32 +1688,45 @@ namespace picBunch
         }
         if(canDistribute)
         {
+            // No node budget on the distributed path: every rank-local offset
+            // and count is 64-bit, and the transpose transfer is chunked.  The
+            // only remaining representation limit is the alpakaVendor plan
+            // batch, which is stored in the extents' 32-bit value type and is
+            // therefore capped at 2^32-1 lines per batched transform.  The
+            // balanced z-split gives the largest rank ceil(Mz / ranks) planes.
             int const ranks = options.parallel->size;
-            // The z-slab split is balanced to within one plane, so the largest
-            // rank holds ceil(padded / ranks) padded nodes.
-            std::uint64_t const perRank
-                = (padded + static_cast<std::uint64_t>(ranks) - 1u)
-                / static_cast<std::uint64_t>(ranks);
-            std::uint64_t const limit
-                = static_cast<std::uint64_t>(detail::kMaxDistributedNodesPerRank);
-            if(perRank > limit)
+            auto const ceilDiv = [](std::uint64_t value, int divisor) {
+                return (value + static_cast<std::uint64_t>(divisor) - 1u)
+                    / static_cast<std::uint64_t>(divisor);
+            };
+            std::uint64_t const Mx = static_cast<std::uint64_t>(grid.n[0]) * padding;
+            std::uint64_t const My = static_cast<std::uint64_t>(grid.n[1]) * padding;
+            std::uint64_t const Mz = static_cast<std::uint64_t>(grid.n[2]) * padding;
+            std::uint64_t const worstBatchX = My * ceilDiv(Mz, ranks);
+            std::uint64_t const worstBatchZ = ceilDiv(Mx, ranks) * My;
+            std::uint64_t const batchLimit
+                = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
+            std::uint64_t const batch = std::max(worstBatchX, worstBatchZ);
+            if(batch > batchLimit)
                 throw std::runtime_error(
                     "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
                     + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
                     + " with padding " + std::to_string(padding) + " is infeasible: rank "
-                    + std::to_string(options.parallel->rank) + " requires "
-                    + std::to_string(perRank) + " padded nodes (worst of "
-                    + std::to_string(ranks) + " ranks), above the distributed limit of "
-                    + std::to_string(limit)
-                    + " nodes per rank; use more ranks or a smaller --cell-size");
+                    + std::to_string(options.parallel->rank) + " needs a vendor FFT batch of "
+                    + std::to_string(batch) + " lines, above the representable batch limit of "
+                    + std::to_string(batchLimit)
+                    + " (the FFT plan layout stores the batch in 32 bits); the padded box is "
+                    + std::to_string(padded) + " nodes");
         }
         else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
             throw std::runtime_error(
                 "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
                 + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
                 + " with padding " + std::to_string(padding)
-                + " is infeasible (limit " + std::to_string(kMaxPaddedNodes)
-                + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
+                + " is infeasible on rank "
+                + std::to_string(options.parallel ? options.parallel->rank : 0)
+                + " (replicated limit " + std::to_string(kMaxPaddedNodes)
+                + " padded nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
         return grid;
     }
 

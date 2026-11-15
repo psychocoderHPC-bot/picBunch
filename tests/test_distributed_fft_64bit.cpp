@@ -236,4 +236,28 @@ TEST(DistributedFft64Bit, AboveFourGiBPerRankMatchesBelowLimit)
         << "per-rank " << perRank(above) << " padded nodes (above 4 GiB): max|E| "
         << abovePeak << " V/m vs " << belowPeak << " V/m below the limit (rank "
         << parallel.rank << " of " << parallel.size << ")";
+
+    // A slab well above the old boundary, to prove there is no hidden
+    // per-rank budget.  Two ranks keep one 5 GB slab per card; four ranks
+    // would put two of them on one V100, so this point is two-rank only.
+    if(parallel.size == 2)
+    {
+        std::array<std::size_t, 3> const far{336u, 672u, 352u};
+        ASSERT_GT(perRank(far), boundary);
+        picBunch::ComputeOptions farOptions = makeOptions(far);
+        farOptions.parallel = &parallel;
+        picBunch::Field const farField
+            = picBunch::computeField(makeCentredBunch(far, 100u, 20.0), farOptions);
+        double const farPeak = fieldPeak(farField, parallel);
+        if(parallel.rank == 0)
+            std::printf(
+                "DistributedFft64Bit: ranks=%d per-rank nodes far=%zu; max|E| far=%.17g V/m\n",
+                parallel.size,
+                perRank(far),
+                farPeak);
+        EXPECT_NEAR(farPeak, belowPeak, 1.0e-4 * belowPeak)
+            << "per-rank " << perRank(far) << " padded nodes must match the reference ("
+            << farPeak << " vs " << belowPeak << " V/m, rank " << parallel.rank
+            << " of " << parallel.size << ")";
+    }
 }
