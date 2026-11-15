@@ -756,9 +756,9 @@ namespace
         options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
 
         // Wire the rank context before the first makeGrid call.  makeGrid
-        // scales kMaxPaddedNodes by the rank count only when a distributed
-        // context is visible; the configured path used to reach it with a null
-        // pointer and rejected the same domain the CLI accepted.
+        // applies the per-rank distributed padded-node limit only when a
+        // distributed context is visible; the configured path used to reach it
+        // with a null pointer and rejected the same domain the CLI accepted.
         options.parallel = &parallel;
         picBunch::mpiBroadcastComputeOptions(options, 0);
         options.parallel = &parallel;

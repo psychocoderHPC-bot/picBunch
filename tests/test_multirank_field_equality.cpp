@@ -77,7 +77,7 @@ namespace
         std::size_t const ny = field.grid.n[1];
         std::size_t const nz = field.grid.n[2];
         std::size_t const plane = nx * ny;
-        std::vector<double> out(6u * nz * plane);
+        std::vector<double> out(6u * nz * plane, 0.0);
         for(int c = 0; c < 6; ++c)
         {
             if(!field.zSlab)
@@ -87,17 +87,19 @@ namespace
             }
             else
             {
-                std::vector<double> full(nz * plane, 0.0);
-                std::size_t const local = field.slabCount * plane;
-                std::vector<int> counts(1), displs(1);
-                counts[0] = static_cast<int>(local);
-                displs[0] = static_cast<int>(field.slabOffset * plane);
-                par->allgatherv(field.data[c].data(), static_cast<int>(local), full.data(),
-                                counts.data(), displs.data());
-                std::copy(full.begin(), full.end(),
-                          out.begin() + static_cast<std::size_t>(c) * nz * plane);
+                // The per-rank output slabs are disjoint, so a global sum
+                // reconstructs the full field.  The previous allgatherv passed
+                // one-element counts/displs arrays to a multi-rank collective,
+                // an out-of-bounds read that segfaulted at two ranks.
+                std::copy(field.data[c].begin(), field.data[c].end(),
+                          out.begin() + static_cast<std::size_t>(c) * nz * plane
+                              + field.slabOffset * plane);
             }
         }
+        // Replicated fields already hold every node on every rank; only the
+        // disjoint distributed slabs need the reduction.
+        if(field.zSlab && par != nullptr)
+            par->allreduceSum(out.data(), out.size());
         return out;
     }
 } // namespace

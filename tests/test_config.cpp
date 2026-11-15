@@ -869,8 +869,9 @@ TEST(Config, MultiRankTomlCapScalesByRankCount)
 {
     // The medium case 440x800x480 at 2e-7 m has a padded box of 1.352e9 nodes,
     // above the single-rank 2^28 cap.  A TOML-derived configuration with two
-    // ranks must be accepted (2^28 * 2 * 8 = 4.295e9) and rejected when the
-    // per-rank share exceeds that budget.
+    // ranks keeps only 676M nodes per rank, below the 2^31 per-rank limit, and
+    // must be accepted; the 880x1600x960 case needs 5.4e9 per rank and must be
+    // rejected.
     ConfigTest fixture;
     auto const medium = picBunch::loadConfig(fixture.write("medium.toml", capConfig(440, 800, 480)));
     auto const options = optionsFromConfig(medium);
@@ -896,6 +897,48 @@ TEST(Config, MultiRankTomlCapScalesByRankCount)
     picBunch::Bunch const bigBunch = centredParticle(big);
     big.parallel = &twoRanks;
     EXPECT_THROW((void)picBunch::makeGrid(bigBunch, big), std::runtime_error);
+}
+
+TEST(Config, DistributedPaddedNodeLimitIsPerRank)
+{
+    // The distributed FFT limit is a per-rank node count, not the replicated
+    // 2^28 whole-box cap: 336x640x352 pads to 672*1280*704 = 605,552,640
+    // nodes, i.e. 302,776,320 per rank at two ranks.  That is above 2^28 and
+    // must be accepted; the boundary case that used to corrupt the field
+    // (measured max|E| 7.53e+25 instead of 5.67e+07 V/m) is this one.
+    ConfigTest fixture;
+    auto const near = picBunch::loadConfig(fixture.write("near.toml", capConfig(336, 640, 352)));
+    picBunch::ComputeOptions options = optionsFromConfig(near);
+    picBunch::Bunch const bunch = centredParticle(options);
+    FakeParallelContext const twoRanks(2);
+    options.parallel = &twoRanks;
+    EXPECT_NO_THROW({
+        picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+        EXPECT_EQ(grid.n, (picBunch::Idx3{336, 640, 352}));
+    });
+
+    // 1200x1600x1000 pads to 2400*3200*2000 = 1.536e10 nodes, i.e. 7.68e9 per
+    // rank: above the 2^31 per-rank limit.  The error must name the rank, the
+    // required size and the limit instead of wrapping an index.
+    auto const tooBig = picBunch::loadConfig(
+        fixture.write("per-rank-big.toml", capConfig(1200, 1600, 1000)));
+    picBunch::ComputeOptions big = optionsFromConfig(tooBig);
+    big.parallel = &twoRanks;
+    picBunch::Bunch const bigBunch = centredParticle(big);
+    try
+    {
+        (void)picBunch::makeGrid(bigBunch, big);
+        FAIL() << "a grid above the per-rank distributed limit was accepted";
+    }
+    catch(std::runtime_error const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("infeasible"), std::string::npos) << message;
+        EXPECT_NE(message.find("per rank"), std::string::npos) << message;
+        EXPECT_NE(message.find("2147483648"), std::string::npos) << message;
+        EXPECT_NE(message.find("rank 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("7680000000"), std::string::npos) << message;
+    }
 }
 
 TEST(Config, MultiRankTomlCapRealContext)
