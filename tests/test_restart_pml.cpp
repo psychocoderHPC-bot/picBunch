@@ -249,6 +249,34 @@ namespace
         begin[face.axis] = face.begin;
         extent[face.axis] = face.size;
     }
+    //! Grid large enough for a 12-cell PML rim on every axis.
+    picBunch::Field makeThicknessField()
+    {
+        picBunch::Field field;
+        field.grid.n = {40, 36, 32}; // nx, ny, nz
+        field.grid.spacing = {0.5, 1.5, 2.5};
+        field.grid.origin = {1.0, 2.0, 3.0};
+        field.grid.fftPadding = 2;
+        for(int c = 0; c < 6; ++c)
+        {
+            field.data[c].resize(field.grid.size());
+            for(std::size_t l = 0; l < field.grid.size(); ++l)
+                field.data[c][l] = 0.0625 * static_cast<double>(c);
+        }
+        return field;
+    }
+
+    std::uint32_t readUint32Attribute(hid_t object, char const* name)
+    {
+        hid_t attribute = H5Aopen(object, name, H5P_DEFAULT);
+        if(attribute < 0)
+            return 0u;
+        std::uint32_t value = 0;
+        H5Aread(attribute, H5T_NATIVE_UINT32, &value);
+        H5Aclose(attribute);
+        return value;
+    }
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -742,5 +770,129 @@ TEST(Restart, PmlCopyPreservesSparseRim)
                 }
     }
     H5Fclose(file);
+    std::filesystem::remove_all(root);
+}
+
+// ---------------------------------------------------------------------------
+// Stored PML thickness: the writer records it and the copy path rejects a
+// thicker request instead of silently reading unwritten zeros.
+TEST(Restart, PmlThicknessMismatchRejected)
+{
+    auto const root = temporaryDirectory();
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    auto const input = root / "input.h5";
+    writeParticleInput(input);
+    auto const field = makeThicknessField();
+    std::size_t const nx = field.grid.n[0];
+    std::size_t const ny = field.grid.n[1];
+    std::size_t const nz = field.grid.n[2];
+
+    auto makeOptions = [&](std::filesystem::path const& directory,
+                           std::size_t step,
+                           std::string const& source,
+                           long long inputStep,
+                           std::size_t thickness) {
+        picBunch::PicOnGPUWriteOptions options;
+        options.step = step;
+        options.directory = directory.string();
+        options.inputFile = source;
+        options.inputIteration = inputStep;
+        options.time = 2.5e-13;
+        options.timeUnitSI = 1.0;
+        options.dt = 1.0e-15;
+        options.unitLength = 1.0;
+        options.unitEField = 2.0;
+        options.unitBField = 4.0;
+        options.nextId = 1;
+        options.absorber = "pml";
+        options.pmlThickness
+            = {thickness, thickness, thickness, thickness, thickness, thickness};
+        return options;
+    };
+    auto makeSource = [&](std::filesystem::path const& directory,
+                          std::size_t thickness) {
+        std::filesystem::create_directories(directory);
+        picBunch::writePicOnGPUCheckpointOpenPMD(
+            field, makeOptions(directory, 2, input.string(), 0, thickness));
+        return directory / "checkpoint_000002.h5";
+    };
+    auto makeCopy = [&](std::filesystem::path const& directory,
+                        std::filesystem::path const& source,
+                        std::size_t thickness) {
+        std::filesystem::create_directories(directory);
+        auto options = makeOptions(directory, 3, source.string(), 2, thickness);
+        options.absorber = "none";
+        options.requiredInputSpecies = {};
+        picBunch::writePicOnGPUCheckpointOpenPMD(field, options);
+        return directory / "checkpoint_000003.h5";
+    };
+    auto thicknessOf = [](std::filesystem::path const& path,
+                          std::size_t step,
+                          char const* record) {
+        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if(file < 0)
+            return std::uint32_t{0};
+        std::string const groupPath
+            = "data/" + std::to_string(step) + "/fields/" + record;
+        hid_t group = H5Gopen2(file, groupPath.c_str(), H5P_DEFAULT);
+        std::uint32_t value = 0;
+        if(group >= 0)
+        {
+            value = readUint32Attribute(group, "picBunchPmlThickness");
+            H5Gclose(group);
+        }
+        H5Fclose(file);
+        return value;
+    };
+
+    auto const src4 = makeSource(root / "src4", 4u);
+    auto const src12 = makeSource(root / "src12", 12u);
+    EXPECT_EQ(thicknessOf(src4, 2, "Convolutional PML E_xneg"), 4u);
+    EXPECT_EQ(thicknessOf(src12, 2, "Convolutional PML E_xneg"), 12u);
+
+    // write 4, read 12: rejected with both values in the message.
+    bool threw = false;
+    try
+    {
+        (void)makeCopy(root / "copy12", src4, 12u);
+    }
+    catch(std::exception const& error)
+    {
+        threw = true;
+        std::string const message = error.what();
+        EXPECT_NE(message.find("12"), std::string::npos) << message;
+        EXPECT_NE(message.find("4"), std::string::npos) << message;
+        EXPECT_NE(message.find("xneg"), std::string::npos) << message;
+    }
+    EXPECT_TRUE(threw);
+    EXPECT_FALSE(std::filesystem::exists(root / "copy12" / "checkpoint_000003.h5"));
+
+    // write 4, read 4: succeeds.
+    auto const same = makeCopy(root / "copy4", src4, 4u);
+    EXPECT_EQ(thicknessOf(same, 3, "Convolutional PML E_xneg"), 4u);
+
+    // write 12, read 4: succeeds with the thinner rim.
+    auto const thin = makeCopy(root / "copythin", src12, 4u);
+    EXPECT_EQ(thicknessOf(thin, 3, "Convolutional PML E_xneg"), 4u);
+    {
+        hid_t file = H5Fopen(thin.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        ASSERT_GE(file, 0);
+        hid_t dataset = H5Dopen2(
+            file, "data/3/fields/Convolutional PML E_xneg/xy", H5P_DEFAULT);
+        ASSERT_GE(dataset, 0);
+        hid_t space = H5Dget_space(dataset);
+        hsize_t dims[3] = {0, 0, 0};
+        ASSERT_EQ(H5Sget_simple_extent_dims(space, dims, nullptr), 3);
+        EXPECT_EQ(dims[0], nz);
+        EXPECT_EQ(dims[1], ny);
+        EXPECT_EQ(dims[2], nx);
+        hsize_t chunks = 0;
+        ASSERT_GE(H5Dget_num_chunks(dataset, space, &chunks), 0);
+        EXPECT_EQ(chunks, 4u);
+        H5Sclose(space);
+        H5Dclose(dataset);
+        H5Fclose(file);
+    }
     std::filesystem::remove_all(root);
 }

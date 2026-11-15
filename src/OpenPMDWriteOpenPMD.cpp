@@ -305,6 +305,25 @@ namespace picBunch
             std::size_t size = 0u;
         };
 
+        //! PIConGPU PML slab suffixes in NUM_CELLS order.
+        inline constexpr char const* const kPmlSlabs[6]
+            = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+
+        //! Slab index of a "Convolutional PML ..._<face>" record, if any.
+        std::optional<std::size_t> pmlSlabIndex(std::string const& name)
+        {
+            for(std::size_t s = 0; s < 6u; ++s)
+            {
+                std::string const suffix = std::string{"_"} + kPmlSlabs[s];
+                if(name.size() >= suffix.size()
+                   && name.compare(
+                          name.size() - suffix.size(), suffix.size(), suffix)
+                       == 0)
+                    return s;
+            }
+            return std::nullopt;
+        }
+
         //! Face geometry of PIConGPU slab index 0..5
         //! (xneg, xpos, yneg, ypos, zneg, zpos), clamped to the grid so a
         //! deck thickness larger than the axis still yields a valid chunk.
@@ -1606,6 +1625,49 @@ namespace picBunch
             Series& in = *inputSeries;
             long long const inStep = static_cast<long long>(options.inputIteration);
             auto inIteration = in.snapshots()[inStep];
+            // Reject a configured PML thickness that is thicker than the rim
+            // stored in the input checkpoint.  The extra cells are unwritten,
+            // so the consumer zero-fill would silently substitute PML zeros.
+            // A thinner request is a subset of the stored rim and is allowed.
+            // The check runs before the output Series is created, so a
+            // mismatch leaves no partial checkpoint behind.
+            for(auto const& entry : inIteration.meshes)
+            {
+                std::string const& name = entry.first;
+                if(name.rfind("Convolutional PML ", 0u) != 0u)
+                    continue;
+                auto const slab = pmlSlabIndex(name);
+                if(!slab)
+                    continue;
+                Mesh srcMesh = inIteration.meshes[name];
+                if(!srcMesh.containsAttribute("picBunchPmlThickness"))
+                {
+                    if(mpiRank() == 0)
+                        std::cerr
+                            << "picBunch: warning: PML record '" << name
+                            << "' has no picBunchPmlThickness attribute; cannot "
+                               "validate [picongpu] pml_thickness against the "
+                               "input\n";
+                    continue;
+                }
+                auto const stored
+                    = srcMesh.getAttribute("picBunchPmlThickness")
+                          .get<std::uint32_t>();
+                PmlFace const face = pmlFace(
+                    *slab, options.pmlThickness, field.grid.n[2],
+                    field.grid.n[1], field.grid.n[0]);
+                if(face.size > static_cast<std::size_t>(stored))
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: PML record '" + name
+                        + "' stores a rim of " + std::to_string(stored)
+                        + " cells but [picongpu] pml_thickness requests "
+                        + std::to_string(face.size)
+                        + " cells; a thicker restart would read unwritten zeros. "
+                          "Set pml_thickness <= "
+                        + std::to_string(stored)
+                        + " cells or use an input checkpoint with the matching "
+                          "thickness.");
+            }
             std::vector<std::string> inSpeciesNames;
             std::set<std::string> inputSpecies;
             for(auto const& kv : inIteration.particles)
@@ -1745,8 +1807,7 @@ namespace picBunch
             std::size_t const nx = field.grid.n[0];
             std::size_t const ny = field.grid.n[1];
             std::size_t const nz = field.grid.n[2];
-            char const* const pmlSlabs[6]
-                = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+            // PML slab names live in kPmlSlabs.
             double const compUnit[6] = {
                 options.unitEField, options.unitEField, options.unitEField,
                 options.unitBField, options.unitBField, options.unitBField};
@@ -1893,7 +1954,7 @@ namespace picBunch
                     for(std::size_t slab = 0; slab < 6u; ++slab)
                     {
                         Mesh mesh
-                            = iteration.meshes[std::string{record} + "_" + pmlSlabs[slab]];
+                            = iteration.meshes[std::string{record} + "_" + kPmlSlabs[slab]];
                         mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
                         mesh.setGridSpacing(
                             std::vector<double>{
@@ -1908,6 +1969,12 @@ namespace picBunch
                         mesh.setGridUnitSI(options.unitLength);
                         mesh.setUnitDimension(recordUnitDimension);
                         PmlFace const face = pmlFace(slab, options.pmlThickness, nz, ny, nx);
+                        // Persist the stored rim thickness so a reader and the
+                        // copy path can refuse a thicker restart instead of
+                        // silently reading unwritten zeros.
+                        mesh.setAttribute(
+                            "picBunchPmlThickness",
+                            static_cast<std::uint32_t>(face.size));
                         // The HDF5 chunk is one rim plane so the interior is
                         // never allocated; ADIOS2 ignores the HDF5 chunk key
                         // and stores one sparse block per storeChunk.  Both
@@ -1945,7 +2012,7 @@ namespace picBunch
                             for(std::size_t slab = 0; slab < 6u; ++slab)
                             {
                                 Mesh& mesh = iteration.meshes[
-                                    std::string{record} + "_" + pmlSlabs[slab]];
+                                    std::string{record} + "_" + kPmlSlabs[slab]];
                                 PmlFace const face
                                     = pmlFace(slab, options.pmlThickness, nz, ny, nx);
                                 auto const chunk = pmlChunk(face, zBegin, zEnd, nz, ny, nx);
@@ -2079,17 +2146,7 @@ namespace picBunch
                     continue;
                 Mesh srcMesh = inIteration.meshes[name];
                 Mesh dstMesh = iteration.meshes[name];
-                std::optional<std::size_t> slab;
-                for(std::size_t s = 0; s < 6u; ++s)
-                {
-                    std::string const suffix = std::string{"_"} + pmlSlabs[s];
-                    if(name.size() >= suffix.size()
-                       && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
-                    {
-                        slab = s;
-                        break;
-                    }
-                }
+                auto const slab = pmlSlabIndex(name);
                 std::optional<PmlFace> face;
                 std::string datasetOptions = "{}";
                 if(slab)
@@ -2101,6 +2158,10 @@ namespace picBunch
                 copyMesh(
                     in, out, srcMesh, dstMesh, field.grid.n, collective, face, true,
                     datasetOptions);
+                if(face)
+                    dstMesh.setAttribute(
+                        "picBunchPmlThickness",
+                        static_cast<std::uint32_t>(face->size));
                 if(rank == 0)
                     std::cerr << "picBunch: copied Convolutional PML record '" << name
                               << "'\n";
