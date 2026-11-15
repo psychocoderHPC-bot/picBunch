@@ -868,9 +868,10 @@ near_shell = "none"
 TEST(Config, MultiRankTomlCapScalesByRankCount)
 {
     // The medium case 440x800x480 at 2e-7 m has a padded box of 1.352e9 nodes,
-    // above the single-rank 2^28 cap.  A TOML-derived configuration with two
-    // ranks must be accepted (2^28 * 2 * 8 = 4.295e9) and rejected when the
-    // per-rank share exceeds that budget.
+    // above the single-rank replicated cap.  A TOML-derived configuration with
+    // two ranks keeps 676M nodes per rank, below the vendor element ceiling,
+    // and must be accepted; 880x1600x960 needs 5.4e9 per rank and must be
+    // rejected.
     ConfigTest fixture;
     auto const medium = picBunch::loadConfig(fixture.write("medium.toml", capConfig(440, 800, 480)));
     auto const options = optionsFromConfig(medium);
@@ -890,12 +891,62 @@ TEST(Config, MultiRankTomlCapScalesByRankCount)
     EXPECT_NO_THROW(accepted = picBunch::makeGrid(bunch, pair));
     EXPECT_EQ(accepted.n, (picBunch::Idx3{440, 800, 480}));
 
-    // 880x1600x960 cells pad to 1.081e10 nodes, above the two-rank budget.
+    // 880x1600x960 cells pad to 1.081e10 nodes, i.e. 5.4e9 per rank, above the
+    // vendor element ceiling of 2^32 nodes per transform.
     auto const tooBig = picBunch::loadConfig(fixture.write("big.toml", capConfig(880, 1600, 960)));
     picBunch::ComputeOptions big = optionsFromConfig(tooBig);
     picBunch::Bunch const bigBunch = centredParticle(big);
     big.parallel = &twoRanks;
     EXPECT_THROW((void)picBunch::makeGrid(bigBunch, big), std::runtime_error);
+}
+
+TEST(Config, DistributedGuardIsTheVendorElementCeiling)
+{
+    // The distributed path has no byte-offset limit: every offset, count and
+    // pitch is 64-bit after the extent fix.  336x640x352 pads to 605,552,640
+    // nodes, i.e. 302,776,320 per rank at two ranks, which used to corrupt the
+    // field (max|E| 7.53e+25 instead of 5.67e+07 V/m).  It must be accepted.
+    // 640x1280x640 pads to 4.194e9 nodes, i.e. 2.097e9 per rank, also under
+    // the ceiling of 2^32 nodes per transform.
+    ConfigTest fixture;
+    FakeParallelContext const twoRanks(2);
+    for(auto const& cells : {picBunch::Idx3{336, 640, 352}, picBunch::Idx3{640, 1280, 640}})
+    {
+        auto const config = picBunch::loadConfig(fixture.write(
+            "accepted-" + std::to_string(cells[0]) + ".toml",
+            capConfig(cells[0], cells[1], cells[2])));
+        picBunch::ComputeOptions options = optionsFromConfig(config);
+        options.parallel = &twoRanks;
+        picBunch::Bunch const bunch = centredParticle(options);
+        EXPECT_NO_THROW({
+            picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
+            EXPECT_EQ(grid.n, cells);
+        }) << "a legal large distributed decomposition must be accepted";
+    }
+
+    // 1200x1600x1000 pads to 1.536e10 nodes, i.e. 7.68e9 per rank, above the
+    // vendor element ceiling.  The error names the worst-rank requirement, the
+    // required size and the limit, without attributing it to the caller.
+    auto const tooBig = picBunch::loadConfig(
+        fixture.write("ceiling.toml", capConfig(1200, 1600, 1000)));
+    picBunch::ComputeOptions options = optionsFromConfig(tooBig);
+    options.parallel = &twoRanks;
+    picBunch::Bunch const bunch = centredParticle(options);
+    try
+    {
+        (void)picBunch::makeGrid(bunch, options);
+        FAIL() << "a grid above the vendor element ceiling was accepted";
+    }
+    catch(std::runtime_error const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("infeasible"), std::string::npos) << message;
+        EXPECT_NE(message.find("vendor element ceiling"), std::string::npos) << message;
+        EXPECT_NE(message.find("4294967296"), std::string::npos) << message;
+        EXPECT_NE(message.find("worst rank of 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("worst-rank requirement"), std::string::npos) << message;
+        EXPECT_NE(message.find("7680000000"), std::string::npos) << message;
+    }
 }
 
 TEST(Config, MultiRankTomlCapRealContext)
