@@ -925,8 +925,8 @@ TEST(Config, DistributedGuardIsTheVendorElementCeiling)
     }
 
     // 1200x1600x1000 pads to 1.536e10 nodes, i.e. 7.68e9 per rank, above the
-    // vendor element ceiling.  The error names the rank, the required size and
-    // the limit.
+    // vendor element ceiling.  The error names the worst-rank requirement, the
+    // required size and the limit, without attributing it to the caller.
     auto const tooBig = picBunch::loadConfig(
         fixture.write("ceiling.toml", capConfig(1200, 1600, 1000)));
     picBunch::ComputeOptions options = optionsFromConfig(tooBig);
@@ -943,7 +943,8 @@ TEST(Config, DistributedGuardIsTheVendorElementCeiling)
         EXPECT_NE(message.find("infeasible"), std::string::npos) << message;
         EXPECT_NE(message.find("vendor element ceiling"), std::string::npos) << message;
         EXPECT_NE(message.find("4294967296"), std::string::npos) << message;
-        EXPECT_NE(message.find("rank 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("worst rank of 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("worst-rank requirement"), std::string::npos) << message;
         EXPECT_NE(message.find("7680000000"), std::string::npos) << message;
     }
 }

@@ -1686,10 +1686,10 @@ namespace picBunch
                 throw std::runtime_error(
                     "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
                     + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
-                    + " with padding " + std::to_string(padding) + " is infeasible: rank "
-                    + std::to_string(options.parallel->rank) + " requires "
-                    + std::to_string(perRank) + " padded nodes (worst of "
-                    + std::to_string(ranks) + " ranks), above the vendor element ceiling of "
+                    + " with padding " + std::to_string(padding)
+                    + " is infeasible: the worst rank of " + std::to_string(ranks)
+                    + " requires " + std::to_string(perRank)
+                    + " padded nodes (worst-rank requirement), above the vendor element ceiling of "
                     + std::to_string(limit) + " nodes per transform");
         }
         else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
@@ -2090,7 +2090,13 @@ namespace picBunch
                     long const cy = static_cast<long>(alpaka::math::floor(ty + 0.5));
                     long const cz = static_cast<long>(alpaka::math::floor(tz + 0.5));
                     std::size_t const i = static_cast<std::size_t>(m);
-                    keys.data()[i] = (wrap(cz, Mz) * My + wrap(cy, My)) * Mx + wrap(cx, Mx);
+                    // Same width as the device key (TscBinCountKernel).  The
+                    // value is bounded by paddedCells <= kMaxBinnedCells, so the
+                    // uint32 storage cannot truncate today.
+                    std::size_t const key
+                        = (static_cast<std::size_t>(wrap(cz, Mz)) * My + wrap(cy, My)) * Mx
+                        + wrap(cx, Mx);
+                    keys.data()[i] = static_cast<std::uint32_t>(key);
                     upart.data()[i] = BinnedParticle{
                         tx,
                         ty,

@@ -118,6 +118,8 @@ namespace picBunch
                 m_chunkSize = std::max(
                     static_cast<std::size_t>(Mx) * m_nz,
                     static_cast<std::size_t>(Mz) * m_nx);
+                m_transposeWindow = resolveTransposeWindow(
+                    static_cast<std::size_t>(parallel->size));
 
                 // Hard safety net around the vendor element ceiling (see
                 // kMaxDistributedNodesPerRank).  Nothing below this guard needs
@@ -410,6 +412,33 @@ namespace picBunch
 #endif
             }
 
+            //! Resolve the MPI transfer window once per transform.
+            /*!
+             * The largest window that keeps every count, displacement and the
+             * packed window total inside int is INT_MAX / (2 * ranks).
+             *
+             * PICBUNCH_FFT_TRANSPOSE_WINDOW is a test-only hook: a small value
+             * forces many chunk calls on a small grid so the window scheduling
+             * is covered without a huge slice.  It is read once here, not per
+             * y-plane, and any positive value is correct.
+             */
+            static std::size_t resolveTransposeWindow(std::size_t ranks)
+            {
+                std::size_t const intMax
+                    = static_cast<std::size_t>(std::numeric_limits<int>::max());
+                std::size_t window = intMax / (2u * std::max<std::size_t>(ranks, 1u));
+                window = std::max<std::size_t>(window, 1u);
+                if(char const* text = std::getenv("PICBUNCH_FFT_TRANSPOSE_WINDOW"))
+                {
+                    long long const parsed = std::strtoll(text, nullptr, 10);
+                    if(parsed > 0)
+                        window = std::min<std::size_t>(
+                            static_cast<std::size_t>(parsed),
+                            window);
+                }
+                return window;
+            }
+
             using Clock = std::chrono::steady_clock;
 
             static double elapsed(Clock::time_point const& start)
@@ -558,23 +587,8 @@ namespace picBunch
                 std::size_t const recvTotal = end(recvCounts, recvDispls);
                 std::size_t const total = std::max(sendTotal, recvTotal);
 
-                // Largest window that keeps every count, displacement and the
-                // packed window total inside int.
-                std::size_t const intMax
-                    = static_cast<std::size_t>(std::numeric_limits<int>::max());
-                std::size_t window = intMax / (2u * std::max<std::size_t>(size, 1u));
-                window = std::max<std::size_t>(window, 1u);
-                // Test hook: a tiny window forces many chunk calls on a small
-                // grid, so the window scheduling is covered without a huge
-                // slice.  Any positive value is correct.
-                if(char const* text = std::getenv("PICBUNCH_FFT_TRANSPOSE_WINDOW"))
-                {
-                    long long const parsed = std::strtoll(text, nullptr, 10);
-                    if(parsed > 0)
-                        window = std::min<std::size_t>(
-                            static_cast<std::size_t>(parsed),
-                            window);
-                }
+                // Window resolved once per transform in the constructor.
+                std::size_t const window = m_transposeWindow;
 
                 // MPI_Alltoallv takes int.  Never narrow silently: the window
                 // bound keeps these values inside int, and this check rejects
@@ -790,6 +804,8 @@ namespace picBunch
             std::uint32_t m_x0 = 0;
             std::uint32_t m_nx = 0;
             std::size_t m_chunkSize = 0;
+            //! MPI_Alltoallv window in doubles, resolved once per transform.
+            std::size_t m_transposeWindow = 0;
             std::optional<Buffer> m_work;
             std::optional<Buffer> m_send;
             std::optional<Buffer> m_recv;
