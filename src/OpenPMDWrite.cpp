@@ -679,6 +679,7 @@ namespace picBunch
         std::array<std::vector<unsigned char>, 6> covered;
         std::array<long long, 3> base{};
         std::uint64_t pendingBytes = 0;
+        std::array<std::size_t, 6> writtenChunks{};
         bool opened = false;
         bool closed = false;
         static constexpr std::uint64_t kFlushBytes = 512ull * 1024ull * 1024ull;
@@ -829,6 +830,7 @@ namespace picBunch
         auto buffer = std::shared_ptr<double[]>(new double[chunk.data.size()]);
         std::copy(chunk.data.begin(), chunk.data.end(), buffer.get());
         component.storeChunk(buffer, offset, extent);
+        ++m_impl->writtenChunks[static_cast<std::size_t>(chunk.component)];
         m_impl->pendingBytes += chunk.data.size() * sizeof(double);
         if(m_impl->pendingBytes >= Impl::kFlushBytes)
         {
@@ -854,6 +856,61 @@ namespace picBunch
             m_impl->series->flush();
             m_impl->series->close();
             m_impl->series.reset();
+            // Post-writer verification: the series must reopen, contain the
+            // iteration, both records, all six components with the full global
+            // extent, and the same non-zero slab count per component.
+            if(!std::filesystem::exists(m_impl->temporary))
+                throw std::runtime_error(
+                    "ChunkedFieldWriter verification: output '" + m_impl->temporary
+                    + "' does not exist");
+            if(std::filesystem::is_regular_file(m_impl->temporary)
+               && std::filesystem::file_size(m_impl->temporary) == 0u)
+                throw std::runtime_error(
+                    "ChunkedFieldWriter verification: output '" + m_impl->temporary
+                    + "' is empty");
+            {
+                openPMD::Series check{m_impl->temporary, openPMD::Access::READ_ONLY};
+                if(!check.iterations.contains(m_impl->options.iteration))
+                    throw std::runtime_error(
+                        "ChunkedFieldWriter verification: iteration "
+                        + std::to_string(m_impl->options.iteration) + " is missing");
+                auto& iteration = check.iterations[m_impl->options.iteration];
+                openPMD::Extent const expected{
+                    static_cast<openPMD::Extent::value_type>(m_impl->globalN[2]),
+                    static_cast<openPMD::Extent::value_type>(m_impl->globalN[1]),
+                    static_cast<openPMD::Extent::value_type>(m_impl->globalN[0])};
+                char const* records[2] = {"E", "B"};
+                char const* components[3] = {"x", "y", "z"};
+                for(char const* record : records)
+                {
+                    if(!iteration.meshes.contains(record))
+                        throw std::runtime_error(
+                            std::string{"ChunkedFieldWriter verification: record '"} + record
+                            + "' is missing");
+                    for(char const* component : components)
+                    {
+                        auto& rc = iteration.meshes[record][component];
+                        if(rc.getExtent() != expected)
+                            throw std::runtime_error(
+                                std::string{"ChunkedFieldWriter verification: "} + record
+                                + "/" + component + " extent does not equal the global extent");
+                    }
+                }
+                check.close();
+            }
+            for(std::size_t c = 0; c < 6; ++c)
+            {
+                if(m_impl->writtenChunks[c] == 0u)
+                    throw std::runtime_error(
+                        "ChunkedFieldWriter verification: component "
+                        + std::to_string(c) + " recorded no chunks");
+                if(m_impl->writtenChunks[c] != m_impl->writtenChunks[0])
+                    throw std::runtime_error(
+                        "ChunkedFieldWriter verification: component "
+                        + std::to_string(c) + " recorded "
+                        + std::to_string(m_impl->writtenChunks[c]) + " chunks, component 0 recorded "
+                        + std::to_string(m_impl->writtenChunks[0]));
+            }
             auto const renames = planRenames(m_impl->temporary, m_impl->fileName);
             if(renames.empty())
                 throw std::runtime_error(
