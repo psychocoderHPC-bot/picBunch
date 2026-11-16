@@ -174,6 +174,15 @@ accurate in-support: `none` is the safest default, `fast` is validated for stati
 and near-axial motion, and `exact` is an adaptive reference that is accurate except for
 a measured few-percent residual at the closest axial node.
 
+The FFT padding is also a grid constraint. The deposit keeps the support of a
+boundary particle in a halo, so every axis needs at least
+`2*floor(shapeSupport)` padding nodes between the physical grid and the padded
+box (2 for the default TSC shape, 4 for PQS). A grid whose padding factor leaves
+fewer halo nodes is rejected before the deposit; the message names the axis, the
+required padding and the padding actually available. `tolerance` never selects a
+factor below 2, so this guard mainly catches an explicit `--fft-padding` or a
+grid that is too small on one axis.
+
 ### `[checkpoint]`
 
 | key | required | meaning |

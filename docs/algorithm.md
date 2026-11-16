@@ -220,28 +220,36 @@ historical split-or-fail behaviour.
 
 ## Padding
 
-The free-space convolution needs zero padding. With `fftPadding = 1` the FFT
-box equals the output box, so source-observer lags beyond half the box wrap and
-add a spurious periodic image; the unit test reproduces this artefact. With
-`fftPadding >= 2` every lag fits inside the box and the FFT result equals the
-free-space discrete TSC sum (no images). `fftPadding = 1` is therefore a
-diagnostic/test option only, never a production choice.
+The deposit needs a source halo. A particle inside the physical node box
+`[0, n-1]` reaches `floor(shapeSupport)` nodes past either end (1 for CIC and
+TSC, 2 for PQS), and the negative and positive halo must stay disjoint. Every
+axis therefore needs at least `2*floor(shapeSupport)` padding nodes between the
+physical grid and the padded box: `M - n >= 2` for CIC/TSC and `M - n >= 4` for
+PQS. `makeGrid` and the shared deposit path enforce this, so the replicated and
+distributed solvers reject the same configurations with the same message. The
+message names the axis, the required padding and the padding actually available.
 
-The unit test now evaluates a direct, non-cyclic sum with its own TSC shape and
-its own Coulomb field at probe nodes where the periodic image is closest. The
-padded result matches that reference to better than `1e-10` relative; the
-unpadded result disagrees by more than `1e-3`. This is what the test proves, not
-merely that two padded runs agree with each other.
+`fftPadding = 1` leaves `M = n` and is rejected. Before the guard it folded the
+support that belongs in the halo onto the opposite side: a TSC particle at
+`t = n - 0.4` on a `16^3` padding-1 box deposited `0.595` of its unit weight at
+nodes 0 and 1 instead of nodes 16 and 17 (59.5% of the particle weight). A
+legitimate boundary particle on a valid grid keeps its full weight: for
+`t = n` the TSC weights `0.125 / 0.75 / 0.125` land at `n-1 / n / n+1`, with
+`n` and `n+1` in the upper halo.
 
-The wraparound artefact is geometry- and box-dependent; quote it only together
-with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
+The free-space convolution also needs zero padding. With `fftPadding >= 2`
+every source-observer lag fits inside the box and the FFT result equals the
+free-space discrete TSC sum (no images). The unit test evaluates a direct,
+non-cyclic sum with its own TSC shape and its own Coulomb field at probe nodes
+where a periodic image would be closest; the padded result matches that
+reference to better than `1e-10` relative.
 
-- toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
-  `marginCells = 6`, `cellSize = 1 m`): `max|pad1-pad2| / max|field| =
-  3.994542e-02`, interior (two nodes skipped per axis) `2.130691e-02`.
-- a single stationary source on a `20^3` box: `9.275e-3` (worst component Ey);
-  the exact geometry and per-component split are in the N1b artifact.
-- for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`, i.e.
+The padding-2 vs padding-3 convergence is geometry- and box-dependent; quote it
+only together with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
+
+- for the toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
+  `marginCells = 6`, `cellSize = 1 m`), `padding=2` versus `padding=3` agrees
+  to `8.37e-16`, i.e.
   padding 2 is converged to roundoff.
 - for a 500-particle, `cellSize = 1e-6 m` cloud on an `n = (18,18,18)` box,
   `padding=2` versus `padding=3` agrees to `4.15e-16`; the code policy uses the
