@@ -176,7 +176,22 @@ namespace picBunch
         {
             std::error_code error;
             std::filesystem::remove_all(to, error);
-            std::filesystem::rename(from, to);
+            if(error)
+                throw std::runtime_error(
+                    "publishTemporary: cannot remove existing target '" + to.string()
+                    + "': " + error.message());
+            std::error_code sizeError;
+            std::uintmax_t const sourceBytes
+                = std::filesystem::is_regular_file(from, sizeError)
+                      ? std::filesystem::file_size(from, sizeError)
+                      : 0u;
+            std::error_code renameError;
+            std::filesystem::rename(from, to, renameError);
+            if(renameError)
+                throw std::runtime_error(
+                    "publishTemporary: rename '" + from.string() + "' to '" + to.string()
+                    + "' failed: " + renameError.message() + " (source size "
+                    + std::to_string(sourceBytes) + " bytes)");
         }
 
         void removeTemporary(std::string const& temporary, std::string const& finalName) noexcept
@@ -853,6 +868,17 @@ namespace picBunch
                         + " plane " + std::to_string(plane) + " was never written");
         try
         {
+            {
+                auto& writeIteration
+                    = m_impl->series->iterations[m_impl->options.iteration];
+                char const* writeRecords[2] = {"E", "B"};
+                char const* writeComponents[3] = {"x", "y", "z"};
+                for(std::size_t r = 0; r < 2; ++r)
+                    for(std::size_t a = 0; a < 3; ++a)
+                        writeIteration.meshes[writeRecords[r]][writeComponents[a]].setAttribute(
+                            "picBunchChunkCount",
+                            static_cast<unsigned long long>(m_impl->writtenChunks[r * 3u + a]));
+            }
             m_impl->series->flush();
             m_impl->series->close();
             m_impl->series.reset();
@@ -868,6 +894,7 @@ namespace picBunch
                 throw std::runtime_error(
                     "ChunkedFieldWriter verification: output '" + m_impl->temporary
                     + "' is empty");
+            std::array<unsigned long long, 6> recordedCounts{};
             {
                 openPMD::Series check{m_impl->temporary, openPMD::Access::READ_ONLY};
                 if(!check.iterations.contains(m_impl->options.iteration))
@@ -881,35 +908,100 @@ namespace picBunch
                     static_cast<openPMD::Extent::value_type>(m_impl->globalN[0])};
                 char const* records[2] = {"E", "B"};
                 char const* components[3] = {"x", "y", "z"};
-                for(char const* record : records)
+                std::array<std::array<double, 7>, 2> const expectedUnit{{
+                    {1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0},
+                    {0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0}}};
+                std::uint64_t const expectedNodes
+                    = static_cast<std::uint64_t>(expected[0]) * expected[1] * expected[2];
+                for(std::size_t r = 0; r < 2; ++r)
                 {
+                    char const* record = records[r];
                     if(!iteration.meshes.contains(record))
                         throw std::runtime_error(
                             std::string{"ChunkedFieldWriter verification: record '"} + record
                             + "' is missing");
-                    for(char const* component : components)
-                    {
-                        auto& rc = iteration.meshes[record][component];
-                        if(rc.getExtent() != expected)
+                    auto& mesh = iteration.meshes[record];
+                    auto const unit = mesh.unitDimension();
+                    for(std::size_t k = 0; k < 7; ++k)
+                        if(std::abs(unit[k] - expectedUnit[r][k]) > 1.0e-12)
                             throw std::runtime_error(
                                 std::string{"ChunkedFieldWriter verification: "} + record
-                                + "/" + component + " extent does not equal the global extent");
+                                + " unitDimension[" + std::to_string(k) + "] is "
+                                + std::to_string(unit[k]) + ", expected "
+                                + std::to_string(expectedUnit[r][k]));
+                    for(std::size_t a = 0; a < 3; ++a)
+                    {
+                        char const* component = components[a];
+                        std::string const label = std::string{record} + "/" + component;
+                        auto& rc = mesh[component];
+                        if(rc.getExtent() != expected)
+                            throw std::runtime_error(
+                                "ChunkedFieldWriter verification: " + label
+                                + " extent does not equal the global extent");
+                        if(rc.getDatatype() != openPMD::determineDatatype<double>())
+                            throw std::runtime_error(
+                                "ChunkedFieldWriter verification: " + label
+                                + " datatype is not double");
+                        if(rc.unitSI() != 1.0)
+                            throw std::runtime_error(
+                                "ChunkedFieldWriter verification: " + label
+                                + " unitSI is not 1");
+                        auto const position
+                            = rc.getAttribute("position").get<std::vector<double>>();
+                        Vec3 const yee{
+                            kYeeOffset[r * 3u + a][0] / kRefinement,
+                            kYeeOffset[r * 3u + a][1] / kRefinement,
+                            kYeeOffset[r * 3u + a][2] / kRefinement};
+                        auto const expectedPosition = reverse(yee);
+                        if(position.size() != expectedPosition.size()
+                           || !std::equal(
+                               position.begin(),
+                               position.end(),
+                               expectedPosition.begin(),
+                               [](double lhs, double rhs) {
+                                   return std::abs(lhs - rhs) <= 1.0e-15;
+                               }))
+                            throw std::runtime_error(
+                                "ChunkedFieldWriter verification: " + label
+                                + " position attribute does not match the Yee offset");
+                        recordedCounts[r * 3u + a]
+                            = rc.getAttribute("picBunchChunkCount")
+                                  .get<unsigned long long>();
+                        auto const chunks = rc.availableChunks();
+                        std::uint64_t covered = 0;
+                        for(auto const& chunk : chunks)
+                            covered += static_cast<std::uint64_t>(chunk.extent[0])
+                                       * chunk.extent[1] * chunk.extent[2];
+                        if(covered < expectedNodes)
+                            throw std::runtime_error(
+                                "ChunkedFieldWriter verification: " + label + " dataset bytes "
+                                + std::to_string(covered * sizeof(double))
+                                + " do not cover the expected "
+                                + std::to_string(expectedNodes * sizeof(double)) + " bytes");
                     }
                 }
                 check.close();
             }
             for(std::size_t c = 0; c < 6; ++c)
             {
-                if(m_impl->writtenChunks[c] == 0u)
+                if(recordedCounts[c] == 0u)
                     throw std::runtime_error(
                         "ChunkedFieldWriter verification: component "
-                        + std::to_string(c) + " recorded no chunks");
-                if(m_impl->writtenChunks[c] != m_impl->writtenChunks[0])
+                        + std::to_string(c) + " recorded no chunks in the file");
+                if(recordedCounts[c] != recordedCounts[0])
                     throw std::runtime_error(
                         "ChunkedFieldWriter verification: component "
                         + std::to_string(c) + " recorded "
-                        + std::to_string(m_impl->writtenChunks[c]) + " chunks, component 0 recorded "
-                        + std::to_string(m_impl->writtenChunks[0]));
+                        + std::to_string(recordedCounts[c])
+                        + " chunks in the file, component 0 recorded "
+                        + std::to_string(recordedCounts[0]));
+                if(recordedCounts[c] != m_impl->writtenChunks[c])
+                    throw std::runtime_error(
+                        "ChunkedFieldWriter verification: component "
+                        + std::to_string(c) + " wrote "
+                        + std::to_string(m_impl->writtenChunks[c])
+                        + " chunks but the file records "
+                        + std::to_string(recordedCounts[c]));
             }
             auto const renames = planRenames(m_impl->temporary, m_impl->fileName);
             if(renames.empty())

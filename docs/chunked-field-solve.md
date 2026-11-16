@@ -172,6 +172,15 @@ is `/usr/bin/time -v`; I/O is the counted staging traffic.
 | 192x288x192 | in-core p1 | - | - | 12.6 s | 1.37 GB | - | - | - | - |
 | 192x288x192 | staged p2 | 22 | 4 194 304 | 83.1 s | 623 MB | 25.82 GB | 19.03 GB | 4.08 GB | 0.191 GB |
 | 192x288x192 | staged p2 | 6 | 16 777 216 | 81.4 s | 1003 MB | 25.82 GB | 19.03 GB | 4.08 GB | 0.680 GB |
+| 256x384x256 | staged p2 | 32 | 4 194 304 | 193.5 s | 722.6 MB | 61.20 GB | 45.10 GB | 9.66 GB | 0.302 GB |
+
+The grid column identifies each row: 16^3 is the smoke case, 192x288x192 is
+the scaling case, and 256x384x256 is the largest validated run.  The 256 grid
+has `Vc = 3.22 GB`, so the model predicts `33 Vc = 106.3 GB`; the measured
+61.20 GB read plus 45.10 GB write totals 106.30 GB.  Peak staging is
+`3 Vc = 9.66 GB`.  At 256x384x256 the near-field agreement against in-core
+padding 1 is `4.89e-16` and the whole-domain difference from the periodic tail
+is `1.51e-3`.
 
 The 192 grid has `Vc = 1.36 GB`, so the model predicts `33 Vc = 44.9 GB`; the
 measured 44.85 GB matches.  Peak staging is `3 Vc = 4.08 GB`, also exact.  The

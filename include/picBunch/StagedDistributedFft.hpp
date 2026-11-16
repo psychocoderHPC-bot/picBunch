@@ -126,6 +126,7 @@ namespace picBunch::detail
                     = m_bwdRowPrefix[sz] + static_cast<std::uint64_t>(m_Mz) * m_nx[sz] * 2u;
             }
             m_sliceDoubles = static_cast<std::uint64_t>(m_Mx) * m_Mz * 2u;
+            validateStagedOffsets();
 
             std::error_code ec;
             std::filesystem::create_directories(m_directory, ec);
@@ -180,7 +181,15 @@ namespace picBunch::detail
             }
 
             if(std::getenv("PICBUNCH_TEST_TRUNCATE_STAGING") != nullptr)
-                ::ftruncate(exchange.fd(), 1024);
+            {
+                std::uint64_t const finalSliceStart
+                    = static_cast<std::uint64_t>(m_My - 1u) * m_sliceDoubles
+                    * sizeof(double);
+                if(::ftruncate(exchange.fd(), static_cast<off_t>(finalSliceStart)) != 0)
+                    throw std::runtime_error(
+                        "staging: truncate '" + exchange.path() + "' failed: "
+                        + std::strerror(errno));
+            }
             StagingFile spectrum = makeStaging("source-spectrum");
             for(int d = 0; d < m_ranks; ++d)
             {
@@ -317,6 +326,147 @@ namespace picBunch::detail
                 &m_contexts[static_cast<std::size_t>(rank)]};
         }
 
+        //! Reject a layout whose write rows or reader blocks leave a gap or overlap.
+        void validateStagedOffsets() const
+        {
+            auto fail = [](std::string const& message) {
+                throw std::runtime_error("staged exchange offsets: " + message);
+            };
+
+            std::uint64_t cursor = 0;
+            for(int s = 0; s < m_ranks; ++s)
+            {
+                auto const ss = static_cast<std::size_t>(s);
+                std::uint64_t const begin = m_fwdRowPrefix[ss];
+                std::uint64_t const end
+                    = begin + static_cast<std::uint64_t>(m_Mx) * m_nz[ss] * 2u;
+                if(begin != cursor)
+                    fail(
+                        "forward row " + std::to_string(s) + " starts at "
+                        + std::to_string(begin) + ", expected " + std::to_string(cursor));
+                if(m_fwdRowPrefix[ss + 1u] != end)
+                    fail(
+                        "forward row " + std::to_string(s) + " ends at "
+                        + std::to_string(m_fwdRowPrefix[ss + 1u]) + ", expected "
+                        + std::to_string(end));
+                cursor = end;
+            }
+            if(cursor != m_sliceDoubles)
+                fail(
+                    "forward rows cover " + std::to_string(cursor) + " doubles, expected "
+                    + std::to_string(m_sliceDoubles));
+
+            for(int s = 0; s < m_ranks; ++s)
+            {
+                auto const ss = static_cast<std::size_t>(s);
+                std::uint64_t const rowBegin = m_fwdRowPrefix[ss];
+                std::uint64_t const rowEnd
+                    = rowBegin + static_cast<std::uint64_t>(m_Mx) * m_nz[ss] * 2u;
+                std::uint64_t readerCursor = rowBegin;
+                for(int d = 0; d < m_ranks; ++d)
+                {
+                    auto const sd = static_cast<std::size_t>(d);
+                    std::uint64_t const begin
+                        = rowBegin + static_cast<std::uint64_t>(m_nz[ss]) * m_x0[sd] * 2u;
+                    std::uint64_t const end
+                        = begin + static_cast<std::uint64_t>(m_nz[ss]) * m_nx[sd] * 2u;
+                    if(begin != readerCursor)
+                        fail(
+                            "forward reader block source " + std::to_string(s)
+                            + " destination " + std::to_string(d) + " starts at "
+                            + std::to_string(begin) + ", expected "
+                            + std::to_string(readerCursor));
+                    if(end > rowEnd)
+                        fail(
+                            "forward reader block source " + std::to_string(s)
+                            + " destination " + std::to_string(d) + " ends at "
+                            + std::to_string(end) + ", beyond the written row end "
+                            + std::to_string(rowEnd));
+                    readerCursor = end;
+                }
+                if(readerCursor != rowEnd)
+                    fail(
+                        "forward reader blocks for source " + std::to_string(s) + " cover "
+                        + std::to_string(readerCursor - rowBegin) + " doubles, expected "
+                        + std::to_string(rowEnd - rowBegin));
+            }
+
+            cursor = 0;
+            for(int d = 0; d < m_ranks; ++d)
+            {
+                auto const sd = static_cast<std::size_t>(d);
+                std::uint64_t const begin = m_bwdRowPrefix[sd];
+                std::uint64_t const end
+                    = begin + static_cast<std::uint64_t>(m_Mz) * m_nx[sd] * 2u;
+                if(begin != cursor)
+                    fail(
+                        "backward row " + std::to_string(d) + " starts at "
+                        + std::to_string(begin) + ", expected " + std::to_string(cursor));
+                if(m_bwdRowPrefix[sd + 1u] != end)
+                    fail(
+                        "backward row " + std::to_string(d) + " ends at "
+                        + std::to_string(m_bwdRowPrefix[sd + 1u]) + ", expected "
+                        + std::to_string(end));
+                cursor = end;
+            }
+            if(cursor != m_sliceDoubles)
+                fail(
+                    "backward rows cover " + std::to_string(cursor) + " doubles, expected "
+                    + std::to_string(m_sliceDoubles));
+
+            for(int d = 0; d < m_ranks; ++d)
+            {
+                auto const sd = static_cast<std::size_t>(d);
+                std::uint64_t const rowBegin = m_bwdRowPrefix[sd];
+                std::uint64_t const rowEnd
+                    = rowBegin + static_cast<std::uint64_t>(m_Mz) * m_nx[sd] * 2u;
+                std::uint64_t readerCursor = rowBegin;
+                for(int s = 0; s < m_ranks; ++s)
+                {
+                    auto const ss = static_cast<std::size_t>(s);
+                    std::uint64_t const begin
+                        = rowBegin + static_cast<std::uint64_t>(m_nx[sd]) * m_z0[ss] * 2u;
+                    std::uint64_t const end
+                        = begin + static_cast<std::uint64_t>(m_nx[sd]) * m_nz[ss] * 2u;
+                    if(begin != readerCursor)
+                        fail(
+                            "backward reader block destination " + std::to_string(d)
+                            + " source " + std::to_string(s) + " starts at "
+                            + std::to_string(begin) + ", expected "
+                            + std::to_string(readerCursor));
+                    if(end > rowEnd)
+                        fail(
+                            "backward reader block destination " + std::to_string(d)
+                            + " source " + std::to_string(s) + " ends at "
+                            + std::to_string(end) + ", beyond the written row end "
+                            + std::to_string(rowEnd));
+                    readerCursor = end;
+                }
+                if(readerCursor != rowEnd)
+                    fail(
+                        "backward reader blocks for destination " + std::to_string(d)
+                        + " cover " + std::to_string(readerCursor - rowBegin)
+                        + " doubles, expected " + std::to_string(rowEnd - rowBegin));
+            }
+        }
+
+        //! Fail with the missing y-slice before a read runs past the file.
+        void requireReadableSlice(
+            StagingFile const& file,
+            std::uint32_t y,
+            std::uint64_t offset,
+            std::uint64_t count) const
+        {
+            std::uint64_t const endByte = (offset + count) * sizeof(double);
+            std::uint64_t const fileBytes = file.fileSizeBytes();
+            if(endByte > fileBytes)
+                throw std::runtime_error(
+                    "staged exchange: missing y-slice " + std::to_string(y) + " in '"
+                    + file.path() + "': requested bytes [" + std::to_string(offset * sizeof(double))
+                    + ", " + std::to_string(endByte) + "), file holds "
+                    + std::to_string(fileBytes) + " bytes");
+        }
+
         StagingFile makeStaging(std::string const& tag)
         {
             static std::uint64_t counter = 0;
@@ -346,6 +496,7 @@ namespace picBunch::detail
                     = static_cast<std::uint64_t>(y) * m_sliceDoubles
                     + m_fwdRowPrefix[ss]
                     + static_cast<std::uint64_t>(m_nz[ss]) * m_x0[sd] * 2u;
+                requireReadableSlice(exchange, y, offset, count);
                 exchange.readAt(
                     fft.recvDoubles() + displs[ss],
                     count * sizeof(double),
@@ -377,6 +528,7 @@ namespace picBunch::detail
                     = static_cast<std::uint64_t>(y) * m_sliceDoubles
                     + m_bwdRowPrefix[rr]
                     + static_cast<std::uint64_t>(m_nx[rr]) * m_z0[ss] * 2u;
+                requireReadableSlice(backward, y, offset, count);
                 backward.readAt(
                     fft.recvDoubles() + displs[rr],
                     count * sizeof(double),

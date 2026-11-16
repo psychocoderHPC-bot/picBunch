@@ -90,6 +90,17 @@ if(PICBUNCH_BUILD_GTESTS)
         )
     endforeach()
 
+    # Staged-exchange diagnostics: the truncation case must name the missing
+    # final y-slice and the read-only case must name the file-create failure.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(
+        NAME picBunch.ChunkedFailureDiagnostics
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_chunked_failures.py
+            $<TARGET_FILE:picBunchApp> ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(picBunch.ChunkedFailureDiagnostics PROPERTIES TIMEOUT 300)
+
     if(PICBUNCH_ENABLE_MPI)
         if(NOT MPIEXEC_EXECUTABLE)
             find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)

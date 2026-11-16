@@ -97,6 +97,18 @@ namespace picBunch::detail
         {
             return m_size;
         }
+        [[nodiscard]] std::string const& path() const
+        {
+            return m_path;
+        }
+        [[nodiscard]] std::uint64_t fileSizeBytes() const
+        {
+            struct stat info{};
+            if(::fstat(m_fd, &info) != 0)
+                throw std::runtime_error(
+                    "staging: stat '" + m_path + "' failed: " + std::strerror(errno));
+            return static_cast<std::uint64_t>(info.st_size);
+        }
 
         void readAt(void* destination, std::size_t bytes, std::uint64_t byteOffset)
         {
@@ -148,6 +160,11 @@ namespace picBunch::detail
                     throw std::runtime_error(
                         "staging: write '" + m_path + "' failed: " + std::strerror(errno));
                 }
+                if(put == 0 || static_cast<std::size_t>(put) > chunk)
+                    throw std::runtime_error(
+                        "staging: write '" + m_path + "' made no progress at byte "
+                        + std::to_string(byteOffset + done) + " with "
+                        + std::to_string(chunk) + " bytes requested");
                 done += static_cast<std::size_t>(put);
             }
             std::uint64_t const oldSize = m_size;
