@@ -169,6 +169,31 @@ so the device side is almost flat across tiles and the host side is not. The
 cause of the higher tile 2 host RSS was not profiled. Any change to the pair
 storage or the per-tile source list must re-measure it.
 
+## Slab-local correction buffer
+
+The near-shell correction is allocated for the rank's own z-slab instead of the
+full domain. The global tile grid is unchanged: a tile that crosses a slab
+boundary is evaluated by both adjacent ranks and each folds only the planes it
+owns. No halo exchange is added, and the field stays bit-identical to the
+replicated buffer.
+
+Measured on `rosi_v100` (gv001, 4 x V100-32GB, CUDA 12.6) with 2000 particles
+in a 24-cell cloud, `--fft-mode distributed`, padding 1. Peak per rank:
+
+| grid | ranks | near_shell | host RSS | device |
+| --- | --- | --- | --- | --- |
+| 192^3 | 4 | none | 328 MiB | 460 MiB |
+| 192^3 | 4 | fast-gpu before | 853 MiB | 580 MiB |
+| 192^3 | 4 | fast-gpu slab | 350 MiB | 586 MiB |
+| 1024x768x1024 | 4 | none | 18.16 GiB | 10.95 GiB |
+| 1024x768x1024 | 4 | fast-gpu slab | 18.43 GiB | 10.95 GiB |
+
+The old buffer did not shrink with the rank count: at 192^3 fast-gpu used
+853 MiB per rank at one rank, 860 MiB at two and 853 MiB at four. At
+1024x768x1024 it used 75.4 GiB per rank at two ranks and needed about 309 GiB
+in total at four ranks, above the 300 GiB allocation. The slab buffer runs at
+four ranks with 1.5% more host RSS than `none`.
+
 ## Gaps
 
 - **H100 data were not available at measurement time.** The H100 file under

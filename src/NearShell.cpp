@@ -257,6 +257,8 @@ namespace picBunch
             std::size_t i0{};
             std::size_t j0{};
             std::size_t k0{};
+            //! Global z plane stored at local index 0 of the correction buffer.
+            std::size_t kBase{};
             std::size_t n0{};
             std::size_t n1{};
             //! Squared radial near cutoff and taper start, in PIC cells.
@@ -300,7 +302,8 @@ namespace picBunch
                     std::size_t const i = args.i0 + ii;
                     std::size_t const j = args.j0 + jj;
                     std::size_t const k = args.k0 + kk;
-                    std::size_t const gidx = i + args.n0 * (j + args.n1 * k);
+                    std::size_t const gidx
+                        = i + args.n0 * (j + args.n1 * (k - args.kBase));
                     double value = 0.0;
 
                     double const x_obs = args.origin[0] + static_cast<double>(i) * args.spacing[0]
@@ -519,63 +522,11 @@ namespace picBunch
             }
         }
 
-        // Each rank owns a disjoint set of output tiles and writes only the
-        // correction there.  A zero correction buffer plus one all-reduce keeps
-        // the untouched tiles and the base field out of the summation.
-        Field correction;
-        correction.grid = field.grid;
-        for(auto& component : correction.data)
-            component.assign(field.grid.size(), 0.0);
-
         ParallelContext const* par = options.parallel;
         int const parSize = (par && par->distributed()) ? par->size : 1;
         int const parRank = (par && par->distributed()) ? par->rank : 0;
 
         Grid const& grid = field.grid;
-
-        // The per-tile subtraction consumes the base field as a full-grid host
-        // array on every rank, so the padded FFT grid must fit under the
-        // replicated per-rank cap (2^28 nodes, see makeGrid).  When it does
-        // not, the base mesh already ran in the distributed z-slab transform,
-        // which keeps only Mx*My*Mz/size nodes per rank; gather the slabs back
-        // into a replicated full field before the tiled loop below.  The
-        // distributed read-out redistributes the output so every rank owns the
-        // same balanced contiguous writer z-slab (Compute.cpp), which is the
-        // split mirrored here.
-        if(field.zSlab)
-        {
-            std::size_t const plane = grid.n[0] * grid.n[1];
-            std::size_t const totalPlanes = grid.n[2];
-            int const size = parSize;
-            for(int c = 0; c < 6; ++c)
-            {
-                std::size_t const local = field.slabCount * plane;
-                std::vector<double> recv(totalPlanes * plane);
-                std::vector<int> counts(size), displs(size);
-                std::size_t const base = totalPlanes / static_cast<std::size_t>(size);
-                std::size_t const rem = totalPlanes % static_cast<std::size_t>(size);
-                for(int r = 0; r < size; ++r)
-                {
-                    std::size_t const begin
-                        = static_cast<std::size_t>(r) * base
-                          + std::min(static_cast<std::size_t>(r), rem);
-                    std::size_t const count
-                        = base + (static_cast<std::size_t>(r) < rem ? 1u : 0u);
-                    counts[r] = static_cast<int>(count * plane);
-                    displs[r] = static_cast<int>(begin * plane);
-                }
-                par->allgatherv(
-                    field.data[c].data(),
-                    static_cast<int>(local),
-                    recv.data(),
-                    counts.data(),
-                    displs.data());
-                field.data[c].swap(recv);
-            }
-            field.zSlab = false;
-            field.slabOffset = 0u;
-            field.slabCount = totalPlanes;
-        }
 
         double const radius = resolveNearShellRadius(options, nearShell);
         double nearTaper = 0.5; //!< blend band below the shell radius
@@ -590,9 +541,32 @@ namespace picBunch
         double const cells[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::size_t const tile
             = resolveNearShellTile(bunch, grid, nearShell, options.cellSize, radius);
+
+        // Slab-local correction buffer.  The base field is already distributed
+        // as a contiguous z-slab per rank (and stays that way: the per-tile
+        // loop only needs the sources, which are replicated), so every rank
+        // allocates the correction for its own z range only.  The range is
+        // rounded out to whole tile rows: a tile that straddles a slab
+        // boundary is then computed in full by both adjacent ranks, and each
+        // folds only the planes it owns.  This keeps the global tile grid, and
+        // therefore the numerical result, identical to the replicated buffer
+        // without any halo exchange or extra communication.
+        std::size_t const plane = grid.n[0] * grid.n[1];
+        std::size_t const fieldZ0 = field.zSlab ? field.slabOffset : 0u;
+        std::size_t const fieldZ1
+            = field.zSlab ? field.slabOffset + field.slabCount : grid.n[2];
+        std::size_t const corrZ0 = (fieldZ0 / tile) * tile;
+        std::size_t const corrZ1 = std::min(grid.n[2], ((fieldZ1 + tile - 1u) / tile) * tile);
+        std::size_t const corrPlanes = corrZ1 - corrZ0;
+        Field correction;
+        correction.grid = grid;
+        for(auto& component : correction.data)
+            component.assign(plane * corrPlanes, 0.0);
+        if(nearShell.resolvedCorrectionNodes)
+            *nearShell.resolvedCorrectionNodes = plane * corrPlanes;
+
         nbref::Settings const settings = exactSettings();
         std::uint64_t pairs = 0;
-        std::size_t tileIndex = 0;
         auto const nearStart = std::chrono::steady_clock::now();
         // Resolve the oblique-box policy once.  0 (or a negative value) means
         // `auto`; an explicit value is mapped to an allowed even order in
@@ -883,10 +857,13 @@ namespace picBunch
                 std::size_t const j1 = std::min(n[1], j0 + tile);
                 for(std::size_t i0 = 0; i0 < n[0]; i0 += tile)
                 {
-                    std::size_t const thisTile = tileIndex++;
-                    if(parSize > 1 && (thisTile % static_cast<std::size_t>(parSize))
-                           != static_cast<std::size_t>(parRank))
-                        continue; // another rank owns this output tile
+                    // A rank computes every tile that overlaps its correction
+                    // z range.  Tiles wholly outside it belong to another
+                    // rank's slab and are skipped; the up-to-one-tile overlap
+                    // at each boundary is computed twice and folded once per
+                    // owning field slab.
+                    if(k1 <= corrZ0 || k0 >= corrZ1)
+                        continue;
                     std::size_t const i1 = std::min(n[0], i0 + tile);
 
                     // Node bounding box of this tile.
@@ -1208,6 +1185,7 @@ namespace picBunch
                         exactArgs.i0 = i0;
                         exactArgs.j0 = j0;
                         exactArgs.k0 = k0;
+                        exactArgs.kBase = corrZ0;
                         exactArgs.n0 = n[0];
                         exactArgs.n1 = n[1];
                         exactArgs.nearRadius2 = radius * radius;
@@ -1267,7 +1245,8 @@ namespace picBunch
                                 std::size_t const i = bt.i0 + ii;
                                 std::size_t const j = bt.j0 + jj;
                                 std::size_t const k = bt.k0 + kk;
-                                std::size_t const gidx = i + n[0] * (j + n[1] * k);
+                                std::size_t const gidx
+                                    = i + n[0] * (j + n[1] * (k - corrZ0));
                                 std::size_t const didx
                                     = static_cast<std::size_t>(ii)
                                     + static_cast<std::size_t>(bt.nx)
@@ -1279,23 +1258,45 @@ namespace picBunch
                             }
             }
         }
-        if(parSize > 1)
-        {
-            for(int c = 0; c < 6; ++c)
-                par->allreduceSum(correction.data[c].data(), correction.data[c].size());
+        // Every rank owns the correction for its own field slab, so no
+        // correction sum is exchanged; only the diagnostic pair count is
+        // reduced.
+        if(parSize > 1 && par)
             par->allreduceSum(pairs);
-        }
         bool const fastMode = nearShell.mode == NearShellOptions::Mode::Fast
             || nearShell.mode == NearShellOptions::Mode::FastGpu;
-        detail::NearShellPeak const uncorrectedPeak
+        detail::NearShellPeak uncorrectedPeak
             = fastMode ? detail::nearShellPeak(field) : detail::NearShellPeak{};
+        // Fold the slab-local correction into the slab-local field.  Each
+        // stored field plane maps to the correction plane with the same
+        // global z index; the tile-row rounding above guarantees it exists.
         for(int c = 0; c < 6; ++c)
-            for(std::size_t i = 0; i < field.data[c].size(); ++i)
-                field.data[c][i] += correction.data[c][i];
+            for(std::size_t k = fieldZ0; k < fieldZ1; ++k)
+            {
+                std::size_t const dst = (k - fieldZ0) * plane;
+                std::size_t const src = (k - corrZ0) * plane;
+                for(std::size_t i = 0; i < plane; ++i)
+                    field.data[c][dst + i] += correction.data[c][src + i];
+            }
+        detail::NearShellPeak correctedPeak
+            = fastMode ? detail::nearShellPeak(field) : detail::NearShellPeak{};
+        if(fastMode && parSize > 1 && par)
+        {
+            // The growth guard is a global property; compare the global peaks
+            // so the slab split cannot hide a spike on another rank.
+            double peaks[4] = {
+                uncorrectedPeak.e,
+                uncorrectedPeak.b,
+                correctedPeak.e,
+                correctedPeak.b};
+            par->allreduceMax(peaks, 4);
+            uncorrectedPeak = {peaks[0], peaks[1]};
+            correctedPeak = {peaks[2], peaks[3]};
+        }
         if(fastMode)
             detail::enforceNearShellPeak(
                 uncorrectedPeak,
-                detail::nearShellPeak(field),
+                correctedPeak,
                 radius,
                 tile,
                 requestedFastOrder);
@@ -1317,7 +1318,17 @@ namespace picBunch
                         << grid.n[1] << "x" << grid.n[2] << " nodes, fft_padding="
                         << grid.fftPadding << ", particles=" << bunch.size() << ", layout="
                         << (parSize > 1 ? "distributed" : "replicated");
-            detail::abortOnEmptyChargedField(field, detail::totalCharge(bunch), description.str());
+            if(field.zSlab && par)
+                detail::abortOnEmptyChargedDistributedField(
+                    field,
+                    detail::totalCharge(bunch),
+                    description.str(),
+                    *par);
+            else
+                detail::abortOnEmptyChargedField(
+                    field,
+                    detail::totalCharge(bunch),
+                    description.str());
         }
         return field;
     }
