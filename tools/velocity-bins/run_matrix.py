@@ -75,13 +75,15 @@ AUTO_COUNT_BINS_ARG = "auto"
 AUTO_COUNT_EDGES = "auto"
 
 #: Named geometries.  "matrix" is the decided campaign geometry: 0.25 um cells
-#: on 24 x 16 x 16 nodes from origin 0, 2R = 2 um cube at the domain centre.
+#: on a 32^3 grid from origin 0, with the 2R = 2 um cube at the domain centre
+#: (4, 4, 4) um.  This is the smallest domain the far-field shell (the bunch box
+#: translated by +2R along +x) fits into with the required 2-cell margins.
 GEOMETRIES = {
     "matrix": {
         "cell": (2.5e-7, 2.5e-7, 2.5e-7),
-        "grid": (24, 16, 16),
+        "grid": (32, 32, 32),
         "origin": (0.0, 0.0, 0.0),
-        "center": (3.0e-6, 2.0e-6, 2.0e-6),
+        "center": (4.0e-6, 4.0e-6, 4.0e-6),
     },
     # The measurement driver's own historical default, kept as a named
     # alternative for reproducing older outputs.
@@ -282,9 +284,17 @@ def measurement_argv(
         "--grid", format_triple(geometry["grid"]),
         "--origin", format_triple(geometry["origin"]),
         "--moments", "0",
+        # The atomic deposit is not bit-reproducible without this switch
+        # (identical runs differed in 17,602 / 36,864 entries at 4.2e-13).
+        "--deterministic-deposit",
         "--output", str(prefix),
     ]
     return argv
+
+
+def reference_cache_dir(out_dir: Path) -> Path:
+    """Shared per-matrix reference cache (T is keyed per case)."""
+    return out_dir / ".work" / "reference-cache"
 
 
 def generator_argv(
@@ -307,9 +317,19 @@ def compare_argv(
     prefix: Path,
     bins: Optional[int],
     workers: int,
+    reference_cache: Path,
+    far_field_policy: str = "error",
+    reference_nodes: str = "mask",
 ) -> List[str]:
     chosen = "<chosen_bins>" if bins is None else str(bins)
-    return [python, str(compare), str(prefix), "--bins", chosen, "--workers", str(workers)]
+    return [
+        python, str(compare), str(prefix),
+        "--bins", chosen,
+        "--workers", str(workers),
+        "--far-field-policy", far_field_policy,
+        "--reference-nodes", reference_nodes,
+        "--reference-cache", str(reference_cache),
+    ]
 
 
 def parse_meta(path: Path) -> Dict[str, List[str]]:
@@ -580,6 +600,7 @@ def manifest_row(
         "metrics_v2": v2,
         "compare_bins_key": str(chosen_bins) if chosen_bins is not None else None,
         "profile": profile,
+        "deterministic_deposit": True,
         "missing_metrics": list(missing),
         "missing_metric_notes": list(notes),
         "status": "ok",
@@ -756,7 +777,9 @@ def execute_run(
             "the automatic count cannot be recovered"
         )
 
-    c_argv = compare_argv(python, compare, prefix, chosen_bins, compare_workers)
+    c_argv = compare_argv(
+        python, compare, prefix, chosen_bins, compare_workers,
+        reference_cache_dir(out_dir))
     compare_wall = run_process(c_argv, workdir / "compare.log", timeout, run.run_id + ":compare")
 
     compare_path = Path(str(prefix) + "_compare.json")
@@ -878,6 +901,15 @@ def assemble_manifest(
         "geometry": dict(geometry),
         "geometry_name": geometry_name,
         "profile": profile,
+        "deterministic_deposit": True,
+        "reference": {
+            "nodes": "mask",
+            "cache": "enabled",
+            "cache_dir": str(reference_cache_dir(out_dir)),
+            "key": "sha256(particles, grid, origin, cell, order, refine, eps, mask)",
+            "note": "T depends only on the particles and geometry, so one entry "
+                    "serves every rule and K of a case",
+        },
         "auto_count": {
             "bins_arg": AUTO_COUNT_BINS_ARG,
             "velocity_bin_edges": AUTO_COUNT_EDGES,
@@ -1125,7 +1157,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             prefix = out_dir / ".work" / run.run_id / run.run_id
             m_argv = measurement_argv(args.binary, bunch, run, prefix, geometry)
             c_argv = compare_argv(
-                args.python, args.compare, prefix, run.requested_bins, compare_workers
+                args.python, args.compare, prefix, run.requested_bins,
+                compare_workers, reference_cache_dir(out_dir)
             )
             print(
                 f"RUN {run.index:02d} lane={run.lane} id={run.run_id} "
@@ -1149,6 +1182,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "geometry": geometry,
                     "profile": args.profile,
                     "auto_count_bins_arg": AUTO_COUNT_BINS_ARG,
+                    "deterministic_deposit": True,
+                    "reference_nodes": "mask",
+                    "reference_cache": str(reference_cache_dir(out_dir)),
                 },
                 sort_keys=True,
             )

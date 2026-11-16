@@ -16,8 +16,8 @@
 #
 # Positions are uniform in a cube of side 2R (R = 1e-6 m) centred at
 # ``--center`` (default: origin + half the ``--grid`` x ``--cell`` domain).  The
-# default geometry is the matrix one: cell 0.25 um, grid 24 x 16 x 16, origin 0,
-# so the domain is 6 um x 4 um x 4 um and the centre is (3, 2, 2) um.
+# default geometry is the matrix one: cell 0.25 um, grid 32 x 32 x 32, origin 0,
+# so the domain is 8 um x 8 um x 8 um and the centre is (4, 4, 4) um.
 #
 # Geometry safety.  Before any particle is drawn the generator checks that the
 # cube plus the 1.5-cell TSC support fits inside the grid, and that the far-field
@@ -82,10 +82,11 @@ M_ELECTRON_C2_MEV = 0.51099895
 R_BUNCH_M = 1.0e-6
 
 #: Matrix measurement geometry (decided, shared with run_matrix.py):
-#: 0.25 um cells on a 24 x 16 x 16 grid, origin at 0, so the domain is
-#: 6 um x 4 um x 4 um.  The 2R cube sits at the domain centre.
+#: 0.25 um cells on a 32^3 grid, origin at 0, so the domain is
+#: 8 um x 8 um x 8 um.  The 2R cube sits at the domain centre (4, 4, 4) um,
+#: which leaves room for the +2R far-field shell with 2-cell margins.
 DEFAULT_CELL_M = (2.5e-7, 2.5e-7, 2.5e-7)
-DEFAULT_GRID = (24, 16, 16)
+DEFAULT_GRID = (32, 32, 32)
 DEFAULT_ORIGIN_M = (0.0, 0.0, 0.0)
 #: Centre = origin + half the domain, so a default run is centred and the cube
 #: plus its TSC support is inside the grid.
