@@ -894,6 +894,85 @@ TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
     EXPECT_LT(binning.modelError, b1.modelError);
 }
 
+TEST(VelocityBins, InBunchAutoNeverReturnsTheCapWhenErrorKeepsDeclining)
+{
+    // Drives the in-bunch model error to keep halving up to the largest count
+    // without meeting the tolerance: a pure-angular bunch (uniform gamma, no
+    // energy spread, so the error is the angular term only and halves at every
+    // doubling) with a tolerance so tight that no count up to the ceiling
+    // reaches it.  This is the exact path the reviewer flagged: the error is
+    // still improving at the largest tested count, so the policy must return
+    // the practical cap (16), NOT the 256 cap.  realBunchLike() has an energy
+    // spread (the error saturates); this one removes it so the error keeps
+    // halving.
+    Bunch bunch;
+    bunch.resize(256);
+    double const u = std::sqrt(490.0 * 490.0 - 1.0); // uniform gamma=490: no energy spread
+    double const div = 0.0136;
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Auto;
+    policy.inBunchCriterion = true;
+    // 1e-15 is far below the in-bunch model error at every count up to the
+    // ceiling (the pure-angular error halves per doubling but is still far
+    // above 1e-15 at 16 boxes), so no count meets the tolerance: the policy
+    // runs to the ceiling and must cap there.
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-15, policy);
+    EXPECT_TRUE(binning.derived);
+    // The returned count is the practical cap (16), NOT the 256 cap, even
+    // though the error is still halving at the largest tested count.
+    EXPECT_EQ(binning.count, picBunch::kInBunchAutoMaxVelocityBins);
+    EXPECT_EQ(binning.count, 16u);
+    EXPECT_LT(binning.count, picBunch::kDefaultMaxVelocityBins);
+    EXPECT_TRUE(binning.practicalCapApplied);
+    EXPECT_TRUE(binning.saturated);
+    // Sanity: the error is still improving at the ceiling (the next doubling
+    // halves it, an improvement of at least kSaturationImprovement), so the
+    // policy had no saturation point to stop at -- it capped at 16.  This is
+    // what distinguishes the "keeps declining" path from the saturation
+    // plateau: at 16 the error is still above the tolerance AND still halving.
+    VelocityBinningOptions cap;
+    cap.mode = VelocityBinningOptions::Mode::Explicit;
+    cap.explicitBins = 16u;
+    cap.inBunchCriterion = true;
+    VelocityBinning const b16 = picBunch::deriveVelocityBinning(bunch, 1e-15, cap);
+    VelocityBinningOptions next;
+    next.mode = VelocityBinningOptions::Mode::Explicit;
+    next.explicitBins = 32u;
+    next.inBunchCriterion = true;
+    VelocityBinning const b32 = picBunch::deriveVelocityBinning(bunch, 1e-15, next);
+    // The error at 32 is at most half the error at 16 (still halving), so the
+    // policy had no saturation point to stop at -- it capped at 16.
+    EXPECT_LE(b32.modelError, picBunch::kSaturationImprovement * b16.modelError + 1e-30);
+    // And the error at 16 is still far above the tolerance (not met).
+    EXPECT_GT(b16.modelError, 1e-15);
+}
+
+TEST(VelocityBins, InBunchAutoCapIsPinned)
+{
+    // Pins the practical cap value so raising it (e.g. 16 -> 32) fails here.
+    // The cap is a documented cost trade-off (16 field solves); a silent change
+    // to it would alter the auto count for every high-gamma bunch and must be
+    // an explicit, reviewed change.
+    EXPECT_EQ(picBunch::kInBunchAutoMaxVelocityBins, 16u);
+    EXPECT_LT(picBunch::kInBunchAutoMaxVelocityBins, picBunch::kDefaultMaxVelocityBins);
+    EXPECT_EQ((picBunch::kInBunchAutoMaxVelocityBins
+               & (picBunch::kInBunchAutoMaxVelocityBins - 1u)),
+              0u); // power of two
+}
+
 TEST(VelocityBins, InBunchCriterionByErrorShrinksWithBoxes)
 {
     // The in-bunch peak-normalised By error (the transverse B component that

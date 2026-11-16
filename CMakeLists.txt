@@ -635,6 +635,21 @@ if(PICBUNCH_BUILD_TESTS AND Python3_FOUND)
     )
     set_tests_properties(VelocityBinsArbiterReference PROPERTIES
         TIMEOUT 600 PASS_REGULAR_EXPRESSION "By_abs_max")
+    # Full-set saturation revalidation from the committed real-bunch fixture
+    # (49931 particles, gamma ~ 490).  Runs the exact LW direct-sum arbiter at
+    # the FULL set of bin counts (1..256) and checks (1) the published
+    # per-component relative-error table is reproduced and (2) the saturation
+    # invariant holds: no component reaches the 1e-3 in-bunch tolerance at any
+    # count up to 256.  This is the claim the auto policy rests on, so it is
+    # revalidated by CI from the fixture, not only from a 4-particle synthetic.
+    add_test(
+        NAME VelocityBinsSaturationReference
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/velocity-bins/validate_saturation.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/velocity_bins_real_bunch.txt
+    )
+    set_tests_properties(VelocityBinsSaturationReference PROPERTIES
+        TIMEOUT 300 PASS_REGULAR_EXPRESSION "PASS: velocity-bin in-bunch saturation revalidated")
 endif()
 
 # ---------------------------------------------------------------------------

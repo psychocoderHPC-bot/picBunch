@@ -941,21 +941,24 @@ namespace picBunch
                 // (the angular term scales with the per-box angular width
                 // squared) with a gradual per-doubling improvement (~30-50
                 // percent), so a "saturation point" (a halving threshold) is
-                // not well defined for the in-bunch curve.  The honest,
-                // practical result is therefore the in-bunch auto ceiling: the
-                // count at which the remaining accuracy gain no longer
-                // justifies another field solve.  The ceiling is
-                // kInBunchAutoMaxVelocityBins (16) unless the user raised
-                // --max-velocity-bins, so a deliberately higher count stays
-                // available; the 256 cap is never returned by the in-bunch
-                // auto path.  An explicit --velocity-bins (the far-field
-                // angular calibration) is unaffected.  The achieved accuracy is
-                // reported either way.
-                std::size_t const ceiling
-                    = (policy.maxBins == kDefaultMaxVelocityBins)
-                          ? kInBunchAutoMaxVelocityBins
-                          : policy.maxBins;
-                std::size_t satBins = ceiling;
+                 // not well defined for the in-bunch curve.  The honest,
+                 // practical result is therefore the in-bunch auto ceiling: the
+                 // count at which the remaining accuracy gain no longer
+                 // justifies another field solve.  The ceiling is
+                 // kInBunchAutoMaxVelocityBins (16) whenever --max-velocity-bins
+                 // is at or below the default cap (256): the 256 cap is never
+                 // returned by the in-bunch auto path, even when the model
+                 // error is still halving at the largest tested count.  Only a
+                 // user who raises --max-velocity-bins ABOVE the default cap
+                 // gets a higher auto ceiling (a deliberate opt-in to more
+                 // field solves).  An explicit --velocity-bins (the far-field
+                 // angular calibration) is unaffected.  The achieved accuracy
+                 // is reported either way.
+                 std::size_t const ceiling
+                     = (policy.maxBins > kDefaultMaxVelocityBins)
+                           ? policy.maxBins
+                           : kInBunchAutoMaxVelocityBins;
+                 std::size_t satBins = ceiling;
                 for(std::size_t B = 1u; B <= ceiling; B *= 2u)
                 {
                     VelocityBinning probe;
