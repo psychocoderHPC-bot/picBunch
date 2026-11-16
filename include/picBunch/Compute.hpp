@@ -133,10 +133,12 @@ namespace picBunch
      * ``tolerance >= 1e-12``, padding 3 below that down to the measured
      * double-precision floor ``1e-14``) unless ``options.fftPadding`` is set
      * explicitly as a diagnostic override.  A tolerance below the floor is
-     * rejected with ``std::runtime_error``.  An explicit padding that leaves
-     * less halo than the deposit stencil requires is rejected with
-     * ``std::invalid_argument``; the message names the axis, the required
-     * padding and the padding actually available.
+     * rejected with ``std::runtime_error``.  The padding factor oversamples
+     * the transform; the deposit halo is separate.  When the factor leaves
+     * fewer halo nodes than the shape needs, ``makeGrid`` appends the deficit
+     * to ``Grid::depositHalo`` (two nodes for CIC/TSC at padding 1) instead of
+     * rejecting the grid.  A hand-built grid whose padded extent is still too
+     * small is rejected by ``validateDepositPadding``.
      */
     Grid makeGrid(Bunch const& bunch, ComputeOptions const& options);
 

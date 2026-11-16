@@ -104,8 +104,9 @@ namespace
             "                        convolution (default: 1e-3; floor 1e-14)\n"
             "  --fft-padding <N>     FFT zero-padding factor, an integer in [0,8]\n"
             "                        (default: 0 = tolerance policy).  1 disables\n"
-            "                        padding (diagnostic: wrapped images leak into\n"
-            "                        the output); values above 3 only add cost\n"
+            "                        oversampling (diagnostic: wrapped images leak\n"
+            "                        into the output) but keeps the deposit halo;\n"
+            "                        values above 3 only add cost\n"
             "  --fft-spectrum-cache-mb <MiB>\n"
             "                        cap the process-wide kernel-spectrum cache in\n"
             "                        MiB (default: 1536; 0 disables).  Overrides\n"
@@ -642,9 +643,19 @@ namespace
 
     void printGrid(picBunch::Grid const& grid)
     {
-        std::printf("grid: n=(%zu,%zu,%zu)  spacing=(%.6g,%.6g,%.6g) m\n",
-                    grid.n[0], grid.n[1], grid.n[2],
-                    grid.spacing[0], grid.spacing[1], grid.spacing[2]);
+        std::printf(
+            "grid: n=(%zu,%zu,%zu)  spacing=(%.6g,%.6g,%.6g) m  fft_padding=%u"
+            "  deposit_halo=(%zu,%zu,%zu)\n",
+            grid.n[0],
+            grid.n[1],
+            grid.n[2],
+            grid.spacing[0],
+            grid.spacing[1],
+            grid.spacing[2],
+            grid.fftPadding,
+            grid.depositHalo[0],
+            grid.depositHalo[1],
+            grid.depositHalo[2]);
         std::printf("      origin=(%.6g,%.6g,%.6g) m\n",
                     grid.origin[0], grid.origin[1], grid.origin[2]);
     }

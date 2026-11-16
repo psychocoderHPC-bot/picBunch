@@ -294,7 +294,7 @@ that bear directly on a restart run:
 | --- | --- |
 | large domains need the distributed multi-rank path | a domain whose padded box is above `2^28` nodes on one rank is rejected on a single rank with the `limit 268435456 nodes` message. Run under `mpirun -n R` and keep `--fft-mode auto` (the default); auto selects the distributed z-slab FFT and scales the per-rank cap by `R * 8`. See [configuration.md, Large domains under MPI](configuration.md#large-domains-under-mpi) |
 | single-process tiling is not supported | there is no chunked or slab-tiled field-computation path. The checkpoint is written only from a fully materialised field, so the peak device memory is the full padded FFT box plus the six output components. A domain that does not fit on one device must use the multi-rank path above |
-| per-rank padded-node cap | `makeGrid` rejects a padded box above the cap for the given rank count. The cap is `2^28` nodes per rank and scales by `R * 8` with the distributed FFT. The deposit also requires at least 2 padding nodes per axis, so padding 1 is rejected; a domain that fits only without padding needs more ranks or a coarser grid |
+| per-rank padded-node cap | `makeGrid` rejects a padded box above the cap for the given rank count. The cap is `2^28` nodes per rank and scales by `R * 8` with the distributed FFT. The deposit also requires at least 2 halo nodes per axis; `makeGrid` appends them to `Grid::depositHalo` when the padding factor does not provide them, so padding 1 adds two nodes instead of being rejected. A domain that still exceeds the cap needs more ranks or a coarser grid |
 
 The full list of open engineering items, with symptoms, evidence and plans, is
 in [known-limitations.md](known-limitations.md). The accuracy envelope of the

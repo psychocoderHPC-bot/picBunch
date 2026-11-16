@@ -1653,6 +1653,21 @@ namespace picBunch
                     + " and out-of-grid particles would be dropped");
         }
 
+        // The FFT padding factor is an oversampling multiplier, while the
+        // deposit needs a fixed number of halo nodes.  Append only the deficit
+        // the factor does not already provide.  Padding 1 therefore gets its
+        // two CIC/TSC halo nodes (M = n + 2) instead of being rejected, and a
+        // padding-2 grid keeps its historical extent unchanged.
+        std::size_t const requiredHalo = requiredDepositPadding(grid.shape);
+        for(int a = 0; a < 3; ++a)
+        {
+            std::size_t const factorHalo
+                = padding > 1u ? grid.n[a] * static_cast<std::size_t>(padding - 1u) : 0u;
+            grid.depositHalo[a]
+                = factorHalo >= requiredHalo ? 0u : requiredHalo - factorHalo;
+        }
+        Idx3 const paddedExtent = grid.paddedSize();
+
         // Reject an infeasible grid before the first allocation.  Both the
         // per-axis and the padded total are checked; the product is formed in
         // 64-bit with an explicit overflow guard.
@@ -1672,7 +1687,7 @@ namespace picBunch
                     + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
                     + " is infeasible (per-axis limit " + std::to_string(kMaxNodesPerAxis)
                     + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
-            std::uint64_t const axisPadded = static_cast<std::uint64_t>(grid.n[a]) * padding;
+            std::uint64_t const axisPadded = static_cast<std::uint64_t>(paddedExtent[a]);
             if(axisPadded != 0u
                && padded > std::numeric_limits<std::uint64_t>::max() / axisPadded)
                 throw std::runtime_error(
@@ -1840,9 +1855,10 @@ namespace picBunch
         auto queue = device.makeQueue();
         using KernelCache = KernelSpectrumCache<decltype(device)>;
 
-        std::uint32_t const Mx = static_cast<std::uint32_t>(grid.n[0] * grid.fftPadding);
-        std::uint32_t const My = static_cast<std::uint32_t>(grid.n[1] * grid.fftPadding);
-        std::uint32_t const Mz = static_cast<std::uint32_t>(grid.n[2] * grid.fftPadding);
+        Idx3 const paddedExtent = grid.paddedSize();
+        std::uint32_t const Mx = static_cast<std::uint32_t>(paddedExtent[0]);
+        std::uint32_t const My = static_cast<std::uint32_t>(paddedExtent[1]);
+        std::uint32_t const Mz = static_cast<std::uint32_t>(paddedExtent[2]);
         // Mx may be odd: the R2C half-spectrum then has (Mx+1)/2 planes and no Nyquist
         // plane; KernelBuildKernel's parity-correct centred index handles that.  The
         // integer ``Mx/2 + 1`` already equals (Mx+1)/2 for odd Mx and Mx/2+1 for even.
@@ -1975,6 +1991,8 @@ namespace picBunch
             text << "path=" << path << ", near_shell=" << mode << ", shape=" << shape
                  << ", grid=" << result.grid.n[0] << "x" << result.grid.n[1] << "x"
                  << result.grid.n[2] << " nodes, fft_padding=" << result.grid.fftPadding
+                 << ", deposit_halo=" << result.grid.depositHalo[0] << ","
+                 << result.grid.depositHalo[1] << "," << result.grid.depositHalo[2]
                  << ", particles=" << bunch.size() << ", velocity_boxes=" << binCount
                  << ", layout=" << (useDistributed ? "distributed" : "replicated");
             return text.str();

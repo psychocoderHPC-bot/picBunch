@@ -1417,12 +1417,16 @@ table above covers the compute stages of the large-N sweep, not the write path.
   does not reproduce the small `B_y` residual of an angular spread; that case needs
   per-particle velocities. An auto request above the box cap exits with the needed count.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
-- **Padding required.** The deposit keeps the TSC support of a boundary particle in a
-  halo between the physical grid `n` and the padded box `M = fftPadding*n`; both halos
-  need `floor(shapeSupport)` nodes per side, so any grid with `M - n < 2` is rejected
-  before it deposits. A TSC particle at `t = n - 0.4` on a padding-1 `16^3` box folded
+- **Deposit halo required.** The deposit keeps the TSC support of a boundary particle
+  in a halo between the physical grid `n` and the padded box `M = paddedSize()`; both
+  halos need `floor(shapeSupport)` nodes per side. `--fft-padding N` is an
+  oversampling factor, not a halo count, so `makeGrid` appends the deficit to
+  `Grid::depositHalo`: padding 1 gets `M = n + 2` for CIC/TSC instead of being
+  rejected. A hand-built grid with `M - n < 2` is still rejected before it deposits.
+  A TSC particle at `t = n - 0.4` on an unchecked padding-1 `16^3` box folded
   **59.5%** of its unit weight onto the opposite side (nodes 0 and 1 instead of 16 and
-  17). The production policy uses padding 2 or 3.
+  17). The production policy still uses padding 2 or 3 for zero padding; padding 1
+  keeps the wrapped images and only adds the deposit halo.
 - **Zero fill only as a diagnostic.** Global output is filled beyond the exact box with the
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.

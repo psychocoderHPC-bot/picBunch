@@ -85,13 +85,17 @@ namespace picBunch
             std::size_t const actual = m > n ? m - n : 0u;
             if(actual >= required)
                 continue;
+            std::size_t const factorHalo
+                = grid.fftPadding > 1u ? n * (grid.fftPadding - 1u) : 0u;
             char const* const axis = a == 0u ? "x" : (a == 1u ? "y" : "z");
             std::ostringstream text;
             text << "deposit: the " << shapeLabel(grid.shape)
                  << " stencil requires at least " << required
-                 << " padding nodes on axis " << a << " (" << axis
-                 << "), but fftPadding=" << grid.fftPadding << " provides " << actual
-                 << " (n=" << n << ", M=" << m << ", need M >= n + " << required << ")";
+                 << " halo nodes on axis " << a << " (" << axis
+                 << "), but only " << actual << " are available (n=" << n
+                 << ", padded M=" << m << "; fftPadding=" << grid.fftPadding
+                 << " contributes " << factorHalo << ", depositHalo="
+                 << grid.depositHalo[a] << ", need M >= n + " << required << ")";
             throw std::invalid_argument(text.str());
         }
     }
@@ -160,9 +164,10 @@ namespace picBunch
         std::size_t const nx = grid.n[0];
         std::size_t const ny = grid.n[1];
         std::size_t const nz = grid.n[2];
-        std::size_t const Mx = nx * grid.fftPadding;
-        std::size_t const My = ny * grid.fftPadding;
-        std::size_t const Mz = nz * grid.fftPadding;
+        Idx3 const padded = grid.paddedSize();
+        std::size_t const Mx = padded[0];
+        std::size_t const My = padded[1];
+        std::size_t const Mz = padded[2];
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
         // The TSC shape is sampled in node units: grid.spacing already carries the

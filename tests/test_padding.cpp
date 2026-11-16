@@ -7,14 +7,16 @@
 // wrong deposit weight or an unnoticed periodic image all fail the test.  A
 // converged padding-2 result alone would only prove self-consistency.
 //
-// A no-padding grid (fftPadding = 1) leaves no deposit halo and is rejected.
-// The guard is tested here and in Deposit.PaddedBoundaryParticleLandsInFullSupport.
+// fftPadding is an oversampling factor, not a halo count.  A padding-1 grid
+// gets the deposit halo appended (M = n + 2 for TSC), while a hand-built grid
+// that really lacks the halo is still rejected in Deposit.InsufficientPaddingIsRejected.
 //
 // Bunch: 27 charges on an asymmetric 3x3x3 lattice spanning about 20 cells,
 // all at rest.  With fftPadding = 2 every source-observer lag fits inside the
 // box and the positive/negative deposit halos stay disjoint.
 
 #include "picBunch/Compute.hpp"
+#include "picBunch/Deposit.hpp"
 #include "picBunch/Types.hpp"
 
 #include <gtest/gtest.h>
@@ -228,56 +230,60 @@ TEST(Padding, PaddingTwoMatchesDirectSumAndPaddingThreeIsConverged)
     EXPECT_LT(paddingConverged, 1.0e-9) << "padding=2 must be converged";
 }
 
-TEST(Padding, InsufficientPaddingIsRejectedWithAxisAndRequirement)
+TEST(Padding, MinimumDepositHaloIsIndependentOfTheFftFactor)
 {
-    picBunch::Bunch const bunch = latticeBunch();
-    picBunch::ComputeOptions options;
-    options.cellSize = {1.0, 1.0, 1.0};
-    options.marginCells = 6.0;
-
-    // fftPadding = 1 leaves no halo at all.
-    options.fftPadding = 1;
-    try
-    {
-        (void)picBunch::makeGrid(bunch, options);
-        FAIL() << "padding 1 must be rejected";
-    }
-    catch(std::invalid_argument const& error)
-    {
-        std::string const message = error.what();
-        EXPECT_NE(message.find("axis 0"), std::string::npos) << message;
-        EXPECT_NE(message.find("(x)"), std::string::npos) << message;
-        EXPECT_NE(message.find("requires at least 2"), std::string::npos) << message;
-        EXPECT_NE(message.find("fftPadding=1"), std::string::npos) << message;
-        EXPECT_NE(message.find("provides 0"), std::string::npos) << message;
-    }
-
-    // PQS needs four halo nodes.  With an 8x8x2 grid at padding 2 only the z
-    // axis is short, so the message must name axis 2 (z), not axis 0.
+    // A realistic production geometry: a large TSC grid at padding 1.  The
+    // factor is an oversampling multiplier, not a halo count, so makeGrid must
+    // append the two halo nodes the stencil needs instead of rejecting it.
     picBunch::Bunch single;
     single.resize(1);
-    single.x[0] = 3.3;
-    single.y[0] = 4.1;
+    single.x[0] = 1.0;
+    single.y[0] = 1.0;
     single.z[0] = 1.0;
     single.weight[0] = 1.0;
     single.charge[0] = 1.0;
-    options.gridSize = picBunch::Idx3{8u, 8u, 2u};
+
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.marginCells = 6.0;
+    options.gridSize = picBunch::Idx3{512u, 512u, 512u};
     options.gridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
-    options.fftPadding = 2;
+    options.shape = picBunch::Shape::TSC;
+    options.fftPadding = 1;
+
+    picBunch::Grid const grid = picBunch::makeGrid(single, options);
+    ASSERT_EQ(grid.fftPadding, 1u);
+    ASSERT_EQ(grid.n, (picBunch::Idx3{512u, 512u, 512u}));
+    picBunch::Idx3 const padded = grid.paddedSize();
+    for(std::size_t a = 0; a < 3u; ++a)
+    {
+        EXPECT_EQ(grid.depositHalo[a], 2u) << "axis " << a;
+        EXPECT_EQ(padded[a], grid.n[a] + 2u) << "axis " << a;
+        EXPECT_GE(padded[a] - grid.n[a], picBunch::requiredDepositPadding(grid.shape));
+    }
+    EXPECT_NO_THROW(picBunch::validateDepositPadding(grid));
+
+    // PQS needs four halo nodes.  Padding 2 on the 2-node z axis already
+    // provides two, so makeGrid appends the remaining two; the x/y axes keep
+    // their factor-derived halo and need no extra nodes.
+    options.gridSize = picBunch::Idx3{8u, 8u, 2u};
     options.shape = picBunch::Shape::PQS;
-    try
-    {
-        (void)picBunch::makeGrid(single, options);
-        FAIL() << "PQS with a 2-node padding-2 axis must be rejected";
-    }
-    catch(std::invalid_argument const& error)
-    {
-        std::string const message = error.what();
-        EXPECT_NE(message.find("axis 2"), std::string::npos) << message;
-        EXPECT_NE(message.find("(z)"), std::string::npos) << message;
-        EXPECT_NE(message.find("requires at least 4"), std::string::npos) << message;
-        EXPECT_NE(message.find("fftPadding=2"), std::string::npos) << message;
-    }
+    options.fftPadding = 2;
+    picBunch::Grid const pqs = picBunch::makeGrid(single, options);
+    EXPECT_EQ(pqs.depositHalo[0], 0u);
+    EXPECT_EQ(pqs.depositHalo[1], 0u);
+    EXPECT_EQ(pqs.depositHalo[2], 2u);
+    EXPECT_EQ(pqs.paddedSize()[2] - pqs.n[2], 4u);
+    EXPECT_NO_THROW(picBunch::validateDepositPadding(pqs));
+
+    // Padding 2 on a normal TSC grid keeps its historical extent: the factor
+    // already leaves far more than the two required halo nodes.
+    options.gridSize = picBunch::Idx3{256u, 256u, 256u};
+    options.shape = picBunch::Shape::TSC;
+    options.fftPadding = 2;
+    picBunch::Grid const padded2 = picBunch::makeGrid(single, options);
+    EXPECT_EQ(padded2.depositHalo[0], 0u);
+    EXPECT_EQ(padded2.paddedSize()[0], 2u * padded2.n[0]);
 }
 
 TEST(Padding, ToleranceSelectsPaddingAndRejectsUnreachableTargets)
@@ -299,18 +305,21 @@ TEST(Padding, ToleranceSelectsPaddingAndRejectsUnreachableTargets)
     options.tolerance = 1e-15;
     EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error);
 
-    // An explicit factor below the deposit stencil's halo requirement is
-    // rejected instead of wrapping charge onto the opposite side.
+    // An explicit factor of 1 is an oversampling choice, not a halo count.
+    // makeGrid appends the deposit halo instead of rejecting the grid.
     options.tolerance = 1e-3;
     options.fftPadding = 1;
-    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::invalid_argument);
+    picBunch::Grid const paddingOne = picBunch::makeGrid(bunch, options);
+    EXPECT_EQ(paddingOne.fftPadding, 1u);
+    for(std::size_t a = 0; a < 3u; ++a)
+        EXPECT_EQ(paddingOne.paddedSize()[a] - paddingOne.n[a], 2u);
 }
 
-// The landscape production case runs at 384^3.  Padding 1 leaves no halo and
-// is rejected before it can deposit.  Padding 2 makes the padded box 768^3,
-// which exceeds the replicated 2^28-node cap in makeGrid and must still raise
-// the documented infeasibility error.
-TEST(Padding, PaddingOneIsRejectedAndPaddingTwoHitsTheSizeGuard)
+// The landscape production case runs at 384^3.  Padding 1 adds the deposit
+// halo and is accepted.  Padding 2 makes the padded box 768^3, which exceeds
+// the replicated 2^28-node cap in makeGrid and must still raise the documented
+// infeasibility error.
+TEST(Padding, PaddingOneIsAcceptedAndPaddingTwoHitsTheSizeGuard)
 {
     picBunch::Bunch const bunch = latticeBunch();
     picBunch::ComputeOptions options;
@@ -320,8 +329,13 @@ TEST(Padding, PaddingOneIsRejectedAndPaddingTwoHitsTheSizeGuard)
     options.gridSize = {384u, 384u, 384u};
 
     options.fftPadding = 1;
-    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::invalid_argument)
-        << "padding 1 has no deposit halo and must be rejected";
+    picBunch::Grid const paddingOne = picBunch::makeGrid(bunch, options);
+    ASSERT_EQ(paddingOne.fftPadding, 1u);
+    for(std::size_t a = 0; a < 3u; ++a)
+    {
+        EXPECT_EQ(paddingOne.depositHalo[a], 2u);
+        EXPECT_EQ(paddingOne.paddedSize()[a], paddingOne.n[a] + 2u);
+    }
 
     options.fftPadding = 2;
     EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error)

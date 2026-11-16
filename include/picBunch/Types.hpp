@@ -45,12 +45,14 @@ namespace picBunch
      * ``n`` nodes per axis, node ``(i,j,k)`` sits at
      * ``origin + (i,j,k) * spacing``.  ``spacing`` is the physical node spacing, i.e.
      * ``kRefinement`` PIC cells.  ``fftPadding`` is the zero-padding factor of the
-     * free-space convolution: the FFT grid has ``M = fftPadding * n`` nodes per axis.
+     * free-space convolution: the transform extent would be ``fftPadding * n``.
      * It is normally selected from ``ComputeOptions::tolerance`` (never below 2).
-     * The deposit halo is a hard floor: every axis needs
-     * ``M - n >= 2*floor(shapeSupport)`` (2 nodes for CIC/TSC, 4 for PQS), so a
-     * factor that leaves less padding is rejected instead of wrapping charge
-     * onto the opposite side.
+     * The factor is an oversampling count, not a halo count.  The deposit needs
+     * ``M - n >= 2*floor(shapeSupport)`` halo nodes (2 for CIC/TSC, 4 for PQS);
+     * ``depositHalo`` holds the per-axis nodes that the factor does not provide
+     * (``makeGrid`` sets them, so padding 1 still gets its two halo nodes and
+     * the extent becomes ``n + 2``).  ``paddedSize`` is the extent of both the
+     * deposit buffer and the transform.
      */
     struct Grid
     {
@@ -58,6 +60,13 @@ namespace picBunch
         Vec3 spacing{1.0, 1.0, 1.0}; //!< physical node spacing
         Vec3 origin{0.0, 0.0, 0.0}; //!< physical position of node (0,0,0)
         unsigned fftPadding{2};
+        /*! Halo nodes appended above ``fftPadding * n`` per axis.
+         *
+         * Zero when the FFT padding factor already leaves the stencil enough
+         * room.  ``makeGrid`` fills the deficit, so a padding-1 grid gets two
+         * extra nodes for CIC/TSC instead of silently wrapping boundary charge.
+         */
+        Idx3 depositHalo{0u, 0u, 0u};
         //! Deposit shape; the near shell currently supports TSC only.
         Shape shape = Shape::TSC;
 
@@ -66,10 +75,13 @@ namespace picBunch
         {
             return n[0] * n[1] * n[2];
         }
-        //! Number of nodes per axis of the zero-padded FFT box.
+        //! Number of nodes per axis of the padded FFT/deposit box.
         [[nodiscard]] Idx3 paddedSize() const
         {
-            return {n[0] * fftPadding, n[1] * fftPadding, n[2] * fftPadding};
+            return {
+                n[0] * fftPadding + depositHalo[0],
+                n[1] * fftPadding + depositHalo[1],
+                n[2] * fftPadding + depositHalo[2]};
         }
     };
 
@@ -448,11 +460,11 @@ namespace picBunch
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
         Vec3 cellSize{1.0, 1.0, 1.0};
         /*! Diagnostic override of the FFT zero-padding factor; 0 selects the
-         * tolerance policy.  A non-zero value bypasses the policy but must
-         * still leave the deposit halo: every axis needs
-         * ``M - n >= 2*floor(shapeSupport)`` (2 for CIC/TSC, 4 for PQS), so
-         * ``fftPadding = 1`` is rejected.  The guard names the axis, the
-         * required padding and the padding actually available.
+         * tolerance policy.  A non-zero value bypasses the policy.  The factor
+         * is an oversampling multiplier (``M = fftPadding * n``), not a halo
+         * count; ``makeGrid`` appends the deposit-halo deficit separately, so
+         * ``fftPadding = 1`` keeps two halo nodes for CIC/TSC and remains a
+         * valid no-oversampling choice.
          */
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.

@@ -384,6 +384,7 @@ set(PICBUNCH_SOURCES
     src/FieldGuard.cpp
     src/FarTail.cpp
     src/FastNearDevice.cpp
+    src/Mpi.cpp
     src/NearShell.cpp
     src/VelocityBinning.cpp
     src/VelocityMoments.cpp
@@ -405,6 +406,14 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(picBunch PUBLIC OpenMP::OpenMP_CXX)
 endif()
 target_link_libraries(picBunch PUBLIC alpaka::alpaka alpakaVendor::alpakaVendor tomlplusplus::tomlplusplus)
+# DeviceAffinity lives in this library and talks to the MPI runtime for the
+# shared-memory local rank/size and the allgather of the mapping.  Own the MPI
+# implementation here so every consumer (including the measurement tools that
+# link only picBunch) resolves those symbols.
+if(PICBUNCH_ENABLE_MPI)
+    target_compile_definitions(picBunch PUBLIC PICBUNCH_ENABLE_MPI=1)
+    target_link_libraries(picBunch PUBLIC MPI::MPI_CXX)
+endif()
 if(PICBUNCH_ENABLE_CUDA)
     target_compile_definitions(picBunch PUBLIC PICBUNCH_BACKEND_CUDA=1)
 elseif(PICBUNCH_ENABLE_HIP)
@@ -422,7 +431,6 @@ add_library(
     src/OpenPMD.cpp
     src/OpenPMDWrite.cpp
     src/OpenPMDWriteOpenPMD.cpp
-    src/Mpi.cpp
     src/Placement.cpp
 )
 add_library(picBunch::openPMD ALIAS picBunchOpenPMD)
