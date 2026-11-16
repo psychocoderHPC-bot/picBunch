@@ -59,6 +59,7 @@ if(PICBUNCH_BUILD_GTESTS)
         test_multirank_field_equality.cpp
         test_near_shell_slab.cpp
         test_multirank_patches.cpp
+        test_grid_independence.cpp
         test_distributed_fft_64bit.cpp
     )
     picbunch_target_warnings(picBunchUnitTests)
@@ -78,7 +79,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField NearShellSlab DistributedFft64Bit)
+    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField NearShellSlab DistributedFft64Bit GridIndependence)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -169,6 +170,14 @@ if(PICBUNCH_BUILD_GTESTS)
                 COMMAND
                     ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=NearShellSlab.*
+            )
+            # The centre field must stay grid-independent on a distributed
+            # z-slab transform too, so the group also runs under four ranks.
+            add_test(
+                NAME picBunch.GridIndependenceN4
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=GridIndependence.*
             )
             # The distributed FFT boundary pair (below/above 2^28 padded nodes
             # per rank) allocates more than 4 GiB per rank.  Opt-in: the

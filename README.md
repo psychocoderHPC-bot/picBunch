@@ -45,6 +45,8 @@ src/                host sources with inline ALPAKA_FN_ACC device functors;
                     the separate CUDA near-shell kernel is src/cuda/*.cu
 tests/              smoke test (CTest), GoogleTest unit tests and reference CSVs
 tools/verify/       independent HDF5 consumer checks (h5py, no openPMD binding)
+tools/fieldprobe/   grid-dependence probe: reads an openPMD bunch, prints the
+                    centre, corner and global max|E| and the field energy
 docs/               algorithm and validation notes
 ```
 
