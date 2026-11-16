@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -146,6 +147,25 @@ namespace picBunch
         }
     };
 
+    /** One component z-slab emitted by the chunked field solve.
+     *
+     * ``data`` holds ``grid.n[0] * grid.n[1] * zCount`` values with x fastest,
+     * covering global planes ``[zOffset, zOffset + zCount)``.  The chunked
+     * writer stores exactly this slab at its dataset offset, so no full output
+     * grid is ever materialised.
+     */
+    struct FieldChunk
+    {
+        Grid grid;
+        int component = 0;
+        std::size_t zOffset = 0;
+        std::size_t zCount = 0;
+        std::vector<double> data;
+    };
+
+    //! Sink for one ``FieldChunk``; called once per emitted output slab.
+    using FieldChunkSink = std::function<void(FieldChunk const&)>;
+
     /*! One particle patch region of a generated species.
      *
      * ``offset`` is the lower cell index relative to the PIConGPU domain
@@ -173,6 +193,18 @@ namespace picBunch
         double transposeMs = 0.0;
         double readoutMs = 0.0;
         double writerMs = 0.0;
+        /*! Measured staging traffic of a chunked solve (0 for the in-core paths).
+         *
+         * ``chunkReadBytes``/``chunkWrittenBytes`` are the byte counts the
+         * out-of-core staging layer actually issued.  ``chunkPeakStagingBytes``
+         * is the live staging-file high-water mark (disk, not RSS), and
+         * ``chunkPeakMemoryBytes`` is the largest single chunk allocation.
+         */
+        std::uint64_t chunkReadBytes = 0;
+        std::uint64_t chunkWrittenBytes = 0;
+        std::uint64_t chunkPeakStagingBytes = 0;
+        std::uint64_t chunkPeakMemoryBytes = 0;
+        std::uint64_t chunkCells = 0;
     };
 
     /** Explicit near-shell mode.  See NearShell.hpp for the split and the cost. */
@@ -542,6 +574,20 @@ namespace picBunch
         Distributed
     };
 
+    //! Field-solve execution path.
+    enum class SolveMode
+    {
+        //! Whole-grid FFT in host/device memory (the historical path).
+        InCore,
+        /*! Out-of-core chunked 3-D FFT with disk-backed transposes.
+         *
+         * One process splits the padded volume into chunks and processes one
+         * chunk at a time.  The transform stays global (it is the same exact
+         * 3-D transform); only the intermediate layouts are staged on disk.
+         */
+        Chunked
+    };
+
     struct ComputeOptions
     {
         /*! Relative accuracy target of the delivered free-space convolution.
@@ -660,6 +706,29 @@ namespace picBunch
          * path runs while one rank can still hold the historical work set.
          */
         std::size_t distributedFftMinNodes = std::size_t{1u} << 28;
+        /*! Chunked solve selection.  ``InCore`` keeps every historical path
+         *  bit-for-bit; ``Chunked`` requires a single process and a sink (or
+         *  accumulates into the returned ``Field`` for the checkpoint writer).
+         */
+        SolveMode solveMode = SolveMode::InCore;
+        //! Cells (not bytes) in the largest chunk buffer; must hold one x-y plane.
+        std::size_t chunkCells = std::size_t{1u} << 22;
+        /*! Explicit number of virtual ranks for the staged solve.  Zero
+         * derives it from ``chunkCells``.  The staged path uses the same slab
+         * split and index arithmetic as the MPI distributed path, so this is
+         * the count a real multi-rank run would use.
+         */
+        int virtualRanks = 0;
+        //! Empty selects ``<output-or-temp>/picbunch-staging-<pid>``.
+        std::string stagingDirectory;
+        //! Keep the staging files after the solve (diagnostics only).
+        bool keepStaging = false;
+        /*! Optional output sink.  When set, a chunked solve streams each output
+         * z-slab here instead of returning a full ``Field``.  The sink is
+         * called with the six components in order, each covering all planes
+         * exactly once.  It is not used by the in-core paths.
+         */
+        FieldChunkSink chunkSink;
     };
 
     //! openPMD record names and component order: E then B.

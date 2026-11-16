@@ -18,6 +18,7 @@
 // dereferenced or the series is closed.
 
 #include "picBunch/OpenPMDWriter.hpp"
+#include "picBunch/ChunkedWriter.hpp"
 
 #include "picBunch/Mpi.hpp"
 
@@ -660,6 +661,211 @@ namespace picBunch
         {
             if(!collective || rank == 0)
                 removeTemporary(temporary, outputName);
+            throw;
+        }
+    }
+
+
+    // ------------------------------------------------------ chunked field writer
+    struct ChunkedFieldWriter::Impl
+    {
+        std::string fileName;
+        std::string temporary;
+        FieldWriteOptions options;
+        Idx3 globalN{0, 0, 0};
+        Vec3 globalOrigin{0.0, 0.0, 0.0};
+        Grid grid;
+        std::unique_ptr<openPMD::Series> series;
+        std::array<std::vector<unsigned char>, 6> covered;
+        std::array<long long, 3> base{};
+        std::uint64_t pendingBytes = 0;
+        bool opened = false;
+        bool closed = false;
+        static constexpr std::uint64_t kFlushBytes = 512ull * 1024ull * 1024ull;
+
+        void open()
+        {
+            base = globalBase(grid, globalN, globalOrigin);
+            temporary = temporaryName(fileName);
+            series = std::make_unique<openPMD::Series>(
+                temporary,
+                openPMD::Access::CREATE);
+            auto& iteration = series->iterations[options.iteration];
+            iteration.setTime(options.time);
+            iteration.setTimeUnitSI(options.timeUnitSI);
+            iteration.setAttribute("timeOffset", options.timeOffset);
+
+            std::vector<std::string> const axisLabels{"z", "y", "x"};
+            openPMD::Extent const extent{
+                static_cast<openPMD::Extent::value_type>(globalN[2]),
+                static_cast<openPMD::Extent::value_type>(globalN[1]),
+                static_cast<openPMD::Extent::value_type>(globalN[0])};
+            openPMD::Dataset const dataset{openPMD::determineDatatype<double>(), extent};
+
+            struct RecordSpec
+            {
+                char const* name;
+                std::size_t firstComponent;
+                std::array<double, 7> unitDimension;
+            };
+            RecordSpec const records[] = {
+                {"E", 0, {1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0}},
+                {"B", 3, {0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0}}};
+            char const componentNames[3] = {'x', 'y', 'z'};
+            for(auto const& spec : records)
+            {
+                auto& mesh = iteration.meshes[spec.name];
+                mesh.setGeometry(openPMD::Mesh::Geometry::cartesian);
+                mesh.setDataOrder(openPMD::Mesh::DataOrder::C);
+                mesh.setAxisLabels(axisLabels);
+                mesh.setGridSpacing(std::vector<double>{
+                    grid.spacing[2], grid.spacing[1], grid.spacing[0]});
+                mesh.setGridGlobalOffset(std::vector<double>{
+                    globalOrigin[2], globalOrigin[1], globalOrigin[0]});
+                mesh.setGridUnitSI(1.0);
+                mesh.setUnitDimension(
+                    {{openPMD::UnitDimension::L, spec.unitDimension[0]},
+                     {openPMD::UnitDimension::M, spec.unitDimension[1]},
+                     {openPMD::UnitDimension::T, spec.unitDimension[2]},
+                     {openPMD::UnitDimension::I, spec.unitDimension[3]},
+                     {openPMD::UnitDimension::theta, spec.unitDimension[4]},
+                     {openPMD::UnitDimension::N, spec.unitDimension[5]},
+                     {openPMD::UnitDimension::J, spec.unitDimension[6]}});
+                for(std::size_t a = 0; a < 3; ++a)
+                {
+                    auto& component = mesh[std::string(1, componentNames[a])];
+                    component.resetDataset(dataset);
+                    component.setUnitSI(1.0);
+                    Vec3 const yee{
+                        kYeeOffset[spec.firstComponent + a][0] / kRefinement,
+                        kYeeOffset[spec.firstComponent + a][1] / kRefinement,
+                        kYeeOffset[spec.firstComponent + a][2] / kRefinement};
+                    component.setAttribute("position", reverse(yee));
+                }
+            }
+            for(auto& mask : covered)
+                mask.assign(static_cast<std::size_t>(globalN[2]), 0u);
+            opened = true;
+        }
+    };
+
+    ChunkedFieldWriter::ChunkedFieldWriter(
+        std::string fileName,
+        FieldWriteOptions options,
+        Idx3 globalGridSize,
+        Vec3 globalGridOrigin,
+        Grid grid)
+        : m_impl{std::make_unique<Impl>()}
+    {
+        if(globalGridSize[0] == 0u || globalGridSize[1] == 0u || globalGridSize[2] == 0u)
+            throw std::invalid_argument(
+                "ChunkedFieldWriter: the global extent must be positive");
+        if(grid.size() == 0u)
+            throw std::invalid_argument("ChunkedFieldWriter: the compute grid is empty");
+        m_impl->fileName = std::move(fileName);
+        m_impl->options = options;
+        m_impl->globalN = globalGridSize;
+        m_impl->globalOrigin = globalGridOrigin;
+        m_impl->grid = grid;
+    }
+
+    ChunkedFieldWriter::~ChunkedFieldWriter()
+    {
+        if(!m_impl->closed && m_impl->opened)
+        {
+            m_impl->series.reset();
+            removeTemporary(m_impl->temporary, m_impl->fileName);
+        }
+    }
+
+    void ChunkedFieldWriter::write(FieldChunk const& chunk)
+    {
+        if(m_impl->closed)
+            throw std::runtime_error("ChunkedFieldWriter: write after close");
+        if(chunk.component < 0 || chunk.component >= 6)
+            throw std::invalid_argument("ChunkedFieldWriter: component out of range");
+        if(chunk.grid.n[0] != m_impl->grid.n[0]
+           || chunk.grid.n[1] != m_impl->grid.n[1]
+           || chunk.grid.n[2] != m_impl->grid.n[2])
+            throw std::invalid_argument(
+                "ChunkedFieldWriter: every chunk must use the same grid");
+        std::size_t const plane
+            = static_cast<std::size_t>(m_impl->grid.n[0])
+            * static_cast<std::size_t>(m_impl->grid.n[1]);
+        if(chunk.zOffset + chunk.zCount > m_impl->grid.n[2])
+            throw std::invalid_argument(
+                "ChunkedFieldWriter: chunk planes exceed the grid");
+        if(chunk.data.size() != plane * chunk.zCount)
+            throw std::invalid_argument(
+                "ChunkedFieldWriter: chunk data does not match zCount * nx * ny");
+        if(!m_impl->opened)
+            m_impl->open();
+
+        auto& mask = m_impl->covered[static_cast<std::size_t>(chunk.component)];
+        for(std::size_t k = 0; k < chunk.zCount; ++k)
+        {
+            if(mask[chunk.zOffset + k] != 0u)
+                throw std::runtime_error(
+                    "ChunkedFieldWriter: component "
+                    + std::to_string(chunk.component) + " plane "
+                    + std::to_string(chunk.zOffset + k) + " was written twice");
+            mask[chunk.zOffset + k] = 1u;
+        }
+
+        auto& iteration = m_impl->series->iterations[m_impl->options.iteration];
+        char const recordName = chunk.component < 3 ? 'E' : 'B';
+        int const inRecord = chunk.component < 3 ? chunk.component : chunk.component - 3;
+        char const componentNames[3] = {'x', 'y', 'z'};
+        auto& component = iteration.meshes[std::string(1, recordName)]
+                              [std::string(1, componentNames[inRecord])];
+        openPMD::Offset const offset{
+            static_cast<openPMD::Offset::value_type>(m_impl->base[2] + chunk.zOffset),
+            static_cast<openPMD::Offset::value_type>(m_impl->base[1]),
+            static_cast<openPMD::Offset::value_type>(m_impl->base[0])};
+        openPMD::Extent const extent{
+            static_cast<openPMD::Extent::value_type>(chunk.zCount),
+            static_cast<openPMD::Extent::value_type>(m_impl->grid.n[1]),
+            static_cast<openPMD::Extent::value_type>(m_impl->grid.n[0])};
+        auto buffer = std::shared_ptr<double[]>(new double[chunk.data.size()]);
+        std::copy(chunk.data.begin(), chunk.data.end(), buffer.get());
+        component.storeChunk(buffer, offset, extent);
+        m_impl->pendingBytes += chunk.data.size() * sizeof(double);
+        if(m_impl->pendingBytes >= Impl::kFlushBytes)
+        {
+            m_impl->series->flush();
+            m_impl->pendingBytes = 0;
+        }
+    }
+
+    void ChunkedFieldWriter::close()
+    {
+        if(m_impl->closed)
+            return;
+        if(!m_impl->opened)
+            throw std::runtime_error("ChunkedFieldWriter: no chunk was written");
+        for(std::size_t c = 0; c < 6; ++c)
+            for(std::size_t plane = 0; plane < m_impl->covered[c].size(); ++plane)
+                if(m_impl->covered[c][plane] == 0u)
+                    throw std::runtime_error(
+                        "ChunkedFieldWriter: component " + std::to_string(c)
+                        + " plane " + std::to_string(plane) + " was never written");
+        try
+        {
+            m_impl->series->flush();
+            m_impl->series->close();
+            m_impl->series.reset();
+            auto const renames = planRenames(m_impl->temporary, m_impl->fileName);
+            if(renames.empty())
+                throw std::runtime_error(
+                    "ChunkedFieldWriter: the temporary series produced no output file");
+            for(auto const& [from, to] : renames)
+                publishTemporary(from, to);
+            m_impl->closed = true;
+        }
+        catch(...)
+        {
+            m_impl->series.reset();
+            removeTemporary(m_impl->temporary, m_impl->fileName);
             throw;
         }
     }

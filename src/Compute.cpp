@@ -15,6 +15,8 @@
 #include "picBunch/Kernel.hpp"
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
+#include "picBunch/ChunkedFft.hpp"
+#include "picBunch/StagedDistributedFft.hpp"
 #include "picBunch/Readout.hpp"
 #include "picBunch/DeviceAffinity.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
@@ -38,6 +40,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <cstring>
 #include <limits>
 #include <atomic>
 #include <list>
@@ -1240,10 +1244,98 @@ namespace picBunch
                 return *instance;
             }
         };
+
+        //! One serial padded-slab deposit, templated on the shape.
+        template<Shape S>
+        void depositPaddedSlabHostImpl(
+            Bunch const& bunch,
+            std::vector<std::size_t> const& list,
+            Grid const& grid,
+            std::uint32_t Mx,
+            std::uint32_t My,
+            std::uint32_t Mz,
+            std::uint32_t zOffset,
+            std::uint32_t zExtent,
+            double* rho,
+            std::uint32_t rhoStride)
+        {
+            double const support = shapeSupport<S>();
+            double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
+            double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
+            for(std::size_t const p : list)
+            {
+                double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
+                long lo[3];
+                long hi[3];
+                double t[3];
+                for(int a = 0; a < 3; ++a)
+                {
+                    t[a] = (pos[a] - org[a]) / sp[a];
+                    lo[a] = static_cast<long>(::ceil(t[a] - support));
+                    hi[a] = static_cast<long>(::floor(t[a] + support));
+                }
+                double const q = bunch.weight[p] * bunch.charge[p];
+                for(long ia = lo[0]; ia <= hi[0]; ++ia)
+                {
+                    double const wa = shapeWeight<S>(static_cast<double>(ia) - t[0]);
+                    if(wa == 0.0)
+                        continue;
+                    long const ma = wrapPaddedIndex(ia, Mx);
+                    for(long ib = lo[1]; ib <= hi[1]; ++ib)
+                    {
+                        double const wb = wa * shapeWeight<S>(static_cast<double>(ib) - t[1]);
+                        if(wb == 0.0)
+                            continue;
+                        long const mb = wrapPaddedIndex(ib, My);
+                        for(long ic = lo[2]; ic <= hi[2]; ++ic)
+                        {
+                            double const wc = wb * shapeWeight<S>(static_cast<double>(ic) - t[2]);
+                            if(wc == 0.0)
+                                continue;
+                            long const mc = wrapPaddedIndex(ic, Mz);
+                            if(mc < static_cast<long>(zOffset)
+                               || mc >= static_cast<long>(zOffset + zExtent))
+                                continue;
+                            auto const idx = static_cast<std::size_t>(ma)
+                                + static_cast<std::size_t>(Mx)
+                                    * (static_cast<std::size_t>(mb)
+                                       + static_cast<std::size_t>(My)
+                                           * static_cast<std::size_t>(mc - zOffset));
+                            rho[idx * rhoStride] += wc * q;
+                        }
+                    }
+                }
+            }
+        }
     } // namespace
 
     namespace detail
     {
+        void depositPaddedSlabHost(
+            Bunch const& bunch,
+            std::vector<std::size_t> const& particles,
+            Grid const& grid,
+            std::uint32_t Mx,
+            std::uint32_t My,
+            std::uint32_t Mz,
+            std::uint32_t zOffset,
+            std::uint32_t zExtent,
+            double* rho,
+            std::uint32_t rhoStride,
+            Shape shape)
+        {
+            validateDepositPadding(grid);
+            if(shape == Shape::CIC)
+                depositPaddedSlabHostImpl<Shape::CIC>(
+                    bunch, particles, grid, Mx, My, Mz, zOffset, zExtent, rho, rhoStride);
+            else if(shape == Shape::PQS)
+                depositPaddedSlabHostImpl<Shape::PQS>(
+                    bunch, particles, grid, Mx, My, Mz, zOffset, zExtent, rho, rhoStride);
+            else
+                depositPaddedSlabHostImpl<Shape::TSC>(
+                    bunch, particles, grid, Mx, My, Mz, zOffset, zExtent, rho, rhoStride);
+        }
+
         std::size_t fftSpectrumCacheLimitMiB()
         {
             return resolveFftSpectrumCacheMiB();
@@ -1716,6 +1808,13 @@ namespace picBunch
                     + " padded nodes (worst-rank requirement), above the vendor element ceiling of "
                     + std::to_string(limit) + " nodes per transform");
         }
+        else if(options.solveMode == SolveMode::Chunked)
+        {
+            // The staged path has no single-process whole-box allocation: every
+            // phase holds one virtual-rank slab, and DistributedFft3D enforces
+            // the vendor element ceiling for that slab.  The historical
+            // replicated whole-box cap does not apply here.
+        }
         else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
             throw std::runtime_error(
                 "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
@@ -1998,96 +2097,26 @@ namespace picBunch
             return text.str();
         };
 
-        // Serial host TSC deposit of a particle list, in list order.  Same
-        // stencil as the device kernel, without atomicAdd's unspecified order.
-        auto depositHostImpl = [&](
-                               auto tag,
-                               std::vector<std::size_t> const& list,
-                               double* rho,
-                               std::uint32_t rhoStride,
-                               std::uint32_t zOffset,
-                               std::uint32_t zExtent) {
-            constexpr Shape S = decltype(tag)::value;
-            double const support = shapeSupport<S>();
-            double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
-            double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
-            for(std::size_t const p : list)
-            {
-                double const pos[3] = {bunch.x[p], bunch.y[p], bunch.z[p]};
-                long lo[3];
-                long hi[3];
-                double t[3];
-                for(int a = 0; a < 3; ++a)
-                {
-                    t[a] = (pos[a] - org[a]) / sp[a];
-                    lo[a] = static_cast<long>(::ceil(t[a] - support));
-                    hi[a] = static_cast<long>(::floor(t[a] + support));
-                }
-                double const q = bunch.weight[p] * bunch.charge[p];
-                for(long ia = lo[0]; ia <= hi[0]; ++ia)
-                {
-                    double const wa = shapeWeight<S>(static_cast<double>(ia) - t[0]);
-                    if(wa == 0.0)
-                        continue;
-                    long const ma = wrapPaddedIndex(ia, Mx);
-                    for(long ib = lo[1]; ib <= hi[1]; ++ib)
-                    {
-                        double const wb = wa * shapeWeight<S>(static_cast<double>(ib) - t[1]);
-                        if(wb == 0.0)
-                            continue;
-                        long const mb = wrapPaddedIndex(ib, My);
-                        for(long ic = lo[2]; ic <= hi[2]; ++ic)
-                        {
-                            double const wc = wb * shapeWeight<S>(static_cast<double>(ic) - t[2]);
-                            if(wc == 0.0)
-                                continue;
-                            long const mc = wrapPaddedIndex(ic, Mz);
-                            if(mc < static_cast<long>(zOffset)
-                               || mc >= static_cast<long>(zOffset + zExtent))
-                                continue;
-                            auto const idx = static_cast<std::size_t>(ma)
-                                + static_cast<std::size_t>(Mx)
-                                    * (static_cast<std::size_t>(mb)
-                                       + static_cast<std::size_t>(My)
-                                           * static_cast<std::size_t>(mc - zOffset));
-                            rho[idx * rhoStride] += wc * q;
-                        }
-                    }
-                }
-            }
-        };
-
+        // Serial host deposit of a particle list, in list order.  The staged
+        // chunked path and the exposed density test call the same helper.
         auto depositHost = [&](
                                std::vector<std::size_t> const& list,
                                double* rho,
                                std::uint32_t rhoStride,
                                std::uint32_t zOffset,
                                std::uint32_t zExtent) {
-            validateDepositPadding(grid);
-            if(grid.shape == Shape::CIC)
-                depositHostImpl(
-                    std::integral_constant<Shape, Shape::CIC>{},
-                    list,
-                    rho,
-                    rhoStride,
-                    zOffset,
-                    zExtent);
-            else if(grid.shape == Shape::PQS)
-                depositHostImpl(
-                    std::integral_constant<Shape, Shape::PQS>{},
-                    list,
-                    rho,
-                    rhoStride,
-                    zOffset,
-                    zExtent);
-            else
-                depositHostImpl(
-                    std::integral_constant<Shape, Shape::TSC>{},
-                    list,
-                    rho,
-                    rhoStride,
-                    zOffset,
-                    zExtent);
+            detail::depositPaddedSlabHost(
+                bunch,
+                list,
+                grid,
+                Mx,
+                My,
+                Mz,
+                zOffset,
+                zExtent,
+                rho,
+                rhoStride,
+                grid.shape);
         };
 
         // Device TSC deposit of a particle list into the (already zeroed) rho.
@@ -3022,6 +3051,235 @@ namespace picBunch
                     guardDescription(*vmField, "velocity-moment"));
                 return *vmField;
             }
+        }
+
+        // ------------------------------------------------------- staged solve
+        // The chunked path is the distributed algorithm with the collective
+        // replaced by a file.  One process plays every virtual rank in turn;
+        // DistributedFft3D supplies the slab split, the x/y/z transforms and
+        // the identical pack/unpack arithmetic.  Only the all-to-all slice is
+        // staged, so the MPI and staged paths differ in the exchange only.
+        if(options.solveMode == SolveMode::Chunked)
+        {
+#if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
+            throw std::runtime_error(
+                "chunked solve is implemented for the host/CPU backend only; the "
+                "staging passes hand host buffers to the FFT backend");
+#endif
+            if(parSize != 1)
+                throw std::runtime_error(
+                    "chunked solve is a single-process path; run it with one rank "
+                    "(or use --fft-mode distributed)");
+            if(options.nearShell.mode != NearShellOptions::Mode::None)
+                throw std::runtime_error(
+                    "chunked solve does not combine with --near-shell; run the near "
+                    "shell on the in-core path");
+            if(options.velocityMoments.mode != VelocityMomentsOptions::Mode::Off)
+                throw std::runtime_error(
+                    "chunked solve does not combine with --velocity-moments; the "
+                    "moment path allocates whole spectra by design");
+            if(options.chunkCells == 0u)
+                throw std::runtime_error("chunked solve: --chunk-cells must be positive");
+            if(options.chunkSink && binCount != 1u)
+                throw std::runtime_error(
+                    "chunked solve with a streaming output sink requires a single "
+                    "velocity box; an output slab is written once per component");
+
+            std::uint32_t const cOutNx = static_cast<std::uint32_t>(grid.n[0]);
+            std::uint32_t const cOutNy = static_cast<std::uint32_t>(grid.n[1]);
+            std::uint32_t const cOutNz = static_cast<std::uint32_t>(grid.n[2]);
+            std::size_t const cPlane
+                = static_cast<std::size_t>(cOutNx) * static_cast<std::size_t>(cOutNy);
+            std::size_t const cNodes = cPlane * static_cast<std::size_t>(cOutNz);
+
+            // One virtual rank owns about chunk-cells/(Mx*My) padded z planes.
+            // The rank count is the number of such slabs that tile Mz, capped by
+            // both axes so every rank owns at least one plane.
+            std::uint64_t const planesPerRank = std::max<std::uint64_t>(
+                1u,
+                static_cast<std::uint64_t>(options.chunkCells)
+                    / (static_cast<std::uint64_t>(Mx) * My));
+            std::uint64_t const wanted
+                = (static_cast<std::uint64_t>(Mz) + planesPerRank - 1u) / planesPerRank;
+            int const derivedRanks = static_cast<int>(std::max<std::uint64_t>(
+                1u,
+                std::min<std::uint64_t>(
+                    wanted,
+                    static_cast<std::uint64_t>(std::min(Mx, Mz)))));
+            int virtualRanks = options.virtualRanks > 0
+                ? options.virtualRanks
+                : derivedRanks;
+            if(virtualRanks > static_cast<int>(std::min(Mx, Mz)))
+                throw std::runtime_error(
+                    "chunked solve: --virtual-ranks "
+                    + std::to_string(virtualRanks) + " exceeds the padded planes on an axis ("
+                    + std::to_string(std::min(Mx, Mz)) + ")");
+            virtualRanks = std::max(virtualRanks, 1);
+
+            std::string staging = options.stagingDirectory;
+            if(staging.empty())
+            {
+                char const* const tmp = std::getenv("TMPDIR");
+                staging = std::string(tmp != nullptr ? tmp : "/tmp") + "/picbunch-staging-"
+                    + std::to_string(static_cast<long long>(::getpid()));
+            }
+            std::error_code ec;
+            std::filesystem::create_directories(staging, ec);
+            if(ec)
+                throw std::runtime_error(
+                    "chunked solve: cannot create staging directory '" + staging
+                    + "': " + ec.message());
+
+            Field chunkedField;
+            chunkedField.grid = grid;
+            bool const streamOutput = static_cast<bool>(options.chunkSink);
+            if(!streamOutput)
+                for(auto& component : chunkedField.data)
+                    component.assign(cNodes, 0.0);
+
+            detail::ChunkedSolveStats stats;
+            auto const chunkedStart = Clock::now();
+            for(std::size_t b = 0; b < binCount; ++b)
+            {
+                if(members[b].empty())
+                    continue;
+                detail::StagedDistributedSolver solver{
+                    device,
+                    queue,
+                    Mx,
+                    My,
+                    Mz,
+                    virtualRanks,
+                    staging,
+                    options.keepStaging,
+                    &stats};
+
+                solver.forwardSource(
+                    [&](std::uint32_t zOffset, std::uint32_t zCount, Complex* work) {
+                        auto const fillStart = Clock::now();
+                        std::memset(
+                            work,
+                            0,
+                            static_cast<std::size_t>(zCount) * My * Mx * sizeof(Complex));
+                        depositHost(
+                            members[b],
+                            reinterpret_cast<double*>(work),
+                            2u,
+                            zOffset,
+                            zCount);
+                        times.depositMs += elapsedMs(fillStart);
+                    });
+
+                Vec3 const uRep{
+                    binning.representativeU[b][0],
+                    binning.representativeU[b][1],
+                    binning.representativeU[b][2]};
+
+                for(int c = 0; c < 6; ++c)
+                {
+                    double const factor = scale * (c < 3 ? eFactor : bFactor);
+                    solver.convolveComponent(
+                        [&](std::uint32_t zOffset, std::uint32_t zCount, Complex* work) {
+                            auto const fillStart = Clock::now();
+                            auto const extents = alpaka::Vec<std::uint32_t, 3u>{
+                                Mx,
+                                My,
+                                zCount};
+                            auto const pitches = alpaka::Vec<std::size_t, 3u>{
+                                static_cast<std::size_t>(Mx) * My * sizeof(Complex),
+                                static_cast<std::size_t>(Mx) * sizeof(Complex),
+                                sizeof(Complex)};
+                            auto const view = alpaka::makeMdSpan(work, extents, pitches);
+                            auto const frame = Extents3::fill(4u);
+                            queue.enqueue(
+                                alpaka::onHost::FrameSpec{
+                                    ceilDivVec(Extents3{Mx, My, zCount}, frame),
+                                    frame},
+                                KernelBuildKernel{},
+                                view,
+                                zOffset,
+                                zCount,
+                                Mx,
+                                My,
+                                Mz,
+                                c,
+                                alpaka::Vec{
+                                    kYeeOffset[c][0],
+                                    kYeeOffset[c][1],
+                                    kYeeOffset[c][2]},
+                                alpaka::Vec{cell[0], cell[1], cell[2]},
+                                kRefinement,
+                                alpaka::Vec{uRep[0], uRep[1], uRep[2]});
+                            alpaka::onHost::wait(queue);
+                            times.kernelMs += elapsedMs(fillStart);
+                        },
+                        cOutNx,
+                        cOutNy,
+                        cOutNz,
+                        factor,
+                        [&](std::size_t zOffset, std::size_t zCount, double const* planes) {
+                            if(streamOutput)
+                            {
+                                FieldChunk chunk;
+                                chunk.grid = grid;
+                                chunk.component = c;
+                                chunk.zOffset = zOffset;
+                                chunk.zCount = zCount;
+                                chunk.data.assign(planes, planes + zCount * cPlane);
+                                options.chunkSink(chunk);
+                            }
+                            else
+                            {
+                                for(std::size_t k = 0; k < zCount; ++k)
+                                    for(std::size_t l = 0; l < cPlane; ++l)
+                                        chunkedField.data[static_cast<std::size_t>(c)]
+                                                         [(zOffset + k) * cPlane + l]
+                                            += planes[k * cPlane + l];
+                            }
+                        });
+                }
+            }
+
+            times.fftMs += stats.fftSeconds * 1000.0;
+            times.transposeMs += stats.transposeSeconds * 1000.0;
+            times.chunkReadBytes = stats.readBytes;
+            times.chunkWrittenBytes = stats.writtenBytes;
+            times.chunkPeakStagingBytes = stats.peakStagingBytes;
+            times.chunkPeakMemoryBytes = stats.peakChunkBytes;
+            times.chunkCells = options.chunkCells;
+            double const wallMs = elapsedMs(chunkedStart);
+            std::fprintf(
+                stderr,
+                "picBunch: staged solve: %d virtual rank%s, chunk=%zu cells, wall=%.1f ms, "
+                "staging read=%.3f GB write=%.3f GB, peak staging=%.3f GB, "
+                "peak chunk=%.3f GB\n",
+                virtualRanks,
+                virtualRanks == 1 ? "" : "s",
+                options.chunkCells,
+                wallMs,
+                static_cast<double>(stats.readBytes) / 1e9,
+                static_cast<double>(stats.writtenBytes) / 1e9,
+                static_cast<double>(stats.peakStagingBytes) / 1e9,
+                static_cast<double>(stats.peakChunkBytes) / 1e9);
+            std::fprintf(
+                stderr,
+                "picBunch: staged I/O phases: source fwd write=%.3f GB read=%.3f GB, "
+                "spec write=%.3f GB read=%.3f GB, kernel write=%.3f GB read=%.3f GB, "
+                "back write=%.3f GB read=%.3f GB\n",
+                static_cast<double>(stats.sourceWrite) / 1e9,
+                static_cast<double>(stats.sourceRead) / 1e9,
+                static_cast<double>(stats.sourceSpecWrite) / 1e9,
+                static_cast<double>(stats.sourceSpecRead) / 1e9,
+                static_cast<double>(stats.kernelWrite) / 1e9,
+                static_cast<double>(stats.kernelRead) / 1e9,
+                static_cast<double>(stats.backWrite) / 1e9,
+                static_cast<double>(stats.backRead) / 1e9);
+            if(!streamOutput)
+                detail::abortOnEmptyChargedField(
+                    chunkedField,
+                    netCharge,
+                    guardDescription(chunkedField, "chunked"));
+            return chunkedField;
         }
 
         if(useDistributed)

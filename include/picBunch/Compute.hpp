@@ -172,4 +172,28 @@ namespace picBunch
          VelocityBinning* outBinning = nullptr,
          VelocityMomentsReport* outReport = nullptr);
 
+
+    namespace detail
+    {
+        /*! Serial padded-slab deposit, exposed for the chunked density test.
+         *
+         * Deposits ``particles`` into the padded box nodes whose z index is in
+         * ``[zOffset, zOffset+zExtent)`` using the same shape weights, index
+         * wrap and order as the chunked solve.  ``rho`` is x-fastest and
+         * ``rhoStride`` selects a real (1) or complex (2) destination.
+         */
+        void depositPaddedSlabHost(
+            Bunch const& bunch,
+            std::vector<std::size_t> const& particles,
+            Grid const& grid,
+            std::uint32_t Mx,
+            std::uint32_t My,
+            std::uint32_t Mz,
+            std::uint32_t zOffset,
+            std::uint32_t zExtent,
+            double* rho,
+            std::uint32_t rhoStride,
+            Shape shape);
+    } // namespace detail
+
 } // namespace picBunch
