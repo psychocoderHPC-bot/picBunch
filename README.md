@@ -689,6 +689,30 @@ source on every rank. Two stages are rank-parallel.
   rank builds the near-source list and the local subtraction FFT for its own tiles, writes
   the correction only there, and one all-reduce sums the corrections.
 
+### Rank-to-device mapping
+
+Each rank selects its device at startup: it queries the visible device count of the
+compiled backend and takes `localRank % deviceCount`, where `localRank` is the MPI
+shared-memory rank and falls back to the world rank without MPI. Rank 0 logs the resolved
+mapping once, with the world rank, local rank, device index, device name, visible device
+count and capacity. The same mapping appears in the `run summary:` line, so a log alone
+records placement. Set `PICBUNCH_DEVICE_LOG=all` to print every rank's line as well.
+
+An explicit `CUDA_VISIBLE_DEVICES` (or `HIP_VISIBLE_DEVICES`) is respected: the backend
+filters the list before picBunch counts devices, every rank selects an index relative to
+that visible list, and the log states that the override was respected. A list with fewer
+entries than ranks therefore puts several ranks on each entry by design.
+
+When more than one rank lands on a device, picBunch prints a warning naming the ranks per
+device and the estimated requirement per rank against the per-rank capacity share. The
+estimate comes from the padded grid, the FFT layout (replicated or distributed), the
+precision, and the velocity-bin count; buffers are reused across bins, so the peak counts
+the largest bin, not bins times the full grid. If the estimate exceeds device capacity
+divided by ranks per device, the run refuses to start with a message naming the required
+size, the capacity, the ranks per device and the rank. Select fewer ranks per device or a
+larger device; an override that pins one device per process avoids the shared-device
+estimate.
+
 **MPI limitations.** The bunch is replicated, so particle memory does not fall with rank
 count. Component parallelism saturates at six ranks (one component per rank); beyond that
 the near-shell tile split is the only additional decomposition. There is no

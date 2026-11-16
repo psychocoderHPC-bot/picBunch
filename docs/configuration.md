@@ -257,6 +257,16 @@ the cap. A domain whose padded box is above `2^28` nodes therefore needs at
 least two ranks; it is rejected on one rank with the `limit 268435456 nodes`
 message.
 
+picBunch maps ranks to devices automatically. Each rank takes
+`localRank % visibleDeviceCount` (the MPI shared-memory rank, or the world rank
+without MPI), logs the chosen device with rank 0, and writes the mapping into the
+`run summary:` line. `CUDA_VISIBLE_DEVICES`/`HIP_VISIBLE_DEVICES` is respected and
+reported as an override. One warning names the ranks per device and the estimated
+per-rank requirement against the device capacity share; the run refuses to start when
+that estimate exceeds `capacity / ranksPerDevice`. The estimate follows the padded
+grid, the replicated or distributed FFT layout, the precision and the velocity-bin
+count. See the README section "Rank-to-device mapping".
+
 The rank count lowers the per-process memory, not the aggregate. The
 distributed path holds three complex arrays over the padded box
 (`3 * M^3 * 16 B` total across ranks), so the device, not the host, sets the

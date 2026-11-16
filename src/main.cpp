@@ -10,6 +10,7 @@
 
 #include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/Config.hpp"
+#include "picBunch/DeviceAffinity.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
 #include "picBunch/NearShell.hpp"
@@ -762,6 +763,8 @@ namespace
         options.parallel = &parallel;
         picBunch::mpiBroadcastComputeOptions(options, 0);
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
         if(root)
         {
             std::printf(
@@ -1022,6 +1025,7 @@ namespace
                 config.picongpu.float64 ? "float64" : "float32",
                 config.picongpu.float64 ? "float64" : "float32");
         }
+        picBunch::printDeviceMappingSummary();
         return 0;
     }
 
@@ -1124,6 +1128,8 @@ namespace
             : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
                                               : picBunch::FftMode::Auto;
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
 
         // Global representative for the single velocity class.  The chunk
         // fields are linear only if every chunk uses the same kernel, so the
@@ -1353,6 +1359,7 @@ namespace
                 static_cast<unsigned long long>(args.outputIteration));
             printTimings(times);
         }
+        picBunch::printDeviceMappingSummary();
         return 0;
     }
 
@@ -1379,6 +1386,7 @@ int main(int argc, char** argv)
     // now builds the rank context before makeGrid (the per-rank padded-node
     // cap scales with the rank count there just as it does on the CLI path).
     picBunch::MpiGuard mpiRuntime(argc, argv);
+    picBunch::logDeviceMapping();
 
     if(args.config)
     {
@@ -1650,6 +1658,8 @@ int main(int argc, char** argv)
         }
         picBunch::mpiBroadcastComputeOptions(options, 0);
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
 
         // --------------------------------------------------------------- compute
         auto const computeStart = Clock::now();
@@ -2098,6 +2108,7 @@ int main(int argc, char** argv)
 
         if(root)
             printTimings(times);
+        picBunch::printDeviceMappingSummary();
     }
     catch(std::exception const& error)
     {

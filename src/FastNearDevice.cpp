@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1710,6 +1711,8 @@ namespace picBunch::pbfast
         inline constexpr char const* kFastNearNoDevice = "fast near-shell: no host device available";
 #endif
 
+        unsigned g_deviceIndex = 0u;
+
         struct Context
         {
             using Selector
@@ -1728,7 +1731,12 @@ namespace picBunch::pbfast
                     = alpaka::onHost::makeDeviceSelector(kFastNearApi, kFastNearDeviceKind);
                 if(!selector.isAvailable())
                     throw std::runtime_error(kFastNearNoDevice);
-                return selector.makeDevice(0);
+                if(g_deviceIndex >= selector.getDeviceCount())
+                    throw std::runtime_error(
+                        "fast near-shell: device index "
+                        + std::to_string(g_deviceIndex)
+                        + " is not visible");
+                return selector.makeDevice(g_deviceIndex);
             }
         };
 
@@ -1753,6 +1761,11 @@ namespace picBunch::pbfast
             return alpaka::onHost::allocUnified<T>(ctx.device, alpaka::Vec<std::uint32_t, 1u>{n});
         }
     } // namespace
+
+    void setFastNearDeviceIndex(unsigned deviceIndex)
+    {
+        g_deviceIndex = deviceIndex;
+    }
 
     bool fastNearDeviceAvailable()
     {

@@ -380,6 +380,7 @@ endif()
 set(PICBUNCH_SOURCES
     src/Deposit.cpp
     src/Compute.cpp
+    src/DeviceAffinity.cpp
     src/FieldGuard.cpp
     src/FarTail.cpp
     src/FastNearDevice.cpp
