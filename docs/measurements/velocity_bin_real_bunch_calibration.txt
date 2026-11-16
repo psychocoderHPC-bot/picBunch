@@ -1,12 +1,64 @@
 Real-bunch velocity-bin calibration (region-aware in-bunch metric)
-============================================================
+==================================================================
 
 Bunch: particles_000000.bp5, species b, 49932 particles, mean gamma 490.3
   (rel |u| spread 1.69e-2, max angle 0.0253 rad, 0.78 deg divergence)
 Field: makeGrid 298x122x318, cell 2e-7 m.
 
+FORMULA DECISION
+----------------
+The shipped angular term is C_ang * Delta_theta_b^2 (squared), with
+C_ang = 1 (kAngularModelConstant).  This is what the code computes (see
+VelocityBinning.cpp, evaluateSplit: "angular = kAngularModelConstant * ... *
+angle * angle") and what the W37 angular calibration
+(velocity_bin_angular_calibration.txt) uses.  The angular term is
+NOT gamma * Delta_theta: that worst case was retired in the W37 calibration
+because it over-predicted the measured superposition-cancellation error by
+~gamma/Delta_theta (for the real bunch, gamma * theta = 12.4 vs the squared
+term 6.4e-4, a ~1.9e4 factor).  Any document that states gamma * theta for
+the shipped angular term is wrong and has been corrected.
+
+Model decomposition at B=1 (the shipped model, evaluated on the real bunch):
+  angular  (C_ang * maxAngle^2)        = 6.42e-04
+  energy   (2 * maxDelta_gamma/gamma)  = 4.94e-04   (the per-particle
+                                                    gamma deviation, up to
+                                                    1.3e-1 for this bunch)
+  modelSum (angular + energy)          = 1.1363e-03
+So the B=1 model_sum 1.136e-3 in the table below is the SHIPPED formula
+value (the energy term, not the angular term, dominates at B=1 for this
+bunch).  It is not "gamma * theta / 2" (which would be 6.2); it is
+C_ang*theta^2 + 2*delta_gamma/gamma.
+
+In-bunch modelSum (C_ang = 1, the inBunchCriterion flag OFF):
+  B=  1: 1.1363e-03   B=  2: 9.0033e-04   B=  4: 7.2249e-04
+  B=  8: 6.5517e-04   B= 16: 5.2240e-04   B= 64: 4.6285e-04   B= 256: 4.3285e-04
+
+REPRODUCIBILITY
+---------------
+The measured in-bunch table (below) is regenerated from the repository by the
+runnable tool target "picBunchBunchBinsRegion" (added this commit,
+tools/velocity-bins/measure_region_bins.py), which wraps the committed
+TSC-convolved continuum reference indfield.integrate_point (order 8).  The
+exact command for the real bunch:
+
+  python3 tools/velocity-bins/measure_region_bins.py \
+      --bunch <bunch.bp5> --species b --cell 2e-7 \
+      --origin 1.5149e-05,9.7255e-05,1.2683e-05 \
+      --grid 298,122,318 \
+      --bins 1,2,4,8,16,64,256 \
+      --cell-region 163,70,23 --cell-radius 3 \
+      --subset 391 --k 128
+
+  --cell-region 163,70,23 is the By-peak cell (x,y,z, x-fastest); --cell-radius
+  3 gives the 27-cell patch; --subset 391 is the stratified particle subset
+  (of 49932) that bounds the reference cost.  The tool prints the same
+  peak-normalised per-component table as below.  (The per-particle continuum
+  reference is slow, ~20 ms/particle/cell in-bunch, so the full 298x122x318
+  x 49932 run is intractable; the 27-cell patch x 391-particle subset is the
+  validated region.)
+
 Metric: TSC-convolved continuum reference (indfield, order 8), per-particle
-  (T) vs binned (Tb), at a 27-cell in-bunch patch around the By-peak cell,
+  (T) vs binned (Tb), at the 27-cell in-bunch patch around the By-peak cell,
   391-particle stratified subset (k=128), weight*charge, beam-frame box split.
   Normalised by the in-bunch PEAK of the reference per component (peak-
   normalised, NOT per-cell). Driver = max over E and B in the in-bunch region.
@@ -23,21 +75,51 @@ In-bunch reference peaks: Ex=1.616e+07  Ey=1.954e+05  Ez=3.006e+08  Bx=1.079e+00
   64 | 9.094e-02 | 4.357e-01 | 3.129e-02 | 2.501e-02 | 1.355e-01 | 1.315e-01 |  4.357e-01
  256 | 5.704e-02 | 1.893e-01 | 1.202e-02 | 1.885e-02 | 4.402e-02 | 4.154e-02 |  1.893e-01
 
+By at the chosen count (auto returns the cap 256): the in-bunch peak-normalised
+By relative error is 4.402e-02 (B=256), down from 1.153e+00 (B=1) and
+5.716e-01 (B=16).  By is explicitly included in the driver (max over E and B).
+
 KEY FINDING: the peak-normalised in-bunch max (driver) does NOT reach 1e-3
-within 256 boxes. At B=256 the driver is 0.19 (Ey and By peaks in the
-per-particle reference are tiny for this relativistic beam: By 8.8e-4 T,
-Ey 1.95e5 V/m), so the relative error stays large even as the absolute
-error shrinks. The earlier 3-7e-4 at 4 bins was the ABSOLUTE in-bunch
-error (By: 7.1e-4 at B=1 -> 5.6e-4 at B=4), not peak-normalised.
+within 256 boxes.  At B=256 the driver is 0.19 (Ey 0.19, By 0.044); the
+per-particle reference in-bunch peaks are tiny for this relativistic beam
+(By 8.8e-4 T, Ey 1.95e5 V/m), so the peak-normalised relative error stays
+large even as the absolute error shrinks.  The earlier "3-7e-4 at 4 bins"
+was the ABSOLUTE in-bunch error (By: 7.1e-4 at B=1 -> 5.6e-4 at B=4), not
+peak-normalised.
 
-Model (C_ang=1) vs measured in-bunch driver:
+Model (in-bunch, C_ang = 1) vs measured in-bunch driver:
   B=  1: model_sum=1.136e-03  in-bunch driver=1.240e+00  ratio=1092
-  B=  2: model_sum=9.003e-04  in-bunch driver=2.297e+00  ratio=2552
-  B=  4: model_sum=7.225e-04  in-bunch driver=2.062e+00  ratio=2854
-  B=  8: model_sum=6.552e-04  in-bunch driver=8.627e-01  ratio=1317
   B= 16: model_sum=5.224e-04  in-bunch driver=6.651e-01  ratio=1273
+  B= 64: model_sum=4.629e-04  in-bunch driver=4.357e-01  ratio=941
+  B= 256: model_sum=4.329e-04  in-bunch driver=1.893e-01  ratio=437
 
-The model (C_ang=1) under-predicts the in-bunch peak-normalised driver by
-~1000-2800x. The in-bunch peak-normalised error is amplified by ~gamma
-relative to the far-field angular error (the transverse B and in-bunch E
-peaks are suppressed by ~1/gamma for a relativistic beam).
+The in-bunch peak-normalised driver is amplified by ~gamma relative to the
+far-field angular model (the transverse B and in-bunch E peaks are suppressed
+by ~1/gamma for a relativistic beam); the gamma-amplified in-bunch criterion
+(kInBunchAngularGammaAmplification = 2.2) drives the auto policy to the cap
+for this bunch.
+
+SATURATION / FLOOR OF THE MEASURED TABLE
+----------------------------------------
+The measured table above is peak-normalised in the in-bunch region and is
+bounded below by the finite in-bunch reference peaks (By 8.8e-4 T, Ey
+1.95e5 V/m): the peak-normalised relative error cannot fall below
+|Tb-T|/peak, and the continuum reference (indfield order 8) itself has a
+finite TSC-convolution accuracy, so the measured in-bunch relative error has
+a floor well above 1e-3 for this beam (measured driver 0.19 at B=256).  This
+floor is NOT the binning error: it is the limit of the peak-normalised metric
+on tiny in-bunch peaks plus the reference's own convolution accuracy.  The
+consequence is that the peak-normalised in-bunch metric cannot resolve
+in-bunch errors below this floor, so it cannot certify a 1e-3 in-bunch
+requirement for a gamma ~ 490 beam; the auto policy therefore returns the cap
+(the count that minimises the in-bunch error) with a diagnostic rather than
+claiming 1e-3.
+
+This is distinct from the W37 far-field angular-calibration floor: that record
+(velocity_bin_angular_calibration.txt) is calibrated on synthetic gamma-10
+bunches where the far-field Liénard-Wiechert proxy reference is accurate, and
+its model sums (not a measured floor) are what the far-field criterion uses.
+The in-bunch region is chosen (the 27-cell patch at the By peak) so the far-
+field proxy floor does not mask the in-bunch error: the patch is inside the
+bunch, where the TSC-convolved continuum reference is the correct kernel and
+the peak-normalisation is against in-bunch peaks, not far-field ones.

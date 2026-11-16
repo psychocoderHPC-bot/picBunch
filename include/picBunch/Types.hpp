@@ -256,13 +256,17 @@ namespace picBunch
      * suppressed by ~1/gamma, so the in-bunch relative error is amplified by
      * ~gamma relative to the far-field one.  The real bunch calibration
      * (``docs/measurements/velocity_bin_real_bunch_calibration.txt``) measured
-     * the in-bunch peak-normalised driver at ~1.24 for one box (model sum
-     * 1.14e-3), a ratio of ~1.1e3; the gamma-amplification
-     * ``gamma * kAngularModelConstant`` reproduces the in-bunch scaling
-     * (gamma ~ 490 here, and the residual ~2-3x spread across B is carried by
-     * the node-bounded energy term).  This factor applies only to the in-bunch
-     * peak-normalised criterion; the far-field angular calibration
-     * (``kAngularModelConstant``) is unchanged.
+     * the in-bunch peak-normalised driver at ~1.24 for one box, against an
+     * angular model term of ``C_ang * theta^2 = 6.4e-4`` (the B=1 model_sum
+     * 1.136e-3 is angular 6.4e-4 plus the energy term 4.9e-4; the energy term
+     * is the per-particle gamma deviation, not the angular term), a ratio of
+     * ~1.9e3 for the angular term.  The gamma-amplification factor
+     * ``kInBunchAngularGammaAmplification`` (a modest ~2.2, not the full
+     * gamma ~ 490) reproduces the in-bunch scaling the auto policy needs to
+     * escalate to the cap for a gamma ~ 490 beam; the residual spread across
+     * the box counts is carried by the node-bounded energy term.  This factor
+     * applies only to the in-bunch peak-normalised criterion; the far-field
+     * angular calibration (``kAngularModelConstant``) is unchanged.
      */
     inline constexpr double kInBunchAngularGammaAmplification = 2.2;
 
