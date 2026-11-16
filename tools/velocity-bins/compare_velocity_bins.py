@@ -18,19 +18,35 @@
 # Usage:
 #   compare_velocity_bins.py PREFIX [--bins 1,2,4,8,16] [--workers 32]
 #       [--order 12] [--refine 1] [--refine100 2] [--fit] [--bands 0-1,1-2,2-4,4-8,8-16,16+]
+#       [--reference-nodes {full,mask}] [--reference-cache DIR]
+#       [--far-field-policy {error,clip}]
 #
 # Reads PREFIX_bunch.txt, PREFIX_field_B<B>.bin, PREFIX_meta_B<B>.txt and
 # writes PREFIX_compare.md / PREFIX_compare.json.  ``--fit`` reports the
 # per-box-count ratio measured/modelSum (the calibration constant).
+#
+# The per-particle reference T is invariant under the bin count K and the edge
+# rule, so ``--reference-cache DIR`` stores it once per case (keyed on the
+# particles, geometry, quadrature, eps and reference mask) and every run of that
+# case reuses it.  ``--reference-nodes mask`` evaluates T only on the union of
+# the in-bunch and far-field masks.  That scope cannot support the whole-grid
+# legacy statistics, so the run then omits ``mesh_vs_T``, ``Tb_vs_T``,
+# ``mesh_vs_Tb`` and ``outside_window_roundoff`` and records
+# ``legacy: {"available": false, "reason": "reference restricted to metric masks"}``
+# (the omitted key names are listed there); downstream consumers must rely on
+# ``metrics_v2``.
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import hashlib
 import json
 import math
 import os
+import struct
 import sys
+import tempfile
 
 import numpy as np
 
@@ -57,6 +73,23 @@ FAR_FIELD_AXIS_NAME = "x"
 FAR_FIELD_MARGIN_CELLS = 2
 FAR_FIELD_POLICIES = ("error", "clip")
 
+#: Which nodes the continuum reference ``T`` is evaluated on.  ``full`` keeps
+#: the historical whole-grid reference; ``mask`` evaluates only the union of
+#: the in-bunch box and the far-field box, the nodes the v2 criteria use.
+REFERENCE_NODE_SCOPES = ("full", "mask")
+#: Version of the on-disk reference cache payload.
+REFERENCE_CACHE_SCHEMA = "velocity-bin-reference-cache/1"
+#: Legacy statistics that need a whole-grid reference.  They are omitted (not
+#: silently computed on a partial grid) when ``--reference-nodes mask`` is used.
+LEGACY_STAT_KEYS = (
+    "mesh_vs_T", "Tb_vs_T", "mesh_vs_Tb", "outside_window_roundoff",
+)
+LEGACY_MASK_REASON = "reference restricted to metric masks"
+
+
+class ReferenceCacheError(RuntimeError):
+    """A reference-cache entry is missing metadata or fails verification."""
+
 
 class FarFieldGeometryError(ValueError):
     """The domain cannot hold the far-field box as requested."""
@@ -82,7 +115,22 @@ def parse_args() -> argparse.Namespace:
                    help="what to do when the domain cannot hold the far-field box "
                         "with the required margin: 'error' (default) fails loudly, "
                         "'clip' clips explicitly and records far_field_clipped")
-    return p.parse_args()
+    p.add_argument("--reference-nodes", choices=REFERENCE_NODE_SCOPES,
+                   default="full",
+                   help="evaluate the continuum reference on the whole grid "
+                        "('full', default, keeps the legacy statistics) or only on "
+                        "the union of the in-bunch and far-field masks ('mask', "
+                        "omits the legacy statistics)")
+    p.add_argument("--reference-cache", default=None, metavar="DIR",
+                   help="cache the per-particle reference T under DIR, keyed on "
+                        "the particles, geometry, quadrature, eps and reference "
+                        "mask; disabled by default.  Writes are atomic, so "
+                        "concurrent invocations sharing DIR are safe")
+    args = p.parse_args()
+    if args.fit and args.reference_nodes == "mask":
+        p.error("--fit requires --reference-nodes full: the legacy statistics "
+                "are omitted when the reference is restricted to the metric masks")
+    return args
 
 
 def parse_bands(text: str):
@@ -148,7 +196,7 @@ def node_windows(bunch: dict, n, origin, cell, margin: float = 2.0):
 
 
 def worker(args):
-    (p_lo, p_hi, bunch, u_use, n, origin, cell, order, refine) = args
+    (p_lo, p_hi, bunch, u_use, n, origin, cell, order, refine, mask) = args
     n = tuple(n)
     origin = np.asarray(origin); cell = np.asarray(cell)
     acc = np.zeros((6, n[0], n[1], n[2]))
@@ -171,6 +219,8 @@ def worker(args):
         for i in range(lo[0], hi[0]):
             for j in range(lo[1], hi[1]):
                 for k in range(lo[2], hi[2]):
+                    if mask is not None and not mask[i, j, k]:
+                        continue
                     node = origin + np.array([i, j, k]) * cell
                     for c in range(6):
                         x_obs = node + YEE[c] * cell
@@ -182,18 +232,179 @@ def worker(args):
     return acc
 
 
-def compute_reference(bunch, u_use, n, origin, cell, order, refine, workers):
+def compute_reference(bunch, u_use, n, origin, cell, order, refine, workers,
+                      *, mask=None):
     nparts = len(bunch["x"])
     chunks = max(1, nparts // workers)
     jobs = []
     for lo in range(0, nparts, chunks):
         jobs.append((lo, min(nparts, lo + chunks), bunch, u_use, tuple(n),
                      [origin[0], origin[1], origin[2]], [cell[0], cell[1], cell[2]],
-                     order, refine))
+                     order, refine, mask))
     if workers <= 1:
         return sum(worker(j) for j in jobs)
     with cf.ProcessPoolExecutor(max_workers=workers) as ex:
         return sum(ex.map(worker, jobs))
+
+
+# ---------------------------------------------------------------------------
+# reference cache
+
+
+def _float64_bytes(values) -> bytes:
+    """Canonical little-endian float64 bytes (byte-order independent key)."""
+    return np.ascontiguousarray(values, dtype="<f8").tobytes()
+
+
+def reference_mask_digest(mask) -> str:
+    """SHA-256 of the packed boolean reference mask."""
+    packed = np.packbits(np.ascontiguousarray(mask, dtype=bool), axis=None)
+    return hashlib.sha256(packed.tobytes()).hexdigest()
+
+
+def reference_cache_key(bunch, n, origin, cell, order, refine, eps,
+                        scope: str, mask=None) -> str:
+    """Stable cache key: particles, geometry, quadrature, eps and mask scope.
+
+    Every particle column is hashed as contiguous little-endian float64 so the
+    key does not depend on the host byte order or on numpy's temporary layout.
+    Lengths are folded in before each payload, so concatenating two arrays can
+    never alias a different particle list.
+    """
+    if scope not in REFERENCE_NODE_SCOPES:
+        raise ValueError(f"reference scope must be one of {REFERENCE_NODE_SCOPES}")
+    if scope == "mask" and mask is None:
+        raise ValueError("scope 'mask' requires the reference mask")
+    h = hashlib.sha256()
+
+    def add(label: str, payload: bytes) -> None:
+        h.update(label.encode("utf-8"))
+        h.update(b"\0")
+        h.update(struct.pack("<Q", len(payload)))
+        h.update(payload)
+
+    add("schema", REFERENCE_CACHE_SCHEMA.encode("ascii"))
+    for name in ("x", "y", "z", "ux", "uy", "uz", "w", "q"):
+        add(f"particle:{name}", _float64_bytes(bunch[name]))
+    add("grid", np.ascontiguousarray(n, dtype="<i8").tobytes())
+    add("origin", _float64_bytes(origin))
+    add("cell", _float64_bytes(cell))
+    add("order", struct.pack("<q", int(order)))
+    add("refine", struct.pack("<q", int(refine)))
+    add("eps", struct.pack("<d", float(eps)))
+    add("scope", scope.encode("ascii"))
+    if scope == "mask":
+        add("mask-shape", np.ascontiguousarray(mask.shape, dtype="<i8").tobytes())
+        add("mask", bytes.fromhex(reference_mask_digest(mask)))
+    return h.hexdigest()
+
+
+def _reference_integrity(array) -> str:
+    data = np.ascontiguousarray(array, dtype="<f8")
+    h = hashlib.sha256()
+    h.update(struct.pack("<Q", data.size))
+    h.update(np.ascontiguousarray(data.shape, dtype="<i8").tobytes())
+    h.update(data.tobytes())
+    return h.hexdigest()
+
+
+def reference_cache_path(cache_dir: str, key: str) -> str:
+    return os.path.join(cache_dir, key + ".npz")
+
+
+def load_reference_cache(cache_dir: str, key: str, expected_shape) -> np.ndarray:
+    """Load and fully verify one cache entry; never silently accept a bad file."""
+    path = reference_cache_path(cache_dir, key)
+    expected = tuple(int(v) for v in expected_shape)
+    try:
+        with np.load(path, allow_pickle=False) as npz:
+            data = npz["data"]
+            raw_meta = npz["meta"]
+    except FileNotFoundError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any unreadable entry is fatal
+        raise ReferenceCacheError(
+            f"reference cache entry {path} is unreadable: {exc}") from exc
+    try:
+        meta = json.loads(str(raw_meta.item()))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ReferenceCacheError(
+            f"reference cache entry {path} has invalid metadata: {exc}") from exc
+    if not isinstance(meta, dict) or meta.get("schema") != REFERENCE_CACHE_SCHEMA:
+        raise ReferenceCacheError(
+            f"reference cache entry {path} has an unknown schema "
+            f"{meta.get('schema') if isinstance(meta, dict) else meta!r}")
+    if meta.get("key") != key:
+        raise ReferenceCacheError(
+            f"reference cache entry {path} belongs to key {meta.get('key')!r}, "
+            f"expected {key!r}")
+    if tuple(meta.get("shape", ())) != expected:
+        raise ReferenceCacheError(
+            f"reference cache entry {path} has shape {meta.get('shape')}, "
+            f"expected {list(expected)}")
+    if data.dtype != np.float64 or tuple(data.shape) != expected:
+        raise ReferenceCacheError(
+            f"reference cache entry {path} stores {data.dtype}{tuple(data.shape)}, "
+            f"expected float64{list(expected)}")
+    integrity = _reference_integrity(data)
+    if integrity != meta.get("integrity"):
+        raise ReferenceCacheError(
+            f"reference cache entry {path} failed its integrity check "
+            f"(stored {meta.get('integrity')}, computed {integrity})")
+    return np.ascontiguousarray(data, dtype=np.float64)
+
+
+def save_reference_cache(cache_dir: str, key: str, array) -> str:
+    """Atomically publish one cache entry (temp file in DIR + rename)."""
+    os.makedirs(cache_dir, exist_ok=True)
+    data = np.ascontiguousarray(array, dtype=np.float64)
+    path = reference_cache_path(cache_dir, key)
+    meta = {
+        "schema": REFERENCE_CACHE_SCHEMA,
+        "key": key,
+        "shape": [int(v) for v in data.shape],
+        "dtype": "float64",
+        "integrity": _reference_integrity(data),
+    }
+    fd, tmp_path = tempfile.mkstemp(
+        dir=cache_dir, prefix=key + ".", suffix=".tmp")
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as handle:
+            np.savez(handle, data=data,
+                     meta=np.array(json.dumps(meta, sort_keys=True)))
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def obtain_reference(bunch, u_use, n, origin, cell, order, refine, workers,
+                     *, scope, mask, cache_dir, eps):
+    """Return ``(T, info)``, reusing a verified cache entry when requested."""
+    if not cache_dir:
+        return compute_reference(bunch, u_use, n, origin, cell, order, refine,
+                                 workers, mask=mask), {
+            "enabled": False, "scope": scope}
+    key = reference_cache_key(bunch, n, origin, cell, order, refine, eps,
+                              scope, mask)
+    expected_shape = (6,) + tuple(int(v) for v in n)
+    path = reference_cache_path(cache_dir, key)
+    if os.path.exists(path):
+        reference = load_reference_cache(cache_dir, key, expected_shape)
+        print(f"reference cache hit: {path}", flush=True)
+        return reference, {
+            "enabled": True, "scope": scope, "key": key, "path": path, "hit": True}
+    reference = compute_reference(bunch, u_use, n, origin, cell, order, refine,
+                                  workers, mask=mask)
+    written = save_reference_cache(cache_dir, key, reference)
+    print(f"reference cache miss: wrote {written}", flush=True)
+    return reference, {
+        "enabled": True, "scope": scope, "key": key, "path": written, "hit": False}
 
 
 def nearest_distance(bunch, n, origin, cell, dmax: float):
@@ -613,9 +824,11 @@ def main() -> None:
     # new metrics only consume the mesh and T arrays computed below, never a
     # second reference pass.  Doing this before the expensive reference pass
     # makes a geometry that cannot hold the shell fail fast instead of after
-    # minutes of integration.
+    # minutes of integration.  The same masks also define the ``mask`` reference
+    # scope, so they are needed even when the metrics payload is disabled.
+    scope = args.reference_nodes
     metrics_ctx = None
-    if args.metrics_v2:
+    if args.metrics_v2 or scope == "mask":
         try:
             metrics_ctx = prepare_metrics_v2(
                 bunch, n, origin, cell,
@@ -624,19 +837,50 @@ def main() -> None:
             sys.stderr.write(f"compare_velocity_bins.py: error: {exc}\n")
             sys.exit(2)
 
-    dist = nearest_distance(bunch, tuple(n), origin, cell, dmax=16.0)
-    band_idx = band_index(dist, bands)
+    union_mask = None
+    if scope == "mask":
+        union_mask = metrics_ctx["in_mask"] | metrics_ctx["far_mask"]
+        print(f"reference nodes: mask scope, {int(union_mask.sum())} of "
+              f"{int(np.prod(n))} nodes (in-bunch box union far-field box)",
+              flush=True)
 
-    # Continuum target with per-particle velocities (independent of B).
+    # The legacy statistics need the whole-grid reference window.  In mask
+    # scope they are omitted rather than computed on a partial reference.
+    dist = None
+    band_idx = None
+    if scope == "full":
+        dist = nearest_distance(bunch, tuple(n), origin, cell, dmax=16.0)
+        band_idx = band_index(dist, bands)
+
+    # Continuum target with per-particle velocities (independent of B).  T is
+    # the only per-case reference: it depends on the particles and geometry,
+    # not on K or the edge rule, so the matrix reuses it for all runs of a case.
     print("computing T (per-particle continuum reference) ...", flush=True)
-    T = compute_reference(bunch, u_p, n, origin, cell, args.order, refine, args.workers)
+    eps_key = float(metrics_ctx["eps"]) if metrics_ctx is not None else REL_EPS
+    try:
+        T, cache_info = obtain_reference(
+            bunch, u_p, n, origin, cell, args.order, refine, args.workers,
+            scope=scope, mask=union_mask, cache_dir=args.reference_cache,
+            eps=eps_key)
+    except ReferenceCacheError as exc:
+        sys.stderr.write(f"compare_velocity_bins.py: error: {exc}\n")
+        sys.exit(2)
 
     results = {"bunch": {"sources": len(bunch["x"]), "gamma": gamma,
                          "energy_spread": float(first_meta["energy_spread"][0]),
                          "angle_degrees": float(first_meta["angle_degrees"][0]),
                          "grid": n, "cell": cell[0], "origin": origin,
                          "order": args.order, "refine": refine},
+               "reference": dict(cache_info, eps=eps_key,
+                                 nodes=int(union_mask.sum()) if union_mask is not None
+                                 else int(np.prod(n))),
                "runs": {}}
+    if scope == "mask":
+        results["legacy"] = {
+            "available": False,
+            "reason": LEGACY_MASK_REASON,
+            "omitted_keys": list(LEGACY_STAT_KEYS),
+        }
     lines = []
     lines.append(f"# MV1 comparison: `{os.path.basename(prefix)}`")
     lines.append("")
@@ -646,6 +890,10 @@ def main() -> None:
                  f"grid {n[0]}^3, cell {cell[0]:g} m.")
     lines.append(f"Reference: TSC-convolved continuum (indfield, order {args.order}, "
                  f"refine {refine}); errors unfloored, over nodes within 16 cells of a particle.")
+    if scope == "mask":
+        lines.append(f"Reference scope: mask ({int(union_mask.sum())} nodes = in-bunch "
+                     f"box union far-field box).  Legacy statistics unavailable: "
+                     f"{LEGACY_MASK_REASON}.")
     lines.append("")
 
     for B in bins:
@@ -654,55 +902,73 @@ def main() -> None:
         model_sum = float(meta["model_sum"][0])
         model_err = float(meta["model_error"][0])
         per_axis = meta["per_axis"]
-        rep = np.array(meta["representative_u"], dtype=float).reshape(-1, 3)
-        box_of = np.array(meta["box_of"], dtype=int)
-        u_b = u_p.copy()
-        u_b[box_of >= 0] = rep[box_of[box_of >= 0]] if len(rep) > 1 else rep[0]
 
         mesh = read_field(prefix, B_used, n)
         print(f"B={B_used}: mesh vs T ...", flush=True)
-        stats_T = error_stats(mesh, T, dist, bands, band_idx)
-        Tb = compute_reference(bunch, u_b, n, origin, cell, args.order, refine, args.workers)
-        stats_bin = error_stats(Tb, T, dist, bands, band_idx)
-        # discretization part: mesh vs Tb (needs Tb as "ref"; mesh error vs Tb)
-        mesh_disp = mesh.copy()
-        stats_disc = error_stats(mesh_disp, Tb, dist, bands, band_idx)
-        outside = dist < 0
-        roundoff = float(np.max(np.abs(mesh[:, outside])) if outside.any() else 0.0)
+        if scope == "full":
+            rep = np.array(meta["representative_u"], dtype=float).reshape(-1, 3)
+            box_of = np.array(meta["box_of"], dtype=int)
+            u_b = u_p.copy()
+            u_b[box_of >= 0] = rep[box_of[box_of >= 0]] if len(rep) > 1 else rep[0]
 
-        run_result = {
-            "bins_used": B_used, "per_axis": per_axis, "model_sum": model_sum,
-            "model_error": model_err,
-            "mesh_vs_T": stats_T, "Tb_vs_T": stats_bin, "mesh_vs_Tb": stats_disc,
-            "outside_window_roundoff": roundoff,
-        }
-        if metrics_ctx is not None:
+            stats_T = error_stats(mesh, T, dist, bands, band_idx)
+            Tb = compute_reference(bunch, u_b, n, origin, cell, args.order, refine,
+                                   args.workers)
+            stats_bin = error_stats(Tb, T, dist, bands, band_idx)
+            # discretization part: mesh vs Tb (needs Tb as "ref"; mesh error vs Tb)
+            mesh_disp = mesh.copy()
+            stats_disc = error_stats(mesh_disp, Tb, dist, bands, band_idx)
+            outside = dist < 0
+            roundoff = float(np.max(np.abs(mesh[:, outside])) if outside.any() else 0.0)
+
+            run_result = {
+                "bins_used": B_used, "per_axis": per_axis, "model_sum": model_sum,
+                "model_error": model_err,
+                "mesh_vs_T": stats_T, "Tb_vs_T": stats_bin, "mesh_vs_Tb": stats_disc,
+                "outside_window_roundoff": roundoff,
+            }
+        else:
+            run_result = {
+                "bins_used": B_used, "per_axis": per_axis, "model_sum": model_sum,
+                "model_error": model_err,
+                "legacy": {
+                    "available": False,
+                    "reason": LEGACY_MASK_REASON,
+                    "omitted_keys": list(LEGACY_STAT_KEYS),
+                },
+            }
+        if args.metrics_v2:
             run_result["metrics_v2"] = compute_metrics_v2(mesh, T, metrics_ctx)
         results["runs"][str(B)] = run_result
 
         lines.append(f"## B = {B_used} (requested {B}, per-axis {per_axis[0]}x{per_axis[1]}x{per_axis[2]}, "
                      f"modelSum {model_sum:.4e}, model error {model_err:.4e})")
         lines.append("")
-        lines.append("| metric | Ex | Ey | Ez | Bx | By | Bz | worst |")
-        lines.append("|---|---|---|---|---|---|---|---|")
-        lines.append("| mesh-T rel | " + " | ".join(fmt(v) for v in stats_T["rel"])
-                     + f" | {stats_T['worst_rel']:.3e} |")
-        lines.append("| mesh-T abs | " + " | ".join(fmt(v) for v in stats_T["abs"])
-                     + f" | {stats_T['worst_abs']:.3e} |")
-        lines.append("| Tb-T rel (binning) | " + " | ".join(fmt(v) for v in stats_bin["rel"])
-                     + f" | {stats_bin['worst_rel']:.3e} |")
-        lines.append("| mesh-Tb rel (discr.) | " + " | ".join(fmt(v) for v in stats_disc["rel"])
-                     + f" | {stats_disc['worst_rel']:.3e} |")
-        lines.append("")
-        lines.append("| band (cells) | n | worst rel mesh-T | worst abs mesh-T |")
-        lines.append("|---|---|---|---|")
-        for b in stats_T["bands"]:
-            lines.append(f"| {b['band']} | {b['n']} | {fmt(b['worst_rel'])} | {fmt(b['worst_abs'])} |")
-        lines.append("")
-        lines.append(f"Dominant band: {stats_T['dominant_band']}; "
-                     f"outside-window max|mesh| = {roundoff:.3e}.")
-        lines.append("")
-        if metrics_ctx is not None:
+        if scope == "full":
+            lines.append("| metric | Ex | Ey | Ez | Bx | By | Bz | worst |")
+            lines.append("|---|---|---|---|---|---|---|---|")
+            lines.append("| mesh-T rel | " + " | ".join(fmt(v) for v in stats_T["rel"])
+                         + f" | {stats_T['worst_rel']:.3e} |")
+            lines.append("| mesh-T abs | " + " | ".join(fmt(v) for v in stats_T["abs"])
+                         + f" | {stats_T['worst_abs']:.3e} |")
+            lines.append("| Tb-T rel (binning) | " + " | ".join(fmt(v) for v in stats_bin["rel"])
+                         + f" | {stats_bin['worst_rel']:.3e} |")
+            lines.append("| mesh-Tb rel (discr.) | " + " | ".join(fmt(v) for v in stats_disc["rel"])
+                         + f" | {stats_disc['worst_rel']:.3e} |")
+            lines.append("")
+            lines.append("| band (cells) | n | worst rel mesh-T | worst abs mesh-T |")
+            lines.append("|---|---|---|---|")
+            for b in stats_T["bands"]:
+                lines.append(f"| {b['band']} | {b['n']} | {fmt(b['worst_rel'])} | {fmt(b['worst_abs'])} |")
+            lines.append("")
+            lines.append(f"Dominant band: {stats_T['dominant_band']}; "
+                         f"outside-window max|mesh| = {roundoff:.3e}.")
+            lines.append("")
+        else:
+            lines.append(f"Legacy statistics omitted: {LEGACY_MASK_REASON} "
+                         f"(missing keys: {', '.join(LEGACY_STAT_KEYS)}).")
+            lines.append("")
+        if args.metrics_v2:
             mv = run_result["metrics_v2"]
             lines.append("| v2 region | nodes | worst rel | worst component |")
             lines.append("|---|---|---|---|")

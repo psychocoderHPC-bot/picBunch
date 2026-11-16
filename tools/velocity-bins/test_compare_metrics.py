@@ -19,6 +19,7 @@ import os
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 import numpy as np
@@ -533,6 +534,207 @@ class TestBackwardCompatibility(unittest.TestCase):
         msg = stderr.getvalue()
         self.assertIn("Required domain extent", msg)
         self.assertIn("far-field", msg)
+
+
+#: The tiny fixture is too small for the offset shell; both scopes need the
+#: explicit clip policy there.
+_CLIP = ["--far-field-policy", "clip"]
+_MASK = _CLIP + ["--reference-nodes", "mask"]
+
+
+def _metrics_canonical(payload):
+    return json.dumps(payload["runs"]["2"]["metrics_v2"],
+                      sort_keys=True, separators=(",", ":"))
+
+
+class TestReferenceCache(unittest.TestCase):
+    """Reference cache: hit/miss, exact reuse, keying and loud rejection."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.prefix = _write_fixture(self.tmp.name)
+        self.cache = os.path.join(self.tmp.name, "cache")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _entries(self):
+        if not os.path.isdir(self.cache):
+            return []
+        return sorted(os.listdir(self.cache))
+
+    def _cached_run(self, extra=()):
+        return _run_main(self.prefix, _MASK + ["--reference-cache", self.cache]
+                         + list(extra))
+
+    def test_cache_disabled_writes_nothing(self):
+        _run_main(self.prefix, _MASK)
+        self.assertEqual(self._entries(), [])
+
+    def test_miss_then_hit_is_bitwise_identical_to_uncached(self):
+        uncached = _run_main(self.prefix, _MASK)
+        self.assertEqual(self._entries(), [])
+        first = self._cached_run()
+        self.assertFalse(first["reference"]["hit"])
+        entries = self._entries()
+        self.assertEqual(len(entries), 1)
+        self.assertTrue(entries[0].endswith(".npz"))
+        self.assertEqual([name for name in entries if name.endswith(".tmp")], [])
+        second = self._cached_run()
+        self.assertTrue(second["reference"]["hit"])
+        self.assertEqual(len(self._entries()), 1)
+        # A disabled run, the miss run and the hit run must agree bit-for-bit.
+        self.assertEqual(_metrics_canonical(uncached), _metrics_canonical(first))
+        self.assertEqual(_metrics_canonical(first), _metrics_canonical(second))
+        self.assertEqual(first["reference"]["key"], second["reference"]["key"])
+        self.assertEqual(first["reference"]["path"], second["reference"]["path"])
+
+    def test_scope_and_quadrature_change_the_key(self):
+        bunch = compare.read_bunch(self.prefix)
+        n = (4, 4, 4)
+        origin = [-2e-7, -2e-7, -2e-7]
+        cell = [1e-7, 1e-7, 1e-7]
+        mask = np.zeros(n, dtype=bool)
+        mask[2, 2, 2] = True
+        base = compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 0, compare.REL_EPS, "full")
+        repeat = compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 0, compare.REL_EPS, "full")
+        self.assertEqual(base, repeat)
+        self.assertNotEqual(base, compare.reference_cache_key(
+            bunch, n, origin, cell, 3, 0, compare.REL_EPS, "full"))
+        self.assertNotEqual(base, compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 1, compare.REL_EPS, "full"))
+        self.assertNotEqual(base, compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 0, 1e-29, "full"))
+        mask_key = compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 0, compare.REL_EPS, "mask", mask)
+        self.assertNotEqual(base, mask_key)
+        self.assertNotEqual(mask_key, compare.reference_cache_key(
+            bunch, n, origin, cell, 2, 0, compare.REL_EPS, "mask",
+            ~mask))
+        # A different particle set cannot reuse the entry either.
+        moved = {key: value.copy() for key, value in bunch.items()}
+        moved["x"][0] += 1e-9
+        self.assertNotEqual(base, compare.reference_cache_key(
+            moved, n, origin, cell, 2, 0, compare.REL_EPS, "full"))
+
+    def test_corrupt_zip_is_rejected_loudly(self):
+        payload = self._cached_run()
+        path = payload["reference"]["path"]
+        with open(path, "r+b") as handle:
+            handle.seek(-100, os.SEEK_END)
+            handle.write(b"X" * 100)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                self._cached_run()
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("unreadable", stderr.getvalue())
+
+    def _rewrite_entry(self, path, data, meta):
+        np.savez(path, data=data,
+                 meta=np.array(json.dumps(meta, sort_keys=True)))
+
+    def _entry(self, path):
+        with np.load(path, allow_pickle=False) as npz:
+            return npz["data"].copy(), json.loads(str(npz["meta"].item()))
+
+    def test_tampered_data_fails_integrity_check(self):
+        payload = self._cached_run()
+        path = payload["reference"]["path"]
+        data, meta = self._entry(path)
+        data.flat[0] += 1.0
+        self._rewrite_entry(path, data, meta)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                self._cached_run()
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertIn("integrity", stderr.getvalue())
+
+    def test_wrong_shape_is_rejected(self):
+        payload = self._cached_run()
+        path = payload["reference"]["path"]
+        data, meta = self._entry(path)
+        meta["shape"] = [6, 1, 1, 1]
+        self._rewrite_entry(path, data[:6, :1, :1, :1], meta)
+        with self.assertRaises(compare.ReferenceCacheError) as cm:
+            compare.load_reference_cache(
+                self.cache, meta["key"], (6,) + (4, 4, 4))
+        self.assertIn("shape", str(cm.exception))
+
+    def test_wrong_key_is_rejected(self):
+        payload = self._cached_run()
+        path = payload["reference"]["path"]
+        data, meta = self._entry(path)
+        meta["key"] = "0" * 64
+        self._rewrite_entry(path, data, meta)
+        with self.assertRaises(compare.ReferenceCacheError) as cm:
+            compare.load_reference_cache(
+                self.cache, payload["reference"]["key"], data.shape)
+        self.assertIn("belongs to key", str(cm.exception))
+
+    def test_concurrent_atomic_saves_leave_one_readable_entry(self):
+        key = "atomic-key"
+        array = np.arange(6 * 2 * 3 * 4, dtype=np.float64).reshape(6, 2, 3, 4)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(
+                lambda _: compare.save_reference_cache(self.cache, key, array),
+                range(8)))
+        leftovers = [name for name in self._entries() if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [])
+        self.assertEqual(self._entries(), [key + ".npz"])
+        loaded = compare.load_reference_cache(self.cache, key, array.shape)
+        np.testing.assert_array_equal(loaded, array)
+
+
+class TestReferenceScope(unittest.TestCase):
+    """``--reference-nodes mask`` omits the whole-grid legacy statistics."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.prefix = _write_fixture(cls.tmp.name)
+        cls.full = _run_main(cls.prefix, _CLIP)
+        cls.mask = _run_main(cls.prefix, _MASK)
+        cls.mask_no_v2 = _run_main(
+            cls.prefix, ["--no-metrics-v2"] + _MASK)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_mask_omits_every_legacy_key(self):
+        for key in compare.LEGACY_STAT_KEYS:
+            self.assertNotIn(key, self.mask["runs"]["2"])
+            self.assertIn(key, self.full["runs"]["2"])
+
+    def test_legacy_marker_is_explicit(self):
+        marker = self.mask["runs"]["2"]["legacy"]
+        self.assertFalse(marker["available"])
+        self.assertEqual(marker["reason"], compare.LEGACY_MASK_REASON)
+        self.assertEqual(set(marker["omitted_keys"]),
+                         set(compare.LEGACY_STAT_KEYS))
+        self.assertEqual(self.mask["legacy"], marker)
+
+    def test_metrics_v2_matches_full_scope_bitwise(self):
+        self.assertEqual(_metrics_canonical(self.mask),
+                         _metrics_canonical(self.full))
+
+    def test_mask_without_metrics_still_marks_legacy(self):
+        self.assertNotIn("metrics_v2", self.mask_no_v2["runs"]["2"])
+        self.assertFalse(self.mask_no_v2["runs"]["2"]["legacy"]["available"])
+
+    def test_fit_with_mask_scope_is_rejected(self):
+        argv = ["compare_velocity_bins.py", self.prefix, "--bins", "2",
+                "--workers", "1", "--order", "2", "--refine", "0",
+                "--reference-nodes", "mask", "--fit"]
+        with mock.patch.object(sys, "argv", argv), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as cm:
+                compare.main()
+        self.assertNotEqual(cm.exception.code, 0)
 
 
 if __name__ == "__main__":
