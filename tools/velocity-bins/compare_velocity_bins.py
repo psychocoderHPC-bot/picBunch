@@ -48,6 +48,19 @@ METRICS_V2_SCHEMA = "velocity-bin-metrics/2.0"
 #: Relative-error floor, identical to the one already used by ``error_stats``.
 REL_EPS = 1e-30
 
+#: The far-field shell is the bunch box translated by ``+2 R`` along one axis.
+#: ``+x`` matches the spec's "box of the same size centred on the bunch but
+#: offset by 2 R"; translating all three axes produced a corner sliver.
+FAR_FIELD_AXIS = 0
+FAR_FIELD_AXIS_NAME = "x"
+#: Empty node layers required between the far-field box and every domain face.
+FAR_FIELD_MARGIN_CELLS = 2
+FAR_FIELD_POLICIES = ("error", "clip")
+
+
+class FarFieldGeometryError(ValueError):
+    """The domain cannot hold the far-field box as requested."""
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
@@ -64,6 +77,11 @@ def parse_args() -> argparse.Namespace:
                    default=True,
                    help="emit the bunch-box / far-field metrics under 'metrics_v2' "
                         "(default: on; --no-metrics-v2 reproduces the legacy JSON)")
+    p.add_argument("--far-field-policy", choices=FAR_FIELD_POLICIES,
+                   default="error",
+                   help="what to do when the domain cannot hold the far-field box "
+                        "with the required margin: 'error' (default) fails loudly, "
+                        "'clip' clips explicitly and records far_field_clipped")
     return p.parse_args()
 
 
@@ -343,19 +361,134 @@ def component_error_stats(mesh_c, ref_c, mask, *, eps: float = REL_EPS,
     return out
 
 
+def inclusive_index_bounds(lo, hi, origin, cell):
+    """Inclusive base-node index range of a closed box, before domain clipping.
+
+    Returns ``{"lo": [i, j, k], "hi": [i, j, k]}`` or ``None`` when the box
+    holds no base node (or the bounds are non-finite).  The same roundoff guard
+    as :func:`box_node_mask` is used so the bounds and the mask agree exactly.
+    """
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        return None
+    first = []
+    last = []
+    for a in range(3):
+        c = float(cell[a])
+        o = float(origin[a])
+        tol = 1e-12 * abs(c)
+        first.append(int(math.ceil((float(lo[a]) - o - tol) / c)))
+        last.append(int(math.floor((float(hi[a]) - o + tol) / c)))
+    if any(first[a] > last[a] for a in range(3)):
+        return None
+    return {"lo": first, "hi": last}
+
+
+def _containment(pre_bounds, n, margin):
+    """Classify the unclipped far-field box against the domain.
+
+    ``contained`` means the box fits with ``margin`` empty node layers on every
+    side; ``clipped`` means at least one node of the box falls outside the
+    domain (the mask built by :func:`box_node_mask` silently drops it).
+    """
+    n = [int(v) for v in n]
+    if pre_bounds is None:
+        return {"contained": True, "clipped": False, "margin_ok": True,
+                "pre": None, "post": None, "margins": None,
+                "required_n": list(n), "lower_violation": [], "detail": []}
+
+    first = pre_bounds["lo"]
+    last = pre_bounds["hi"]
+    post_lo = [max(0, first[a]) for a in range(3)]
+    post_hi = [min(n[a] - 1, last[a]) for a in range(3)]
+    post = None
+    if all(post_lo[a] <= post_hi[a] for a in range(3)):
+        post = {"lo": post_lo, "hi": post_hi}
+
+    lower_ok = [first[a] >= margin for a in range(3)]
+    upper_ok = [last[a] <= n[a] - 1 - margin for a in range(3)]
+    clipped = any(first[a] < 0 or last[a] > n[a] - 1 for a in range(3))
+    margins = {"lo": [first[a] for a in range(3)],
+               "hi": [(n[a] - 1) - last[a] for a in range(3)]}
+    # Smallest n (per axis) that would give every part of the box a >= margin
+    # gap to the upper face.  A lower-face violation needs an origin shift.
+    required_n = [max(last[a] + margin + 1, margin + 1) for a in range(3)]
+    detail = []
+    for a, name in enumerate("xyz"):
+        detail.append(f"{name}[{first[a]}..{last[a]}] needs n>={required_n[a]}")
+        if not lower_ok[a]:
+            detail.append(
+                f"{name} starts at index {first[a]} (< {margin}-cell lower "
+                f"margin), so the origin must move or the axis must grow")
+    return {
+        "contained": all(lower_ok) and all(upper_ok),
+        "clipped": clipped,
+        "margin_ok": all(lower_ok) and all(upper_ok),
+        "pre": pre_bounds,
+        "post": post,
+        "margins": margins,
+        "required_n": required_n,
+        "lower_violation": [not v for v in lower_ok],
+        "detail": detail,
+    }
+
+
+def _required_extent_message(info, n, origin, cell, margin):
+    req = info["required_n"]
+    have = [int(v) for v in n]
+    need_m = [req[a] * float(cell[a]) for a in range(3)]
+    return (
+        "far-field box (bunch box translated by +2R along "
+        f"+{FAR_FIELD_AXIS_NAME} only) is not contained without clipping: "
+        f"domain {have[0]}x{have[1]}x{have[2]} cells "
+        f"(origin {list(origin)}, cell {list(cell)}) is too small. "
+        f"Required domain extent is at least {req[0]}x{req[1]}x{req[2]} cells "
+        f"= {need_m[0]:.6e} x {need_m[1]:.6e} x {need_m[2]:.6e} m with "
+        f">= {margin} empty cell layers on every side. "
+        + "; ".join(info["detail"])
+        + ". Pass --far-field-policy clip to clip explicitly (the JSON then "
+        "reports far_field_clipped=true and the pre-clip bounds).")
+
+
 def prepare_metrics_v2(bunch: dict, n, origin, cell, *,
-                       eps: float = REL_EPS) -> dict:
+                       eps: float = REL_EPS,
+                       far_field_policy: str = "error",
+                       margin_cells: int = FAR_FIELD_MARGIN_CELLS) -> dict:
     """Precompute the bunch-box and far-field masks once per bunch.
 
-    The far-field shell is the bunch bounding box translated by ``+2 R`` along
-    each axis, where ``R`` is half the largest bunch extent.  No reference field
-    is recomputed here; :func:`compute_metrics_v2` only reuses the mesh and
-    reference arrays that the caller already has.
+    The in-bunch mask is the inclusive node box of the particle min/max (the
+    legacy behaviour).  The far-field shell is that same box translated by
+    ``+2 R`` along ``+x`` only, where ``R`` is half the largest bunch extent.
+    With ``far_field_policy="error"`` a domain that cannot hold the translated
+    box with ``margin_cells`` empty layers per face raises
+    :class:`FarFieldGeometryError`; ``"clip"`` keeps the intersection and
+    records the clipping.  No reference field is recomputed here.
     """
+    if far_field_policy not in FAR_FIELD_POLICIES:
+        raise ValueError(
+            f"far_field_policy must be one of {FAR_FIELD_POLICIES}, "
+            f"got {far_field_policy!r}")
     bbox = bunch_bounding_box(bunch)
     offset = 2.0 * bbox["R"]
-    ff_lo = [bbox["min"][a] + offset for a in range(3)]
-    ff_hi = [bbox["max"][a] + offset for a in range(3)]
+    ff_lo = [bbox["min"][a] for a in range(3)]
+    ff_hi = [bbox["max"][a] for a in range(3)]
+    ff_lo[FAR_FIELD_AXIS] = bbox["min"][FAR_FIELD_AXIS] + offset
+    ff_hi[FAR_FIELD_AXIS] = bbox["max"][FAR_FIELD_AXIS] + offset
+
+    ff_pre = inclusive_index_bounds(ff_lo, ff_hi, origin, cell)
+    containment = _containment(ff_pre, n, int(margin_cells))
+    if far_field_policy == "error" and not containment["contained"]:
+        raise FarFieldGeometryError(
+            _required_extent_message(containment, n, origin, cell,
+                                     int(margin_cells)))
+
+    in_pre = inclusive_index_bounds(bbox["min"], bbox["max"], origin, cell)
+    in_post = None
+    if in_pre is not None:
+        lo = [max(0, in_pre["lo"][a]) for a in range(3)]
+        hi = [min(int(n[a]) - 1, in_pre["hi"][a]) for a in range(3)]
+        if all(lo[a] <= hi[a] for a in range(3)):
+            in_post = {"lo": lo, "hi": hi}
+
     return {
         "schema": METRICS_V2_SCHEMA,
         "eps": float(eps),
@@ -364,8 +497,20 @@ def prepare_metrics_v2(bunch: dict, n, origin, cell, *,
         "cell": [float(v) for v in cell],
         "bbox": bbox,
         "far_field_offset": offset,
+        "far_field_offset_axis": FAR_FIELD_AXIS_NAME,
+        "far_field_offset_vector": [
+            offset if a == FAR_FIELD_AXIS else 0.0 for a in range(3)],
         "far_field_min": ff_lo,
         "far_field_max": ff_hi,
+        "far_field_policy": far_field_policy,
+        "far_field_clipped": bool(containment["clipped"]),
+        "far_field_margin_ok": bool(containment["margin_ok"]),
+        "far_field_margin_cells": int(margin_cells),
+        "far_field_pre_clip_bounds": containment["pre"],
+        "far_field_index_bounds": containment["post"],
+        "far_field_margins": containment["margins"],
+        "far_field_required_domain_n": containment["required_n"],
+        "in_bunch_index_bounds": in_post,
         "in_mask": box_node_mask(n, origin, cell, bbox["min"], bbox["max"]),
         "far_mask": box_node_mask(n, origin, cell, ff_lo, ff_hi),
     }
@@ -420,6 +565,20 @@ def compute_metrics_v2(mesh, ref, ctx: dict) -> dict:
             "bbox_n_particles": int(bbox["n_particles"]),
             "node_position_convention":
                 "origin + index*cell (base node, shared by all six components)",
+            # New in E1b: single-axis offset plus the mask bounds and clipping
+            # state, so a downstream criterion can never mistake a sliver for
+            # a full-size shell.
+            "far_field_offset_axis": ctx["far_field_offset_axis"],
+            "far_field_offset_vector": list(ctx["far_field_offset_vector"]),
+            "far_field_policy": ctx["far_field_policy"],
+            "far_field_clipped": bool(ctx["far_field_clipped"]),
+            "far_field_margin_ok": bool(ctx["far_field_margin_ok"]),
+            "far_field_margin_cells": int(ctx["far_field_margin_cells"]),
+            "in_bunch_index_bounds": ctx["in_bunch_index_bounds"],
+            "far_field_index_bounds": ctx["far_field_index_bounds"],
+            "far_field_pre_clip_bounds": ctx["far_field_pre_clip_bounds"],
+            "far_field_margins_cells": ctx["far_field_margins"],
+            "far_field_required_domain_n": ctx["far_field_required_domain_n"],
         },
         "in_bunch": _region_metrics(mesh, ref, ctx["in_mask"], origin, cell, eps),
         "far_field": _region_metrics(mesh, ref, ctx["far_mask"], origin, cell, eps),
@@ -450,14 +609,23 @@ def main() -> None:
     print(f"bunch: {len(bunch['x'])} particles, gamma={gamma}, grid={n}, cell={cell[0]} m, "
           f"reference order={args.order} refine={refine}, workers={args.workers}")
 
-    dist = nearest_distance(bunch, tuple(n), origin, cell, dmax=16.0)
-    band_idx = band_index(dist, bands)
-
     # Bunch-box and far-field masks are built once and reused for every B; the
     # new metrics only consume the mesh and T arrays computed below, never a
-    # second reference pass.
-    metrics_ctx = (prepare_metrics_v2(bunch, n, origin, cell)
-                   if args.metrics_v2 else None)
+    # second reference pass.  Doing this before the expensive reference pass
+    # makes a geometry that cannot hold the shell fail fast instead of after
+    # minutes of integration.
+    metrics_ctx = None
+    if args.metrics_v2:
+        try:
+            metrics_ctx = prepare_metrics_v2(
+                bunch, n, origin, cell,
+                far_field_policy=args.far_field_policy)
+        except FarFieldGeometryError as exc:
+            sys.stderr.write(f"compare_velocity_bins.py: error: {exc}\n")
+            sys.exit(2)
+
+    dist = nearest_distance(bunch, tuple(n), origin, cell, dmax=16.0)
+    band_idx = band_index(dist, bands)
 
     # Continuum target with per-particle velocities (independent of B).
     print("computing T (per-particle continuum reference) ...", flush=True)
