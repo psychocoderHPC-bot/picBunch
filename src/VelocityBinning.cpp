@@ -330,6 +330,15 @@ namespace picBunch
             return {a[0] / n, a[1] / n, a[2] / n};
         }
 
+        //! Largest box count the infeasible-requirement diagnostic evaluates.
+        //!
+        //! ``deriveVelocityBinning`` reports the count the model would need
+        //! above the cap.  Each probe allocates O(count) box storage, so the
+        //! former 2^30 ceiling exhausted memory before it could report: the
+        //! search is bounded to a count no binned run could use (1M boxes is
+        //! 4000x the default 256-box cap).
+        constexpr std::size_t kMaxVelocityBinSearch = 1u << 20u;
+
         //! Beam-frame coordinates of every particle plus the per-axis extent.
         struct BeamFrame
         {
@@ -522,7 +531,10 @@ namespace picBunch
             double uMax)
         {
             QuantileAxis out;
-            if(nBoxes <= 1u || uMax - uMin <= 0.0)
+            // No cuts for a degenerate axis and none for an empty particle set:
+            // the callers fall back to the uniform edges (or the uMin fill) for
+            // an empty cut list, and an empty ``order`` must never be indexed.
+            if(nBoxes <= 1u || uBeam.empty() || uMax - uMin <= 0.0)
                 return out;
             std::vector<std::size_t> order(uBeam.size());
             std::iota(order.begin(), order.end(), 0u);
@@ -541,7 +553,14 @@ namespace picBunch
                                       * totalAbsoluteCharge;
                 while(cursor < order.size() && cumulative < target)
                     cumulative += absCharge[order[cursor++]];
-                out.cuts[q] = uBeam[order[cursor]][static_cast<std::size_t>(a)];
+                // ``cursor`` is one past the end when the last particle is the
+                // one that reaches the target: the loop exits after the
+                // increment, not before it.  Clamp to the last particle, the
+                // same way the DP candidate fallback does, instead of reading
+                // ``order[size()]``.
+                std::size_t const at
+                    = (cursor < order.size()) ? cursor : order.size() - 1u;
+                out.cuts[q] = uBeam[order[at]][static_cast<std::size_t>(a)];
             }
             return out;
         }
@@ -666,7 +685,10 @@ namespace picBunch
                 QuantileAxis const q = quantileAxis(
                     uBeam, a, nBoxes, absCharge, totalAbsoluteCharge, uLo, uHi);
                 out.assign(nBoxes - 1u, uLo);
-                for(std::size_t k = 0u; k + 1u < nBoxes; ++k)
+                // ``q.cuts`` is empty for a degenerate axis or an empty particle
+                // set; iterate over what the fallback actually produced so the
+                // uMin fill stands instead of indexing a null cut array.
+                for(std::size_t k = 0u; k < q.cuts.size() && k < out.size(); ++k)
                     out[k] = q.cuts[k];
                 return out;
             }
@@ -1496,8 +1518,26 @@ namespace picBunch
                     totalAbsoluteCharge, policy.modelConstant,
                     policy.inBunchCriterion, adaCuts);
                 // Keep the lower-predicted-error partition; ties go to uniform
-                // (the cheaper, historical rule).
-                bool const useAdaptive = (adaCost < uniCost);
+                // (the cheaper, historical rule).  A non-finite predicted cost
+                // makes the comparison meaningless (every comparison with NaN
+                // is false, so uniform would be kept silently and the run would
+                // look like a legitimate loss); report it and keep uniform as
+                // the safe fallback.
+                bool const costsFinite = std::isfinite(uniCost) && std::isfinite(adaCost);
+                if(!costsFinite)
+                {
+                    char const* const axisName = (a == 0) ? "x" : (a == 1) ? "y" : "z";
+                    std::fprintf(
+                        stderr,
+                        "picBunch: velocity-bin edges axis %s (%zu boxes): non-finite "
+                        "predicted model (uniform %g, adaptive %g); keeping the uniform "
+                        "partition\n",
+                        axisName,
+                        n,
+                        uniCost,
+                        adaCost);
+                }
+                bool const useAdaptive = costsFinite && (adaCost < uniCost);
                 choice.axes[a].cuts = useAdaptive ? adaCuts : uniCuts;
                 choice.axes[a].range = frame.range[static_cast<std::size_t>(a)];
                 choice.axisRule[a] = useAdaptive ? VelocityBinning::EdgeRule::Adaptive
@@ -1660,7 +1700,7 @@ namespace picBunch
                         "error %g at %zu boxes (prev count %g).  The 1e-3 in-bunch "
                         "tolerance is not reachable by the binned model at this gamma; "
                         "validate a production field against a physics run.  Raise "
-                        "--max-velocity-bins for more boxes.\\n",
+                        "--max-velocity-bins for more boxes.\n",
                         tolerance, ceiling, out.saturationError, satBins,
                         out.saturationPrevError);
                 }
@@ -1676,7 +1716,19 @@ namespace picBunch
                         = policy.modelConstant * modelSumFor(policy.maxBins, capProbe);
                     std::size_t required = policy.maxBins;
                     double lastError = capError;
-                    for(std::size_t B = policy.maxBins * 2u; B <= (1u << 30); B *= 2u)
+                    // Every probe allocates O(count) box storage, so an
+                    // unbounded escalation (the former 2^30 bound) exhausted
+                    // memory long before it could report anything: a request
+                    // whose tolerance is below what the model can reach (for
+                    // example 1e-12 for a bunch with an energy spread) grew to
+                    // tens of GB and died with std::bad_alloc instead of the
+                    // documented runtime_error.  The diagnostic is bounded to a
+                    // count no binned run could use anyway (the default cap is
+                    // 256 boxes); a user-raised cap above it still gets one more
+                    // doubling.
+                    std::size_t const searchCeiling
+                        = std::max(kMaxVelocityBinSearch, policy.maxBins * 2u);
+                    for(std::size_t B = policy.maxBins * 2u; B <= searchCeiling; B *= 2u)
                     {
                         VelocityBinning probe;
                         double const modelSum = modelSumFor(B, probe);
@@ -1687,7 +1739,8 @@ namespace picBunch
                     }
                     std::string const remedy
                         = (lastError > tolerance)
-                            ? " no count up to 2^30 boxes meets the tolerance"
+                            ? " no count up to " + std::to_string(searchCeiling)
+                                  + " boxes meets the tolerance"
                             : "";
                     throw std::runtime_error(
                         "deriveVelocityBinning: the velocity-bin model requires at least "
@@ -1709,12 +1762,18 @@ namespace picBunch
         // final geometry and the diagnostic log below; recomputing it would
         // repeat the (potentially expensive) DP and model sums.
         AutoAxes const autoChoice = isAuto ? autoAxesFor(targetBins) : AutoAxes{};
-        std::array<QuantileAxis, 3> const finalAxes
-            = isAuto
-                  ? autoChoice.axes
-                  : (policy.edgeRule == VelocityBinning::EdgeRule::Adaptive)
-                        ? adaptiveAxesFor(targetBins)
-                        : quantileAxesFor(targetBins);
+        // The final geometry must be the geometry the model searched and the
+        // boundaries below advertise.  ``Uniform`` passes no cuts, so
+        // ``evaluateSplit`` uses the equal subdivision; passing the quantile
+        // axes here made the stored ``boxOf`` / representatives / ``modelError``
+        // quantile while ``axisBoundaries`` (and the search) stayed uniform.
+        std::array<QuantileAxis, 3> finalAxes{};
+        if(isAuto)
+            finalAxes = autoChoice.axes;
+        else if(policy.edgeRule == VelocityBinning::EdgeRule::Adaptive)
+            finalAxes = adaptiveAxesFor(targetBins);
+        else if(policy.edgeRule == VelocityBinning::EdgeRule::Quantile)
+            finalAxes = quantileAxesFor(targetBins);
         out.edgeRule = policy.edgeRule;
         evaluateSplit(
             bunch, frame, finalSplit, absCharge, particleGamma, totalAbsoluteCharge,
