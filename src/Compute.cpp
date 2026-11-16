@@ -3154,6 +3154,8 @@ namespace picBunch
                     options.keepStaging,
                     &stats};
 
+                try
+                {
                 solver.forwardSource(
                     [&](std::uint32_t zOffset, std::uint32_t zCount, Complex* work) {
                         auto const fillStart = Clock::now();
@@ -3169,6 +3171,18 @@ namespace picBunch
                             zCount);
                         times.depositMs += elapsedMs(fillStart);
                     });
+                }
+                catch(std::exception const& error)
+                {
+                    std::fprintf(
+                        stderr,
+                        "picBunch: staged failure: phase=source component=-1 chunk=0..%d "
+                        "file='%s' reason=%s\n",
+                        virtualRanks - 1,
+                        staging.c_str(),
+                        error.what());
+                    throw;
+                }
 
                 Vec3 const uRep{
                     binning.representativeU[b][0],
@@ -3178,6 +3192,8 @@ namespace picBunch
                 for(int c = 0; c < 6; ++c)
                 {
                     double const factor = scale * (c < 3 ? eFactor : bFactor);
+                    try
+                    {
                     solver.convolveComponent(
                         [&](std::uint32_t zOffset, std::uint32_t zCount, Complex* work) {
                             auto const fillStart = Clock::now();
@@ -3237,6 +3253,19 @@ namespace picBunch
                                             += planes[k * cPlane + l];
                             }
                         });
+                    }
+                    catch(std::exception const& error)
+                    {
+                        std::fprintf(
+                            stderr,
+                            "picBunch: staged failure: phase=kernel/product/backward "
+                            "component=%d chunk=0..%d file='%s' reason=%s\n",
+                            c,
+                            virtualRanks - 1,
+                            staging.c_str(),
+                            error.what());
+                        throw;
+                    }
                 }
             }
 

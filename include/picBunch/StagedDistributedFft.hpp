@@ -179,6 +179,8 @@ namespace picBunch::detail
                 accountFft(fft);
             }
 
+            if(std::getenv("PICBUNCH_TEST_TRUNCATE_STAGING") != nullptr)
+                ::ftruncate(exchange.fd(), 1024);
             StagingFile spectrum = makeStaging("source-spectrum");
             for(int d = 0; d < m_ranks; ++d)
             {

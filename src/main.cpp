@@ -1545,6 +1545,39 @@ int main(int argc, char** argv)
             bunchData.bunch.size(),
             static_cast<unsigned long long>(bunchData.iteration),
             bunchData.time * bunchData.timeUnitSI);
+        {
+            double sumWeight = 0.0;
+            double totalCharge = 0.0;
+            double cx = 0.0;
+            double cy = 0.0;
+            double cz = 0.0;
+            for(std::size_t p = 0; p < bunchData.bunch.size(); ++p)
+            {
+                double const w = bunchData.bunch.weight[p];
+                sumWeight += w;
+                totalCharge += w * bunchData.bunch.charge[p];
+                cx += w * bunchData.bunch.x[p];
+                cy += w * bunchData.bunch.y[p];
+                cz += w * bunchData.bunch.z[p];
+            }
+            double const norm = std::max(sumWeight, 1.0e-300);
+            std::fprintf(
+                stderr,
+                "picBunch: input sanity: particles=%zu sum_weight=%.12g "
+                "total_charge=%.12g C centroid=(%.9g,%.9g,%.9g) m\n",
+                bunchData.bunch.size(),
+                sumWeight,
+                totalCharge,
+                cx / norm,
+                cy / norm,
+                cz / norm);
+            if(totalCharge > 0.0)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: positive total charge %.12g C for an electron "
+                    "bunch; check the charge sign and weighting\n",
+                    totalCharge);
+        }
 
         // Geometry: an explicit --cell-size always wins over the input mesh.
         // When neither is available the run fails; nothing is assumed.
