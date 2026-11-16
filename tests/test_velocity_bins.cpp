@@ -1001,3 +1001,153 @@ TEST(VelocityBins, InBunchCriterionByErrorShrinksWithBoxes)
         first = false;
     }
 }
+
+TEST(VelocityBins, QuantileEdgesPartitionByCharge)
+{
+    // Four particles on the beam axis at uz = -5, -1, 3, 9 (all positive
+    // charge, weight 1).  The uniform rule at 2 boxes puts the cut at the
+    // midpoint of the extent (uz = 2); the quantile rule puts it at the
+    // charge-weighted median (uz = 3, the second particle in sorted order).
+    // Both rules produce 2 boxes; the quantile rule's per-box charge is
+    // exactly 1/2 (two particles per box), while the uniform rule's is 3/4
+    // and 1/4.  The model sum must be finite and non-negative for both.
+    Bunch bunch;
+    bunch.resize(4);
+    for(int i = 0; i < 4; ++i)
+    {
+        bunch.x[i] = 4.0;
+        bunch.y[i] = 4.0;
+        bunch.z[i] = 4.0;
+        bunch.ux[i] = 0.0;
+        bunch.uy[i] = 0.0;
+        bunch.uz[i] = (i == 0 ? -5.0 : i == 1 ? -1.0 : i == 2 ? 3.0 : 9.0);
+        bunch.weight[i] = 1.0;
+        bunch.charge[i] = kElectronCharge;
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 2;
+    // Uniform: the cut is at the midpoint of the extent.
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
+    VelocityBinning const bu = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(bu.count, 2u);
+    EXPECT_EQ(bu.edgeRule, VelocityBinning::EdgeRule::Uniform);
+    EXPECT_TRUE(bu.axisBoundaries.size() >= 7u); // 3 axes * (n+1) values
+    EXPECT_GT(bu.modelSum, 0.0);
+    EXPECT_TRUE(std::isfinite(bu.modelSum));
+    // Quantile: the cut is at the charge-weighted median.
+    policy.edgeRule = VelocityBinning::EdgeRule::Quantile;
+    VelocityBinning const bq = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(bq.count, 2u);
+    EXPECT_EQ(bq.edgeRule, VelocityBinning::EdgeRule::Quantile);
+    EXPECT_TRUE(bq.axisBoundaries.size() >= 7u);
+    EXPECT_GT(bq.modelSum, 0.0);
+    EXPECT_TRUE(std::isfinite(bq.modelSum));
+    // The per-axis boundaries differ between the two rules (the cut is at a
+    // different position).  For the beam axis (axis 2, the last n+1 values),
+    // the interior boundary is the midpoint for uniform and the median for
+    // quantile.
+    std::size_t const n2 = bq.perAxis[2];
+    std::size_t const offset2 = bq.perAxis[0] + 1u + bq.perAxis[1] + 1u;
+    double const uniformCut = bu.axisBoundaries[offset2 + 1u];
+    double const quantileCut = bq.axisBoundaries[offset2 + 1u];
+    EXPECT_NE(uniformCut, quantileCut)
+        << "the uniform and quantile cuts must differ for this bunch";
+    // The quantile cut is at the median (uz = 3), not the midpoint (uz = 2).
+    EXPECT_DOUBLE_EQ(quantileCut, 3.0);
+    EXPECT_DOUBLE_EQ(uniformCut, 2.0);
+}
+
+TEST(VelocityBins, QuantileEdgesSingleVelocityStaysOneBox)
+{
+    // A single-velocity bunch with the quantile edge rule must still take
+    // the one-box fast path (the shared-velocity check runs before the edge
+    // rule is applied).
+    Bunch bunch = axisBunch({10.0, 10.0, 10.0});
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 4;
+    policy.edgeRule = VelocityBinning::EdgeRule::Quantile;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(binning.count, 1u);
+    EXPECT_FALSE(binning.multiVelocity);
+    EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
+}
+
+TEST(VelocityBins, AdaptiveEdgesMinimiseTheContentModel)
+{
+    // Two well-separated energy clusters (gamma 10 and 100) on the beam
+    // axis.  The adaptive rule places its interior cut in the gap between the
+    // clusters so that no box straddles both, which minimises the calibrated
+    // content model; the uniform rule cuts at the midpoint of the range,
+    // straddling the gap.  For 2 boxes the adaptive model error must not
+    // exceed the uniform model error, and the boundaries must be populated
+    // and monotonically non-decreasing.
+    Bunch bunch;
+    bunch.resize(8);
+    double const uzLo = std::sqrt(100.0 - 1.0);  // gamma 10
+    double const uzHi = std::sqrt(10000.0 - 1.0); // gamma 100
+    for(int i = 0; i < 8; ++i)
+    {
+        bool const hiCluster = (i >= 4);
+        bunch.x[i] = 4.0 + static_cast<double>(i % 3);
+        bunch.y[i] = 4.0 + static_cast<double>((i / 3) % 3);
+        bunch.z[i] = 4.0;
+        bunch.ux[i] = 0.0;
+        bunch.uy[i] = 0.0;
+        bunch.uz[i] = (hiCluster ? uzHi : uzLo);
+        bunch.weight[i] = 1.0;
+        bunch.charge[i] = kElectronCharge;
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 2;
+    policy.inBunchCriterion = true;
+
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
+    VelocityBinning const bu = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    policy.edgeRule = VelocityBinning::EdgeRule::Adaptive;
+    VelocityBinning const ba = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+
+    EXPECT_EQ(ba.count, 2u);
+    EXPECT_EQ(ba.edgeRule, VelocityBinning::EdgeRule::Adaptive);
+    EXPECT_FALSE(ba.axisBoundaries.empty());
+    // per-axis boundaries are monotonically non-decreasing (the concatenated
+    // array is not monotone across axis boundaries, since the transverse
+    // axes are degenerate at uMin = 0)
+    std::size_t const nAx[3] = {ba.perAxis[0], ba.perAxis[1], ba.perAxis[2]};
+    std::size_t offset = 0u;
+    for(int a = 0; a < 3; ++a)
+    {
+        for(std::size_t i = 1u; i <= nAx[static_cast<std::size_t>(a)]; ++i)
+            EXPECT_GE(ba.axisBoundaries[offset + i], ba.axisBoundaries[offset + i - 1u]);
+        offset += nAx[static_cast<std::size_t>(a)] + 1u;
+    }
+    // the adaptive rule must not do worse than uniform on the content model
+    EXPECT_LE(ba.modelSum, bu.modelSum + 1.0e-15);
+    // the adaptive cut sits strictly between the two cluster values (in the
+    // gap), so each box holds a single cluster and the model error is zero
+    std::size_t const offset2 = ba.perAxis[0] + 1u + ba.perAxis[1] + 1u;
+    double const adaptiveCut = ba.axisBoundaries[offset2 + 1u];
+    EXPECT_GT(adaptiveCut, uzLo);
+    EXPECT_LT(adaptiveCut, uzHi);
+    // and the adaptive model error is zero (each box is a single cluster),
+    // strictly better than uniform's straddling error
+    EXPECT_DOUBLE_EQ(ba.modelSum, 0.0);
+    EXPECT_GT(bu.modelSum, 0.0);
+}
+
+TEST(VelocityBins, AdaptiveEdgesSingleVelocityStaysOneBox)
+{
+    // A single-velocity bunch with the adaptive edge rule must still take
+    // the one-box fast path.
+    Bunch bunch = axisBunch({10.0, 10.0, 10.0});
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 4;
+    policy.edgeRule = VelocityBinning::EdgeRule::Adaptive;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(binning.count, 1u);
+    EXPECT_FALSE(binning.multiVelocity);
+    EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
+}

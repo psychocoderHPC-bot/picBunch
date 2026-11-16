@@ -26,6 +26,7 @@
 #include <cstring>
 #include <fstream>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -139,13 +140,15 @@ int main(int argc, char** argv)
         double tolerance = 1.0e-3;
         double modelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
+        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
         std::size_t momentOrder = 0; //!< 0 = off; else run the moment path at this order
         unsigned fftPadding = 2u;
         bool deterministicDeposit = false;
-        std::string nearShell = "none";
-        double nearShellRadius = 0.0;
-        std::size_t nearShellTile = 4;
-        std::string prefix = "velocity_bins";
+            std::string nearShell = "none";
+            double nearShellRadius = 0.0;
+            std::size_t nearShellTile = 4;
+            std::string prefix = "velocity_bins";
+            std::string bunchInput; //!< when set, read the bunch from this file
 
         for(int i = 1; i < argc; ++i)
         {
@@ -191,6 +194,19 @@ int main(int argc, char** argv)
                 modelConstant = std::stod(next());
             else if(a == "--max-bins")
                 maxBins = static_cast<std::size_t>(std::stoul(next()));
+            else if(a == "--bin-edges")
+            {
+                std::string const text = next();
+                if(text == "uniform")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
+                else if(text == "quantile")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Quantile;
+                else if(text == "adaptive")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Adaptive;
+                else
+                    throw std::runtime_error(
+                        "--bin-edges must be uniform, quantile or adaptive");
+            }
             else if(a == "--moments")
             {
                 std::size_t const v = static_cast<std::size_t>(std::stoul(next()));
@@ -210,6 +226,8 @@ int main(int argc, char** argv)
                 nearShellTile = static_cast<std::size_t>(std::stoul(next()));
             else if(a == "--output")
                 prefix = next();
+            else if(a == "--bunch")
+                bunchInput = next();
             else
                 throw std::runtime_error("unknown argument " + a);
         }
@@ -229,57 +247,89 @@ int main(int argc, char** argv)
             throw std::runtime_error("--near-shell-tile must be positive");
 
         // ------------------------------------------------------- bunch generation
-        // Beam axis: +z.  Energy spread: gamma_p = gamma*(1 + s*z1), clipped to
-        // |z1| <= 4.  Angular spread: small-angle tilt (theta_x, theta_y) ~
-        // N(0, sigma_theta) each, applied to the unit direction.
-        Rng rng(seed);
-        double const sigmaTheta = angleDegrees * M_PI / 180.0;
+        // Either read an explicit bunch (``--bunch``) or generate a synthetic
+        // one.  Beam axis: +z.  Energy spread: gamma_p = gamma*(1 + s*z1),
+        // clipped to |z1| <= 4.  Angular spread: small-angle tilt
+        // (theta_x, theta_y) ~ N(0, sigma_theta) each, applied to the unit
+        // direction.
         picBunch::Bunch bunch;
-        bunch.resize(sources);
-        std::array<double, 3> const centre{
-            origin[0] + 0.5 * static_cast<double>(grid[0]) * cell[0],
-            origin[1] + 0.5 * static_cast<double>(grid[1]) * cell[1],
-            origin[2] + 0.5 * static_cast<double>(grid[2]) * cell[2]};
-        for(std::size_t p = 0; p < sources; ++p)
+        if(!bunchInput.empty())
         {
-            double z1 = 0.0, z2 = 0.0, z3 = 0.0;
-            double pos[3], zpos[3];
-            for(int a = 0; a < 3; ++a)
+            std::ifstream fin(bunchInput);
+            if(!fin)
+                throw std::runtime_error("cannot open --bunch file " + bunchInput);
+            std::string line;
+            while(std::getline(fin, line))
             {
-                zpos[a] = rng.gaussian();
-                pos[a] = centre[a] + cloudCells * cell[a] * zpos[a];
+                if(line.empty() || line[0] == '#')
+                    continue;
+                std::istringstream ss(line);
+                double x, y, z, ux, uy, uz, w, q;
+                if(!(ss >> x >> y >> z >> ux >> uy >> uz >> w >> q))
+                    continue;
+                bunch.x.push_back(x);
+                bunch.y.push_back(y);
+                bunch.z.push_back(z);
+                bunch.ux.push_back(ux);
+                bunch.uy.push_back(uy);
+                bunch.uz.push_back(uz);
+                bunch.weight.push_back(w);
+                bunch.charge.push_back(q);
             }
-            if(energySpread > 0.0)
-                z1 = rng.gaussian();
-            if(angleDegrees > 0.0)
+            if(bunch.size() == 0u)
+                throw std::runtime_error("--bunch file " + bunchInput + " has no particles");
+            sources = bunch.size();
+        }
+        else
+        {
+            Rng rng(seed);
+            double const sigmaTheta = angleDegrees * M_PI / 180.0;
+            bunch.resize(sources);
+            std::array<double, 3> const centre{
+                origin[0] + 0.5 * static_cast<double>(grid[0]) * cell[0],
+                origin[1] + 0.5 * static_cast<double>(grid[1]) * cell[1],
+                origin[2] + 0.5 * static_cast<double>(grid[2]) * cell[2]};
+            for(std::size_t p = 0; p < sources; ++p)
             {
-                z2 = rng.gaussian();
-                z3 = rng.gaussian();
+                double z1 = 0.0, z2 = 0.0, z3 = 0.0;
+                double pos[3], zpos[3];
+                for(int a = 0; a < 3; ++a)
+                {
+                    zpos[a] = rng.gaussian();
+                    pos[a] = centre[a] + cloudCells * cell[a] * zpos[a];
+                }
+                if(energySpread > 0.0)
+                    z1 = rng.gaussian();
+                if(angleDegrees > 0.0)
+                {
+                    z2 = rng.gaussian();
+                    z3 = rng.gaussian();
+                }
+                z1 = std::max(-4.0, std::min(4.0, z1));
+                double const gammaP = (energySpread > 0.0) ? gamma * (1.0 + energySpread * z1) : gamma;
+                double const umag = std::sqrt(std::max(1.0e-24, gammaP * gammaP - 1.0));
+                double ux = 0.0, uy = 0.0;
+                if(angleDegrees > 0.0)
+                {
+                    double const tx = sigmaTheta * z2;
+                    double const ty = sigmaTheta * z3;
+                    double const inv = 1.0 / std::sqrt(1.0 + tx * tx + ty * ty);
+                    ux = umag * tx * inv;
+                    uy = umag * ty * inv;
+                }
+                double const uz = umag * (angleDegrees > 0.0
+                    ? 1.0 / std::sqrt(1.0 + (sigmaTheta * z2) * (sigmaTheta * z2)
+                                        + (sigmaTheta * z3) * (sigmaTheta * z3))
+                    : 1.0);
+                bunch.x[p] = pos[0];
+                bunch.y[p] = pos[1];
+                bunch.z[p] = pos[2];
+                bunch.ux[p] = ux;
+                bunch.uy[p] = uy;
+                bunch.uz[p] = uz;
+                bunch.weight[p] = 1.0;
+                bunch.charge[p] = -kElementaryCharge;
             }
-            z1 = std::max(-4.0, std::min(4.0, z1));
-            double const gammaP = (energySpread > 0.0) ? gamma * (1.0 + energySpread * z1) : gamma;
-            double const umag = std::sqrt(std::max(1.0e-24, gammaP * gammaP - 1.0));
-            double ux = 0.0, uy = 0.0;
-            if(angleDegrees > 0.0)
-            {
-                double const tx = sigmaTheta * z2;
-                double const ty = sigmaTheta * z3;
-                double const inv = 1.0 / std::sqrt(1.0 + tx * tx + ty * ty);
-                ux = umag * tx * inv;
-                uy = umag * ty * inv;
-            }
-            double const uz = umag * (angleDegrees > 0.0
-                ? 1.0 / std::sqrt(1.0 + (sigmaTheta * z2) * (sigmaTheta * z2)
-                                    + (sigmaTheta * z3) * (sigmaTheta * z3))
-                : 1.0);
-            bunch.x[p] = pos[0];
-            bunch.y[p] = pos[1];
-            bunch.z[p] = pos[2];
-            bunch.ux[p] = ux;
-            bunch.uy[p] = uy;
-            bunch.uz[p] = uz;
-            bunch.weight[p] = 1.0;
-            bunch.charge[p] = -kElementaryCharge;
         }
 
         picBunch::ComputeOptions options;
@@ -297,6 +347,7 @@ int main(int argc, char** argv)
         options.nearShell.tileNodes = nearShellTile;
         options.velocityBinning.modelConstant = modelConstant;
         options.velocityBinning.maxBins = maxBins;
+        options.velocityBinning.edgeRule = binEdges;
 
         std::ofstream bunchFile(prefix + "_bunch.txt");
         if(!bunchFile)
@@ -326,6 +377,18 @@ int main(int argc, char** argv)
                 = picBunch::computeField(bunch, options, &times, &binning);
             auto const t1 = std::chrono::steady_clock::now();
             double const wallS = std::chrono::duration<double>(t1 - t0).count();
+            // Bin-derivation (the DP edge placement for the adaptive rule) cost,
+            // measured by running the same derivation standalone; the rest of the
+            // run is the field solve.  Zero for the uniform rule (no DP).
+            double binDeriveMs = 0.0;
+            {
+                auto const b0 = std::chrono::steady_clock::now();
+                picBunch::VelocityBinning const probe = picBunch::deriveVelocityBinning(
+                    bunch, tolerance, options.velocityBinning);
+                (void)probe;
+                auto const b1 = std::chrono::steady_clock::now();
+                binDeriveMs = std::chrono::duration<double, std::milli>(b1 - b0).count();
+            }
 
             std::size_t const B = binning.count;
             if(B > refB)
@@ -353,6 +416,12 @@ int main(int argc, char** argv)
             meta << "near_shell_radius " << nearShellRadius << "\n";
             meta << "bin_model_constant " << modelConstant << "\n";
             meta << "max_bins " << maxBins << "\n";
+            meta << "bin_edges " << (binEdges == picBunch::VelocityBinning::EdgeRule::Quantile
+                                         ? "quantile"
+                                         : (binEdges == picBunch::VelocityBinning::EdgeRule::Adaptive
+                                                ? "adaptive"
+                                                : "uniform"))
+                  << "\n";
             meta << "requested_bins " << requested << "\n";
             meta << "bins_used " << B << "\n";
             meta << "per_axis " << binning.perAxis[0] << " " << binning.perAxis[1] << " "
@@ -360,6 +429,7 @@ int main(int argc, char** argv)
             meta << "multi_velocity " << (binning.multiVelocity ? 1 : 0) << "\n";
             meta << "model_sum " << binning.modelSum << "\n";
             meta << "model_error " << binning.modelError << "\n";
+            meta << "bin_derive_ms " << binDeriveMs << "\n";
             meta << "wall_seconds " << wallS << "\n";
             meta << "deposit_ms " << times.depositMs << "\n";
             meta << "kernel_ms " << times.kernelMs << "\n";

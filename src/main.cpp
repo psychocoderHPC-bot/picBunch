@@ -165,6 +165,19 @@ namespace
             "                        velocity (charge-weighted |u| spread <= 2%% and\n"
             "                        divergence <= 50 mrad) at the default cap, where\n"
             "                        one box is used\n"
+            "  --bin-edges <rule>    uniform|quantile|adaptive (default: uniform).\n"
+            "                        uniform: equal-width edges in reduced velocity\n"
+            "                        u = p/(m c) per axis (the historical rule).\n"
+            "                        quantile: interior edges at equal cumulative\n"
+            "                        charge fraction along each axis.  adaptive:\n"
+            "                        interior edges chosen by dynamic programming to\n"
+            "                        minimise the calibrated content model for the\n"
+            "                        requested count (per-axis, O(K^2*N) at startup;\n"
+            "                        K candidates capped at 96).  The box\n"
+            "                        decomposition and the field construction are\n"
+            "                        unchanged for all three.  The auto policy\n"
+            "                        (the smallest count whose model error meets\n"
+            "                        --tolerance) runs against the selected rule.\n"
             "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
@@ -244,6 +257,7 @@ namespace
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
+        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
         std::optional<Vec3> cellSize;
         std::optional<Idx3> grid;
         std::optional<Vec3> origin;
@@ -502,6 +516,19 @@ namespace
             else if(option == "--max-velocity-bins")
                 args.maxVelocityBins
                     = parseIteration(value("--max-velocity-bins"), "--max-velocity-bins");
+            else if(option == "--bin-edges")
+            {
+                std::string const text = value("--bin-edges");
+                if(text == "uniform")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
+                else if(text == "quantile")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Quantile;
+                else if(text == "adaptive")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Adaptive;
+                else
+                    throw std::invalid_argument(
+                        "--bin-edges must be uniform, quantile or adaptive");
+            }
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -831,6 +858,7 @@ namespace
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        options.velocityBinning.edgeRule = args.binEdges;
         // The auto policy drives the bin count with the in-bunch peak-normalised
         // error model (angular term amplified by ~gamma, the suppression of the
         // in-bunch transverse B and E peaks of a relativistic beam).  For a

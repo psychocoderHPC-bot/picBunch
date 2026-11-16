@@ -486,8 +486,35 @@ namespace picBunch
         //! ``modelConstant * modelSum``; the achieved accuracy.
         double saturationError = 0.0;
 
+        //! Edge rule used to place the per-axis box edges.  The box
+        //! decomposition (``perAxis``) and the field construction are identical
+        //! for all rules; only the per-axis edge placement changes.  Populated
+        //! by ``deriveVelocityBinning``; the default (``Uniform``) leaves the
+        //! historical behaviour unchanged.
+        enum class EdgeRule
+        {
+            Uniform,   //!< equal-width edges (default; existing behaviour)
+            Quantile,  //!< per-axis edges at equal cumulative charge fraction
+            Adaptive   //!< per-axis edges chosen by DP to minimise the content model
+        };
+        EdgeRule edgeRule = EdgeRule::Uniform;
+        //! Per-axis box boundaries: ``N[0] + 1`` then ``N[1] + 1`` then
+        //! ``N[2] + 1`` beam-frame ``u`` values, concatenated in axis order.
+        //! Uniform rule: equal subdivision of ``[uMin[a], uMax[a]]``;
+        //! quantile rule: ``uMin[a]``, the per-axis cut positions, ``uMax[a]``;
+        //! adaptive rule: ``uMin[a]``, the DP-chosen cut positions, ``uMax[a]``.
+        //! A degenerate axis (no extent, or one box) has all boundaries equal
+        //! to ``uMin[a]``.  The half-open floor lookup against these
+        //! boundaries is the assignment for all three rules (a particle exactly
+        //! on an interior edge lands in the box to the right).  Populated by
+        //! ``deriveVelocityBinning`` when ``multiVelocity`` is true; empty
+        //! otherwise.
+        std::vector<double> axisBoundaries;
+
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
-        //! fixed binning on a sub-bunch (the near shell tile mesh).
+        //! fixed binning on a sub-bunch (the near shell tile mesh).  Uses the
+        //! per-axis boundaries (``axisBoundaries``) when populated, otherwise
+        //! the uniform-width rule from ``uMin`` / ``uMax`` / ``perAxis``.
         [[nodiscard]] std::size_t boxIndex(double u1, double u2, double u3) const;
     };
 
@@ -524,6 +551,20 @@ namespace picBunch
         //! reported.  Default off: the far-field angular calibration
         //! (``kAngularModelConstant``) is unchanged.
         bool inBunchCriterion = false;
+        //! Edge rule for the per-axis box edges (``VelocityBinning::EdgeRule``):
+        //! ``Uniform`` (default) divides each active axis range equally, the
+        //! historical behaviour; ``Quantile`` places the interior edges at
+        //! equal cumulative charge fraction along each axis, computed from the
+        //! particle set at startup; ``Adaptive`` chooses the interior edges by
+        //! dynamic programming to minimise the calibrated content model for the
+        //! requested count (the per-axis problem is independent because the
+        //! decomposition is a product of per-axis partitions).  The box
+        //! decomposition (``explicitBins`` / the auto policy) and the field
+        //! construction are unchanged; only the per-axis edge placement
+        //! changes.  The auto policy (the smallest count whose model error
+        //! meets the tolerance) runs against the selected rule, so the returned
+        //! count is the count for that rule.
+        VelocityBinning::EdgeRule edgeRule = VelocityBinning::EdgeRule::Uniform;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).
