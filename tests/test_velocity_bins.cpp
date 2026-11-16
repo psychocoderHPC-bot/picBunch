@@ -18,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -1073,6 +1074,44 @@ TEST(VelocityBins, QuantileEdgesPartitionByCharge)
     EXPECT_DOUBLE_EQ(uniformCut, 2.0);
 }
 
+TEST(VelocityBins, QuantileCutsClampToTheLastParticle)
+{
+    // Two classes and three quantile boxes: the 1/3 charge fraction is reached
+    // at the first particle and the 2/3 fraction only at the last one, which
+    // is exactly where the cumulative loop runs out of particles.  The cut
+    // must clamp to the last particle instead of reading one past the sorted
+    // order (the DP candidate path already clamps the same way).
+    Bunch bunch = axisBunch({10.0, 100.0});
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 3u;
+    policy.edgeRule = VelocityBinning::EdgeRule::Quantile;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    EXPECT_EQ(binning.count, 3u);
+    ASSERT_EQ(binning.perAxis[2], 3u);
+    double const uLo = std::sqrt(100.0 - 1.0);
+    double const uHi = std::sqrt(10000.0 - 1.0);
+    std::size_t const offset2 = binning.perAxis[0] + 1u + binning.perAxis[1] + 1u;
+    // Every edge is a real per-axis cut: inside the axis extent, monotone, and
+    // finite.  An out-of-range read shows up here as an edge outside the
+    // extent (the one-past-the-end element is fresh vector memory, normally
+    // zero, which is far below uLo).
+    for(std::size_t i = 0; i <= 3u; ++i)
+    {
+        double const edge = binning.axisBoundaries[offset2 + i];
+        EXPECT_TRUE(std::isfinite(edge));
+        EXPECT_GE(edge, uLo);
+        EXPECT_LE(edge, uHi);
+        if(i > 0u)
+            EXPECT_GE(edge, binning.axisBoundaries[offset2 + i - 1u]);
+    }
+    // The clamped cuts sit on the last particle, so the geometry is the
+    // documented "cut at the particle that reaches the target".
+    EXPECT_DOUBLE_EQ(binning.axisBoundaries[offset2 + 1u], uHi);
+    EXPECT_DOUBLE_EQ(binning.axisBoundaries[offset2 + 2u], uHi);
+    EXPECT_TRUE(std::isfinite(binning.modelSum));
+}
+
 TEST(VelocityBins, QuantileEdgesSingleVelocityStaysOneBox)
 {
     // A single-velocity bunch with the quantile edge rule must still take
@@ -1146,10 +1185,15 @@ TEST(VelocityBins, AdaptiveEdgesMinimiseTheContentModel)
     double const adaptiveCut = ba.axisBoundaries[offset2 + 1u];
     EXPECT_GT(adaptiveCut, uzLo);
     EXPECT_LT(adaptiveCut, uzHi);
-    // and the adaptive model error is zero (each box is a single cluster),
-    // strictly better than uniform's straddling error
+    // and the adaptive model error is zero (each box is a single cluster).
     EXPECT_DOUBLE_EQ(ba.modelSum, 0.0);
-    EXPECT_GT(bu.modelSum, 0.0);
+    // The correct uniform geometry (the equal subdivision of [uMin, uMax])
+    // also places its midpoint in the gap of this symmetric two-cluster
+    // fixture, so uniform separates the clusters too and is exact here.  The
+    // bound guards the geometry: with the former mismatch between the uniform
+    // rule's advertised boundaries and the quantile cuts its model was
+    // evaluated on, both clusters landed in one box and this sum was 0.018.
+    EXPECT_LT(bu.modelSum, 1.0e-12);
 }
 
 TEST(VelocityBins, AdaptiveEdgesSingleVelocityStaysOneBox)
@@ -1165,6 +1209,46 @@ TEST(VelocityBins, AdaptiveEdgesSingleVelocityStaysOneBox)
     EXPECT_EQ(binning.count, 1u);
     EXPECT_FALSE(binning.multiVelocity);
     EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
+}
+
+TEST(VelocityBins, NonFiniteEdgeCostKeepsUniformAndReportsIt)
+{
+    // A finite weight large enough that the charge-weighted second moments of
+    // the per-axis content model overflow: both predicted costs are
+    // non-finite.  ``adaCost < uniCost`` is then false for every ordering
+    // (any comparison with NaN is false), so without an explicit check the run
+    // silently keeps the uniform partition and is indistinguishable from a
+    // legitimate loss to adaptive.  Uniform stays the safe fallback AND the
+    // run says why.
+    //
+    // The charge product is finite (``weight * charge`` is the only charge
+    // precondition), the momenta are finite, and the momentum magnitude is
+    // chosen so that sum(w * |u|^2) = 1e320 overflows while sum(w * |u|) does
+    // not: the predicted cost, not the input, is what goes non-finite.
+    Bunch bunch;
+    bunch.resize(2);
+    for(int i = 0; i < 2; ++i)
+    {
+        bunch.x[i] = 4.0;
+        bunch.y[i] = 4.0;
+        bunch.z[i] = 4.0;
+        bunch.ux[i] = 0.0;
+        bunch.uy[i] = 0.0;
+        bunch.uz[i] = (i == 0) ? -1.0e60 : 1.0e60;
+        bunch.weight[i] = 1.0e200;
+        bunch.charge[i] = 1.0;
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 2u;
+    policy.edgeRule = VelocityBinning::EdgeRule::Auto;
+    testing::internal::CaptureStderr();
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
+    std::string const log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("non-finite predicted model"), std::string::npos) << log;
+    EXPECT_EQ(binning.count, 2u);
+    // Uniform is the safe fallback on the axis whose costs are non-finite.
+    EXPECT_EQ(binning.axisEdgeRule[2], VelocityBinning::EdgeRule::Uniform);
 }
 
 TEST(VelocityBins, DefaultEdgeRuleIsAuto)
