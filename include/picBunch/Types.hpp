@@ -187,6 +187,11 @@ namespace picBunch
         //! Diagnostic output: receives the tile edge actually used, including
         //! the automatic choice.  May be left null.
         std::size_t* resolvedTileNodes = nullptr;
+        //! Diagnostic output: receives the number of nodes per component in the
+        //! slab-local correction buffer.  It is at most the rank's field slab
+        //! rounded out to whole tile rows, never the full grid once the field
+        //! is distributed.  May be left null.
+        std::size_t* resolvedCorrectionNodes = nullptr;
         //! Gauss order per panel of the fast remainder (default 5).
         int fastOrder = 5;
         //! Order of the fast oblique singular box.  0 selects the shared
