@@ -623,6 +623,18 @@ if(PICBUNCH_BUILD_TESTS AND Python3_FOUND)
     )
     set_tests_properties(VelocityBinsRegionReference PROPERTIES
         TIMEOUT 600 PASS_REGULAR_EXPRESSION "DRIVER=")
+    # The arbiter: exact LW direct-sum reference (full set, no proxy, no TSC)
+    # at in-bunch probe nodes.  Exercises the pipeline on a small bunch and
+    # confirms the per-component relative-error + By-absolute report format.
+    add_test(
+        NAME VelocityBinsArbiterReference
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/velocity-bins/arbiter_in_bunch.py
+            --bunch ${CMAKE_CURRENT_BINARY_DIR}/region_test_bunch.txt
+            --bins 1,2
+    )
+    set_tests_properties(VelocityBinsArbiterReference PROPERTIES
+        TIMEOUT 600 PASS_REGULAR_EXPRESSION "By_abs_max")
 endif()
 
 # ---------------------------------------------------------------------------

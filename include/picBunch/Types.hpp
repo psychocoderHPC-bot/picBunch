@@ -289,6 +289,20 @@ namespace picBunch
      */
     inline constexpr std::size_t kDefaultMaxVelocityBins = 256u;
 
+    /*! Relative improvement below which the auto policy stops increasing the
+     *  in-bunch box count (saturation).
+     *
+     * The in-bunch peak-normalised error of a high-gamma beam saturates above
+     * the tolerance (the beam-axis components and the core 1/r singularity
+     * keep it above 1e-3).  The auto policy returns the smallest count after
+     * which the model error no longer improves by more than this relative
+     * factor per doubling, instead of the cap (256 field solves is not
+     * acceptable in production).  0.5 means "a doubling cut the error by at
+     * least half" is the threshold for continuing; a doubling that cuts the
+     * error by less than half marks the saturation point.
+     */
+    inline constexpr double kSaturationImprovement = 0.5;
+
     /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
      *
      * The mesh kernel is exact only for a single shared ``u``; it is linear in
@@ -395,6 +409,22 @@ namespace picBunch
         //! Largest particle angle (rad) to the one-box representative measured
         //! for that decision.
         double singleVelocityMaxAngle = 0.0;
+        //! True when the in-bunch criterion saturated above the tolerance and
+        //! the auto policy returned the smallest box count after which the
+        //! model no longer improved beyond ``kSaturationImprovement`` (NOT the
+        //! cap).  The in-bunch peak-normalised error of a high-gamma beam does
+        //! not reach 1e-3 within the cap (the beam-axis components and the
+        //! core 1/r singularity keep it above), so the count that minimises
+        //! further improvement is the honest result; the achieved accuracy is
+        //! ``modelError`` at that count.
+        bool saturated = false;
+        //! The in-bunch model error at the count before the saturation point
+        //! (it no longer improved beyond the relative improvement threshold
+        //! past the returned count).
+        double saturationPrevError = 0.0;
+        //! The in-bunch model error at the returned (saturated) count,
+        //! ``modelConstant * modelSum``; the achieved accuracy.
+        double saturationError = 0.0;
 
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
         //! fixed binning on a sub-bunch (the near shell tile mesh).
