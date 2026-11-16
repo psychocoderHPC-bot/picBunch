@@ -1,34 +1,43 @@
-Real-bunch velocity-bin calibration
-===================================
-Bunch: particles_000000.bp5, species 'b', 49932 particles, mean |u| = 490.3
-  (gamma 471-510 class; mean gamma 490.3; rel |u| spread 1.69e-2;
-   max angle 0.0253 rad; beam-frame u-range transverse 19.2/17.9, beam 68.0)
-Field: 128^3 nominal -> makeGrid 298x122x318, cell 2e-7 m, fftPadding 2.
-Model (src/VelocityBinning.cpp): modelError = C * sum_boxes (q_b/Q) *
-  (C_ang*angle^2 + 2*Delta_gamma/gamma/gamma), C_ang = kAngularModelConstant = 1.
+Real-bunch velocity-bin calibration (region-aware in-bunch metric)
+============================================================
 
-Model sums (binning model, charge-weighted):
-  B   per-axis  model_sum     model_error
-  1   1x1x1     1.1363e-03    1.1363e-03
-  2   1x2x1     9.0033e-04    9.0033e-04
-  4   2x2x1     7.2249e-04    7.2249e-04
-  8   2x4x1     6.5517e-04    6.5517e-04
-  16  4x4x1     5.2240e-04    5.2240e-04
+Bunch: particles_000000.bp5, species b, 49932 particles, mean gamma 490.3
+  (rel |u| spread 1.69e-2, max angle 0.0253 rad, 0.78 deg divergence)
+Field: makeGrid 298x122x318, cell 2e-7 m.
 
-Measured binning error (E field, T_binned vs T_per-particle, far-field 500-particle
-subset, 12^3 nodes 100um from center, LW far-field):
-  B   Ex        Ey        Ez        worst-E
-  1   2.017e-03 2.246e-03 2.261e-03 2.261e-03
-  2   1.436e-03 1.676e-03 1.700e-03 1.700e-03
-  4   1.268e-03 1.425e-03 1.468e-03 1.468e-03
-  8   1.291e-03 1.497e-03 1.583e-03 1.583e-03
-  16  1.292e-03 1.463e-03 1.592e-03 1.592e-03
-  (B field is numerically ill-conditioned in the far field - near-zero reference -
-   and is not a reliable binning-error signal for this geometry.)
+Metric: TSC-convolved continuum reference (indfield, order 8), per-particle
+  (T) vs binned (Tb), at a 27-cell in-bunch patch around the By-peak cell,
+  391-particle stratified subset (k=128), weight*charge, beam-frame box split.
+  Normalised by the in-bunch PEAK of the reference per component (peak-
+  normalised, NOT per-cell). Driver = max over E and B in the in-bunch region.
 
-Measured/model ratio (worst-E / model_sum):  2.0 (B<=4) -> 3.0 (B=16).
-The model is a lower bound; C_ang=1 is conservative but does not over-predict.
-The measured E-error (2.3e-3 at B=1, saturating ~1.6e-3 at B=16) is ABOVE the
-default tolerance 1e-3, so `auto` correctly selects B=2 (the smallest count whose
-model meets tolerance is 2, at model_error 9.0e-4). This is the correct behavior:
-the bunch's 0.78-degree divergence is a genuine multi-velocity spread.
+In-bunch reference peaks: Ex=1.616e+07  Ey=1.954e+05  Ez=3.006e+08  Bx=1.079e+00  By=8.764e-04  Bz=7.278e-02
+
+   B |        Ex |        Ey |        Ez |        Bx |        By |        Bz |     DRIVER
+--------------------------------------------------------------------------------------------
+   1 | 6.787e-01 | 1.240e+00 | 2.638e-01 | 3.077e-01 | 1.153e+00 | 7.038e-01 |  1.240e+00
+   2 | 6.930e-01 | 2.297e+00 | 1.706e-01 | 2.574e-01 | 1.195e+00 | 5.736e-01 |  2.297e+00
+   4 | 4.768e-01 | 2.062e+00 | 1.475e-01 | 2.157e-01 | 3.484e-01 | 4.080e-01 |  2.062e+00
+   8 | 3.822e-01 | 8.627e-01 | 7.237e-02 | 7.405e-02 | 2.421e-01 | 2.798e-01 |  8.627e-01
+  16 | 1.710e-01 | 6.651e-01 | 6.389e-02 | 7.927e-02 | 5.716e-01 | 9.071e-02 |  6.651e-01
+  64 | 9.094e-02 | 4.357e-01 | 3.129e-02 | 2.501e-02 | 1.355e-01 | 1.315e-01 |  4.357e-01
+ 256 | 5.704e-02 | 1.893e-01 | 1.202e-02 | 1.885e-02 | 4.402e-02 | 4.154e-02 |  1.893e-01
+
+KEY FINDING: the peak-normalised in-bunch max (driver) does NOT reach 1e-3
+within 256 boxes. At B=256 the driver is 0.19 (Ey and By peaks in the
+per-particle reference are tiny for this relativistic beam: By 8.8e-4 T,
+Ey 1.95e5 V/m), so the relative error stays large even as the absolute
+error shrinks. The earlier 3-7e-4 at 4 bins was the ABSOLUTE in-bunch
+error (By: 7.1e-4 at B=1 -> 5.6e-4 at B=4), not peak-normalised.
+
+Model (C_ang=1) vs measured in-bunch driver:
+  B=  1: model_sum=1.136e-03  in-bunch driver=1.240e+00  ratio=1092
+  B=  2: model_sum=9.003e-04  in-bunch driver=2.297e+00  ratio=2552
+  B=  4: model_sum=7.225e-04  in-bunch driver=2.062e+00  ratio=2854
+  B=  8: model_sum=6.552e-04  in-bunch driver=8.627e-01  ratio=1317
+  B= 16: model_sum=5.224e-04  in-bunch driver=6.651e-01  ratio=1273
+
+The model (C_ang=1) under-predicts the in-bunch peak-normalised driver by
+~1000-2800x. The in-bunch peak-normalised error is amplified by ~gamma
+relative to the far-field angular error (the transverse B and in-bunch E
+peaks are suppressed by ~1/gamma for a relativistic beam).

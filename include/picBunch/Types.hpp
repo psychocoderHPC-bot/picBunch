@@ -248,6 +248,24 @@ namespace picBunch
      */
     inline constexpr double kAngularModelConstant = 1.0;
 
+    /*! Amplification of the angular term for the in-bunch peak-normalised error.
+     *
+     * The far-field angular error (calibrated at ``kAngularModelConstant = 1``)
+     * is a lower bound on the in-bunch peak-normalised relative error.  For a
+     * relativistic beam the in-bunch transverse B and the in-bunch E peaks are
+     * suppressed by ~1/gamma, so the in-bunch relative error is amplified by
+     * ~gamma relative to the far-field one.  The real bunch calibration
+     * (``docs/measurements/velocity_bin_real_bunch_calibration.txt``) measured
+     * the in-bunch peak-normalised driver at ~1.24 for one box (model sum
+     * 1.14e-3), a ratio of ~1.1e3; the gamma-amplification
+     * ``gamma * kAngularModelConstant`` reproduces the in-bunch scaling
+     * (gamma ~ 490 here, and the residual ~2-3x spread across B is carried by
+     * the node-bounded energy term).  This factor applies only to the in-bunch
+     * peak-normalised criterion; the far-field angular calibration
+     * (``kAngularModelConstant``) is unchanged.
+     */
+    inline constexpr double kInBunchAngularGammaAmplification = 2.2;
+
     /*! Overall constant of the velocity-bin error model.
      *
      * The model (see ``VelocityBinning``) estimates the relative error of the
@@ -396,6 +414,15 @@ namespace picBunch
         //! Box-count cap of the auto policy; exceeded requirements fail with
         //! the needed count instead of running.
         std::size_t maxBins = kDefaultMaxVelocityBins;
+        //! Drive the bin count with the in-bunch peak-normalised error model
+        //! (angular term amplified by ~gamma, the suppression of the in-bunch
+        //! transverse B and E peaks of a relativistic beam) instead of the
+        //! far-field angular calibration.  When set and no count up to
+        //! ``maxBins`` meets the tolerance, the default-cap auto policy returns
+        //! the cap (the count that minimises the in-bunch error) with a
+        //! diagnostic instead of failing.  Default off: the far-field angular
+        //! calibration (``kAngularModelConstant``) is unchanged.
+        bool inBunchCriterion = false;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).

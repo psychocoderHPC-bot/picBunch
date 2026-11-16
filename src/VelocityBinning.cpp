@@ -539,6 +539,7 @@ namespace picBunch
             std::vector<double> const& particleGamma,
             double totalAbsoluteCharge,
             double modelConstant,
+            bool inBunch,
             VelocityBinning& out)
         {
             std::size_t const count = bunch.size();
@@ -709,7 +710,25 @@ namespace picBunch
                 // factor).  The former gamma * Delta_theta worst case
                 // over-predicted the same bunch by 40x and drove the auto
                 // policy to order 1e5 boxes.
-                double const angular = kAngularModelConstant * angle * angle;
+                // In-bunch peak-normalised amplification: the in-bunch
+                // transverse B and E peaks are suppressed by ~1/gamma for a
+                // relativistic beam, so the in-bunch peak-normalised relative
+                // error is amplified by ~gamma relative to the far-field
+                // angular error (real-bunch calibration: measured in-bunch
+                // driver 1.24 at one box vs model sum 1.14e-3, ratio ~1.1e3,
+                // gamma ~ 490).  The far-field angular calibration
+                // (kAngularModelConstant) is unchanged; this factor applies to
+                // the in-bunch peak-normalised criterion the auto policy uses
+                // to drive the in-bunch max below the tolerance.
+                // The in-bunch peak-normalised amplification (gamma factor) is
+                // applied only when the in-bunch criterion is active for this
+                // call; otherwise the far-field angular calibration
+                // (kAngularModelConstant) is unchanged.  The flag is threaded
+                // through from the policy (see below).
+                double const angular
+                    = kAngularModelConstant
+                      * (inBunch ? kInBunchAngularGammaAmplification * gamma : 1.0)
+                      * angle * angle;
                 // Energy term: a relative gamma shift changes the boosted
                 // pattern by at most 2*Delta_gamma/gamma at a node.  The former
                 // (Delta_gamma/gamma + maxGammaDev) pair charged ~1.5
@@ -846,7 +865,7 @@ namespace picBunch
         auto modelSumFor = [&](std::size_t B, VelocityBinning& probe) {
             return evaluateSplit(
                 bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
-                policy.modelConstant, probe);
+                policy.modelConstant, policy.inBunchCriterion, probe);
         };
 
         std::size_t targetBins = 0u;
@@ -882,8 +901,21 @@ namespace picBunch
                 {
                     SingleVelocityMeasure const measure
                         = measureSingleVelocity(bunch, absCharge, totalAbsoluteCharge);
+                    // The one-box fallback is only physical when the one-box
+                    // model error (now gamma-amplified for the in-bunch
+                    // peak-normalised criterion) actually meets the tolerance.
+                    // A high-gamma bunch whose in-bunch transverse B and E
+                    // peaks are ~1/gamma suppressed can be "single-velocity" in
+                    // spread yet still have a one-box in-bunch error far above
+                    // the tolerance (real bunch: 0.74 at one box); in that case
+                    // the fallback must not force one box -- the cap-escalation
+                    // below is the honest result.
+                    VelocityBinning oneBoxProbe;
+                    double const oneBoxError
+                        = policy.modelConstant * modelSumFor(1u, oneBoxProbe);
                     if(measure.relativeSpread <= kSingleVelocityRelativeSpread
-                       && measure.maxAngle <= kSingleVelocityMaxAngle)
+                       && measure.maxAngle <= kSingleVelocityMaxAngle
+                       && oneBoxError <= tolerance)
                     {
                         targetBins = 1u;
                         out.singleVelocityFallback = true;
@@ -894,43 +926,72 @@ namespace picBunch
             }
             if(targetBins == 0u)
             {
-                // Report the count the model would need beyond the cap, and the
-                // model error at the cap itself (a different number: the loop
-                // above already failed at the cap before continuing).
-                VelocityBinning capProbe;
-                double const capError
-                    = policy.modelConstant * modelSumFor(policy.maxBins, capProbe);
-                std::size_t required = policy.maxBins;
-                double lastError = capError;
-                for(std::size_t B = policy.maxBins * 2u; B <= (1u << 30); B *= 2u)
+                // The in-bunch peak-normalised error (gamma-amplified angular
+                // term) can fail to reach the tolerance within the cap for a
+                // high-gamma bunch whose in-bunch transverse B and E peaks are
+                // suppressed by ~1/gamma (real-bunch calibration: the driver is
+                // 0.19 at the 256-box cap, still above 1e-3).  For the
+                // default-cap auto policy the honest result is to return the
+                // cap (the count that minimises the in-bunch error) with a
+                // diagnostic, not to fail: the cap is the best available
+                // in-bunch resolution and the caller can inspect the in-bunch
+                // error at that count.  An explicit --velocity-bins or a
+                // non-default --max-velocity-bins keeps the historical throw so
+                // a deliberately strict requirement is not silently relaxed.
+                if(policy.mode == VelocityBinningOptions::Mode::Auto
+                   && policy.maxBins == kDefaultMaxVelocityBins
+                   && policy.inBunchCriterion)
                 {
-                    VelocityBinning probe;
-                    double const modelSum = modelSumFor(B, probe);
-                    lastError = policy.modelConstant * modelSum;
-                    required = B;
-                    if(lastError <= tolerance)
-                        break;
+                    targetBins = policy.maxBins;
+                    std::fprintf(stderr,
+                        "picBunch: velocity-bin auto: the in-bunch peak-normalised "
+                        "model does not meet tolerance %g within the %zu-box cap "
+                        "(a high-gamma in-bunch field is ~1/gamma suppressed in the "
+                        "transverse B and E peaks); returning the cap %zu, the count "
+                        "that minimises the in-bunch error.  Raise --max-velocity-bins "
+                        "or --tolerance to reduce it further.\\n",
+                        tolerance, policy.maxBins, policy.maxBins);
                 }
-                std::string const remedy
-                    = (lastError > tolerance)
-                        ? " no count up to 2^30 boxes meets the tolerance"
-                        : "";
-                throw std::runtime_error(
-                    "deriveVelocityBinning: the velocity-bin model requires at least "
-                    + std::to_string(required)
-                    + " boxes for tolerance " + std::to_string(tolerance)
-                    + " (estimated error at " + std::to_string(required)
-                    + " boxes: " + std::to_string(lastError)
-                    + "; at the " + std::to_string(policy.maxBins)
-                    + "-box cap: " + std::to_string(capError)
-                    + remedy
-                    + "); reduce the momentum or angular spread, raise --tolerance, or raise --max-velocity-bins");
+                else
+                {
+                    // Report the count the model would need beyond the cap, and
+                    // the model error at the cap itself (a different number: the
+                    // loop above already failed at the cap before continuing).
+                    VelocityBinning capProbe;
+                    double const capError
+                        = policy.modelConstant * modelSumFor(policy.maxBins, capProbe);
+                    std::size_t required = policy.maxBins;
+                    double lastError = capError;
+                    for(std::size_t B = policy.maxBins * 2u; B <= (1u << 30); B *= 2u)
+                    {
+                        VelocityBinning probe;
+                        double const modelSum = modelSumFor(B, probe);
+                        lastError = policy.modelConstant * modelSum;
+                        required = B;
+                        if(lastError <= tolerance)
+                            break;
+                    }
+                    std::string const remedy
+                        = (lastError > tolerance)
+                            ? " no count up to 2^30 boxes meets the tolerance"
+                            : "";
+                    throw std::runtime_error(
+                        "deriveVelocityBinning: the velocity-bin model requires at least "
+                        + std::to_string(required)
+                        + " boxes for tolerance " + std::to_string(tolerance)
+                        + " (estimated error at " + std::to_string(required)
+                        + " boxes: " + std::to_string(lastError)
+                        + "; at the " + std::to_string(policy.maxBins)
+                        + "-box cap: " + std::to_string(capError)
+                        + remedy
+                        + "); reduce the momentum or angular spread, raise --tolerance, or raise --max-velocity-bins");
+                }
             }
         }
 
         evaluateSplit(
             bunch, frame, splitsFor(targetBins), absCharge, particleGamma, totalAbsoluteCharge,
-            policy.modelConstant, out);
+            policy.modelConstant, policy.inBunchCriterion, out);
         return out;
     }
 

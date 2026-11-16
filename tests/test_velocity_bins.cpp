@@ -768,3 +768,76 @@ TEST(VelocityBins, RealBunchOneBoxHasFiniteModelError)
     EXPECT_TRUE(std::isfinite(b1.modelSum));
     EXPECT_LT(b16.modelSum, b1.modelSum);
 }
+
+TEST(VelocityBins, InBunchCriterionEscalatesToTheCapForHighGamma)
+{
+    // The in-bunch peak-normalised error model (angular term amplified by
+    // ~gamma) drives the auto policy to the cap for a high-gamma bunch whose
+    // in-bunch transverse B and E peaks are ~1/gamma suppressed.  This is the
+    // honest result: the in-bunch max error cannot reach the tolerance within
+    // the cap, so the cap (the count that minimises the in-bunch error) is
+    // returned with a diagnostic.  The regression guard is that the By
+    // in-bunch error at the returned count is finite and below the one-box
+    // error (the cap reduces it), so a future change cannot silently drop the
+    // transverse B component from the criterion again.
+    Bunch const bunch = realBunchLike();
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Auto;
+    policy.inBunchCriterion = true;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    // The in-bunch criterion escalates the count far above the far-field
+    // result (which lands at a small count for this geometry) because the
+    // in-bunch peak-normalised error is amplified by ~gamma.  The count is a
+    // large power of two, bounded by the cap.
+    EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    EXPECT_GE(binning.count, 64u);
+    EXPECT_LE(binning.count, picBunch::kDefaultMaxVelocityBins);
+    // The far-field criterion (flag off) for the same bunch lands at a small
+    // count, confirming the in-bunch criterion is what escalates it.
+    VelocityBinningOptions farPolicy;
+    farPolicy.mode = VelocityBinningOptions::Mode::Auto;
+    VelocityBinning const farBinning = picBunch::deriveVelocityBinning(bunch, 1e-3, farPolicy);
+    EXPECT_LT(farBinning.count, binning.count);
+    // The cap's in-bunch model error must be below the one-box in-bunch model
+    // error (the cap reduces the in-bunch error), so the transverse B
+    // component is not silently dropped from the criterion.
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    one.inBunchCriterion = true;
+    VelocityBinning const b1 = picBunch::deriveVelocityBinning(bunch, 1e-3, one);
+    EXPECT_GT(b1.modelSum, 0.0);
+    EXPECT_TRUE(std::isfinite(b1.modelSum));
+    EXPECT_LT(binning.modelSum, b1.modelSum);
+}
+
+TEST(VelocityBins, InBunchCriterionByErrorShrinksWithBoxes)
+{
+    // The in-bunch peak-normalised By error (the transverse B component that
+    // the earlier measurement found 88-99 percent wrong with one bin) must
+    // shrink as the box count increases, so a future change cannot silently
+    // drop the component from the criterion.  The gamma-amplified angular
+    // model is a monotone lower bound on the in-bunch By error.
+    Bunch const bunch = realBunchLike();
+    double previous = 0.0;
+    bool first = true;
+    for(std::size_t B : {1u, 4u, 16u, 64u})
+    {
+        VelocityBinningOptions policy;
+        policy.mode = VelocityBinningOptions::Mode::Explicit;
+        policy.explicitBins = B;
+        policy.inBunchCriterion = true;
+        VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+        EXPECT_EQ(binning.count, B);
+        EXPECT_GT(binning.modelSum, 0.0);
+        EXPECT_TRUE(std::isfinite(binning.modelSum));
+        if(!first)
+        {
+            EXPECT_LT(binning.modelSum, previous);
+        }
+        previous = binning.modelSum;
+        first = false;
+    }
+}

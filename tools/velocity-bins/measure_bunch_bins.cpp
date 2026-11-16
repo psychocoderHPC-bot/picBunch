@@ -74,6 +74,7 @@ int main(int argc, char** argv)
         bool autoBins = false;
         double tolerance = 1.0e-3;
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
+        bool perParticle = false;
         std::string prefix = "bunch_bins";
         std::string species;
 
@@ -132,6 +133,8 @@ int main(int argc, char** argv)
                 tolerance = std::stod(next());
             else if(a == "--max-bins")
                 maxBins = static_cast<std::size_t>(std::stoul(next()));
+            else if(a == "--per-particle")
+                perParticle = true;
             else if(a == "--electron-mass")
                 electronMassKg = std::stod(next());
             else if(a == "--c")
@@ -196,6 +199,52 @@ int main(int argc, char** argv)
         {
             options.gridSize = {grid[0], grid[1], grid[2]};
             options.gridOrigin = {origin[0], origin[1], origin[2]};
+        }
+
+        // A true per-particle reference: one box per particle, each box
+        // representative exactly the particle's own u.  This is the field the
+        // binning error is measured against.  Computed before the binned runs
+        // so it can be written as the reference field.
+        if(perParticle)
+        {
+            picBunch::VelocityBinning pp;
+            std::size_t const N = bunch.size();
+            pp.derived = true;
+            pp.multiVelocity = true;
+            pp.count = N;
+            pp.perAxis = {N, 1u, 1u};
+            // Identity basis (lab frame) so boxIndex uses the raw u coords.
+            pp.basis = {{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}};
+            // One box per particle: split the x-axis range into N slabs so that
+            // boxIndex floors each particle into a distinct box (a particle at
+            // the exact upper edge clamps to the last box).
+            double lo = bunch.ux[0], hi = bunch.ux[0];
+            for(std::size_t p = 0; p < N; ++p)
+            {
+                lo = std::min(lo, bunch.ux[p]);
+                hi = std::max(hi, bunch.ux[p]);
+            }
+            pp.uMin = {lo, 0.0, 0.0};
+            pp.uMax = {hi, 0.0, 0.0};
+            pp.representativeU.resize(N);
+            pp.boxOf.resize(N);
+            for(std::size_t p = 0; p < N; ++p)
+            {
+                pp.representativeU[p] = {bunch.ux[p], bunch.uy[p], bunch.uz[p]};
+                pp.boxOf[p] = p;
+            }
+            pp.modelSum = 0.0;
+            pp.modelConstant = 1.0;
+            pp.modelError = 0.0;
+            options.fixedBinning = pp;
+            picBunch::StageTimes times;
+            auto const t0 = std::chrono::steady_clock::now();
+            picBunch::Field const field = picBunch::computeField(bunch, options);
+            auto const t1 = std::chrono::steady_clock::now();
+            double const wallS = std::chrono::duration<double>(t1 - t0).count();
+            writeField(prefix + "_field_pp.bin", field);
+            std::printf("per-particle reference written (%zu boxes), wall=%.2f s\n", N, wallS);
+            std::exit(0);
         }
 
         std::ofstream bunchFile(prefix + "_bunch.txt");

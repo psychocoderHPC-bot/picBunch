@@ -758,6 +758,15 @@ namespace
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")
@@ -1491,6 +1500,15 @@ int main(int argc, char** argv)
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")
