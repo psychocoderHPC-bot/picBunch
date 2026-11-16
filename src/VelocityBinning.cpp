@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -230,8 +231,49 @@ namespace picBunch
             }
         };
 
-        //! Assign every particle to its box for an existing split.
-        struct BoxAssignmentKernel
+        //! Assign every particle to its box for an existing split.  Uniform
+        //! and quantile edge rules share this kernel: the per-axis boundaries
+        //! (``N[a] + 1`` values per axis, concatenated in axis order) are the
+        //! only geometry input, so the kernel is the half-open floor lookup
+        //! against a general non-uniform edge set.  A particle exactly on a
+        //! cut lands in the box to the right of the cut.
+        //! Per-axis box lookup against explicit boundaries (the per-axis edge
+        //! sets, uniform or quantile).  Returns the box index of ``coord``
+        //! for an axis with ``nBoxes`` boxes whose boundaries are the
+        //! ``nBoxes + 1`` values ``bounds[0..nBoxes]`` (ascending; a
+        //! degenerate axis has all values equal).  Half-open: a coordinate
+        //! exactly on an interior boundary takes the box to the right,
+        //! matching the historical uniform rule's ``floor`` assignment.
+        //! Device-compatible (no host-only constructs).
+        [[nodiscard]] constexpr std::size_t boxIndexOfBounds(
+            double coord,
+            std::size_t nBoxes,
+            double const* bounds) noexcept
+        {
+            // A degenerate axis (all boundaries equal) has no extent; the
+            // historical rule put every particle in box 0.
+            double const lo = bounds[0u];
+            double hi = lo;
+            for(std::size_t b = 1u; b <= nBoxes; ++b)
+                hi = (bounds[b] > hi) ? bounds[b] : hi;
+            if(hi <= lo)
+                return 0u;
+            long t = 0;
+            for(long b = 0; b < static_cast<long>(nBoxes) + 1; ++b)
+                if(bounds[static_cast<std::size_t>(b)] < coord)
+                    ++t;
+            return (t <= 0) ? 0u
+                            : (static_cast<std::size_t>(t - 1) >= nBoxes
+                                   ? nBoxes - 1u
+                                   : static_cast<std::size_t>(t - 1));
+        }
+
+        //! Assign every particle to its box for an existing split.  Uniform
+        //! and quantile edge rules share this kernel: the per-axis boundaries
+        //! (``N[a] + 1`` values per axis, concatenated in axis order) are the
+        //! only geometry input, so the kernel is the half-open floor lookup
+        //! against a general non-uniform edge set.
+        struct BoxAssignmentKernel2
         {
             template<typename TAcc>
             ALPAKA_FN_ACC void operator()(
@@ -239,28 +281,28 @@ namespace picBunch
                 std::size_t count,
                 alpaka::concepts::IMdSpan auto const& beam,
                 KernelIndex3 const N,
-                KernelVec3 const uMin,
-                KernelVec3 const range,
-                alpaka::concepts::IMdSpan auto const& width,
+                alpaka::concepts::IMdSpan auto const& boundaries,
                 alpaka::concepts::IMdSpan auto boxOf) const
             {
+                using IdxT = std::remove_cv_t<decltype(N[0])>;
+                IdxT const n0 = N[0];
+                IdxT const n1 = N[1];
+                IdxT const n2 = N[2];
+                double const* const b0 = &boundaries[0u];
+                double const* const b1 = &boundaries[static_cast<std::size_t>(n0) + 1u];
+                double const* const b2
+                    = &boundaries[static_cast<std::size_t>(n0) + 1u
+                                  + static_cast<std::size_t>(n1) + 1u];
                 for(auto [p] : alpaka::onAcc::makeIdxMap(
                         acc,
                         alpaka::onAcc::worker::threadsInGrid,
                         alpaka::IdxRange{count}))
                 {
-                    KernelIndex3 idx{0u, 0u, 0u};
-                    for(std::uint32_t a = 0u; a < 3u; ++a)
-                    {
-                        if(range[a] <= 0.0)
-                            continue;
-                        long t = static_cast<long>(
-                            alpaka::math::floor((beam[3u * p + a] - uMin[a]) / width[a]));
-                        idx[a] = (t < 0) ? 0u
-                                         : (static_cast<std::size_t>(t) >= N[a] ? N[a] - 1u
-                                                                                : static_cast<std::size_t>(t));
-                    }
-                    boxOf[p] = idx[0] + N[0] * (idx[1] + N[1] * idx[2]);
+                    KernelIndex3 idx{
+                        static_cast<IdxT>(boxIndexOfBounds(beam[3u * p + 0u], n0, b0)),
+                        static_cast<IdxT>(boxIndexOfBounds(beam[3u * p + 1u], n1, b1)),
+                        static_cast<IdxT>(boxIndexOfBounds(beam[3u * p + 2u], n2, b2))};
+                    boxOf[p] = idx[0] + n0 * (idx[1] + n1 * idx[2]);
                 }
             }
         };
@@ -452,14 +494,58 @@ namespace picBunch
             return measure;
         }
 
-        //! Axis split of a total box budget ``B`` over the active axes.
+        //! Per-axis interior edges of a quantile split: ``N[a] - 1`` cut
+        //! positions of axis ``a`` at equal cumulative charge fraction of the
+        //! particles' beam-frame coordinate, plus the per-axis extent needed
+        //! by the box geometry.  ``frac = q / N[a]`` (the median, not the
+        //! mean, of the cumulative fractions) keeps a particle exactly on a
+        //! cut in the box above it, so the charge fractions per bin are
+        //! (approximately) equal: the half-open floor assignment then puts
+        //! the cut particle in box ``q`` (the box to the right).
         //!
-        //! Minimizes the geometric part of the model, ``sqrt((r1/N1)^2 +
-        //! (r2/N2)^2 + (r3/(N3*gamma))^2)`` (perpendicular box width plus beam-
-        //! axis width in ``Delta_gamma/gamma`` units), over splits
-        //! ``N1*N2*N3 = B``.  With two active axes the minimum is closed-form
-        //! (``N_i`` proportional to ``sqrt(range_i)``); with three, a grid over
-        //! the power-of-two factors of ``B`` (which is always a power of two).
+        //! The sort is a stable, charge-weighted quantile (no interpolation
+        //! between distinct coordinates), deterministic in particle order for
+        //! a deterministic fixture.
+        struct QuantileAxis
+        {
+            std::vector<double> cuts; //!< size N[a] - 1 (empty when N[a] == 1)
+            double range = 0.0;      //!< uMax[a] - uMin[a]
+        };
+
+        QuantileAxis quantileAxis(
+            std::vector<Vec3> const& uBeam,
+            int a,
+            std::size_t nBoxes,
+            std::vector<double> const& absCharge,
+            double totalAbsoluteCharge,
+            double uMin,
+            double uMax)
+        {
+            QuantileAxis out;
+            if(nBoxes <= 1u || uMax - uMin <= 0.0)
+                return out;
+            std::vector<std::size_t> order(uBeam.size());
+            std::iota(order.begin(), order.end(), 0u);
+            std::stable_sort(order.begin(), order.end(), [&](std::size_t const p, std::size_t const q) {
+                return uBeam[p][static_cast<std::size_t>(a)]
+                    < uBeam[q][static_cast<std::size_t>(a)];
+            });
+            out.range = uMax - uMin;
+            out.cuts.resize(nBoxes - 1u);
+            double cumulative = 0.0;
+            std::size_t cursor = 0u;
+            for(std::size_t q = 0; q + 1u < nBoxes; ++q)
+            {
+                double const target = (static_cast<double>(q + 1u)
+                                       / static_cast<double>(nBoxes))
+                                      * totalAbsoluteCharge;
+                while(cursor < order.size() && cumulative < target)
+                    cumulative += absCharge[order[cursor++]];
+                out.cuts[q] = uBeam[order[cursor]][static_cast<std::size_t>(a)];
+            }
+            return out;
+        }
+
         Idx3 chooseSplit(
             std::size_t B,
             Vec3 const& range,
@@ -528,9 +614,53 @@ namespace picBunch
             return best;
         }
 
+        //! Per-axis ``nBoxes + 1`` boundaries for the box geometry and the
+        //! assignment.  Uniform edges (``axis.cuts`` empty) divide the active
+        //! extent equally; quantile edges use the cut positions with
+        //! ``uMin`` / ``uMax`` as the outer bounds.  A degenerate axis (one
+        //! box, or no extent) has all boundaries equal to ``uMin``: the box
+        //! is a single point and the assignment kernel never divides by zero.
+        std::vector<double> buildAxisBounds(
+            BeamFrame const& frame,
+            int a,
+            std::size_t nBoxes,
+            QuantileAxis const& axis)
+        {
+            std::vector<double> b(nBoxes + 1u);
+            double const lo = frame.uMin[static_cast<std::size_t>(a)];
+            double const hi = frame.uMax[static_cast<std::size_t>(a)];
+            std::fill(b.begin(), b.end(), lo);
+            if(nBoxes == 1u || hi <= lo)
+                return b;
+            if(axis.cuts.empty())
+            {
+                double const width = (hi - lo) / static_cast<double>(nBoxes);
+                for(std::size_t i = 0; i <= nBoxes; ++i)
+                    b[i] = lo + static_cast<double>(i) * width;
+                return b;
+            }
+            b[0] = lo;
+            for(std::size_t i = 0; i + 1u < nBoxes; ++i)
+                b[i + 1u] = axis.cuts[i];
+            b[nBoxes] = hi;
+            return b;
+        }
+
         //! Assign every particle to its box for a split and evaluate the
         //! calibrated content model.  ``out`` receives the geometry, the
         //! representatives and the per-particle assignment.
+        //!
+        //! When ``quantileAxes`` holds non-empty per-axis cut positions (and
+        //! the axis is active), the assignment uses those cuts instead of
+        //! uniform widths: the per-axis cumulative charge fraction along the
+        //! axis is equal across the bins, which bounds the per-box angular
+        //! spread by the per-box charge spread instead of by the box width
+        //! (equal-width edges put a dense velocity cluster in a box whose
+        //! angular spread can exceed the sparse outer box).  The geometric
+        //! centre of each box (used only for empty boxes and the initial
+        //! representative) is the midpoint of its two adjacent cuts (the
+        //! global minimum for the first box, the maximum for the last), so
+        //! the box geometry stays consistent with the assignment.
         double evaluateSplit(
             Bunch const& bunch,
             BeamFrame const& frame,
@@ -540,17 +670,38 @@ namespace picBunch
             double totalAbsoluteCharge,
             double modelConstant,
             bool inBunch,
-            VelocityBinning& out)
+            VelocityBinning& out,
+            std::array<QuantileAxis, 3> const& quantileAxes = {})
         {
             std::size_t const count = bunch.size();
             std::size_t const boxes = N[0] * N[1] * N[2];
 
+            // Per-axis effective range: the quantile cuts span the same extent
+            // as the uniform rule (first cut at uMin, last at uMax, by
+            // construction), so the range is unchanged; the kernel uses the
+            // cuts instead of a constant width.
             out.perAxis = N;
             out.count = boxes;
             out.basis = frame.basis;
             out.uMin = frame.uMin;
             out.uMax = frame.uMax;
             out.representativeU.resize(boxes);
+
+            // Box geometry (beam frame) per axis: uniform rule is the equal
+            // subdivision of [uMin, uMax]; the quantile rule is the cut
+            // positions, with uMin / uMax as the outer bounds.  The box centre
+            // (used only for empty boxes and the initial representative) is
+            // the midpoint of the two adjacent bounds, so the geometric
+            // centres are consistent with whichever rule assigns the particles.
+            std::vector<std::vector<double>> const bounds{
+                buildAxisBounds(frame, 0, N[0], quantileAxes[0]),
+                buildAxisBounds(frame, 1, N[1], quantileAxes[1]),
+                buildAxisBounds(frame, 2, N[2], quantileAxes[2]),
+            };
+            auto axisCentre = [&](int a, std::size_t i) {
+                return 0.5 * (bounds[static_cast<std::size_t>(a)][i]
+                              + bounds[static_cast<std::size_t>(a)][i + 1u]);
+            };
 
             // Representative: box centre in the beam frame, mapped to the lab
             // frame.  For a multi-box split it is replaced below by the
@@ -580,12 +731,9 @@ namespace picBunch
                         {
                             std::size_t const box = i1 + N[0] * (i2 + N[1] * i3);
                             double const centre[3] = {
-                                frame.uMin[0] + (static_cast<double>(i1) + 0.5) * frame.range[0]
-                                    / static_cast<double>(N[0]),
-                                frame.uMin[1] + (static_cast<double>(i2) + 0.5) * frame.range[1]
-                                    / static_cast<double>(N[1]),
-                                frame.uMin[2] + (static_cast<double>(i3) + 0.5) * frame.range[2]
-                                    / static_cast<double>(N[2])};
+                                axisCentre(0, i1),
+                                axisCentre(1, i2),
+                                axisCentre(2, i3)};
                             for(int a = 0; a < 3; ++a)
                                 out.representativeU[box][a]
                                     = centre[0] * frame.basis[0][a] + centre[1] * frame.basis[1][a]
@@ -596,21 +744,33 @@ namespace picBunch
             std::vector<std::size_t> boxOf(count, 0u);
             if(boxes > 1u)
             {
-                double const width[3] = {
-                    (frame.range[0] > 0.0) ? frame.range[0] / static_cast<double>(N[0]) : 1.0,
-                    (frame.range[1] > 0.0) ? frame.range[1] / static_cast<double>(N[1]) : 1.0,
-                    (frame.range[2] > 0.0) ? frame.range[2] / static_cast<double>(N[2]) : 1.0};
+                // The assignment is the same per-axis floor lookup for both
+                // rules: uniform edges divide the axis range equally, quantile
+                // edges use the per-axis cut positions.  Both are carried in a
+                // single per-axis array of ``N[a] + 1`` boundaries, so the
+                // kernel needs only the array and the per-box width is not a
+                // separate input.  A particle exactly on a cut lands in the
+                // box to the right of the cut (half-open intervals), matching
+                // the ``boxIndex`` behaviour of the uniform rule.
+                std::vector<double> boundaries;
+                boundaries.reserve((N[0] + 1u) + (N[1] + 1u) + (N[2] + 1u));
+                for(int a = 0; a < 3; ++a)
+                {
+                    auto const& b = bounds[a];
+                    for(int i = 0; i <= static_cast<int>(N[a]); ++i)
+                        boundaries.push_back(b[i]);
+                }
                 runHostKernel(
                     count,
-                    BoxAssignmentKernel{},
+                    BoxAssignmentKernel2{},
                     count,
                     alpaka::makeMdSpan(
                         &frame.uBeam[0][0],
                         alpaka::Vec<std::size_t, 1u>{3u * count}),
                     KernelIndex3{N[0], N[1], N[2]},
-                    KernelVec3{frame.uMin[0], frame.uMin[1], frame.uMin[2]},
-                    KernelVec3{frame.range[0], frame.range[1], frame.range[2]},
-                    alpaka::makeMdSpan(width, alpaka::Vec<std::size_t, 1u>{3u}),
+                    alpaka::makeMdSpan(
+                        boundaries.data(),
+                        alpaka::Vec<std::size_t, 1u>{boundaries.size()}),
                     alpaka::makeMdSpan(
                         boxOf.data(),
                         alpaka::Vec<std::size_t, 1u>{count}));
@@ -751,6 +911,25 @@ namespace picBunch
     {
         double const coords[3] = {u1, u2, u3};
         std::size_t idx[3] = {};
+        // With per-axis boundaries populated (``axisBoundaries``), use the
+        // half-open floor lookup against the actual edges (uniform or
+        // quantile); without them (a single-velocity bunch, or a binning not
+        // derived through ``deriveVelocityBinning``), fall back to the
+        // uniform-width rule from ``uMin`` / ``uMax`` / ``perAxis``.
+        if(!axisBoundaries.empty())
+        {
+            std::size_t const offset[3] = {
+                0u,
+                perAxis[0] + 1u,
+                perAxis[0] + 1u + perAxis[1] + 1u};
+            for(int a = 0; a < 3; ++a)
+            {
+                idx[a] = boxIndexOfBounds(
+                    coords[a], perAxis[static_cast<std::size_t>(a)],
+                    &axisBoundaries[offset[static_cast<std::size_t>(a)]]);
+            }
+            return idx[0] + perAxis[0] * (idx[1] + perAxis[1] * idx[2]);
+        }
         for(int a = 0; a < 3; ++a)
         {
             if(uMax[a] - uMin[a] <= 0.0)
@@ -862,7 +1041,34 @@ namespace picBunch
         auto splitsFor = [&](std::size_t B) {
             return chooseSplit(B, frame.range, frame.active, gammaWeighted);
         };
+        // Per-axis quantile cuts for a candidate split, computed from the
+        // particle set at startup (the absolute charge of each particle, the
+        // bin content the model charges for).  Recomputed per candidate count
+        // during the auto search; the same function is reused for the final
+        // split so the final geometry matches the model's geometry exactly.
+        auto quantileAxesFor = [&](std::size_t B) -> std::array<QuantileAxis, 3> {
+            std::array<QuantileAxis, 3> axes;
+            Idx3 const N = chooseSplit(B, frame.range, frame.active, gammaWeighted);
+            for(int a = 0; a < 3; ++a)
+            {
+                axes[a] = quantileAxis(
+                    frame.uBeam,
+                    a,
+                    N[static_cast<std::size_t>(a)],
+                    absCharge,
+                    totalAbsoluteCharge,
+                    frame.uMin[static_cast<std::size_t>(a)],
+                    frame.uMax[static_cast<std::size_t>(a)]);
+            }
+            return axes;
+        };
         auto modelSumFor = [&](std::size_t B, VelocityBinning& probe) {
+            if(policy.edgeRule == VelocityBinning::EdgeRule::Quantile)
+            {
+                return evaluateSplit(
+                    bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
+                    policy.modelConstant, policy.inBunchCriterion, probe, quantileAxesFor(B));
+            }
             return evaluateSplit(
                 bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
                 policy.modelConstant, policy.inBunchCriterion, probe);
@@ -1040,9 +1246,50 @@ namespace picBunch
             }
         }
 
+        Idx3 const finalSplit = splitsFor(targetBins);
+        std::array<QuantileAxis, 3> const finalAxes = quantileAxesFor(targetBins);
+        out.edgeRule = policy.edgeRule;
         evaluateSplit(
-            bunch, frame, splitsFor(targetBins), absCharge, particleGamma, totalAbsoluteCharge,
-            policy.modelConstant, policy.inBunchCriterion, out);
+            bunch, frame, finalSplit, absCharge, particleGamma, totalAbsoluteCharge,
+            policy.modelConstant, policy.inBunchCriterion, out, finalAxes);
+        // Populate ``axisBoundaries`` for the final split (uniform or
+        // quantile).  A degenerate axis (no extent, or one box) has all
+        // boundaries equal to ``uMin[a]``, so the half-open floor lookup in
+        // ``boxIndex`` and the kernel never divide by zero.
+        {
+            std::size_t const N0 = out.perAxis[0], N1 = out.perAxis[1], N2 = out.perAxis[2];
+            std::vector<double> b;
+            b.reserve((N0 + 1u) + (N1 + 1u) + (N2 + 1u));
+            for(int a = 0; a < 3; ++a)
+            {
+                std::size_t const n = out.perAxis[static_cast<std::size_t>(a)];
+                double const lo = out.uMin[static_cast<std::size_t>(a)];
+                double const hi = out.uMax[static_cast<std::size_t>(a)];
+                if(n == 1u || hi <= lo)
+                {
+                    for(std::size_t i = 0; i <= n; ++i)
+                        b.push_back(lo);
+                    continue;
+                }
+                if(policy.edgeRule == VelocityBinning::EdgeRule::Uniform)
+                {
+                    double const width = (hi - lo) / static_cast<double>(n);
+                    for(std::size_t i = 0; i <= n; ++i)
+                        b.push_back(lo + static_cast<double>(i) * width);
+                }
+                else
+                {
+                    // Quantile: the same cuts the model used during the
+                    // search, so the final geometry matches the model's
+                    // geometry exactly.
+                    b.push_back(lo);
+                    for(std::size_t i = 0; i + 1u < n; ++i)
+                        b.push_back(finalAxes[static_cast<std::size_t>(a)].cuts[i]);
+                    b.push_back(hi);
+                }
+            }
+            out.axisBoundaries = std::move(b);
+        }
         return out;
     }
 

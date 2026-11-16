@@ -139,6 +139,7 @@ int main(int argc, char** argv)
         double tolerance = 1.0e-3;
         double modelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
+        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
         std::size_t momentOrder = 0; //!< 0 = off; else run the moment path at this order
         unsigned fftPadding = 2u;
         bool deterministicDeposit = false;
@@ -191,6 +192,16 @@ int main(int argc, char** argv)
                 modelConstant = std::stod(next());
             else if(a == "--max-bins")
                 maxBins = static_cast<std::size_t>(std::stoul(next()));
+            else if(a == "--bin-edges")
+            {
+                std::string const text = next();
+                if(text == "uniform")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
+                else if(text == "quantile")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Quantile;
+                else
+                    throw std::runtime_error("--bin-edges must be uniform or quantile");
+            }
             else if(a == "--moments")
             {
                 std::size_t const v = static_cast<std::size_t>(std::stoul(next()));
@@ -297,6 +308,7 @@ int main(int argc, char** argv)
         options.nearShell.tileNodes = nearShellTile;
         options.velocityBinning.modelConstant = modelConstant;
         options.velocityBinning.maxBins = maxBins;
+        options.velocityBinning.edgeRule = binEdges;
 
         std::ofstream bunchFile(prefix + "_bunch.txt");
         if(!bunchFile)
@@ -353,6 +365,10 @@ int main(int argc, char** argv)
             meta << "near_shell_radius " << nearShellRadius << "\n";
             meta << "bin_model_constant " << modelConstant << "\n";
             meta << "max_bins " << maxBins << "\n";
+            meta << "bin_edges " << (binEdges == picBunch::VelocityBinning::EdgeRule::Quantile
+                                        ? "quantile"
+                                        : "uniform")
+                 << "\n";
             meta << "requested_bins " << requested << "\n";
             meta << "bins_used " << B << "\n";
             meta << "per_axis " << binning.perAxis[0] << " " << binning.perAxis[1] << " "

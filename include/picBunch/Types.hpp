@@ -9,7 +9,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -147,25 +146,6 @@ namespace picBunch
         }
     };
 
-    /** One component z-slab emitted by the chunked field solve.
-     *
-     * ``data`` holds ``grid.n[0] * grid.n[1] * zCount`` values with x fastest,
-     * covering global planes ``[zOffset, zOffset + zCount)``.  The chunked
-     * writer stores exactly this slab at its dataset offset, so no full output
-     * grid is ever materialised.
-     */
-    struct FieldChunk
-    {
-        Grid grid;
-        int component = 0;
-        std::size_t zOffset = 0;
-        std::size_t zCount = 0;
-        std::vector<double> data;
-    };
-
-    //! Sink for one ``FieldChunk``; called once per emitted output slab.
-    using FieldChunkSink = std::function<void(FieldChunk const&)>;
-
     /*! One particle patch region of a generated species.
      *
      * ``offset`` is the lower cell index relative to the PIConGPU domain
@@ -193,18 +173,6 @@ namespace picBunch
         double transposeMs = 0.0;
         double readoutMs = 0.0;
         double writerMs = 0.0;
-        /*! Measured staging traffic of a chunked solve (0 for the in-core paths).
-         *
-         * ``chunkReadBytes``/``chunkWrittenBytes`` are the byte counts the
-         * out-of-core staging layer actually issued.  ``chunkPeakStagingBytes``
-         * is the live staging-file high-water mark (disk, not RSS), and
-         * ``chunkPeakMemoryBytes`` is the largest single chunk allocation.
-         */
-        std::uint64_t chunkReadBytes = 0;
-        std::uint64_t chunkWrittenBytes = 0;
-        std::uint64_t chunkPeakStagingBytes = 0;
-        std::uint64_t chunkPeakMemoryBytes = 0;
-        std::uint64_t chunkCells = 0;
     };
 
     /** Explicit near-shell mode.  See NearShell.hpp for the split and the cost. */
@@ -486,8 +454,36 @@ namespace picBunch
         //! ``modelConstant * modelSum``; the achieved accuracy.
         double saturationError = 0.0;
 
+        //! Edge rule used to place the per-axis box edges: ``Uniform``
+        //! divides each active axis range equally (the historical default);
+        //! ``Quantile`` places the interior edges at equal cumulative charge
+        //! fraction along each axis, computed from the particle set at
+        //! startup.  The box decomposition (``perAxis``) and the field
+        //! construction are identical for both rules; only the per-axis edge
+        //! placement changes.  Populated by ``deriveVelocityBinning``; the
+        //! default (``Uniform``) leaves the historical behaviour unchanged.
+        enum class EdgeRule
+        {
+            Uniform,  //!< equal-width edges (default; existing behaviour)
+            Quantile  //!< per-axis edges at equal cumulative charge fraction
+        };
+        EdgeRule edgeRule = EdgeRule::Uniform;
+        //! Per-axis box boundaries: ``N[0] + 1`` then ``N[1] + 1`` then
+        //! ``N[2] + 1`` beam-frame ``u`` values, concatenated in axis order.
+        //! Uniform rule: equal subdivision of ``[uMin[a], uMax[a]]``;
+        //! quantile rule: ``uMin[a]``, the per-axis cut positions, ``uMax[a]``.
+        //! A degenerate axis (no extent, or one box) has all boundaries equal
+        //! to ``uMin[a]``.  The half-open floor lookup against these
+        //! boundaries is the assignment for both rules (a particle exactly on
+        //! an interior edge lands in the box to the right).  Populated by
+        //! ``deriveVelocityBinning`` when ``multiVelocity`` is true; empty
+        //! otherwise.
+        std::vector<double> axisBoundaries;
+
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
-        //! fixed binning on a sub-bunch (the near shell tile mesh).
+        //! fixed binning on a sub-bunch (the near shell tile mesh).  Uses the
+        //! per-axis boundaries (``axisBoundaries``) when populated, otherwise
+        //! the uniform-width rule from ``uMin`` / ``uMax`` / ``perAxis``.
         [[nodiscard]] std::size_t boxIndex(double u1, double u2, double u3) const;
     };
 
@@ -524,6 +520,16 @@ namespace picBunch
         //! reported.  Default off: the far-field angular calibration
         //! (``kAngularModelConstant``) is unchanged.
         bool inBunchCriterion = false;
+        //! Edge rule for the per-axis box edges (``VelocityBinning::EdgeRule``):
+        //! ``Uniform`` (default) divides each active axis range equally, the
+        //! historical behaviour; ``Quantile`` places the interior edges at
+        //! equal cumulative charge fraction along each axis, computed from the
+        //! particle set at startup.  The box decomposition (``explicitBins`` /
+        //! the auto policy) and the field construction are unchanged; only the
+        //! per-axis edge placement changes.  The auto policy (the smallest
+        //! count whose model error meets the tolerance) runs against the
+        //! selected rule, so the returned count is the count for that rule.
+        VelocityBinning::EdgeRule edgeRule = VelocityBinning::EdgeRule::Uniform;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).
@@ -572,20 +578,6 @@ namespace picBunch
         Replicated,
         //! Always the distributed z-slab/pencil FFT; falls back to replicated with one rank.
         Distributed
-    };
-
-    //! Field-solve execution path.
-    enum class SolveMode
-    {
-        //! Whole-grid FFT in host/device memory (the historical path).
-        InCore,
-        /*! Out-of-core chunked 3-D FFT with disk-backed transposes.
-         *
-         * One process splits the padded volume into chunks and processes one
-         * chunk at a time.  The transform stays global (it is the same exact
-         * 3-D transform); only the intermediate layouts are staged on disk.
-         */
-        Chunked
     };
 
     struct ComputeOptions
@@ -706,29 +698,6 @@ namespace picBunch
          * path runs while one rank can still hold the historical work set.
          */
         std::size_t distributedFftMinNodes = std::size_t{1u} << 28;
-        /*! Chunked solve selection.  ``InCore`` keeps every historical path
-         *  bit-for-bit; ``Chunked`` requires a single process and a sink (or
-         *  accumulates into the returned ``Field`` for the checkpoint writer).
-         */
-        SolveMode solveMode = SolveMode::InCore;
-        //! Cells (not bytes) in the largest chunk buffer; must hold one x-y plane.
-        std::size_t chunkCells = std::size_t{1u} << 22;
-        /*! Explicit number of virtual ranks for the staged solve.  Zero
-         * derives it from ``chunkCells``.  The staged path uses the same slab
-         * split and index arithmetic as the MPI distributed path, so this is
-         * the count a real multi-rank run would use.
-         */
-        int virtualRanks = 0;
-        //! Empty selects ``<output-or-temp>/picbunch-staging-<pid>``.
-        std::string stagingDirectory;
-        //! Keep the staging files after the solve (diagnostics only).
-        bool keepStaging = false;
-        /*! Optional output sink.  When set, a chunked solve streams each output
-         * z-slab here instead of returning a full ``Field``.  The sink is
-         * called with the six components in order, each covering all planes
-         * exactly once.  It is not used by the in-core paths.
-         */
-        FieldChunkSink chunkSink;
     };
 
     //! openPMD record names and component order: E then B.
