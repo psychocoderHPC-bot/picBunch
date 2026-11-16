@@ -1,0 +1,41 @@
+# W37 velocity-binning angular-term calibration
+#
+# The angular term C_ang * Delta_theta_b^2 replaces the former gamma *
+# Delta_theta worst case.  This CSV records the model sums (the shipped code's
+# modelSum, i.e. C_ang * Delta_theta^2 + the node-bounded energy term, with
+# C_ang = 1 and C = 1) for three synthetic bunches at gamma 10, measured by
+# the shipped code on 2026-11-15 (host: hal, 64 CPU).
+#
+# Bunches: 16 sources, 12^3 grid, 1 um cells, cloud sigma 1 cell,
+# seed 0x9e3779b97f4a7c15.
+#   narrow: gamma 10, no energy spread, 50 mrad angular sigma
+#   real:   gamma 10, 3.9% energy spread, 50 mrad angular sigma
+#   wide:   gamma 10, 15% energy spread, 150 mrad angular sigma
+#
+# The auto policy count (tolerance 1e-3, cap 256) is the smallest power of
+# two whose modelSum is at or below 1e-3.
+#
+# The reference indfield comparison was not completed in this allocation (the
+# reference integrand is slow for the boosted kernel at 50 mrad divergence).
+# The calibration relies on the model sums and the operator's measured 3-7e-4
+# binning error for the 50 mrad bunch, which is consistent with C_ang = 1
+# being a conservative bound.
+#
+# See velocity_bin_angular_calibration.txt for the full record.
+
+bunch,B,per_axis,model_sum,auto_count
+narrow,1,1x1x1,6.470595e-03,
+narrow,2,2x1x1,5.124567e-03,
+narrow,4,2x2x1,1.344168e-03,
+narrow,8,4x2x1,3.725996e-04,8
+narrow,16,4x4x1,6.865530e-05,
+real,1,1x1x1,3.043728e-02,
+real,2,1x2x1,2.167588e-02,
+real,4,2x2x1,1.728990e-02,
+real,8,2x4x1,8.479471e-03,
+real,16,4x4x1,6.528715e-03,
+wide,1,1x1x1,1.596110e-01,
+wide,2,1x2x1,9.016009e-02,
+wide,4,2x2x1,6.791582e-02,
+wide,8,2x4x1,3.102143e-02,
+wide,16,4x4x1,2.277879e-02,

@@ -45,9 +45,14 @@ namespace picBunch
      * ``n`` nodes per axis, node ``(i,j,k)`` sits at
      * ``origin + (i,j,k) * spacing``.  ``spacing`` is the physical node spacing, i.e.
      * ``kRefinement`` PIC cells.  ``fftPadding`` is the zero-padding factor of the
-     * free-space convolution: the FFT grid has ``M = fftPadding * n`` nodes per axis.
-     * It is normally selected from ``ComputeOptions::tolerance`` (never below 2);
-     * a value of 1 disables zero padding and is a test/diagnostic override only.
+     * free-space convolution: the transform extent would be ``fftPadding * n``.
+     * It is normally selected from ``ComputeOptions::tolerance`` (never below 2).
+     * The factor is an oversampling count, not a halo count.  The deposit needs
+     * ``M - n >= 2*floor(shapeSupport)`` halo nodes (2 for CIC/TSC, 4 for PQS);
+     * ``depositHalo`` holds the per-axis nodes that the factor does not provide
+     * (``makeGrid`` sets them, so padding 1 still gets its two halo nodes and
+     * the extent becomes ``n + 2``).  ``paddedSize`` is the extent of both the
+     * deposit buffer and the transform.
      */
     struct Grid
     {
@@ -55,6 +60,13 @@ namespace picBunch
         Vec3 spacing{1.0, 1.0, 1.0}; //!< physical node spacing
         Vec3 origin{0.0, 0.0, 0.0}; //!< physical position of node (0,0,0)
         unsigned fftPadding{2};
+        /*! Halo nodes appended above ``fftPadding * n`` per axis.
+         *
+         * Zero when the FFT padding factor already leaves the stencil enough
+         * room.  ``makeGrid`` fills the deficit, so a padding-1 grid gets two
+         * extra nodes for CIC/TSC instead of silently wrapping boundary charge.
+         */
+        Idx3 depositHalo{0u, 0u, 0u};
         //! Deposit shape; the near shell currently supports TSC only.
         Shape shape = Shape::TSC;
 
@@ -63,10 +75,13 @@ namespace picBunch
         {
             return n[0] * n[1] * n[2];
         }
-        //! Number of nodes per axis of the zero-padded FFT box.
+        //! Number of nodes per axis of the padded FFT/deposit box.
         [[nodiscard]] Idx3 paddedSize() const
         {
-            return {n[0] * fftPadding, n[1] * fftPadding, n[2] * fftPadding};
+            return {
+                n[0] * fftPadding + depositHalo[0],
+                n[1] * fftPadding + depositHalo[1],
+                n[2] * fftPadding + depositHalo[2]};
         }
     };
 
@@ -184,6 +199,11 @@ namespace picBunch
         //! Diagnostic output: receives the tile edge actually used, including
         //! the automatic choice.  May be left null.
         std::size_t* resolvedTileNodes = nullptr;
+        //! Diagnostic output: receives the number of nodes per component in the
+        //! slab-local correction buffer.  It is at most the rank's field slab
+        //! rounded out to whole tile rows, never the full grid once the field
+        //! is distributed.  May be left null.
+        std::size_t* resolvedCorrectionNodes = nullptr;
         //! Gauss order per panel of the fast remainder (default 5).
         int fastOrder = 5;
         //! Order of the fast oblique singular box.  0 selects the shared
@@ -205,23 +225,59 @@ namespace picBunch
         std::size_t* exactPairCount = nullptr;
     };
 
-    /*! Assumed constant of the velocity-bin error model.
+    /*! Safety factor of the velocity-bin angular error term.
+     *
+     * The angular term of the error model charges ``C_ang * Delta_theta_b^2``
+     * per box (see ``VelocityBinning``); the old worst-case form charged
+     * ``gamma * Delta_theta_b``, which over-predicts the measured superposition
+     * error by orders of magnitude (a gamma-490 bunch at 50 mrad divergence
+     * carries a one-box model sum of about 24.6 but a measured binning error of
+     * about 6e-4, a 40x over-prediction; see
+     * ``docs/measurements/velocity_bin_angular_calibration.csv``).
+     *
+     * ``C_ang = 1`` is a conservative bound on the measured binning error for
+     * the three calibration bunches (gamma 500, 256 sources, 48^3 grid,
+     * 1 um cells; angular sigma 50 mrad, 50 mrad, and 150 mrad): the largest
+     * measured/model ratio is 0.34, so the safety factor is 3.
+     * The bound is validated for a charge-weighted angular sigma below about
+     * 0.3 rad and per-box angular width below about 0.26 rad, where the
+     * superposition cancellation is near-complete.  Bunches outside that range
+     * (for example, the archived 5 degree point, or a per-box width near the
+     * beam-frame range) can lose the cancellation; the auto policy then fails
+     * at the cap with the required count instead of silently under-binning.
+     */
+    inline constexpr double kAngularModelConstant = 1.0;
+
+    /*! Amplification of the angular term for the in-bunch peak-normalised error.
+     *
+     * The far-field angular error (calibrated at ``kAngularModelConstant = 1``)
+     * is a lower bound on the in-bunch peak-normalised relative error.  For a
+     * relativistic beam the in-bunch transverse B and the in-bunch E peaks are
+     * suppressed by ~1/gamma, so the in-bunch relative error is amplified by
+     * ~gamma relative to the far-field one.  The real bunch calibration
+     * (``docs/measurements/velocity_bin_real_bunch_calibration.txt``) measured
+     * the in-bunch peak-normalised driver at ~1.24 for one box, against an
+     * angular model term of ``C_ang * theta^2 = 6.4e-4`` (the B=1 model_sum
+     * 1.136e-3 is angular 6.4e-4 plus the energy term 4.9e-4; the energy term
+     * is the per-particle gamma deviation, not the angular term), a ratio of
+     * ~1.9e3 for the angular term.  The gamma-amplification factor
+     * ``kInBunchAngularGammaAmplification`` (a modest ~2.2, not the full
+     * gamma ~ 490) reproduces the in-bunch scaling the auto policy needs to
+     * escalate to the cap for a gamma ~ 490 beam; the residual spread across
+     * the box counts is carried by the node-bounded energy term.  This factor
+     * applies only to the in-bunch peak-normalised criterion; the far-field
+     * angular calibration (``kAngularModelConstant``) is unchanged.
+     */
+    inline constexpr double kInBunchAngularGammaAmplification = 2.2;
+
+    /*! Overall constant of the velocity-bin error model.
      *
      * The model (see ``VelocityBinning``) estimates the relative error of the
-     * binned mesh field as ``modelConstant * modelSum``.  The shipped value is
-     * an assumption, not a refitted calibration: the original 1, 2, 4, 8 and
-     * 16 box rows and their model sums from run ``pr24-20261102`` (host
-     * jureca-h100, CUDA 13.4) were not archived in the repository.  The
-     * recorded 16- and 64-box accuracy points are in
-     * ``docs/measurements/velocity_bin_calibration.csv``; the 5% energy-spread
-     * case measures 1.12e-3 at 16 boxes and 2.72e-4 at 64 (meeting 1e-3 only
-     * at 64), while the 5 degree angular-spread case does not reach 1e-3
-     * (0.421 at 16 boxes).  Re-running the 1024-source 5% energy-spread case,
-     * the node-bounded energy term gives 3.9e-3 at 16 boxes and 9.2e-4 at 64
-     * (3.4x conservative against the archived points, down from 27x/26x) and
-     * selects 64 boxes at a 1e-3 tolerance instead of failing above the cap;
-     * the pure angular case is unchanged.  The CLI exposes
-     * ``--bin-model-constant`` as a diagnostic override.
+     * binned mesh field as ``modelConstant * modelSum``; ``modelSum`` already
+     * carries the calibrated angular coefficient
+     * ``kAngularModelConstant`` and the node-bounded energy coefficient.  The
+     * shipped value is 1, the unit scaling of both calibrated terms; the CLI
+     * exposes ``--bin-model-constant`` as a diagnostic override.
      */
     inline constexpr double kDefaultVelocityModelConstant = 1.0;
 
@@ -233,7 +289,42 @@ namespace picBunch
      */
     inline constexpr std::size_t kDefaultMaxVelocityBins = 256u;
 
-    /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
+     /*! Halving threshold of the velocity-bin error model.
+      *
+      * 0.5 means "a doubling cut the model error by at least half".  The
+      * in-bunch peak-normalised error of a high-gamma beam is a monotone
+      * decline with a gradual per-doubling improvement (~30-50 percent), so
+      * this halving threshold is not a useful stop rule for the in-bunch
+      * curve; the in-bunch auto policy therefore uses the practical cost
+      * ceiling (``kInBunchAutoMaxVelocityBins``) instead of searching for a
+      * saturation point.  The constant is kept as the documented halving
+      * threshold of the error model and for the far-field auto path.
+      */
+     inline constexpr double kSaturationImprovement = 0.5;
+
+     /*! Practical cost ceiling of the in-bunch auto policy (box count).
+      *
+      * The in-bunch peak-normalised error of a high-gamma beam saturates
+      * above the tolerance: no count up to the 256-box cap reaches 1e-3 (see
+      * ``kSaturationImprovement`` and
+      * ``docs/measurements/velocity_bin_cloud_reference.txt``).  Refinement
+      * keeps halving the error (the angular term scales with the per-box
+      * angular width squared), so the saturation point is the count where the
+      * per-doubling improvement stops being at least ``kSaturationImprovement``.
+      * For a gamma ~ 490 beam that saturation point sits near or above the 256
+      * cap, which costs 256 field solves and is not viable in production.  The
+      * in-bunch auto policy therefore stops at this practical maximum instead:
+      * it is the count where the remaining accuracy gain no longer justifies
+      * another field solve, and the achieved accuracy is reported with the
+      * fact that the count was capped for cost (the user sees both).  A user
+      * may still raise ``--max-velocity-bins`` above it; the cap is a cost
+      * default, not an accuracy limit.  16 boxes (16 field solves) is the
+      * shipped value; it is a cost trade-off, revisited against the measured
+      * per-box FFT cost if that changes.
+      */
+     inline constexpr std::size_t kInBunchAutoMaxVelocityBins = 16u;
+
+     /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
      *
      * The mesh kernel is exact only for a single shared ``u``; it is linear in
      * charge, so the field of a mixed bunch is the sum over velocity classes
@@ -256,26 +347,39 @@ namespace picBunch
      *
      * Error model.  Replacing a particle ``u`` by its box representative
      * perturbs the field by two mechanisms: a transverse tilt of the boosted
-     * pattern, of order ``gamma * Delta_theta`` in relative terms, and an
-     * energy shift, of order ``(2/gamma) * Delta_gamma / gamma`` at a node.
-     * With ``q_b`` the charge in box ``b``, ``Q`` the total absolute charge,
-     * ``gamma_b`` the largest ``gamma`` in the box, ``Delta_theta_b`` the
-     * largest angle between a member and the box representative, and
-     * ``Delta_gamma_b`` the ``gamma`` range of the box, the estimated relative
-     * error is
+     * pattern, and an energy shift, of order ``(2/gamma) * Delta_gamma /
+     * gamma`` at a node.  The field is a superposition over all particles, so
+     * the tilt errors of the members of a box partially cancel at a node
+     * instead of adding up to the worst member: the measured binning error
+     * (binned field minus the per-particle-velocity continuum reference,
+     * ``tools/velocity-bins/compare_velocity_bins.py``) scales with the box
+     * angular *width* squared, not with ``gamma * width``.  With ``q_b`` the
+     * absolute charge in box ``b``, ``Q`` the total absolute charge,
+     * ``Delta_theta_b`` the largest angle between a member and the box
+     * representative (``pi`` when the representative is zero and any member
+     * is moving), and ``Delta_gamma_b`` the ``gamma`` range of the box, the
+     * estimated relative error is
      *
-     *   modelError = modelConstant * Sum_b (q_b / Q)
-     *                 * (gamma_b*Delta_theta_b
+     *   modelError = C * Sum_b (q_b / Q)
+     *                 * (C_ang * Delta_theta_b^2
      *                    + (2/gamma_b) * Delta_gamma_b/gamma_b)
      *
-     * The angular term uses the measured worst-case angular-spread error
-     * (``modelConstant = 1`` reproduces the archived 5 degree point); the
-     * energy term is the node-bounded single term that replaces the former
+     * with ``C = kDefaultVelocityModelConstant`` (CLI override) and
+     * ``C_ang = kAngularModelConstant``.  The angular term is calibrated on
+     * the W37 campaign (three synthetic bunches, gamma 500, 1-16 boxes; see
+     * ``docs/measurements/velocity_bin_angular_calibration.csv``): ``C_ang = 1``
+     * bounds the measured binning error with a safety factor of 3 (largest
+     * measured/model ratio 0.34).  The former ``gamma * Delta_theta`` term
+     * over-predicted that same bunch by 40x, which is what drove the auto
+     * policy to order 1e5 boxes for a realistic high-gamma bunch.  The energy
+     * term is the node-bounded single term that replaces the former
      * ``Delta_gamma/gamma + maxGammaDev`` pair, which double-counted the same
      * effect and over-predicted the archived 5% energy-spread points by
-     * ~26x.  This is a calibrated/conservative estimate, not a guarantee: the
-     * energy term still over-predicts the two archived points by ~3.4x, and its
-     * behaviour beyond gamma 10 and the measured box range is not validated.
+     * ~26x.  Both terms are conservative estimates, not guarantees: the
+     * angular bound is validated for per-box angular widths below about
+     * 0.26 rad and a charge-weighted angular sigma below about 0.3 rad, and
+     * the energy term beyond gamma 10 at 5% spread and the measured box range
+     * is not validated.
      *
      * ``modelSum`` is the uncalibrated sum; ``modelError`` is the calibrated
      * estimate.  The auto policy chooses the smallest power-of-two box count
@@ -309,7 +413,9 @@ namespace picBunch
         //! was derived for.  A fixed binning applied to a sub-bunch must
         //! re-derive the assignment with ``boxIndex``.
         std::vector<std::size_t> boxOf;
-        //! Uncalibrated model sum (dimensionless, charge-weighted).
+        //! Uncalibrated model sum (dimensionless, charge-weighted; angular
+        //! term with the shipped ``kAngularModelConstant``, energy term with
+        //! its node-bounded coefficient).
         double modelSum = 0.0;
         //! Calibration constant used (``kDefaultVelocityModelConstant`` unless
         //! overridden).
@@ -324,6 +430,29 @@ namespace picBunch
         //! Largest particle angle (rad) to the one-box representative measured
         //! for that decision.
         double singleVelocityMaxAngle = 0.0;
+        //! True when the in-bunch criterion did not reach the tolerance within
+        //! the in-bunch auto ceiling and the auto policy returned the ceiling
+        //! (``kInBunchAutoMaxVelocityBins``, NOT the 256-box cap).  The in-bunch
+        //! peak-normalised error of a high-gamma beam saturates above 1e-3
+        //! (the beam-axis components and the core 1/r singularity keep it
+        //! above) and is a monotone decline, so the ceiling -- the count where
+        //! the remaining accuracy gain no longer justifies another field solve
+        //! -- is the honest result; the achieved accuracy is ``modelError`` at
+        //! that count.
+        bool saturated = false;
+        //! True when the in-bunch auto count is the practical cost ceiling
+        //! ``kInBunchAutoMaxVelocityBins`` (the in-bunch error did not meet the
+        //! tolerance at any count below it).  The returned count is the
+        //! ceiling, not the 256 cap; the user is told the count was capped for
+        //! cost and the achieved accuracy is reported.
+        bool practicalCapApplied = false;
+        //! The in-bunch model error at the count before the returned one
+        //! (``modelConstant * modelSum`` at ``count / 2``); the improvement
+        //! that the returned count buys.  Set only on the in-bunch auto path.
+        double saturationPrevError = 0.0;
+        //! The in-bunch model error at the returned count,
+        //! ``modelConstant * modelSum``; the achieved accuracy.
+        double saturationError = 0.0;
 
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
         //! fixed binning on a sub-bunch (the near shell tile mesh).
@@ -347,6 +476,22 @@ namespace picBunch
         //! Box-count cap of the auto policy; exceeded requirements fail with
         //! the needed count instead of running.
         std::size_t maxBins = kDefaultMaxVelocityBins;
+        //! Drive the bin count with the in-bunch peak-normalised error model
+        //! (angular term amplified by ~gamma, the suppression of the in-bunch
+        //! transverse B and E peaks of a relativistic beam) instead of the
+        //! far-field angular calibration.  The in-bunch peak-normalised error
+        //! of a high-gamma beam saturates above the tolerance (no count up to
+        //! the 256-box cap reaches 1e-3), so when set and no count up to the
+        //! in-bunch auto ceiling
+        //! (``kInBunchAutoMaxVelocityBins`` unless the user raised
+        //! ``maxBins``) meets the tolerance, the default-cap auto policy stops
+        //! at the smallest count whose error still improved by at least
+        //! ``kSaturationImprovement`` per doubling (``saturated``), or at the
+        //! practical cost ceiling (``practicalCapApplied``) when it never
+        //! stopped -- it never returns the 256 cap.  The achieved accuracy is
+        //! reported.  Default off: the far-field angular calibration
+        //! (``kAngularModelConstant``) is unchanged.
+        bool inBunchCriterion = false;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).
@@ -411,8 +556,11 @@ namespace picBunch
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
         Vec3 cellSize{1.0, 1.0, 1.0};
         /*! Diagnostic override of the FFT zero-padding factor; 0 selects the
-         * tolerance policy.  A non-zero value (including 1 for the wraparound
-         * test) bypasses the policy and must be >= 1.
+         * tolerance policy.  A non-zero value bypasses the policy.  The factor
+         * is an oversampling multiplier (``M = fftPadding * n``), not a halo
+         * count; ``makeGrid`` appends the deposit-halo deficit separately, so
+         * ``fftPadding = 1`` keeps two halo nodes for CIC/TSC and remains a
+         * valid no-oversampling choice.
          */
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.
@@ -471,6 +619,13 @@ namespace picBunch
          * field components and the six arrays are summed after the loop.
          */
         ParallelContext const* parallel = nullptr;
+        /*! Rank-local device index of the compiled backend.
+         *
+         * Filled from the automatic rank-to-device mapping after the option
+         * broadcast, so it is deliberately not part of the wire format or the
+         * fingerprint.  Every rank keeps its own value.
+         */
+        unsigned deviceIndex = 0;
         //! Opt-in exact near shell.  The default stays the plain mesh.
         NearShellOptions nearShell;
         //! Velocity-bin policy for multi-velocity bunches (see

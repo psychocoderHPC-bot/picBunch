@@ -13,7 +13,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -210,6 +213,125 @@ TEST(Deposit, PaddedSourceHaloWrapsNegativeSupport)
         + M * (static_cast<std::size_t>(3u) + M * static_cast<std::size_t>(3u));
     // tscShape(-1) * tscShape(0) * tscShape(0) = 0.125 * 0.75 * 0.75.
     EXPECT_NEAR(rho[idx], 0.0703125, 1.0e-14);
+}
+
+TEST(Deposit, PaddedBoundaryParticleLandsInFullSupport)
+{
+    // A particle on the upper face t = n has TSC support at n-1, n and n+1.
+    // With a valid halo, n and n+1 are upper-padding nodes and the opposite
+    // side (x = 0) must stay empty.  Before the padded-boundary guard a
+    // padding-1 grid folded this support onto x = 0 and x = 1.
+    picBunch::Grid grid;
+    grid.n = {8u, 8u, 8u};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    grid.fftPadding = 2u;
+    grid.shape = picBunch::Shape::TSC;
+    std::size_t const M = 16u;
+
+    auto lineSum = [](std::vector<double> const& rho, std::size_t m) {
+        std::array<double, 16> line{};
+        for(std::size_t x = 0; x < m; ++x)
+            for(std::size_t y = 0; y < m; ++y)
+                for(std::size_t z = 0; z < m; ++z)
+                    line[x] += rho[x + m * (y + m * z)];
+        return line;
+    };
+
+    {
+        // Upper face: t = n = 8, weights 0.125 / 0.75 / 0.125 at 7 / 8 / 9.
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x[0] = 8.0;
+        bunch.y[0] = 3.0;
+        bunch.z[0] = 3.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = 1.0;
+        auto const rho = picBunch::depositTSCPaddedHost(bunch, grid);
+        auto const line = lineSum(rho, M);
+        EXPECT_NEAR(line[7], 0.125, 1.0e-14);
+        EXPECT_NEAR(line[8], 0.75, 1.0e-14);
+        EXPECT_NEAR(line[9], 0.125, 1.0e-14);
+        EXPECT_DOUBLE_EQ(line[0], 0.0) << "no charge may wrap to the opposite side";
+        EXPECT_DOUBLE_EQ(line[1], 0.0) << "no charge may wrap to the opposite side";
+        EXPECT_NEAR(std::accumulate(rho.begin(), rho.end(), 0.0), 1.0, 1.0e-14);
+    }
+    {
+        // Lower face: t = 0, support -1 maps into the upper halo at M-1 = 15.
+        picBunch::Bunch bunch;
+        bunch.resize(1);
+        bunch.x[0] = 0.0;
+        bunch.y[0] = 3.0;
+        bunch.z[0] = 3.0;
+        bunch.weight[0] = 1.0;
+        bunch.charge[0] = 1.0;
+        auto const rho = picBunch::depositTSCPaddedHost(bunch, grid);
+        auto const line = lineSum(rho, M);
+        EXPECT_NEAR(line[15], 0.125, 1.0e-14);
+        EXPECT_NEAR(line[0], 0.75, 1.0e-14);
+        EXPECT_NEAR(line[1], 0.125, 1.0e-14);
+        EXPECT_DOUBLE_EQ(line[7], 0.0) << "no charge may wrap to the opposite side";
+        EXPECT_NEAR(std::accumulate(rho.begin(), rho.end(), 0.0), 1.0, 1.0e-14);
+    }
+}
+
+TEST(Deposit, InsufficientPaddingIsRejected)
+{
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 4.0;
+    bunch.y[0] = 4.0;
+    bunch.z[0] = 4.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = 1.0;
+
+    picBunch::Grid grid;
+    grid.n = {8u, 8u, 8u};
+    grid.spacing = {1.0, 1.0, 1.0};
+    grid.origin = {0.0, 0.0, 0.0};
+    grid.fftPadding = 1u;
+    grid.shape = picBunch::Shape::TSC;
+    try
+    {
+        (void)picBunch::depositTSCPaddedHost(bunch, grid);
+        FAIL() << "TSC with fftPadding 1 must be rejected";
+    }
+    catch(std::invalid_argument const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("(x)"), std::string::npos) << message;
+        EXPECT_NE(message.find("requires at least 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("only 0 are available"), std::string::npos) << message;
+        EXPECT_NE(message.find("fftPadding=1"), std::string::npos) << message;
+        EXPECT_NE(message.find("depositHalo=0"), std::string::npos) << message;
+    }
+
+    // PQS needs four halo nodes per side; padding 2 on a 2-node z axis leaves
+    // only two.  The message must name the short axis.
+    picBunch::Bunch single;
+    single.resize(1);
+    single.x[0] = 4.0;
+    single.y[0] = 4.0;
+    single.z[0] = 1.0;
+    single.weight[0] = 1.0;
+    single.charge[0] = 1.0;
+    grid.n = {8u, 8u, 2u};
+    grid.fftPadding = 2u;
+    grid.shape = picBunch::Shape::PQS;
+    try
+    {
+        (void)picBunch::depositTSCPaddedHost(single, grid);
+        FAIL() << "PQS with a 2-node padding-2 axis must be rejected";
+    }
+    catch(std::invalid_argument const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("(z)"), std::string::npos) << message;
+        EXPECT_NE(message.find("requires at least 4"), std::string::npos) << message;
+        EXPECT_NE(message.find("fftPadding=2"), std::string::npos) << message;
+    }
 }
 
 TEST(Deposit, ShapeChargeConservationAndSupport)

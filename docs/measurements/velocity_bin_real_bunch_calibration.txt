@@ -1,0 +1,105 @@
+Real-bunch velocity-bin calibration (region-aware in-bunch metric)
+==================================================================
+
+Bunch: particles_000000.bp5, species b, 49931 particles, mean gamma 490.3
+  (rel |u| spread 1.69e-2, max angle 0.0253 rad, 0.78 deg divergence)
+Field: makeGrid 298x122x318, cell 2e-7 m.  Beam axis: lab +y.
+
+FORMULA DECISION
+----------------
+The shipped angular term is C_ang * Delta_theta^2 (squared), with C_ang = 1
+(kAngularModelConstant).  It is NOT gamma * Delta_theta (that worst case was
+retired in the W37 calibration).  The B=1 real-bunch model_sum 1.1363e-3
+decomposes into the angular term 6.4e-4 (C_ang * theta^2) plus the energy term
+4.9e-4 (2 * maxDelta_gamma/gamma, the per-particle gamma deviation, up to
+1.3e-1); it is not gamma * theta / 2.  The table, the Types.hpp comment, and
+this document state the same formula.
+
+ARBITER (the truth): exact Liénard-Wiechert direct-sum reference
+---------------------------------------------------------------
+The arbiter computes the field at in-bunch probe nodes by direct summation of
+the Liénard-Wiechert field of EVERY particle (no proxy, no fitted kernel, no
+TSC convolution), at the actual per-particle gamma distribution, and reports
+the per-component relative error normalised by the reference amplitude at each
+probe node (maximum over nodes), plus the absolute By error.  Probe nodes: the
+bunch core plus points at 2, 5 and 10 sigma in each transverse (lab x, z)
+direction (13 nodes).  Reproducible from the repository:
+
+  python3 tools/velocity-bins/arbiter_in_bunch.py \
+      --bunch <bunch.bp5-or-txt> --species b --bins 1,2,4,8,16,32,64,256
+  (CMake test: VelocityBinsArbiterReference)
+
+Reference (full-set LW direct sum, T):
+node     Ex         Ey         Ez         Bx         By         Bz
+core   -2.510e+10  4.379e+07  6.673e+09  2.226e+01  3.515e-01  8.374e+01
+x+2    -6.616e+10 -5.262e+06 -4.140e+09 -1.381e+01  1.190e-02  2.207e+02
+x-2     6.929e+10  6.123e+07  3.339e+09  1.114e+01 -9.117e-02 -2.311e+02
+z+2     1.609e+08 -1.549e+07 -6.238e+10 -2.081e+02  3.631e-02 -5.365e-01
+z-2    -4.937e+09 -1.436e+07  6.787e+10  2.264e+02 -3.289e-02  1.647e+01
+x+5    -3.081e+10  1.372e+06 -3.335e-08 -1.113e+00 -1.092e-02  1.028e+02
+x-5     3.085e+10  2.643e+06 -3.189e-07 -1.064e-01  3.000e-02 -1.029e+02
+z+5     7.016e+07  1.128e+06 -3.003e+10 -1.002e+02  7.156e-04 -2.340e-01
+z-5    -2.554e+08 -1.701e+07  3.152e+10  1.051e+02  8.323e-03  8.521e-01
+x+10   -1.556e+10 -1.979e+05 -3.273e+07 -1.092e-01 -2.427e-03  5.191e+01
+x-10    1.563e+10 -1.919e+05  8.243e+06  2.749e-02  7.922e-03 -5.214e+01
+z+10   -2.013e+06 -5.649e+05 -1.551e+10 -5.175e+01 -2.119e-03  6.744e-03
+z-10   -2.187e+07 -9.889e+05  1.574e+10  5.251e+01 -1.148e-03  7.294e-02
+
+Relative error per component (max over probe nodes); absolute By error (T):
+   B  |         Ex         Ey         Ez         Bx         By         Bz |  By_abs_max
+   1  | 1.620e+01  2.521e+00  1.026e+01  1.025e+01  2.447e+00  1.621e+01 |  3.511e-01
+   2  | 9.348e+00  2.360e+00  1.135e+01  1.135e+01  6.729e+00  9.352e+00 |  5.209e-01
+   4  | 4.049e+00  5.850e+00  1.317e+00  1.317e+00  1.293e+01  4.034e+00 |  3.935e-01
+   8  | 3.621e+00  7.014e+00  2.492e+00  2.491e+00  1.692e+01  3.607e+00 |  2.169e-01
+  16  | 3.598e+00  1.085e+01  2.132e+00  2.131e+00  1.272e+01  3.584e+00 |  2.271e-01
+  32  | 4.099e+00  6.540e+00  3.102e+00  3.101e+00  2.180e+01  4.082e+00 |  1.126e-01
+  64  | 2.383e+00  5.301e+00  3.191e+00  3.190e+00  9.622e+00  2.373e+00 |  1.394e-01
+ 256  | 1.020e+00  4.649e+00  2.041e+00  2.041e+00  3.703e+00  1.020e+00 |  6.441e-02
+
+CONVERGENCE AND SATURATION
+--------------------------
+The tolerance (1e-3) is NOT reached by any component at any box count up to
+256.  The per-node relative error is dominated by the beam-axis components
+(Ez ~ 6.7e9, Bx ~ 22 T at the core, versus By only 0.35 T) and the core 1/r
+singularity (nearby particles dominate the core field, so replacing their
+velocities by a box representative is a large error that does not vanish as
+the boxes refine).  The absolute in-bunch By error saturates: 3.5e-1 T at 1
+box, 2.2e-1 T at 16-32 boxes, 6.4e-2 T at 256 boxes (it does not reach
+3-7e-4 T, and it does not converge to zero within the cap).
+
+Cause (with numbers): a GENUINE LIMIT OF THE VELOCITY-BINNING MODEL at
+gamma 490, not the reference accuracy and not the TSC convolution of the
+reference (the arbiter uses a direct sum, no convolution).  The binning
+groups particles by velocity direction; the beam-axis field (Ez, Bx) and the
+core near-field are set by the per-particle gamma (energy) and the
+longitudinal position, which the transverse velocity binning does not resolve.
+The per-particle gamma deviation (maxDelta_gamma/gamma ~ 1.3e-1) is the
+node-bounded energy term in the shipped model, and it does not shrink to
+1e-3 as the boxes refine.
+
+CONSEQUENCE AND THE AUTO POLICY
+-------------------------------
+Because the in-bunch error saturates above the tolerance (and 256 boxes is 256
+field solves, which no production run accepts), the auto policy (inBunchCriterion
+on) does NOT return the cap.  It returns the smallest box count after which the
+in-bunch model error no longer improves by at least kSaturationImprovement (0.5,
+i.e. "a doubling cut the error by at least half") per doubling: the saturation
+count.  The achieved accuracy (modelError at that count) is reported as a
+diagnostic.  If a count does meet the tolerance within the cap (a bunch with a
+small per-particle gamma deviation, like the synthetic realBunchLike), the auto
+policy returns that count instead.  This is the arbiter requirement: do not
+return 256; report the saturation count and the achieved accuracy.
+
+REPRODUCIBILITY OF THE TSC-CONVOLVED REGION TABLE
+-------------------------------------------------
+(Secondary) The TSC-convolved continuum reference (indfield, order 8) peak-
+normalised region table is regenerated by:
+  python3 tools/velocity-bins/measure_region_bins.py \
+      --bunch <bunch.bp5> --species b --cell 2e-7 \
+      --origin 1.5149e-05,9.7255e-05,1.2683e-05 --grid 298,122,318 \
+      --bins 1,2,4,8,16,64,256 --cell-region 163,70,23 --cell-radius 3 \
+      --subset 391
+  (CMake test: VelocityBinsRegionReference)
+That table normalises by the in-bunch reference peak per component and was the
+basis of the earlier peak-normalised analysis; the arbiter (above) is the
+direct-sum truth it is checked against.

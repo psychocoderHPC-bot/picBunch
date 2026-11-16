@@ -42,8 +42,15 @@ and B records are recomputed from the particles and stay float32.
 The input checkpoint is scanned at `data/<inputIteration>/fields`. Every record
 whose name starts with `Convolutional PML ` is copied through the openPMD
 Series API, so the component values, `position` and `unitSI` attributes survive
-unchanged. The writer replaces the record geometry with the main-field geometry
-and never synthesizes PML state.
+unchanged. The copy keeps the record's full extent and re-writes only the face
+rim chunk, so a sparse PIConGPU source stays sparse. The writer replaces the
+record geometry with the main-field geometry and never synthesizes PML state.
+`[picongpu] pml_thickness` must match the input deck; see
+[configuration](configuration.md#boundary-conditions). The stored thickness is
+recorded as the `picBunchPmlThickness` attribute on each PML record. PIConGPU's
+`RestartFieldLoader` does not read it (the deck thickness is compiled into
+`fieldAbsorber.param`), so a direct restart still needs a matching deck;
+picBunch's copy path validates the attribute before writing.
 
 When the input checkpoint has no PML records, the writer keeps its previous
 behaviour and writes only E, B and `picongpu_idProvider`. An open-boundary
@@ -54,9 +61,12 @@ contains PML records for such a deck, or restart with periodic boundaries.
 For a deck whose PML has never run, `[picongpu] absorber = "pml"` in the
 configuration is the other option: the writer adds the twelve `Convolutional
 PML` slab records (six components `E` and `B`, each with a `neg` and a `pos`
-slab record) with the zero initial state, so the restart deck's PML loads from
-rest; the full record layout is documented in [openPMD backend
-selection](openpmd-backends.md#field-absorber-key).
+slab record) with the zero initial state and stores only the face rim of
+`pml_thickness` cells, so the restart deck's PML loads from rest. The full
+record layout is documented in [openPMD backend
+selection](openpmd-backends.md#field-absorber-key). `RestartFieldLoader` zeroes
+its host buffer before loading the per-face chunk, so the unwritten interior is
+zero on restart.
 
 ## Particle species and the id range
 

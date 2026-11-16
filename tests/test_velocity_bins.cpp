@@ -65,7 +65,8 @@ namespace
         for(std::size_t p = 0; p < count; ++p)
         {
             double const phi
-                = 2.0 * std::acos(-1.0) * static_cast<double>(p) / static_cast<double>(count);
+                = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p) + 1.0)
+                    / (2.0 * static_cast<double>(count));
             bunch.x[p] = 4.0 + static_cast<double>(p % 3);
             bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
             bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
@@ -436,7 +437,9 @@ TEST(VelocityBins, PureAngularSpreadKeepsTheUnitAngularConstant)
     policy.mode = VelocityBinningOptions::Mode::Explicit;
     policy.explicitBins = 1;
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
-    EXPECT_NEAR(binning.modelSum, 10.0 * theta, 1e-12);
+    EXPECT_NEAR(binning.modelSum, theta * theta, 1e-15);
+    // The calibrated term is 114x below the old gamma*theta worst case.
+    EXPECT_LT(binning.modelSum, 10.0 * theta);
 }
 
 TEST(VelocityBins, PureEnergySpreadAutoCountIsTractable)
@@ -494,83 +497,507 @@ TEST(VelocityBins, InfeasibleRequirementPrintsTheCapError)
 
 TEST(VelocityBins, MonoenergeticHighGammaUsesOneBoxWithoutFlags)
 {
-    // The operator hit: gamma 1101 with a few mrad divergence demands millions
-    // of boxes from the gamma * Delta_theta term.  It is one velocity class, so
-    // the default auto policy must use one box and run without flags.
-    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
+    // The operator hit: gamma 1101 with a few mrad divergence demanded
+    // millions of boxes from the gamma * Delta_theta worst case.  The
+    // calibrated angular term (theta^2) is far below the 1e-3 tolerance, so
+    // the default auto policy runs without flags and picks a small count.
+    Bunch bunch;
+    bunch.resize(1024);
+    double const u = std::sqrt(1101.0 * 1101.0 - 1.0);
+    for(std::size_t p = 0; p < 1024; ++p)
+    {
+        // Interleaved deterministic spread over two axes: a 3 mrad ring
+        // (azimuth by p mod 16) plus a 1-3 mrad azimuth offset and a 0-1.5
+        // mrad tilt step (p / 16), so the beam-frame extent is nonzero in
+        // both transverse directions.
+        double const theta = 3.0e-3 + 1.5e-3 * (p / 16 % 2);
+        double const phi
+            = 2.0 * std::acos(-1.0) * ((2.0 * static_cast<double>(p % 16) + 1.0) / 32.0
+                                       + (p / 16 % 2) * 0.02);
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
     ASSERT_TRUE(binning.derived);
     EXPECT_TRUE(binning.multiVelocity);
+    // The one-box estimate is below the tolerance: the calibrated angular
+    // term is 2.0e-5 for this geometry, where the old gamma*Delta_theta
+    // worst case was 1.33e+01, a 6600x over-prediction.
     ASSERT_EQ(binning.count, 1u);
-    EXPECT_TRUE(binning.singleVelocityFallback);
+    EXPECT_FALSE(binning.singleVelocityFallback);
     ASSERT_EQ(binning.representativeU.size(), 1u);
-    EXPECT_LE(
-        binning.singleVelocityRelativeSpread,
-        picBunch::kSingleVelocityRelativeSpread);
-    EXPECT_LE(binning.singleVelocityMaxAngle, picBunch::kSingleVelocityMaxAngle);
-    // The diagnostics stay honest: the one-box estimate is above tolerance.
-    EXPECT_GT(binning.modelError, 1e-3);
+    EXPECT_LE(binning.modelError, 1e-3);
 }
 
-TEST(VelocityBins, ExplicitBinsOverrideSingleVelocityFallback)
+// ---------------------------------------------------------------------------
+// W37: calibrated angular term (replaces the gamma*Delta_theta worst case).
+
+TEST(VelocityBins, AngularTermIsWidthSquaredNotGamma)
 {
-    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
+    // Constant gamma 10, two symmetric 5 degree tilts: the old model charged
+    // gamma*theta = 0.873.  The calibrated angular term charges theta^2
+    // = 7.67e-3: the superposition of the member fields cancels the tilt
+    // error at a node to the measured 3-7e-4 level, not to gamma*theta.
+    Bunch bunch;
+    bunch.resize(2);
+    bunch.x = {4.0, 4.0};
+    bunch.y = {4.0, 4.0};
+    bunch.z = {4.0, 4.0};
+    double const u = std::sqrt(100.0 - 1.0);
+    double const theta = 5.0 * std::acos(-1.0) / 180.0;
+    bunch.ux = {u * std::sin(theta), -u * std::sin(theta)};
+    bunch.uy = {0.0, 0.0};
+    bunch.uz = {u * std::cos(theta), u * std::cos(theta)};
+    bunch.weight = {1.0, 1.0};
+    bunch.charge = {kElectronCharge, kElectronCharge};
+
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 4;
-    VelocityBinning const four = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
-    EXPECT_EQ(four.count, 4u);
-    EXPECT_FALSE(four.singleVelocityFallback);
-
-    // Even an explicit single box is the user's choice, not the fallback.
     policy.explicitBins = 1;
-    VelocityBinning const one = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
-    EXPECT_EQ(one.count, 1u);
-    EXPECT_FALSE(one.singleVelocityFallback);
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    // gamma range zero: the estimate is the pure angular term theta^2
+    // (kAngularModelConstant = 1), 114x below the old gamma*theta.
+    EXPECT_NEAR(binning.modelSum, theta * theta, 1e-15);
+    EXPECT_LT(binning.modelSum, 10.0 * theta);
 }
 
-TEST(VelocityBins, NonDefaultCapKeepsTheHistoricalFailure)
+TEST(VelocityBins, RealisticHighGammaBunchLandsAtFourToEight)
 {
-    // An explicit --max-velocity-bins is authoritative even for a bunch that
-    // would qualify for the default-cap one-box fallback.
-    Bunch const bunch = divergentBunch(1101.0, 3.0e-3, 1024);
-    VelocityBinningOptions policy;
-    policy.maxBins = 2;
+    // The operator's bunch: gamma 471-510 (the 1-99% interval of |p|, sigma_g/gamma about 3.9%) and about 50 mrad divergence.  The old gamma*Delta_theta term gave a one-box model sum of about 24.6 and the auto policy demanded order 1e5 boxes.  The calibrated angular term must return 4 to 8 boxes at the 1e-3 tolerance.
+    Bunch bunch;
+    bunch.resize(256);
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        // Interleaved deterministic spread: gamma over the 1-99% |p| interval
+        // (linspace by p mod 16) and an angular ring with a 50 mrad tilt step
+        // (p / 16) and even azimuth, so both beam-frame axes carry spread.
+        double const t = static_cast<double>(p) / 255.0;
+        double const gammaP = 471.0 + (509.56 - 471.04) * t;
+        double const u = std::sqrt(gammaP * gammaP - 1.0);
+        double const theta = 1.28 * 50.0e-3;
+        double const phi
+            = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    ASSERT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    EXPECT_GE(binning.count, 4u) << binning.count;
+    EXPECT_LE(binning.count, 8u) << binning.count;
+    EXPECT_LE(binning.modelError, 1e-3);
+    EXPECT_FALSE(binning.singleVelocityFallback);
+}
+
+TEST(VelocityBins, NarrowSyntheticBunchLandsAtEight)
+{
+    // The W37 'narrow' bunch: gamma 500, negligible energy spread, 50 mrad divergence.  The measured binning error reaches 1e-3 at 8 boxes (4.1e-4 at 8, 1.2e-3 at 4; docs/measurements/ velocity_bin_angular_calibration.csv).  Auto must select 8.
+    Bunch bunch;
+    bunch.resize(256);
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        // The W37 "narrow" bunch: gamma 500, negligible energy spread, 50 mrad
+        // divergence.  Interleaved 50/64 mrad tilt ring with even azimuth.
+        double const u = std::sqrt(500.0 * 500.0 - 1.0);
+        double const theta
+            = 1.28 * 50.0e-3 * (1.0 + 0.25 * (p / 16 % 2));
+        double const phi
+            = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_EQ(binning.count, 8u);
+    EXPECT_LE(binning.modelError, 1e-3);
+}
+
+TEST(VelocityBins, WideSyntheticBunchLandsAtSixteen)
+{
+    // The W37 "wide" bunch: gamma 500 with sigma_g/gamma 0.15 (1.65 sigma
+    // range) and 150 mrad divergence (1.28 sigma).  Interleaved tilt
+    // (p / 16) and gamma (p mod 16) so both beam-frame axes carry spread.
+    // Measured: the binning error reaches 1e-3 at 32 boxes (7.8e-4 at 32,
+    // 1.6e-3 at 16; docs/measurements/velocity_bin_angular_calibration.csv).
+    // The auto policy must land inside 32-64 boxes, not above the 256 cap.
+    Bunch bunch;
+    bunch.resize(256);
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        double const t = static_cast<double>(p % 16) / 15.0;
+        double const gammaP = 500.0 * (1.0 + 0.15 * 1.65 * (2.0 * t - 1.0));
+        double const u = std::sqrt(gammaP * gammaP - 1.0);
+        double const theta
+            = 1.28 * 150.0e-3 * (1.0 + 0.25 * ((p / 16) % 2));
+        double const phi
+            = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_GE(binning.count, 32u) << binning.count;
+    EXPECT_LE(binning.count, 64u) << binning.count;
+    EXPECT_LE(binning.modelError, 1e-3);
+}
+
+TEST(VelocityBins, CapFailureNamesTheRequiredCount)
+{
+    // An extreme angular spread (gamma 2000, 1 radian constant divergence)
+    // drives the calibrated model error above the 1e-3 tolerance up to the
+    // 256-box cap.  The auto policy must fail with the required count and
+    // the separate cap error, never silently under-binning.
+    Bunch bunch;
+    bunch.resize(256);
+    double const u = std::sqrt(2000.0 * 2000.0 - 1.0);
+    double const div = 1.0;
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
     try
     {
-        picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
-        FAIL() << "expected the explicit 2-box cap to throw";
+        picBunch::deriveVelocityBinning(bunch, 1e-3);
+        FAIL() << "expected the 1 radian bunch to exceed the cap at 1e-3";
     }
     catch(std::runtime_error const& e)
     {
-        EXPECT_NE(std::string(e.what()).find("requires at least"), std::string::npos)
-            << e.what();
+        std::string const message = e.what();
+        EXPECT_NE(message.find("requires at least"), std::string::npos) << message;
+        // The required count is printed as a number; the cap error follows it.
+        EXPECT_NE(message.find("at the 256-box cap: "), std::string::npos) << message;
     }
 }
 
-TEST(VelocityBins, BroadDistributionDoesNotTakeTheFallback)
-{    // A 5% energy spread splits within the default cap and keeps the binned
-    // path; it is not essentially single-velocity.
-    Bunch const spread = axisBunch(gammaLinspace(8.0, 12.0, 64));
-    VelocityBinning const autoBins = picBunch::deriveVelocityBinning(spread, 1e-3);
-    EXPECT_GT(autoBins.count, 1u);
-    EXPECT_FALSE(autoBins.singleVelocityFallback);
-    EXPECT_LE(autoBins.modelError, 1e-3);
-
-    // A 5 degree angular spread is far outside the angular criterion.  A
-    // non-default cap is authoritative, so the run still fails with the
-    // required count instead of silently collapsing to one box.
-    Bunch const angular = divergentBunch(10.0, 5.0 * std::acos(-1.0) / 180.0, 64);
-    VelocityBinningOptions policy;
-    policy.maxBins = 2;
-    try
+namespace
+{
+    //! Mirror the calibrated real bunch (particles_000000.bp5 species 'b'):
+    //! gamma ~490, 0.78-degree (0.0136 rad) transverse divergence, ~1.7%
+    //! relative momentum spread, 256 sources on a lattice.  The binning model
+    //! is calibrated on this geometry; the auto policy must return a small
+    //! power-of-two count (the model meets the tolerance at B=2), not an
+    //! extreme count, and the model error must shrink with the box count.
+    Bunch realBunchLike()
     {
-        picBunch::deriveVelocityBinning(angular, 1e-3, policy);
-        FAIL() << "expected the broad angular bunch to throw above a 2-box cap";
+        Bunch bunch;
+        bunch.resize(256);
+        double const u = std::sqrt(490.0 * 490.0 - 1.0);
+        double const div = 0.0136; // ~0.78 degrees
+        for(std::size_t p = 0; p < 256; ++p)
+        {
+            double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+            double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+            // a small relative energy spread (~1.7%) across the sources
+            double const g = 490.0 * (1.0 + 0.017 * (static_cast<double>(p % 5) / 4.0 - 0.5));
+            double const gu = std::sqrt(g * g - 1.0);
+            bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+            bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+            bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+            bunch.ux[p] = gu * std::sin(theta) * std::cos(phi);
+            bunch.uy[p] = gu * std::sin(theta) * std::sin(phi);
+            bunch.uz[p] = gu * std::cos(theta);
+            bunch.weight[p] = 1.0;
+            bunch.charge[p] = kElectronCharge;
+        }
+        return bunch;
     }
-    catch(std::runtime_error const& e)
+} // namespace
+
+TEST(VelocityBins, RealBunchAutoReturnsASmallCount)
+{
+    Bunch const bunch = realBunchLike();
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    // The auto policy picks a small power-of-two count, not an extreme one.
+    EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    EXPECT_GE(binning.count, 1u);
+    EXPECT_LE(binning.count, 32u);
+    // The selected count's model error meets the tolerance.
+    EXPECT_LE(binning.modelError, 1e-3 + 1e-15);
+}
+
+TEST(VelocityBins, RealBunchOneBoxHasFiniteModelError)
+{
+    // The one-box estimate for the real-bunch-like geometry must be finite and
+    // positive (a genuine spread), and the 16-box estimate must be lower than
+    // the one-box estimate: refining the boxes reduces the model error.  This
+    // is the calibration anchor -- the 16-box model error is the value the
+    // auto policy compares against the tolerance.
+    Bunch const bunch = realBunchLike();
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    VelocityBinning const b1 = picBunch::deriveVelocityBinning(bunch, 1e-3, one);
+    VelocityBinningOptions sixteen;
+    sixteen.mode = VelocityBinningOptions::Mode::Explicit;
+    sixteen.explicitBins = 16;
+    VelocityBinning const b16 = picBunch::deriveVelocityBinning(bunch, 1e-3, sixteen);
+    EXPECT_GT(b1.modelSum, 0.0);
+    EXPECT_TRUE(std::isfinite(b1.modelSum));
+    EXPECT_LT(b16.modelSum, b1.modelSum);
+}
+
+TEST(VelocityBins, InBunchAutoReturnsASmallCountWhenToleranceIsMet)
+{
+    // The synthetic real-bunch-like geometry (gamma 490, 0.78 deg divergence,
+    // 1.7% energy spread, 256 sources) has a SMALL per-particle gamma
+    // deviation (the sources share a near-single gamma), so its in-bunch model
+    // error reaches the tolerance at a count well below the cap.  The auto
+    // policy (inBunchCriterion on) must return that small count and NOT the
+    // cap (256 field solves is not acceptable in production).  The far-field
+    // criterion (flag off) lands at a smaller count, confirming the in-bunch
+    // criterion is what escalates it.
+    Bunch const bunch = realBunchLike();
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Auto;
+    policy.inBunchCriterion = true;
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    EXPECT_FALSE(binning.saturated);
+    // A power of two, below the cap (the tolerance is met well before 256).
+    EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    EXPECT_GT(binning.count, 1u);
+    EXPECT_LT(binning.count, picBunch::kDefaultMaxVelocityBins);
+    // The returned count meets the tolerance.
+    EXPECT_LE(binning.modelError, 1e-3 + 1e-15);
+    // The in-bunch criterion escalates above the far-field count.
+    VelocityBinningOptions farPolicy;
+    farPolicy.mode = VelocityBinningOptions::Mode::Auto;
+    VelocityBinning const farBinning = picBunch::deriveVelocityBinning(bunch, 1e-3, farPolicy);
+    EXPECT_LT(farBinning.count, binning.count);
+}
+
+TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
+{
+    // A high-gamma bunch with a GENUINE per-particle gamma spread (the real
+    // bunch has maxDelta_gamma/gamma ~ 1.3e-1) has an in-bunch model error
+    // that saturates above the tolerance: the per-particle gamma-deviation
+    // energy term (2*delta_gamma/gamma) does not shrink below ~2*sigma_g/gamma
+    // as the boxes refine, and the gamma-amplified angular term keeps it above
+    // 1e-3.  The auto policy must therefore return the SATURATION count
+    // (smallest count after which the error no longer improves by at least
+    // kSaturationImprovement per doubling), NOT the cap (256 field solves).
+    // This is the arbiter result for the real bunch: the tolerance is
+    // unreachable and the error saturates, so the policy reports the achieved
+    // accuracy instead of returning 256.
+    Bunch bunch;
+    bunch.resize(256);
+    double const div = 0.0136;
+    for(std::size_t p = 0; p < 256; ++p)
     {
-        EXPECT_NE(std::string(e.what()).find("requires at least"), std::string::npos)
-            << e.what();
+        double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+        // A genuine gamma spread: gamma varies over ~12% (like the real bunch,
+        // maxDelta_gamma/gamma ~ 0.13), so the per-particle gamma-deviation
+        // energy term does not shrink to the tolerance as the boxes refine.
+        // Signed arithmetic: p is a std::size_t, so (p % 11) - 5 would
+        // underflow for p % 11 < 5; cast to int first.
+        double const frac = static_cast<double>(static_cast<int>(p % 11u) - 5) / 5.0;
+        double const g = 490.0 * (1.0 + 0.06 * frac);
+        double const gu = std::sqrt(g * g - 1.0);
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = gu * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = gu * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = gu * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    if(std::getenv("DIAG256") != nullptr)
+    {
+        double umax = 0.0;
+        for(std::size_t p = 0; p < 256; ++p)
+        {
+            double um = std::sqrt(bunch.ux[p] * bunch.ux[p] + bunch.uy[p] * bunch.uy[p]
+                                  + bunch.uz[p] * bunch.uz[p]);
+            umax = std::max(umax, um);
+        }
+        std::fprintf(stderr, "DIAG256 umax=%.4e p0=(%.4e,%.4e,%.4e)\n",
+                     umax, bunch.ux[0], bunch.uy[0], bunch.uz[0]);
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Auto;
+    policy.inBunchCriterion = true;
+    // The tolerance is 1e-5, stricter than the in-bunch error at every count
+    // (the in-bunch peak-normalised error of a high-gamma beam saturates above
+    // the tolerance and never reaches 1e-5, even at 256 boxes).  The error
+    // keeps halving, so it still improves by at least half per doubling up to
+    // the in-bunch auto ceiling: the policy must return that ceiling (NOT the
+    // 256 cap) and flag it as a cost cap.
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-5, policy);
+    EXPECT_TRUE(binning.derived);
+    // The in-bunch error saturates above the tolerance for this genuine
+    // gamma-spread bunch.
+    EXPECT_TRUE(binning.saturated);
+    // The returned count is the practical cost ceiling, NOT the 256 cap.
+    EXPECT_EQ(binning.count, picBunch::kInBunchAutoMaxVelocityBins);
+    EXPECT_LT(binning.count, picBunch::kDefaultMaxVelocityBins);
+    EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    // The count was capped for cost (the error was still improving).
+    EXPECT_TRUE(binning.practicalCapApplied);
+    // The achieved accuracy is reported, and it is above the tolerance (the
+    // error saturates above it, it does not reach 1e-5).  The reported
+    // accuracy is exactly the model error at the returned (capped) count, and
+    // saturationPrevError is the model error at the count before it -- these
+    // are the numbers printed to the user.
+    EXPECT_GT(binning.saturationError, 1e-5);
+    EXPECT_TRUE(std::isfinite(binning.saturationError));
+    EXPECT_GT(binning.saturationPrevError, binning.saturationError);
+    EXPECT_DOUBLE_EQ(binning.saturationError, binning.modelError);
+    VelocityBinningOptions prev;
+    prev.mode = VelocityBinningOptions::Mode::Explicit;
+    prev.explicitBins = binning.count / 2u;
+    prev.inBunchCriterion = true;
+    VelocityBinning const bPrev = picBunch::deriveVelocityBinning(bunch, 1e-5, prev);
+    EXPECT_DOUBLE_EQ(binning.saturationPrevError, bPrev.modelError);
+    // The returned count's error must be lower than the one-box error
+    // (refining reduced it).
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    one.inBunchCriterion = true;
+    VelocityBinning const b1 = picBunch::deriveVelocityBinning(bunch, 1e-3, one);
+    EXPECT_LT(binning.modelError, b1.modelError);
+}
+
+TEST(VelocityBins, InBunchAutoNeverReturnsTheCapWhenErrorKeepsDeclining)
+{
+    // Drives the in-bunch model error to keep halving up to the largest count
+    // without meeting the tolerance: a pure-angular bunch (uniform gamma, no
+    // energy spread, so the error is the angular term only and halves at every
+    // doubling) with a tolerance so tight that no count up to the ceiling
+    // reaches it.  This is the exact path the reviewer flagged: the error is
+    // still improving at the largest tested count, so the policy must return
+    // the practical cap (16), NOT the 256 cap.  realBunchLike() has an energy
+    // spread (the error saturates); this one removes it so the error keeps
+    // halving.
+    Bunch bunch;
+    bunch.resize(256);
+    double const u = std::sqrt(490.0 * 490.0 - 1.0); // uniform gamma=490: no energy spread
+    double const div = 0.0136;
+    for(std::size_t p = 0; p < 256; ++p)
+    {
+        double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+        double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+        bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+        bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+        bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+        bunch.ux[p] = u * std::sin(theta) * std::cos(phi);
+        bunch.uy[p] = u * std::sin(theta) * std::sin(phi);
+        bunch.uz[p] = u * std::cos(theta);
+        bunch.weight[p] = 1.0;
+        bunch.charge[p] = kElectronCharge;
+    }
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Auto;
+    policy.inBunchCriterion = true;
+    // 1e-15 is far below the in-bunch model error at every count up to the
+    // ceiling (the pure-angular error halves per doubling but is still far
+    // above 1e-15 at 16 boxes), so no count meets the tolerance: the policy
+    // runs to the ceiling and must cap there.
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-15, policy);
+    EXPECT_TRUE(binning.derived);
+    // The returned count is the practical cap (16), NOT the 256 cap, even
+    // though the error is still halving at the largest tested count.
+    EXPECT_EQ(binning.count, picBunch::kInBunchAutoMaxVelocityBins);
+    EXPECT_EQ(binning.count, 16u);
+    EXPECT_LT(binning.count, picBunch::kDefaultMaxVelocityBins);
+    EXPECT_TRUE(binning.practicalCapApplied);
+    EXPECT_TRUE(binning.saturated);
+    // Sanity: the error is still improving at the ceiling (the next doubling
+    // halves it, an improvement of at least kSaturationImprovement), so the
+    // policy had no saturation point to stop at -- it capped at 16.  This is
+    // what distinguishes the "keeps declining" path from the saturation
+    // plateau: at 16 the error is still above the tolerance AND still halving.
+    VelocityBinningOptions cap;
+    cap.mode = VelocityBinningOptions::Mode::Explicit;
+    cap.explicitBins = 16u;
+    cap.inBunchCriterion = true;
+    VelocityBinning const b16 = picBunch::deriveVelocityBinning(bunch, 1e-15, cap);
+    VelocityBinningOptions next;
+    next.mode = VelocityBinningOptions::Mode::Explicit;
+    next.explicitBins = 32u;
+    next.inBunchCriterion = true;
+    VelocityBinning const b32 = picBunch::deriveVelocityBinning(bunch, 1e-15, next);
+    // The error at 32 is at most half the error at 16 (still halving), so the
+    // policy had no saturation point to stop at -- it capped at 16.
+    EXPECT_LE(b32.modelError, picBunch::kSaturationImprovement * b16.modelError + 1e-30);
+    // And the error at 16 is still far above the tolerance (not met).
+    EXPECT_GT(b16.modelError, 1e-15);
+}
+
+TEST(VelocityBins, InBunchAutoCapIsPinned)
+{
+    // Pins the practical cap value so raising it (e.g. 16 -> 32) fails here.
+    // The cap is a documented cost trade-off (16 field solves); a silent change
+    // to it would alter the auto count for every high-gamma bunch and must be
+    // an explicit, reviewed change.
+    EXPECT_EQ(picBunch::kInBunchAutoMaxVelocityBins, 16u);
+    EXPECT_LT(picBunch::kInBunchAutoMaxVelocityBins, picBunch::kDefaultMaxVelocityBins);
+    EXPECT_EQ((picBunch::kInBunchAutoMaxVelocityBins
+               & (picBunch::kInBunchAutoMaxVelocityBins - 1u)),
+              0u); // power of two
+}
+
+TEST(VelocityBins, InBunchCriterionByErrorShrinksWithBoxes)
+{
+    // The in-bunch peak-normalised By error (the transverse B component that
+    // the earlier measurement found 88-99 percent wrong with one bin) must
+    // shrink as the box count increases, so a future change cannot silently
+    // drop the component from the criterion.  The gamma-amplified angular
+    // model is a monotone lower bound on the in-bunch By error.
+    Bunch const bunch = realBunchLike();
+    double previous = 0.0;
+    bool first = true;
+    for(std::size_t B : {1u, 4u, 16u, 64u})
+    {
+        VelocityBinningOptions policy;
+        policy.mode = VelocityBinningOptions::Mode::Explicit;
+        policy.explicitBins = B;
+        policy.inBunchCriterion = true;
+        VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+        EXPECT_EQ(binning.count, B);
+        EXPECT_GT(binning.modelSum, 0.0);
+        EXPECT_TRUE(std::isfinite(binning.modelSum));
+        if(!first)
+        {
+            EXPECT_LT(binning.modelSum, previous);
+        }
+        previous = binning.modelSum;
+        first = false;
     }
 }

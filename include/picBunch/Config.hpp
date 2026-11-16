@@ -70,9 +70,17 @@ namespace picBunch
             bool float64 = false;
             //! Field-absorber kind of the deck that restarts the checkpoint:
             //! ``"none"`` (default), ``"exponential"`` or ``"pml"``.  Only
-            //! ``"pml"`` changes the emitted checkpoint: it writes the eight
+            //! ``"pml"`` changes the emitted checkpoint: it writes the twelve
             //! convolutional-PML slab records the deck's restart loader needs.
             std::string absorber = "none";
+            //! PML thickness in cells per face, in the PIConGPU
+            //! ``NUM_CELLS`` order (xneg, xpos, yneg, ypos, zneg, zpos).
+            //! Only used with ``absorber = "pml"``.  The value must match the
+            //! restarting deck's compiled ``fieldAbsorber.param``; it sets the
+            //! thickness of the rim chunk written for each PML record.  An
+            //! explicit value larger than the face-axis extent is rejected;
+            //! the default is clamped for a grid smaller than 12.
+            std::array<std::size_t, 6> pmlThickness{12, 12, 12, 12, 12, 12};
             //! Ordered input species names read from ``--input``.  The scalar
             //! TOML form (a single string) parses to a one-entry list.
             std::vector<std::string> species;

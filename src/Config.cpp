@@ -5,6 +5,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -110,6 +111,36 @@ namespace picBunch
                     fail(key, "every entry must be positive");
                 result[a] = static_cast<std::size_t>(value);
             }
+            return result;
+        }
+
+        //! PML thickness per face (PIConGPU NUM_CELLS order).
+        //!
+        //! Accepts one positive integer (applied to every face) or an array
+        //! of six positive integers ordered xneg, xpos, yneg, ypos, zneg,
+        //! zpos.
+        std::array<std::size_t, 6> asPmlThickness(toml::node const& node, std::string const& key)
+        {
+            std::array<std::size_t, 6> result{};
+            auto put = [&](std::int64_t value, std::size_t face) {
+                if(value <= 0)
+                    fail(key, "every thickness must be a positive integer");
+                result[face] = static_cast<std::size_t>(value);
+            };
+            if(auto const scalar = node.value<std::int64_t>())
+            {
+                for(std::size_t face = 0; face < result.size(); ++face)
+                    put(*scalar, face);
+                return result;
+            }
+            auto const* array = node.as_array();
+            if(array == nullptr || array->size() != result.size())
+                fail(
+                    key,
+                    "expected a positive integer or an array of six positive "
+                    "integers (xneg, xpos, yneg, ypos, zneg, zpos)");
+            for(std::size_t face = 0; face < result.size(); ++face)
+                put(asInteger((*array)[face], key), face);
             return result;
         }
 
@@ -281,7 +312,36 @@ namespace picBunch
                     "--fieldAbsorber pml restart deck requires");
         }
 
+        bool const pmlThicknessGiven = picongpu.get("pml_thickness") != nullptr;
+        if(auto const* node = picongpu.get("pml_thickness"))
+            config.picongpu.pmlThickness
+                = asPmlThickness(*node, "picongpu.pml_thickness");
+
         config.domain.cells = asCells(require(domain, "cells"), "domain.cells");
+        // An explicit rim thickness must fit the corresponding axis.  The
+        // default 12 is not checked here: it keeps the historical clamp for
+        // grids smaller than 12, so existing configurations still load.
+        if(pmlThicknessGiven)
+        {
+            std::array<std::size_t, 3> const axisExtent{
+                config.domain.cells[0],
+                config.domain.cells[1],
+                config.domain.cells[2]};
+            char const* const faceNames[6]
+                = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+            char const* const axisNames[3] = {"x", "y", "z"};
+            for(std::size_t face = 0; face < 6u; ++face)
+            {
+                std::size_t const axis = face / 2u;
+                if(config.picongpu.pmlThickness[face] > axisExtent[axis])
+                    fail(
+                        "picongpu.pml_thickness",
+                        std::string{"face "} + faceNames[face] + " = "
+                            + std::to_string(config.picongpu.pmlThickness[face])
+                            + " exceeds the " + axisNames[axis]
+                            + " axis extent " + std::to_string(axisExtent[axis]));
+            }
+        }
         // The physical cell size may live in [picongpu] (new schema) or in
         // [domain] (legacy).  Both are the same deck value; if both are given
         // they must agree, otherwise the unit derivation and the geometry
@@ -591,6 +651,7 @@ namespace picBunch
              "picongpu.step",
              "picongpu.precision",
              "picongpu.absorber",
+             "picongpu.pml_thickness",
              "picongpu.species",
              "picongpu.output_species",
              "picongpu.empty_species"},

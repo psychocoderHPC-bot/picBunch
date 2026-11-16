@@ -73,6 +73,13 @@ namespace picBunch::pbfast
         kQuadratureOrderCap <= DeviceParams::kMaxOrder,
         "near-field command order exceeds the device xi/wi table capacity");
 
+    //! Select the backend device index used by the fast near-field context.
+    //!
+    //! Must be called before the first device evaluation so the context is
+    //! created on the same device as the main pipeline.  A process uses one
+    //! device, so the value is deliberately process-global.
+    void setFastNearDeviceIndex(unsigned deviceIndex);
+
     //! True when a device for the compiled backend is present and the kernel can run.
     bool fastNearDeviceAvailable();
 

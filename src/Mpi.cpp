@@ -32,6 +32,37 @@ namespace picBunch
 #endif
         }
 
+        //! Cached local rank/size of the MPI shared-memory domain.
+        void sharedDomainInfo(int& localRank, int& localSize)
+        {
+            static int cachedRank = -1;
+            static int cachedSize = 1;
+            if(cachedRank < 0)
+            {
+#if defined(PICBUNCH_ENABLE_MPI)
+                if(initialized())
+                {
+                    MPI_Comm shared = MPI_COMM_NULL;
+                    if(MPI_Comm_split_type(
+                           MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared)
+                       == MPI_SUCCESS)
+                    {
+                        MPI_Comm_rank(shared, &cachedRank);
+                        MPI_Comm_size(shared, &cachedSize);
+                        MPI_Comm_free(&shared);
+                    }
+                }
+#endif
+                if(cachedRank < 0)
+                {
+                    cachedRank = mpiRank();
+                    cachedSize = mpiSize();
+                }
+            }
+            localRank = cachedRank;
+            localSize = cachedSize;
+        }
+
         //! Version of the compute-options wire layout and fingerprint.
         constexpr std::uint64_t kComputeOptionsWireVersion = 4u;
 
@@ -505,6 +536,89 @@ namespace picBunch
         return 1;
     }
 
+    int mpiLocalRank()
+    {
+        int localRank = 0;
+        int localSize = 1;
+        sharedDomainInfo(localRank, localSize);
+        return localRank;
+    }
+
+    int mpiLocalSize()
+    {
+        int localRank = 0;
+        int localSize = 1;
+        sharedDomainInfo(localRank, localSize);
+        return localSize;
+    }
+
+    std::vector<RankDeviceMapping> mpiGatherDeviceMappings(RankDeviceMapping const& local)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            int const count = mpiSize();
+            constexpr int nameLength = 128;
+            constexpr int variableLength = 32;
+            constexpr int valueLength = 256;
+            std::uint64_t mine[7] = {
+                static_cast<std::uint64_t>(local.worldRank),
+                static_cast<std::uint64_t>(local.localRank),
+                static_cast<std::uint64_t>(local.deviceIndex),
+                static_cast<std::uint64_t>(local.visibleDeviceCount),
+                static_cast<std::uint64_t>(local.ranksPerDevice),
+                static_cast<std::uint64_t>(local.deviceCapacityBytes),
+                local.overrideRespected ? 1u : 0u};
+            std::vector<std::uint64_t> gathered(7u * static_cast<std::size_t>(count));
+            MPI_Allgather(mine, 7, MPI_UINT64_T, gathered.data(), 7, MPI_UINT64_T, MPI_COMM_WORLD);
+
+            auto gatherString = [&](std::string const& text, int length) {
+                std::vector<char> mineText(static_cast<std::size_t>(length), '\0');
+                std::snprintf(mineText.data(), mineText.size(), "%s", text.c_str());
+                std::vector<char> allText(static_cast<std::size_t>(length * count), '\0');
+                MPI_Allgather(
+                    mineText.data(),
+                    length,
+                    MPI_CHAR,
+                    allText.data(),
+                    length,
+                    MPI_CHAR,
+                    MPI_COMM_WORLD);
+                std::vector<std::string> result(static_cast<std::size_t>(count));
+                for(int rank = 0; rank < count; ++rank)
+                    result[static_cast<std::size_t>(rank)] = std::string{
+                        allText.data() + static_cast<std::size_t>(rank * length)};
+                return result;
+            };
+            std::vector<std::string> const names = gatherString(local.deviceName, nameLength);
+            std::vector<std::string> const variables
+                = gatherString(local.overrideVariable, variableLength);
+            std::vector<std::string> const values
+                = gatherString(local.overrideValue, valueLength);
+
+            std::vector<RankDeviceMapping> result(static_cast<std::size_t>(count));
+            for(int rank = 0; rank < count; ++rank)
+            {
+                std::size_t const i = static_cast<std::size_t>(rank);
+                std::uint64_t const* wire = gathered.data() + i * 7u;
+                RankDeviceMapping& mapping = result[i];
+                mapping.worldRank = static_cast<int>(wire[0]);
+                mapping.localRank = static_cast<int>(wire[1]);
+                mapping.deviceIndex = static_cast<int>(wire[2]);
+                mapping.visibleDeviceCount = static_cast<int>(wire[3]);
+                mapping.ranksPerDevice = static_cast<int>(wire[4]);
+                mapping.deviceCapacityBytes = static_cast<std::size_t>(wire[5]);
+                mapping.overrideRespected = wire[6] != 0u;
+                mapping.deviceName = names[i];
+                mapping.overrideVariable = variables[i];
+                mapping.overrideValue = values[i];
+            }
+            return result;
+        }
+#endif
+        return {local};
+    }
+
     void mpiBarrier()
     {
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -551,11 +665,14 @@ namespace picBunch
 #if defined(PICBUNCH_ENABLE_MPI)
         if(!initialized() || mpiSize() <= 1)
             return;
-        std::uint64_t meta[6] = {
+        std::uint64_t meta[9] = {
             field.grid.n[0],
             field.grid.n[1],
             field.grid.n[2],
             field.grid.fftPadding,
+            field.grid.depositHalo[0],
+            field.grid.depositHalo[1],
+            field.grid.depositHalo[2],
             0,
             0};
         double spacing[3] = {
@@ -563,7 +680,7 @@ namespace picBunch
             field.grid.spacing[1],
             field.grid.spacing[2]};
         double origin[3] = {field.grid.origin[0], field.grid.origin[1], field.grid.origin[2]};
-        MPI_Bcast(meta, 6, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(meta, 9, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(spacing, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         MPI_Bcast(origin, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         field.grid.n = {
@@ -571,6 +688,10 @@ namespace picBunch
             static_cast<std::size_t>(meta[1]),
             static_cast<std::size_t>(meta[2])};
         field.grid.fftPadding = static_cast<unsigned>(meta[3]);
+        field.grid.depositHalo = {
+            static_cast<std::size_t>(meta[4]),
+            static_cast<std::size_t>(meta[5]),
+            static_cast<std::size_t>(meta[6])};
         field.grid.spacing = {spacing[0], spacing[1], spacing[2]};
         field.grid.origin = {origin[0], origin[1], origin[2]};
         for(auto& component : field.data)

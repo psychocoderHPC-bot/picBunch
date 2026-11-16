@@ -214,12 +214,14 @@ picBunch --input bunch.h5 --species electrons --output field.h5 \
 
 `--fft-padding <N>` overrides the FFT zero-padding factor selected by
 `--tolerance`. The default, `0`, keeps the tolerance policy (`2` at or above the
-padding-2 bound, `3` below it) and reproduces earlier output exactly. `1` disables
-padding and is a diagnostic control: the FFT box equals the output box, so source
-images wrap and leak into the field. Values above `3` only add work; the CLI
-accepts `0` to `8` and rejects larger values. The zero-padded grid is still
-subject to the per-run node cap, so an explicit `--grid` that fits with padding
-`1` can be rejected with padding `2` or `3`.
+padding-2 bound, `3` below it) and reproduces earlier output exactly. The
+deposit sets a lower bound: every axis needs at least `2*floor(shapeSupport)`
+padding nodes between the physical grid and the padded box (`2` for the default
+TSC shape, `4` for PQS), so `1` is rejected and the message names the
+axis, the required padding and the padding actually available. Values above `3`
+only add work; the CLI accepts `0` to `8` and rejects larger values. The
+zero-padded grid is still subject to the per-run node cap, so a large explicit
+`--grid` can be rejected at padding `2` or `3`.
 
 An explicit `--cell-size` always wins over the mesh-derived value, and the run fails with a
 clear message when neither source exists. Nothing is assumed or rescaled. The physical cell
@@ -380,20 +382,29 @@ subtraction cancels bin for bin. Nodes inside the shell therefore keep the exact
 per-particle-velocity field and only the outside-shell field carries the binning error.
 
 The error model is
-`modelError = C * Sum_b (q_b/Q) * (gamma_b * Delta_theta_b + (2/gamma_b) * Delta_gamma_b/gamma_b)`,
+`modelError = C * Sum_b (q_b/Q) * (C_ang * Delta_theta_b^2 + (2/gamma_b) * Delta_gamma_b/gamma_b)`,
 where `q_b/Q` is the charge fraction of box `b`, `gamma_b` the largest gamma in the box,
-`Delta_theta_b` the largest angle to the box representative (the absolute-charge-weighted mean momentum of the box), and `Delta_gamma_b` the gamma range. The angular term
-`gamma_b * Delta_theta_b` and `C = 1` are unchanged. The single node-bounded energy term
+`Delta_theta_b` the largest angle to the box representative (the absolute-charge-weighted mean momentum of the box), `Delta_gamma_b` the gamma range, `C = 1` (CLI
+`--bin-model-constant`), and `C_ang = 1` (`kAngularModelConstant`). The field is a
+superposition over all particles, so the tilt errors of a box's members partially cancel
+at a node instead of adding up to the worst member; the measured binning error scales
+with the box angular width squared, not with `gamma * width`. The angular term
+`C_ang * Delta_theta_b^2` is calibrated on the W37 campaign (three synthetic bunches,
+gamma 500, 64 sources, 16^3 grid, 1 um cells; angular sigma 50/50/150 mrad, energy
+sigma 0/3.9%/15%, at 1-16 boxes): `C_ang = 1` bounds the measured binning error with a
+safety factor of 3 (largest measured/model ratio 0.34). The former `gamma * Delta_theta`
+worst case over-predicted the same bunch by 40x, which is what drove the auto policy to
+order 1e5 boxes for a realistic high-gamma bunch. The single node-bounded energy term
 `(2/gamma_b) * Delta_gamma_b/gamma_b` replaces the former `Delta_gamma_b/gamma_b +
-delta_gamma_b` pair, which charged one node effect twice.
+delta_gamma_b` pair, which charged one node effect twice; it is `3.4x` conservative on
+the archived 5% energy-spread points (gamma 10, 16 and 64 boxes).
 
-The energy term is calibrated on the archived 5% energy-spread points only (gamma 10,
-16 and 64 boxes). At those points it gives `3.9e-3` and `9.2e-4` against measured
-`1.12e-3` and `2.72e-4`, a `3.4x` conservative over-prediction (down from `26.7x` and
-`25.9x`). `C = 1` remains an assumption for the angular term, not a reproduced fit. The
-model makes no accuracy claim beyond gamma 10, 5% energy spread and the measured 16-64
-box range, and it is not a tolerance guarantee. `--bin-model-constant` overrides it for
-diagnostics.
+The angular bound is validated for a charge-weighted angular sigma below about 0.3 rad
+and per-box angular width below about 0.26 rad, where the superposition cancellation is
+near-complete. Bunches outside that range (for example, the archived 5 degree point at
+gamma 10) can lose the cancellation; the auto policy then fails at the cap with the
+required count instead of silently under-binning. The model is an estimate, not a
+tolerance guarantee.
 
 `--velocity-bins N` requests a fixed count and `--velocity-bins 0` (the default) takes the
 smallest power of two whose estimate is at or below `--tolerance`, capped by
@@ -405,15 +416,15 @@ cap as separate numbers, for example
 One exception: under the default cap the auto policy uses one box for a bunch that is
 essentially single-velocity, meaning its charge-weighted relative `|u|` spread is at most
 `2%` and every particle lies within `50 mrad` (about 2.9 degrees) of the charge-weighted
-mean direction. That covers cold gamma-1101 beams with mrad-to-1-degree divergence, where
-the `gamma * Delta_theta` worst case asks for millions of boxes even though one velocity
-class is the physical model. The run prints one line naming the measured spread and
-divergence and reports the one-box `modelError`; that estimate can exceed `--tolerance`,
-and when it does the run proceeds with a warning rather than claiming the target is met
-(a genuinely monoenergetic beam, e.g. the operator's gamma-1101, 4.2 mrad case, has a
-one-box estimate of `1.33e+01` and still runs). A non-default `--max-velocity-bins`
-disables this fallback, so an explicit infeasible cap still exits non-zero with the
-message above.
+mean direction. That covers cold high-gamma beams with mrad-to-1-degree divergence, where
+one velocity class is the physical model. The threshold is justified by measurement: the
+W37 narrow calibration bunch (50 mrad divergence, five times the angular limit) measures
+a one-box binning error of 4.9e-4, five times below the 1e-3 tolerance, so a bunch at
+the limit carries a one-box error well below tolerance. The run prints one line naming
+the measured spread and divergence and reports the one-box `modelError`; that estimate
+can exceed `--tolerance`, and when it does the run proceeds with a warning rather than
+claiming the target is met. A non-default `--max-velocity-bins` disables this fallback,
+so an explicit infeasible cap still exits non-zero with the message above.
 The single-velocity case is detected within `1e-12` relative and returns one box, so its
 field is bitwise the unbinned field.
 
@@ -537,7 +548,7 @@ The per-term controls are:
 | term | controlled by | scope and recorded behaviour |
 | --- | --- | --- |
 | mesh / TSC deposit | `--tolerance` (padding), TSC order | `--tolerance` selects padding 2 at or above the measured padding-2 bound (`1e-12`) and padding 3 between that bound and the double-precision floor (`1e-14`); tighter targets exit non-zero. It does not change the interpolation order or deposit scheme. Near-source continuum error is sized by the near-quadrature row, not by this mesh term. |
-| velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | `C = 1` is assumed for the angular term. The energy term is `(2/gamma_b) * Delta_gamma_b/gamma_b`, calibrated on the archived 5% energy-spread points (gamma 10, 16-64 boxes); it is `3.4x` conservative there and claims nothing beyond that range. A 5 degree angular spread measures `0.421` at 16 and `0.295` at 64 and does not reach `1e-3`. This is not a tolerance guarantee. See `docs/measurements/velocity_bin_calibration.csv`. |
+| velocity binning | `--velocity-bins`, `--bin-model-constant`, `--max-velocity-bins` | The angular term is `C_ang * Delta_theta_b^2` with `C_ang = 1`, calibrated on the W37 campaign (gamma 500, 50-150 mrad divergence, 1-16 boxes; safety factor 3). The energy term is `(2/gamma_b) * Delta_gamma_b/gamma_b`, `3.4x` conservative on the archived 5% energy-spread points (gamma 10, 16-64 boxes). The angular bound is validated for per-box width below about 0.26 rad; beyond that the auto policy fails at the cap rather than under-binning. This is not a tolerance guarantee. See `docs/measurements/velocity_bin_calibration.csv` and `docs/measurements/velocity_bin_angular_calibration.csv`. |
 | near quadrature | `--tolerance`, `--near-shell none/fast/exact`, `--near-shell-radius`, `--near-shell-fast-order`, `--near-shell-oblique-order`, `--near-shell-exact-cells` (TOML `accuracy.near_shell_oblique_order`, `accuracy.near_shell_exact_cells`) | `--tolerance` sizes the smooth near-field remainder: each decade below the default `1e-3` raises the Gauss order by one, capped at 32 nodes per axis. At the default tolerance the remainder keeps the historical order-5 rule; the oblique ray integral keeps its `16x32x4` rule. The observer-containing TSC support cell uses the exact s-space moment evaluator by default, on host and device. That route is neutral to 9% cheaper than base on the CPU and costs 0-1% on the GPU on-node workload; the GPU spread 12-cell cloud pays up to 30% from warp divergence in the per-source branch. In-support L2 accuracy improves roughly twofold (static `1.80e-3 -> 5.74e-4`, axial gamma 10 E `9.35e-3 -> 3.14e-3`, B `3.55e-2 -> 2.35e-3`). `--near-shell-exact-cells 2` selects the full-support exact mode, the in-support accuracy reference; it costs `0.93-1.19x` base on the CPU, `1.0-1.04x` on the GPU on-node workload, and `0.90-2.17x` on the GPU spread cloud. It is also automatic at `--tolerance <= 1e-4`. A tile with gamma `>= 100` is always full exact. The independent gamma-100 oblique in-support reference (direct d-space ray quadrature, `128x256x10` with a `256x512x10` convergence check) agrees with the exact evaluator to `<=1e-3`; the two resolutions differ by `<=2.4e-5`. The `exact` mode still uses the Lorentz-contracted adaptive reference: about `1e-4` axial, `1e-3` oblique, about `2%` at the closest axial node. See `tests/data/near_distance_golden.csv` and `docs/measurements/field_error_energy_spread.csv`. |
 | far tail | multipole switch radius and exact-box margin | the asymptotic moving multipole fills the global domain outside the exact box: the exact Liénard monopole of the total charge at the mean velocity plus the rest-frame dipole/quadrupole evaluated at the Lorentz-stretched point and boosted back. It is exact for a single point source and in the principal dipole alignments; for an extended bunch it is the leading moving multipole beyond the measured switch radius, not a full Liénard sum. |
 | output precision | checkpoint `precision` | the field pipeline is float64; the default checkpoint stores float32 (`6e-8` fractional resolution) unless `precision = "float64"` is requested. |
@@ -679,6 +690,30 @@ source on every rank. Two stages are rank-parallel.
 * **Near shell by output tile.** The tile loop is partitioned by linear tile index. Each
   rank builds the near-source list and the local subtraction FFT for its own tiles, writes
   the correction only there, and one all-reduce sums the corrections.
+
+### Rank-to-device mapping
+
+Each rank selects its device at startup: it queries the visible device count of the
+compiled backend and takes `localRank % deviceCount`, where `localRank` is the MPI
+shared-memory rank and falls back to the world rank without MPI. Rank 0 logs the resolved
+mapping once, with the world rank, local rank, device index, device name, visible device
+count and capacity. The same mapping appears in the `run summary:` line, so a log alone
+records placement. Set `PICBUNCH_DEVICE_LOG=all` to print every rank's line as well.
+
+An explicit `CUDA_VISIBLE_DEVICES` (or `HIP_VISIBLE_DEVICES`) is respected: the backend
+filters the list before picBunch counts devices, every rank selects an index relative to
+that visible list, and the log states that the override was respected. A list with fewer
+entries than ranks therefore puts several ranks on each entry by design.
+
+When more than one rank lands on a device, picBunch prints a warning naming the ranks per
+device and the estimated requirement per rank against the per-rank capacity share. The
+estimate comes from the padded grid, the FFT layout (replicated or distributed), the
+precision, and the velocity-bin count; buffers are reused across bins, so the peak counts
+the largest bin, not bins times the full grid. If the estimate exceeds device capacity
+divided by ranks per device, the run refuses to start with a message naming the required
+size, the capacity, the ranks per device and the rank. Select fewer ranks per device or a
+larger device; an override that pins one device per process avoids the shared-device
+estimate.
 
 **MPI limitations.** The bunch is replicated, so particle memory does not fall with rank
 count. Component parallelism saturates at six ranks (one component per rank); beyond that
@@ -1056,7 +1091,9 @@ that the named species is present and never drops the others. `--picongpu-dt` se
 stored `dt`. The single `picongpu_idProvider` range covers the particles of every copied
 species (`nextId` is at least their total count). When the input checkpoint contains
 `Convolutional PML ...` records, the writer copies those records from the input instead of
-recomputing them. See [docs/picongpu-restart.md](docs/picongpu-restart.md).
+recomputing them; the copy keeps the full dataset extent and re-writes only the face rim
+chunk, so a sparse PIConGPU source stays sparse. See
+[docs/picongpu-restart.md](docs/picongpu-restart.md).
 
 ## Test status
 
@@ -1380,10 +1417,16 @@ table above covers the compute stages of the large-N sweep, not the write path.
   does not reproduce the small `B_y` residual of an angular spread; that case needs
   per-particle velocities. An auto request above the box cap exits with the needed count.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
-- **Padding required.** With `fftPadding = 1` the FFT box equals the output box and
-  source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
-  (single stationary source, 20^3 box, worst component Ey). The production policy never
-  selects 1.
+- **Deposit halo required.** The deposit keeps the TSC support of a boundary particle
+  in a halo between the physical grid `n` and the padded box `M = paddedSize()`; both
+  halos need `floor(shapeSupport)` nodes per side. `--fft-padding N` is an
+  oversampling factor, not a halo count, so `makeGrid` appends the deficit to
+  `Grid::depositHalo`: padding 1 gets `M = n + 2` for CIC/TSC instead of being
+  rejected. A hand-built grid with `M - n < 2` is still rejected before it deposits.
+  A TSC particle at `t = n - 0.4` on an unchecked padding-1 `16^3` box folded
+  **59.5%** of its unit weight onto the opposite side (nodes 0 and 1 instead of 16 and
+  17). The production policy still uses padding 2 or 3 for zero padding; padding 1
+  keeps the wrapped images and only adds the deposit halo.
 - **Zero fill only as a diagnostic.** Global output is filled beyond the exact box with the
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.

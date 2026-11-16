@@ -145,35 +145,50 @@ bin-free: nodes inside the shell carry the exact per-particle-velocity field,
 and only the outside-shell field carries the binning error.
 
 Error model.  Replacing a particle `u` by its box representative perturbs the
-field by a transverse tilt of the boosted pattern, of relative order
-`gamma * Delta_theta`, and an energy shift.  With `|q_b|` the absolute charge in
-box `b`, `Q` the total absolute charge, `gamma_b` the largest `gamma` in the
-box, `Delta_theta_b` the largest member angle against the representative (taken
-as `pi` when the representative is zero and any member is moving, so a
-counterstreaming box cannot hide its error), and `Delta_gamma_b` the `gamma`
-range of the box, the estimated relative error is
+field by a transverse tilt of the boosted pattern and an energy shift.  The
+field is a superposition over all particles, so the tilt errors of a box's
+members partially cancel at a node instead of adding up to the worst member:
+the measured binning error (binned field minus the per-particle-velocity
+continuum reference, `tools/velocity-bins/compare_velocity_bins.py`) scales
+with the box angular *width* squared, not with `gamma * width`.  With `|q_b|`
+the absolute charge in box `b`, `Q` the total absolute charge, `gamma_b` the
+largest `gamma` in the box, `Delta_theta_b` the largest member angle against
+the representative (taken as `pi` when the representative is zero and any
+member is moving, so a counterstreaming box cannot hide its error), and
+`Delta_gamma_b` the `gamma` range of the box, the estimated relative error is
 
-    modelError = C * Sum_b (|q_b| / Q) * (gamma_b * Delta_theta_b
+    modelError = C * Sum_b (|q_b| / Q) * (C_ang * Delta_theta_b^2
                                          + (2 / gamma_b) * Delta_gamma_b / gamma_b)
 
-Absolute charges keep opposite signs from cancelling a local error. The angular
-term and `C = 1` are unchanged from the original calibration. The single
-node-bounded energy term `(2/gamma_b) * Delta_gamma_b/gamma_b` replaces the
-former `Delta_gamma_b/gamma_b + delta_gamma_b` pair, which charged the same
-node effect twice and over-predicted the archived 5% energy-spread points by
-`26.7x` and `25.9x`.
+with `C = kDefaultVelocityModelConstant = 1` (CLI override
+`--bin-model-constant`) and `C_ang = kAngularModelConstant = 1`.  Absolute
+charges keep opposite signs from cancelling a local error.
 
-The energy term is calibrated on the archived energy-spread points only: gamma
-10, 5% energy spread, 16 and 64 boxes. It gives `3.9e-3` at 16 boxes and `9.2e-4`
-at 64 against measured `1.12e-3` and `2.72e-4`, a `3.4x` conservative
-over-prediction. It selected 64 boxes at `--tolerance 1e-3` instead of failing
-above the 256-box cap. The angular term is not refitted: `C = 1` reproduces the
-archived 5 degree point, and the 5 degree angular-spread case measures `0.421`
-at 16 and `0.295` at 64 and does not reach `1e-3`. No guarantee is made beyond
-gamma 10, 5% energy spread and the measured 16-64 box range. The stored points
-are in `docs/measurements/velocity_bin_calibration.csv`;
-`tools/velocity-bins/calibrate_velocity_bins.py` reproduces the record from the
-CSV.
+The angular term is calibrated on the W37 campaign: three synthetic bunches
+(gamma 500, 64 sources, 16^3 grid, 1 um cells; angular sigma 50 mrad, 50 mrad,
+and 150 mrad; energy sigma 0, 3.9%, 15%) at 1-16 boxes, measured against the
+indfield continuum reference.  `C_ang = 1` bounds the measured binning error
+with a safety factor of 3 (largest measured/model ratio 0.34).  The former
+`gamma * Delta_theta` worst case over-predicted the same bunch by 40x, which
+is what drove the auto policy to order 1e5 boxes for a realistic high-gamma
+bunch (the operator's gamma 471-510, 50 mrad bunch carried a one-box model sum
+of 24.6 under the old term but a measured binning error of about 6e-4).  The
+energy term is the node-bounded single term that replaces the former
+`Delta_gamma_b/gamma_b + delta_gamma_b` pair, which charged the same node
+effect twice and over-predicted the archived 5% energy-spread points by
+`26.7x` and `25.9x`; it gives `3.9e-3` at 16 boxes and `9.2e-4` at 64 against
+measured `1.12e-3` and `2.72e-4`, a `3.4x` conservative over-prediction.
+
+The angular bound is validated for a charge-weighted angular sigma below about
+0.3 rad and per-box angular width below about 0.26 rad, where the
+superposition cancellation is near-complete.  Bunches outside that range (for
+example, the archived 5 degree point at gamma 10, or a per-box width near the
+beam-frame range) can lose the cancellation; the auto policy then fails at the
+cap with the required count instead of silently under-binning.  The stored
+points are in `docs/measurements/velocity_bin_calibration.csv` (energy term)
+and `docs/measurements/velocity_bin_angular_calibration.csv` (angular term);
+`tools/velocity-bins/calibrate_velocity_bins.py` reproduces the energy-term
+record from the CSV.
 
 `--velocity-bins` runs a fixed count (calibration/diagnostics),
 `--bin-model-constant` overrides `C`, and `--max-velocity-bins` (default 256)
@@ -185,45 +200,63 @@ example
 
 One exception keeps cold, nearly monoenergetic beams usable. Under the default
 cap the auto policy uses one box when the bunch is essentially single-velocity:
-the charge-weighted relative spread of `|u|` is at most `2%` and every particle
-is within `50 mrad` of the charge-weighted mean direction (the same
-representative the one-box path uses). The `gamma * Delta_theta` worst case can
-ask for millions of boxes for such a beam even though one velocity class is the
-physical model. The run prints one line with the measured spread and divergence
-and reports the one-box `modelError`. That estimate may exceed `--tolerance`;
-when it does the run proceeds with a warning rather than claiming the target is
-met, because the binning model is conservative for a cold relativistic beam (the
-operator's gamma-1101, 4.2 mrad bunch has a one-box estimate of `1.33e+01` and
-still runs). An explicit `--velocity-bins N` always wins, and a non-default
-`--max-velocity-bins` disables the fallback so an explicit infeasible cap still
-fails with the message above. A broad distribution, including the 5% energy
-spread and 5 degree angular calibration cases, does not meet the criterion and
-keeps the historical split-or-fail behaviour.
+the charge-weighted relative spread of `|u|` is at most `2%`
+(`kSingleVelocityRelativeSpread`) and every particle is within `50 mrad`
+(`kSingleVelocityMaxAngle`) of the charge-weighted mean direction (the same
+representative the one-box path uses).  The threshold is justified by
+measurement, not assertion: the W37 narrow calibration bunch (50 mrad
+divergence, five times the angular limit) measures a one-box binning error of
+4.9e-4, five times below the 1e-3 tolerance; a bunch at the 50 mrad limit
+therefore carries a one-box error well below tolerance, which is the evidence
+that the threshold bounds the one-box error rather than asserting it.  The run
+prints one line with the measured spread and divergence and reports the one-box
+`modelError`.  That estimate may exceed `--tolerance`; when it does the run
+proceeds with a warning rather than claiming the target is met.  An explicit
+`--velocity-bins N` always wins, and a non-default `--max-velocity-bins`
+disables the fallback so an explicit infeasible cap still fails with the
+message above.  A broad distribution, including the 5% energy spread and 5
+degree angular calibration cases, does not meet the criterion and keeps the
+historical split-or-fail behaviour.
 
 ## Padding
 
-The free-space convolution needs zero padding. With `fftPadding = 1` the FFT
-box equals the output box, so source-observer lags beyond half the box wrap and
-add a spurious periodic image; the unit test reproduces this artefact. With
-`fftPadding >= 2` every lag fits inside the box and the FFT result equals the
-free-space discrete TSC sum (no images). `fftPadding = 1` is therefore a
-diagnostic/test option only, never a production choice.
+The deposit needs a source halo. A particle inside the physical node box
+`[0, n-1]` reaches `floor(shapeSupport)` nodes past either end (1 for CIC and
+TSC, 2 for PQS), and the negative and positive halo must stay disjoint. Every
+axis therefore needs at least `2*floor(shapeSupport)` halo nodes between the
+physical grid and the padded box: `M - n >= 2` for CIC/TSC and `M - n >= 4` for
+PQS. `makeGrid` and the shared deposit path enforce this and name the axis, the
+required halo nodes and the halo nodes actually available.
 
-The unit test now evaluates a direct, non-cyclic sum with its own TSC shape and
-its own Coulomb field at probe nodes where the periodic image is closest. The
-padded result matches that reference to better than `1e-10` relative; the
-unpadded result disagrees by more than `1e-3`. This is what the test proves, not
-merely that two padded runs agree with each other.
+`--fft-padding N` is an oversampling factor, not a halo count: the transform
+extent would be `N*n`. Those are different quantities. The deposit halo is
+independent of the factor, and `makeGrid` appends whatever the factor does not
+already provide to `Grid::depositHalo`. So `fftPadding = 1` is a valid
+no-oversampling choice: for CIC/TSC it produces `M = n + 2`, and for PQS on a
+short axis it fills the remaining deficit up to `M = n + 4`. A hand-built grid
+whose padded extent is still too small is rejected by `validateDepositPadding`
+before it can fold the support that belongs in the halo onto the opposite side.
+The failure mode this prevents was a TSC particle at `t = n - 0.4` on a `16^3`
+padding-1 box depositing `0.595` of its unit weight at nodes 0 and 1 instead of
+nodes 16 and 17 (59.5% of the particle weight). A legitimate boundary particle
+keeps its full weight: for `t = n` the TSC weights `0.125 / 0.75 / 0.125` land
+at `n-1 / n / n+1`, with `n` and `n+1` in the upper halo.
 
-The wraparound artefact is geometry- and box-dependent; quote it only together
-with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
+The free-space convolution also needs zero padding. With `fftPadding >= 2`
+every source-observer lag fits inside the box and the FFT result equals the
+free-space discrete TSC sum (no images). The unit test evaluates a direct,
+non-cyclic sum with its own TSC shape and its own Coulomb field at probe nodes
+where a periodic image would be closest; the padded result matches that
+reference to better than `1e-10` relative. `fftPadding = 1` does not remove the
+periodic images; it remains a diagnostic/no-oversampling choice with the
+deposit halo attached.
 
-- toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
-  `marginCells = 6`, `cellSize = 1 m`): `max|pad1-pad2| / max|field| =
-  3.994542e-02`, interior (two nodes skipped per axis) `2.130691e-02`.
-- a single stationary source on a `20^3` box: `9.275e-3` (worst component Ey);
-  the exact geometry and per-component split are in the N1b artifact.
-- for the toy geometry, `padding=2` versus `padding=3` agrees to `8.37e-16`, i.e.
+The padding-2 vs padding-3 convergence is geometry- and box-dependent; quote it
+only together with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):
+
+- for the toy geometry (27 charges on a 3x3x3 lattice spanning about 20 cells,
+  `marginCells = 6`, `cellSize = 1 m`), `padding=2` versus `padding=3` agrees
+  to `8.37e-16`, i.e.
   padding 2 is converged to roundoff.
 - for a 500-particle, `cellSize = 1e-6 m` cloud on an `n = (18,18,18)` box,
   `padding=2` versus `padding=3` agrees to `4.15e-16`; the code policy uses the

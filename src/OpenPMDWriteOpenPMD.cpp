@@ -43,6 +43,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -295,6 +296,122 @@ namespace picBunch
                     "full grid");
         }
 
+        //! One PML face: the openPMD axis (0=z, 1=y, 2=x), its global begin
+        //! and its thickness in cells along that axis.
+        struct PmlFace
+        {
+            std::size_t axis = 0u;
+            std::size_t begin = 0u;
+            std::size_t size = 0u;
+        };
+
+        //! PIConGPU PML slab suffixes in NUM_CELLS order.
+        inline constexpr char const* const kPmlSlabs[6]
+            = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
+
+        //! Slab index of a "Convolutional PML ..._<face>" record, if any.
+        std::optional<std::size_t> pmlSlabIndex(std::string const& name)
+        {
+            for(std::size_t s = 0; s < 6u; ++s)
+            {
+                std::string const suffix = std::string{"_"} + kPmlSlabs[s];
+                if(name.size() >= suffix.size()
+                   && name.compare(
+                          name.size() - suffix.size(), suffix.size(), suffix)
+                       == 0)
+                    return s;
+            }
+            return std::nullopt;
+        }
+
+        //! Face geometry of PIConGPU slab index 0..5
+        //! (xneg, xpos, yneg, ypos, zneg, zpos), clamped to the grid so a
+        //! deck thickness larger than the axis still yields a valid chunk.
+        PmlFace pmlFace(
+            std::size_t slab,
+            std::array<std::size_t, 6> const& thickness,
+            std::size_t nz,
+            std::size_t ny,
+            std::size_t nx)
+        {
+            std::size_t const axis = slab < 2u ? 2u : (slab < 4u ? 1u : 0u);
+            std::size_t const n = axis == 2u ? nx : (axis == 1u ? ny : nz);
+            std::size_t const size = std::min(thickness[slab], n);
+            std::size_t const begin = (slab % 2u == 0u) ? 0u : n - size;
+            return {axis, begin, size};
+        }
+
+        //! Full face extent in openPMD [z, y, x] order.
+        std::array<std::size_t, 3> pmlFaceExtent(
+            PmlFace const& face,
+            std::size_t nz,
+            std::size_t ny,
+            std::size_t nx)
+        {
+            std::array<std::size_t, 3> extent{nz, ny, nx};
+            extent[face.axis] = face.size;
+            return extent;
+        }
+
+        //! HDF5 chunk shape for one face.  The normal axis stays at one cell so
+        //! the HDF5 chunk grid (which starts at the dataset origin) can never
+        //! allocate an interior plane of a positive face: only the rim planes
+        //! are ever part of an allocated chunk.
+        std::array<std::size_t, 3> pmlChunkLayout(
+            PmlFace const& face,
+            std::size_t nz,
+            std::size_t ny,
+            std::size_t nx)
+        {
+            std::array<std::size_t, 3> chunk{nz, ny, nx};
+            chunk[face.axis] = 1u;
+            return chunk;
+        }
+
+        //! Rectangular chunk of one face owned by this rank.
+        struct PmlChunk
+        {
+            std::array<std::size_t, 3> begin{};
+            std::array<std::size_t, 3> extent{};
+        };
+
+        //! Intersect a face with the rank z-slab [zBegin, zEnd).
+        std::optional<PmlChunk> pmlChunk(
+            PmlFace const& face,
+            std::size_t zBegin,
+            std::size_t zEnd,
+            std::size_t nz,
+            std::size_t ny,
+            std::size_t nx)
+        {
+            if(face.size == 0u)
+                return std::nullopt;
+            std::array<std::size_t, 3> const full{pmlFaceExtent(face, nz, ny, nx)};
+            std::array<std::size_t, 3> begin{0u, 0u, 0u};
+            begin[face.axis] = face.begin;
+            std::size_t const z0 = std::max(begin[0], zBegin);
+            std::size_t const z1 = std::min(begin[0] + full[0], zEnd);
+            if(z1 <= z0)
+                return std::nullopt;
+            begin[0] = z0;
+            std::array<std::size_t, 3> extent = full;
+            extent[0] = z1 - z0;
+            return PmlChunk{begin, extent};
+        }
+
+        //! HDF5 per-dataset chunk layout that aligns one physical chunk with
+        //! the face rim, so the unwritten interior chunks are never allocated.
+        std::string hdf5ChunkOptions(std::array<std::size_t, 3> const& extent)
+        {
+            auto const dim = [](std::size_t value) {
+                return std::max<std::size_t>(value, 1u);
+            };
+            return std::string{"{\"hdf5\":{\"dataset\":{\"chunks\":["}
+                + std::to_string(dim(extent[0])) + ","
+                + std::to_string(dim(extent[1])) + ","
+                + std::to_string(dim(extent[2])) + "]}}}";
+        }
+
         //! Allocate a full-shape dataset on a record component (one dataset per
         //! component, matching a real PIConGPU checkpoint).
         template<typename T_Rc>
@@ -303,13 +420,15 @@ namespace picBunch
             Datatype type,
             std::size_t nz,
             std::size_t ny,
-            std::size_t nx)
+            std::size_t nx,
+            std::string options = "{}")
         {
             Dataset dataset(
                 type,
                 {static_cast<std::uint64_t>(nz),
                  static_cast<std::uint64_t>(ny),
-                 static_cast<std::uint64_t>(nx)});
+                 static_cast<std::uint64_t>(nx)},
+                std::move(options));
             rc.resetDataset(std::move(dataset));
             return rc;
         }
@@ -1001,8 +1120,12 @@ namespace picBunch
             }
         }
 
-        //! Copy one PML record component.  A field-shaped record is written as
-        //! one z-slab per rank; any other shape falls back to a root-only copy.
+        //! Copy one PML record component.
+        //!
+        //! A field-shaped PML record keeps its full extent.  With
+        //! ``sparseOutput`` only the face rim chunk of this rank is read and
+        //! written, so the copy stays as sparse as the synthesized records.
+        //! Any other shape falls back to the historical dense copy.
         template<typename T_Component>
         void copyMeshComponent(
             Series& in,
@@ -1010,21 +1133,58 @@ namespace picBunch
             T_Component& src,
             T_Component& dst,
             Idx3 const& globalN,
-            bool collective)
+            bool collective,
+            std::optional<PmlFace> const& pmlFace,
+            bool sparseOutput,
+            std::string const& datasetOptions)
         {
             Extent const ext = src.getExtent();
             std::uint64_t const count = extentCount(ext);
             Datatype const datatype = src.getDatatype();
-            dst.resetDataset(Dataset(datatype, ext));
             bool const fieldShaped = ext.size() == 3u
                 && ext[0] == static_cast<Extent::value_type>(globalN[2])
                 && ext[1] == static_cast<Extent::value_type>(globalN[1])
                 && ext[2] == static_cast<Extent::value_type>(globalN[0]);
+            dst.resetDataset(Dataset(
+                datatype, ext, fieldShaped ? datasetOptions : std::string{"{}"}));
             int const rank = mpiRank();
             int const size = mpiSize();
             auto copy = [&](auto value) {
                 using T = decltype(value);
-                if(fieldShaped && collective)
+                if(pmlFace.has_value() && sparseOutput && fieldShaped)
+                {
+                    // Read and write only this rank's part of the face rim.  The
+                    // buffer is zero-initialized so an unwritten part of the
+                    // source (sparse input) becomes an explicit zero.
+                    std::size_t const begin
+                        = (static_cast<std::size_t>(rank) * globalN[2])
+                        / static_cast<std::size_t>(size);
+                    std::size_t const end
+                        = ((static_cast<std::size_t>(rank) + 1u) * globalN[2])
+                        / static_cast<std::size_t>(size);
+                    auto const chunk
+                        = pmlChunk(*pmlFace, begin, end, globalN[2], globalN[1], globalN[0]);
+                    if(chunk)
+                    {
+                        std::size_t const chunkCount = chunk->extent[0] * chunk->extent[1]
+                                                       * chunk->extent[2];
+                        auto buffer = std::shared_ptr<T[]>(new T[chunkCount]());
+                        Offset const offset{
+                            static_cast<Offset::value_type>(chunk->begin[0]),
+                            static_cast<Offset::value_type>(chunk->begin[1]),
+                            static_cast<Offset::value_type>(chunk->begin[2])};
+                        Extent const chunkExtent{
+                            static_cast<Extent::value_type>(chunk->extent[0]),
+                            static_cast<Extent::value_type>(chunk->extent[1]),
+                            static_cast<Extent::value_type>(chunk->extent[2])};
+                        src.loadChunkRaw(buffer.get(), offset, chunkExtent);
+                        in.flush();
+                        dst.storeChunk(buffer, offset, chunkExtent);
+                    }
+                    else
+                        in.flush();
+                }
+                else if(fieldShaped && collective)
                 {
                     // The input PML record covers the same global domain, so
                     // split it exactly like the main field: one z-slab per rank.
@@ -1039,7 +1199,7 @@ namespace picBunch
                         = planes * globalN[0] * globalN[1];
                     if(localCount != 0u)
                     {
-                        auto buffer = std::shared_ptr<T[]>(new T[localCount]);
+                        auto buffer = std::shared_ptr<T[]>(new T[localCount]());
                         Offset const offset{
                             static_cast<Offset::value_type>(begin), 0u, 0u};
                         Extent const localExtent{
@@ -1120,7 +1280,10 @@ namespace picBunch
             Mesh& src,
             Mesh& dst,
             Idx3 const& globalN,
-            bool collective)
+            bool collective,
+            std::optional<PmlFace> const& pmlFace = std::nullopt,
+            bool sparseOutput = false,
+            std::string const& datasetOptions = "{}")
         {
             dst.setGeometry(src.geometry());
             dst.setDataOrder(src.dataOrder());
@@ -1138,14 +1301,15 @@ namespace picBunch
                 std::vector<double> const sourcePosition
                     = srcComponent.position<double>();
                 double const sourceUnitSI = srcComponent.unitSI();
-                copyMeshComponent(in, out, srcComponent, dstComponent, globalN, collective);
-                dstComponent.setUnitSI(sourceUnitSI);
-                // The first component flush installs openPMD's default scalar
-                // ``position`` attribute (one-element dataspace).  Remove it
-                // and recreate it from the source vector so the PML slab keeps
-                // its three-component position metadata.
-                dstComponent.deleteAttribute("position");
+                // Set the three-component Yee position before the first flush:
+                // openPMD otherwise installs a default scalar ``position``
+                // attribute and the only way to replace its shape is
+                // deleteAttribute, which the ADIOS2 backend rejects.
                 dstComponent.setPosition(sourcePosition);
+                copyMeshComponent(
+                    in, out, srcComponent, dstComponent, globalN, collective,
+                    pmlFace, sparseOutput, datasetOptions);
+                dstComponent.setUnitSI(sourceUnitSI);
                 out.flush();
             }
         }
@@ -1460,6 +1624,49 @@ namespace picBunch
             Series& in = *inputSeries;
             long long const inStep = static_cast<long long>(options.inputIteration);
             auto inIteration = in.snapshots()[inStep];
+            // Reject a configured PML thickness that is thicker than the rim
+            // stored in the input checkpoint.  The extra cells are unwritten,
+            // so the consumer zero-fill would silently substitute PML zeros.
+            // A thinner request is a subset of the stored rim and is allowed.
+            // The check runs before the output Series is created, so a
+            // mismatch leaves no partial checkpoint behind.
+            for(auto const& entry : inIteration.meshes)
+            {
+                std::string const& name = entry.first;
+                if(name.rfind("Convolutional PML ", 0u) != 0u)
+                    continue;
+                auto const slab = pmlSlabIndex(name);
+                if(!slab)
+                    continue;
+                Mesh srcMesh = inIteration.meshes[name];
+                if(!srcMesh.containsAttribute("picBunchPmlThickness"))
+                {
+                    if(mpiRank() == 0)
+                        std::cerr
+                            << "picBunch: warning: PML record '" << name
+                            << "' has no picBunchPmlThickness attribute; cannot "
+                               "validate [picongpu] pml_thickness against the "
+                               "input\n";
+                    continue;
+                }
+                auto const stored
+                    = srcMesh.getAttribute("picBunchPmlThickness")
+                          .get<std::uint32_t>();
+                PmlFace const face = pmlFace(
+                    *slab, options.pmlThickness, field.grid.n[2],
+                    field.grid.n[1], field.grid.n[0]);
+                if(face.size > static_cast<std::size_t>(stored))
+                    throw std::runtime_error(
+                        "PicOnGPU restart writer: PML record '" + name
+                        + "' stores a rim of " + std::to_string(stored)
+                        + " cells but [picongpu] pml_thickness requests "
+                        + std::to_string(face.size)
+                        + " cells; a thicker restart would read unwritten zeros. "
+                          "Set pml_thickness <= "
+                        + std::to_string(stored)
+                        + " cells or use an input checkpoint with the matching "
+                          "thickness.");
+            }
             std::vector<std::string> inSpeciesNames;
             std::set<std::string> inputSpecies;
             for(auto const& kv : inIteration.particles)
@@ -1599,6 +1806,7 @@ namespace picBunch
             std::size_t const nx = field.grid.n[0];
             std::size_t const ny = field.grid.n[1];
             std::size_t const nz = field.grid.n[2];
+            // PML slab names live in kPmlSlabs.
             double const compUnit[6] = {
                 options.unitEField, options.unitEField, options.unitEField,
                 options.unitBField, options.unitBField, options.unitBField};
@@ -1707,17 +1915,22 @@ namespace picBunch
 
             // Convolutional PML auxiliary state (absorber = "pml" only).
             //
-            // The loop below writes twelve slab records, one per record/slab
+            // The loop below allocates twelve records, one per record/slab
             // pair: "Convolutional PML E" and "Convolutional PML B" for the six
             // slab names xneg, xpos, yneg, ypos, zneg, zpos (getPmlSlabName in
             // the openPMD plugin's RestartFieldLoader), each with the six
-            // cross components xy, xz, yx, yz, zx, zy (12 * 6 = 72 components
-            // in total).  The layout matches the PIConGPU writer: full
-            // domain extent (Nz,Ny,Nx) like E and B, axisLabels z,y,x,
-            // dataOrder C, geometry cartesian, gridSpacing/gridGlobalOffset/
-            // gridUnitSI from the main field, unitDimension of the parent E or
-            // B record, per-component unitSI unitEField/unitBField and the
-            // parent Yee position duplicated across the split components.
+            // cross components xy, xz, yx, yz, zx, zy (12 * 6 = 72 datasets
+            // in total).  The dataset extent stays the full global domain
+            // (Nz,Ny,Nx) like E and B, because RestartFieldLoader loads a
+            // per-face chunk at a global offset.  Only the face rim of
+            // ``pml_thickness`` cells is stored: the HDF5 dataset is chunked
+            // exactly to that rim so the interior chunks are never allocated
+            // and read back as HDF5's default fill value zero.  The remaining
+            // metadata (axisLabels z,y,x, dataOrder C, geometry cartesian,
+            // gridSpacing/gridGlobalOffset/gridUnitSI from the main field,
+            // unitDimension of the parent E or B record, per-component unitSI
+            // unitEField/unitBField and the parent Yee position duplicated
+            // across the split components) is unchanged.
             //
             // picBunch computes a free-space field and has no PML state, so the
             // values are the physically correct initial state of a fresh deck:
@@ -1729,8 +1942,6 @@ namespace picBunch
             if(options.absorber == "pml")
             {
                 char const* const pmlComponents[6] = {"xy", "xz", "yx", "yz", "zx", "zy"};
-                char const* const pmlSlabs[6]
-                    = {"xneg", "xpos", "yneg", "ypos", "zneg", "zpos"};
                 for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
                 {
                     bool const isElectric = std::string_view{record} == "Convolutional PML E";
@@ -1739,9 +1950,10 @@ namespace picBunch
                     std::array<double, 7> const recordUnitDimension
                         = isElectric ? std::array<double, 7>{1.0, 1.0, -3.0, -1.0, 0.0, 0.0, 0.0}
                                      : std::array<double, 7>{0.0, 1.0, -2.0, -1.0, 0.0, 0.0, 0.0};
-                    for(char const* slab : pmlSlabs)
+                    for(std::size_t slab = 0; slab < 6u; ++slab)
                     {
-                        Mesh mesh = iteration.meshes[std::string{record} + "_" + slab];
+                        Mesh mesh
+                            = iteration.meshes[std::string{record} + "_" + kPmlSlabs[slab]];
                         mesh.setAxisLabels(std::vector<std::string>{"z", "y", "x"});
                         mesh.setGridSpacing(
                             std::vector<double>{
@@ -1755,6 +1967,20 @@ namespace picBunch
                                 field.grid.origin[0] / options.unitLength});
                         mesh.setGridUnitSI(options.unitLength);
                         mesh.setUnitDimension(recordUnitDimension);
+                        PmlFace const face = pmlFace(slab, options.pmlThickness, nz, ny, nx);
+                        // Persist the stored rim thickness so a reader and the
+                        // copy path can refuse a thicker restart instead of
+                        // silently reading unwritten zeros.
+                        mesh.setAttribute(
+                            "picBunchPmlThickness",
+                            static_cast<std::uint32_t>(face.size));
+                        // The HDF5 chunk is one rim plane so the interior is
+                        // never allocated; ADIOS2 ignores the HDF5 chunk key
+                        // and stores one sparse block per storeChunk.  Both
+                        // backends rely on the consumer zero-filling its host
+                        // buffer (PIConGPU RestartFieldLoader does).
+                        std::string const chunkOptions
+                            = hdf5ChunkOptions(pmlChunkLayout(face, nz, ny, nx));
                         for(int a = 0; a < 6; ++a)
                         {
                             // Split components inherit the parent Yee position:
@@ -1767,42 +1993,51 @@ namespace picBunch
                                     kYeeOffset[parentFirst + parentAxis][1],
                                     kYeeOffset[parentFirst + parentAxis][2]});
                             rc.setUnitSI(recordUnit);
-                            allocateFull(rc, fieldDatatype(options.float64), nz, ny, nx);
+                            allocateFull(
+                                rc, fieldDatatype(options.float64), nz, ny, nx,
+                                chunkOptions);
                         }
                         mesh.setAttribute("fieldSmoothing", std::string("none"));
                     }
                 }
-                // All 48 components are zero.  Each rank stores only its own
-                // z-slab; the zero buffer is shared by all components so the
-                // per-rank memory is one slab, not 48 full fields.
+                // The 72 PML datasets are zero.  One shared zero buffer of this
+                // rank's z-slab serves every face; a face chunk is never larger
+                // than that slab.
                 attempt([&]() {
                     if(localValues == 0u)
                         return;
+                    auto storeFaces = [&](auto const& zero) {
+                        for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
+                            for(std::size_t slab = 0; slab < 6u; ++slab)
+                            {
+                                Mesh& mesh = iteration.meshes[
+                                    std::string{record} + "_" + kPmlSlabs[slab]];
+                                PmlFace const face
+                                    = pmlFace(slab, options.pmlThickness, nz, ny, nx);
+                                auto const chunk = pmlChunk(face, zBegin, zEnd, nz, ny, nx);
+                                if(!chunk)
+                                    continue;
+                                Offset const offset{
+                                    static_cast<Offset::value_type>(chunk->begin[0]),
+                                    static_cast<Offset::value_type>(chunk->begin[1]),
+                                    static_cast<Offset::value_type>(chunk->begin[2])};
+                                Extent const extent{
+                                    static_cast<Extent::value_type>(chunk->extent[0]),
+                                    static_cast<Extent::value_type>(chunk->extent[1]),
+                                    static_cast<Extent::value_type>(chunk->extent[2])};
+                                for(char const* component : pmlComponents)
+                                    mesh[component].storeChunk(zero, offset, extent);
+                            }
+                    };
                     if(options.float64)
                     {
                         auto zero = std::shared_ptr<double[]>(new double[localValues]());
-                        for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
-                            for(char const* slab : pmlSlabs)
-                            {
-                                Mesh& mesh
-                                    = iteration.meshes[std::string{record} + "_" + slab];
-                                for(char const* component : pmlComponents)
-                                    mesh[component].storeChunk(
-                                        zero, fieldChunkOffset, fieldChunkExtent);
-                            }
+                        storeFaces(zero);
                     }
                     else
                     {
                         auto zero = std::shared_ptr<float[]>(new float[localValues]());
-                        for(char const* record : {"Convolutional PML E", "Convolutional PML B"})
-                            for(char const* slab : pmlSlabs)
-                            {
-                                Mesh& mesh
-                                    = iteration.meshes[std::string{record} + "_" + slab];
-                                for(char const* component : pmlComponents)
-                                    mesh[component].storeChunk(
-                                        zero, fieldChunkOffset, fieldChunkExtent);
-                            }
+                        storeFaces(zero);
                     }
                 });
             }
@@ -1910,7 +2145,22 @@ namespace picBunch
                     continue;
                 Mesh srcMesh = inIteration.meshes[name];
                 Mesh dstMesh = iteration.meshes[name];
-                copyMesh(in, out, srcMesh, dstMesh, field.grid.n, collective);
+                auto const slab = pmlSlabIndex(name);
+                std::optional<PmlFace> face;
+                std::string datasetOptions = "{}";
+                if(slab)
+                {
+                    face = pmlFace(*slab, options.pmlThickness, nz, ny, nx);
+                    datasetOptions
+                        = hdf5ChunkOptions(pmlChunkLayout(*face, nz, ny, nx));
+                }
+                copyMesh(
+                    in, out, srcMesh, dstMesh, field.grid.n, collective, face, true,
+                    datasetOptions);
+                if(face)
+                    dstMesh.setAttribute(
+                        "picBunchPmlThickness",
+                        static_cast<std::uint32_t>(face->size));
                 if(rank == 0)
                     std::cerr << "picBunch: copied Convolutional PML record '" << name
                               << "'\n";

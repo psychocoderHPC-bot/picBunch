@@ -82,9 +82,16 @@ slab records an open-boundary PIConGPU deck reads on restart: six field
 components `E` and `B`, each with a `neg` and a `pos` slab record
 (`E_xneg`, `E_xpos`, `E_yneg`, `E_ypos`, `E_zneg`, `E_zpos`, and the same six
 for `B`). Each record carries the six cross components `xy`, `xz`, `yx`, `yz`,
-`zx`, `zy` as full `(Nz, Ny, Nx)` datasets, with the main-field geometry, the
-parent `E`/`B` `unitSI` and unit dimension, and the parent Yee positions
-duplicated across the split components.
+`zx`, `zy`. The dataset extent stays `(Nz, Ny, Nx)` because the consumer loads a
+per-face chunk at a global offset, but only the rim of `pml_thickness` cells
+(default 12, or six values in the `NUM_CELLS` face order) is written. The
+main-field geometry, the parent `E`/`B` `unitSI` and unit dimension, and the
+parent Yee positions are duplicated across the split components. Each PML
+record also carries a scalar `picBunchPmlThickness` attribute with the number
+of cells stored along the face normal. On copy, picBunch compares it with the
+configured `pml_thickness` and aborts when the requested rim is thicker,
+because the extra cells are unwritten; a thinner request copies a subset of
+the stored rim.
 Without those slabs the restart aborts with
 `Key 'Convolutional PML E_xneg' does not exist`. Set `absorber = "pml"` when
 the restart deck uses the convolutional PML: a checkpoint written with
@@ -98,23 +105,35 @@ including the padding and BP5 regression tests. Compare counts only between
 builds with the same options: a different configuration can register a
 different number of tests.
 
-## `--openPMD.range` axis order and the single-range limit
+## `--openPMD.range` axis order and several writers per run
 
 The `--openPMD.range` option is read by the PIConGPU openPMD writer plugin when
 a deck restarts from a checkpoint and dumps a field plane. The range tokens are
 in **physical (x, y, z) order**: the first token is the x range, the second the
 y range, the third the z range. This is easy to get backwards because the
 stored openPMD array order is `[z, y, x]` (the plugin writes the full-shape
-`(Nz, Ny, Nx)` record component with `axisLabels = [z, y, x]`), so a range that
-looks like it fixes z actually fixes x, and vice versa.
+`(Nz, Ny, Nx)` record component), so a range that looks like it fixes z
+actually fixes x, and vice versa.
+
+Three rules govern a multi-writer run:
+
+- The range tokens are always physical x, y, z, independent of the stored
+  `[z, y, x]` order.
+- Repeat the complete option group, `--openPMD.period`, `--openPMD.file`,
+  `--openPMD.source`, `--openPMD.range` and `--openPMD.ext`, once per writer.
+- Give every writer its own `--openPMD.range`. A writer without one shifts the
+  positional range assignment of every later field writer.
 
 This was settled empirically on `jureca-h100` (sm_90 build, PIConGPU source @
 `f75efb0dc`) with an intentionally unequal grid of `64 x 128 x 32` cells (x, y,
 z) so the output shape alone identifies the fixed axis. With
 `--fieldAbsorber exponential` and `--autoAdjustGrid 0` the grid stays at exactly
-`64 x 128 x 32`, and the full-domain dump has stored shape `[32, 128, 64]` with
-`axisLabels = [z, y, x]`. The measured single-cell slices (a `10:11` window, the
-second cell, so the plane is non-symmetric and the fixed axis is visible):
+`64 x 128 x 32`, and the full-domain dump has stored shape `[32, 128, 64]`.
+`axisLabels` is `[z, y, x]` and sits on the field record, not on the component
+datasets, so a reader that inspects only the datasets reports none. The stored
+shape, not the label, identifies the plane. The measured single-cell slices (a
+`10:11` window, the second cell, so the plane is non-symmetric and the fixed
+axis is visible):
 
 | `--openPMD.range` | stored shape `(Nz, Ny, Nx)` | `gridGlobalOffset` (cells, `[z, y, x]`) | fixed axis |
 |-------------------|-----------------------------|------------------------------------------|------------|
@@ -127,48 +146,127 @@ The `gridGlobalOffset` of the written component confirms the mapping: for
 range token addresses the axis that openPMD labels `x`; for `:,:,10:11` only the
 first (z) entry is set.
 
-Two caveats that cost a wrong plane in a prior production run:
+### Several writers in one invocation
 
-- **Only one range per run.** The plugin binds a single global
-  `--openPMD.range` (one `Option<std::string>` in `openPMDWriter.x.cpp`); there
-  is no per-instance range. Repeating the flag is not honoured: the **first**
-  value is kept and later duplicates are silently ignored (verified on
-  `jureca-h100`: `10:11,:,:` then `:,:,10:11` produced the x-fixed plane only).
-  A paired `--openPMD.file` has the same first-value-wins behaviour, so two
-  spatial planes cannot be written in one invocation. To get a y-x plane at
-  fixed z and a y-z plane at fixed x, either run two separate jobs restarted
-  from the same checkpoint step (each with its own `--openPMD.range` and a
-  distinct `--openPMD.file`), or write the full domain once and slice the fields
-  afterwards with `h5py` / the openPMD-api.
+One run can write the particles and both planes. Repeat the complete option
+group once per writer:
 
-- **Always write exactly three tokens, one per physical axis, x then y then
-  z.** A range is only correct if it has a token in every position; a range
-  with fewer than three tokens assigns the first token to x, the second to y,
-  and treats z as `:`. The range string is split on `,` with
-  `std::sregex_token_iterator`, which does not emit empty tokens, and the parser
-  then skips any empty slice it does encounter. A missing token is therefore
-  dropped and every following token shifts to the lower dimension index: the
-  two-token range `10:11,:` fixes x (the first token) and leaves y as `:`, and
-  the three-token range `,:,10:11` fixes z (the third token) with y as `:`,
-  so a range meant to fix y writes the wrong plane unless it is written as
-  `:,10:11,:`.
-
-A ready-to-copy production pair for a `640 x 1536 x 640` (x, y, z) grid
-(restart step 10, cell `1.772e-7` m), run as two separate jobs from the same
-checkpoint:
-
-```bash
-# y-x plane at fixed z = 320 (third token)
---openPMD.period 10 --openPMD.source fields_all --openPMD.particle 0 \
---openPMD.ext h5 --openPMD.file yx_z320 \
---openPMD.range :,:,320:321
-
-# y-z plane at fixed x = 320 (first token)
---openPMD.period 10 --openPMD.source fields_all --openPMD.particle 0 \
---openPMD.ext h5 --openPMD.file yz_x320 \
---openPMD.range 320:321,:,:
+```text
+--openPMD.period <n> --openPMD.file <name> --openPMD.source <source> \
+--openPMD.range <x>,<y>,<z> --openPMD.ext <ext>
 ```
 
-Expected stored shapes (order `[z, y, x]`): the y-x plane is `[1, 1536, 640]`
-(one z cell, full y, full x) and the y-z plane is `[640, 1536, 1]` (full z,
-full y, one x cell).
+The plugin creates one writer per `--openPMD.period` value and reads the other
+options positionally, one value per writer, so each range stays with its own
+file. The order of the groups does not matter.
+
+This is the trap that produced the earlier, wrong "only one range per run"
+conclusion: sharing one `--openPMD.period` and repeating only `--openPMD.range`
+and `--openPMD.file` creates **one** writer, the first one. The second range and
+file are dropped silently, with no warning. The instance count comes from
+`--openPMD.period` (`getNumPlugins()` in `openPMDWriter.x.cpp` takes the
+maximum of the `period` and `pluginConfig` counts), not from the other vectors.
+
+Omitting any option from a group is equally silent. Each option is a separate
+positional vector indexed by writer id. A writer whose id lies past the end of a
+vector takes that option's registered default when it has one. `range`, `file`
+and `ext` have scalar defaults (`:,:,:`, `simData` and the openPMD default
+extension). `source` instead defaults to the comma-joined
+`species_all, fields_all`, and `period`/`pluginConfig` have no default and set
+the writer count. A missing `range` on any writer therefore reassigns the plane
+selection: every later writer reads the range intended for the next writer, and
+the last field writer falls back to the full domain. On the production deck this
+silently wrote the full domain instead of the requested plane. A range is read
+by the field writers only, so the particle writer's own `:,:,:` selects nothing,
+but that placeholder still has to be present to keep the field writer indices
+aligned.
+
+**Write exactly three tokens, one per physical axis, x then y then z.** A range
+is only correct if it has a token in every position; a range with fewer than
+three tokens assigns the first token to x, the second to y, and treats z as
+`:`. The range string is split on `,` with `std::sregex_token_iterator`, which
+does not emit empty tokens, and the parser then skips any empty slice it does
+encounter. A missing token is therefore dropped and every following token shifts
+to the lower dimension index: the two-token range `10:11,:` fixes x (the first
+token) and leaves y as `:`, and the three-token range `,:,10:11` fixes z (the
+third token) with y as `:`, so a range meant to fix y writes the wrong plane
+unless it is written as `:,10:11,:`.
+
+A complete three-writer invocation for a `640 x 1536 x 640` (x, y, z) grid
+(cell `1.772e-7` m), restarted at step 10 and advanced one step. It writes the
+particles, a y-x plane at fixed z = 320 (third token) and a y-z plane at fixed
+x = 320 (first token), each with its own complete option group:
+
+```bash
+mpirun -n 1 ./picongpu -d 1 1 1 -g 640 1536 640 --periodic 1 1 1 -s 1 \
+  --checkpoint.restart --checkpoint.restart.step 10 \
+  --checkpoint.restart.directory "$CHECKPOINT_DIR" \
+  --checkpoint.restart.file checkpoint \
+  --openPMD.period 1 --openPMD.file particles --openPMD.source species_all \
+  --openPMD.range :,:,: --openPMD.ext h5 \
+  --openPMD.period 1 --openPMD.file yx_z320 --openPMD.source fields_all \
+  --openPMD.range :,:,320:321 --openPMD.ext h5 \
+  --openPMD.period 1 --openPMD.file yz_x320 --openPMD.source fields_all \
+  --openPMD.range 320:321,:,: --openPMD.ext h5
+```
+
+The one-step run reaches step 11, so the period-1 writers produce
+`particles_000011.h5`, `yx_z320_000011.h5` and `yz_x320_000011.h5`. Stored
+shapes (order `[z, y, x]`) are `[1, 1536, 640]` for the y-x plane (one z cell,
+full y, full x) and `[640, 1536, 1]` for the y-z plane (full z, full y, one x
+cell).
+
+A separate three-writer verification run on a `384 x 168 x 384` (x, y, z) grid
+produced the particle output and both planes in one invocation. The measured
+stored shapes were `[1, 168, 384]` for the y-x plane (z fixed) and
+`[384, 168, 1]` for the y-z plane (x fixed).
+
+### Implementation reference (PIConGPU `f75efb0dc`)
+
+The grouping is positional in the plugin code. The option accessor returns the
+stored value at the writer id, or the option default when that id was not
+supplied (`include/picongpu/plugins/multi/Option.hpp:177-190`):
+
+```cpp
+T_ValueType get(uint32_t idx) const
+{
+    if(!optionDefined(idx))
+    {
+        if(!m_hasDefaultValue)
+            throw std::runtime_error(
+                std::string(
+                    "There is no default value defined for the option " + getName()
+                    + " and idx is out of range"));
+        return m_defaultValue;
+    }
+
+    return StorageType::operator[](idx);
+}
+```
+
+The writer count comes from `period` (or TOML), not from the other vectors
+(`include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:675`):
+
+```cpp
+auto res = std::max({pluginConfig.size(), notifyPeriod.size(), pluginConfigForbidden.size()});
+```
+
+`Master` then creates one instance per id
+(`include/picongpu/plugins/multi/Master.hpp:119-127`), and each instance reads
+its own index (`include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:411-418`):
+
+```cpp
+else if(commandLineParameter->optionDefined(id))
+{
+    res.** targetInConfigObject = commandLineParameter->get(id);
+}
+else if(commandLineParameter->hasDefault())
+{
+    res.** targetInConfigObject = commandLineParameter->getDefault();
+}
+```
+
+`--openPMD.range` is registered with default `:,:,:` at
+`include/picongpu/plugins/openPMD/openPMDWriter.x.cpp:220-221` and `:518`.
+`--openPMD.source` is registered with default `species_all, fields_all` at
+`:223`.

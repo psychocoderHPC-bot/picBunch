@@ -10,6 +10,7 @@
 
 #include "picBunch/detail/FftSpectrumCacheControl.hpp"
 #include "picBunch/Config.hpp"
+#include "picBunch/DeviceAffinity.hpp"
 #include "picBunch/FarTail.hpp"
 #include "picBunch/Mpi.hpp"
 #include "picBunch/NearShell.hpp"
@@ -103,8 +104,9 @@ namespace
             "                        convolution (default: 1e-3; floor 1e-14)\n"
             "  --fft-padding <N>     FFT zero-padding factor, an integer in [0,8]\n"
             "                        (default: 0 = tolerance policy).  1 disables\n"
-            "                        padding (diagnostic: wrapped images leak into\n"
-            "                        the output); values above 3 only add cost\n"
+            "                        oversampling (diagnostic: wrapped images leak\n"
+            "                        into the output) but keeps the deposit halo;\n"
+            "                        values above 3 only add cost\n"
             "  --fft-spectrum-cache-mb <MiB>\n"
             "                        cap the process-wide kernel-spectrum cache in\n"
             "                        MiB (default: 1536; 0 disables).  Overrides\n"
@@ -141,7 +143,17 @@ namespace
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0); an\n"
-            "                        explicit N overrides the automatic choice\n"
+            "                        explicit N overrides the automatic choice.\n"
+            "                        In-bunch caveat: for a high-gamma beam the\n"
+            "                        in-bunch peak-normalised error saturates above\n"
+            "                        --tolerance (no count up to the 256-box cap\n"
+            "                        reaches 1e-3; the measured in-bunch floor is\n"
+            "                        ~0.1-4.4 per-component relative error and\n"
+            "                        ~3.3 T absolute By).  auto then caps at the\n"
+            "                        16-box practical cost ceiling (not 256) and\n"
+            "                        reports the achieved accuracy; the 1e-3 in-\n"
+            "                        bunch tolerance is not met -- validate a\n"
+            "                        production field against a physics run.\n"
             "  --bin-model-constant <C>\n"
             "                        calibration constant of the bin error model\n"
             "                        (diagnostic override of the shipped fit)\n"
@@ -641,9 +653,19 @@ namespace
 
     void printGrid(picBunch::Grid const& grid)
     {
-        std::printf("grid: n=(%zu,%zu,%zu)  spacing=(%.6g,%.6g,%.6g) m\n",
-                    grid.n[0], grid.n[1], grid.n[2],
-                    grid.spacing[0], grid.spacing[1], grid.spacing[2]);
+        std::printf(
+            "grid: n=(%zu,%zu,%zu)  spacing=(%.6g,%.6g,%.6g) m  fft_padding=%u"
+            "  deposit_halo=(%zu,%zu,%zu)\n",
+            grid.n[0],
+            grid.n[1],
+            grid.n[2],
+            grid.spacing[0],
+            grid.spacing[1],
+            grid.spacing[2],
+            grid.fftPadding,
+            grid.depositHalo[0],
+            grid.depositHalo[1],
+            grid.depositHalo[2]);
         std::printf("      origin=(%.6g,%.6g,%.6g) m\n",
                     grid.origin[0], grid.origin[1], grid.origin[2]);
     }
@@ -746,6 +768,15 @@ namespace
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")
@@ -756,12 +787,14 @@ namespace
         options.velocityMoments.allowUnconverged = args.velocityMomentsAllowUnconverged;
 
         // Wire the rank context before the first makeGrid call.  makeGrid
-        // scales kMaxPaddedNodes by the rank count only when a distributed
-        // context is visible; the configured path used to reach it with a null
-        // pointer and rejected the same domain the CLI accepted.
+        // applies the per-rank distributed padded-node limit only when a
+        // distributed context is visible; the configured path used to reach it
+        // with a null pointer and rejected the same domain the CLI accepted.
         options.parallel = &parallel;
         picBunch::mpiBroadcastComputeOptions(options, 0);
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
         if(root)
         {
             std::printf(
@@ -981,6 +1014,7 @@ namespace
         restart.unitCharge = config.picongpu.unitCharge;
         restart.float64 = config.picongpu.float64;
         restart.absorber = config.picongpu.absorber;
+        restart.pmlThickness = config.picongpu.pmlThickness;
         restart.generatedSpecies = std::move(generatedSpecies);
         restart.backend = config.checkpoint.backend == "adios2"
             ? picBunch::CheckpointBackend::Adios2
@@ -1021,6 +1055,7 @@ namespace
                 config.picongpu.float64 ? "float64" : "float32",
                 config.picongpu.float64 ? "float64" : "float32");
         }
+        picBunch::printDeviceMappingSummary();
         return 0;
     }
 
@@ -1123,6 +1158,8 @@ namespace
             : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
                                               : picBunch::FftMode::Auto;
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
 
         // Global representative for the single velocity class.  The chunk
         // fields are linear only if every chunk uses the same kernel, so the
@@ -1352,6 +1389,7 @@ namespace
                 static_cast<unsigned long long>(args.outputIteration));
             printTimings(times);
         }
+        picBunch::printDeviceMappingSummary();
         return 0;
     }
 
@@ -1378,6 +1416,7 @@ int main(int argc, char** argv)
     // now builds the rank context before makeGrid (the per-rank padded-node
     // cap scales with the rank count there just as it does on the CLI path).
     picBunch::MpiGuard mpiRuntime(argc, argv);
+    picBunch::logDeviceMapping();
 
     if(args.config)
     {
@@ -1471,6 +1510,15 @@ int main(int argc, char** argv)
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")
@@ -1649,6 +1697,8 @@ int main(int argc, char** argv)
         }
         picBunch::mpiBroadcastComputeOptions(options, 0);
         options.parallel = &parallel;
+        options.deviceIndex = static_cast<unsigned>(
+            picBunch::currentRankDeviceMapping().deviceIndex);
 
         // --------------------------------------------------------------- compute
         auto const computeStart = Clock::now();
@@ -2097,6 +2147,7 @@ int main(int argc, char** argv)
 
         if(root)
             printTimings(times);
+        picBunch::printDeviceMappingSummary();
     }
     catch(std::exception const& error)
     {

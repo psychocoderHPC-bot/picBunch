@@ -28,6 +28,7 @@ if(PICBUNCH_BUILD_GTESTS)
         picBunchUnitTests
         test_deposit.cpp
         test_domain.cpp
+        test_device_affinity.cpp
         test_kernel.cpp
         test_fft.cpp
         test_io.cpp
@@ -56,8 +57,10 @@ if(PICBUNCH_BUILD_GTESTS)
         test_openpmd_wait.cpp
         test_checkpoint_field_units.cpp
         test_multirank_field_equality.cpp
+        test_near_shell_slab.cpp
         test_multirank_patches.cpp
         test_grid_independence.cpp
+        test_distributed_fft_64bit.cpp
     )
     picbunch_target_warnings(picBunchUnitTests)
     target_compile_features(picBunchUnitTests PUBLIC cxx_std_20)
@@ -76,7 +79,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField GridIndependence)
+    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField NearShellSlab DistributedFft64Bit GridIndependence)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -101,7 +104,7 @@ if(PICBUNCH_BUILD_GTESTS)
                     --gtest_filter=MpiFailure.SetupStatusReportsRootErrorOnEveryRank
             )
             # The configured path must see the rank context before makeGrid so
-            # the per-rank padded-node cap scales with the rank count.
+            # the per-rank distributed padded-node limit applies.
             add_test(
                 NAME picBunch.ConfigMultiRankCap
                 COMMAND
@@ -153,6 +156,37 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${MPIEXEC_EXECUTABLE} -n 3 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MultiRankField.*
             )
+            # The near-shell correction buffer is slab-local: the same field
+            # must come out at any rank count, and no rank may hold the full
+            # correction.  The group itself checks the buffer size.
+            add_test(
+                NAME picBunch.NearShellSlabN2
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 2 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=NearShellSlab.*
+            )
+            add_test(
+                NAME picBunch.NearShellSlabN4
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=NearShellSlab.*
+            )
+            # The distributed FFT boundary pair (below/above 2^28 padded nodes
+            # per rank) allocates more than 4 GiB per rank.  Opt-in: the
+            # operator sets PICBUNCH_LARGE_FFT_GPUS to the device list, e.g.
+            # PICBUNCH_LARGE_FFT_GPUS=2,3 ctest -R LargeDistributedFft.
+            if(PICBUNCH_LARGE_MPI_TESTS)
+                foreach(ranks 2 4)
+                    add_test(
+                        NAME picBunch.LargeDistributedFftN${ranks}
+                        COMMAND
+                            ${CMAKE_COMMAND} -E env PICBUNCH_LARGE_FFT_TESTS=1
+                            ${MPIEXEC_EXECUTABLE} -n ${ranks}
+                            $<TARGET_FILE:picBunchUnitTests>
+                            --gtest_filter=DistributedFft64Bit.*
+                    )
+                endforeach()
+            endif()
             # The checkpoint's particlePatches table must be complete and
             # disjoint for any rank count.  The test writes collectively and
             # checks the records, components, counts and offset/extent tiling.
