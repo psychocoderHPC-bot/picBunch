@@ -214,12 +214,14 @@ picBunch --input bunch.h5 --species electrons --output field.h5 \
 
 `--fft-padding <N>` overrides the FFT zero-padding factor selected by
 `--tolerance`. The default, `0`, keeps the tolerance policy (`2` at or above the
-padding-2 bound, `3` below it) and reproduces earlier output exactly. `1` disables
-padding and is a diagnostic control: the FFT box equals the output box, so source
-images wrap and leak into the field. Values above `3` only add work; the CLI
-accepts `0` to `8` and rejects larger values. The zero-padded grid is still
-subject to the per-run node cap, so an explicit `--grid` that fits with padding
-`1` can be rejected with padding `2` or `3`.
+padding-2 bound, `3` below it) and reproduces earlier output exactly. The
+deposit sets a lower bound: every axis needs at least `2*floor(shapeSupport)`
+padding nodes between the physical grid and the padded box (`2` for the default
+TSC shape, `4` for PQS), so `1` is rejected and the message names the
+axis, the required padding and the padding actually available. Values above `3`
+only add work; the CLI accepts `0` to `8` and rejects larger values. The
+zero-padded grid is still subject to the per-run node cap, so a large explicit
+`--grid` can be rejected at padding `2` or `3`.
 
 An explicit `--cell-size` always wins over the mesh-derived value, and the run fails with a
 clear message when neither source exists. Nothing is assumed or rescaled. The physical cell
@@ -1415,10 +1417,12 @@ table above covers the compute stages of the large-N sweep, not the write path.
   does not reproduce the small `B_y` residual of an angular spread; that case needs
   per-particle velocities. An auto request above the box cap exits with the needed count.
 - **Double precision required.** The field pipeline and its accuracy claims are double.
-- **Padding required.** With `fftPadding = 1` the FFT box equals the output box and
-  source-observer lags beyond half the box wrap. The measured artifact is **9.275e-3**
-  (single stationary source, 20^3 box, worst component Ey). The production policy never
-  selects 1.
+- **Padding required.** The deposit keeps the TSC support of a boundary particle in a
+  halo between the physical grid `n` and the padded box `M = fftPadding*n`; both halos
+  need `floor(shapeSupport)` nodes per side, so any grid with `M - n < 2` is rejected
+  before it deposits. A TSC particle at `t = n - 0.4` on a padding-1 `16^3` box folded
+  **59.5%** of its unit weight onto the opposite side (nodes 0 and 1 instead of 16 and
+  17). The production policy uses padding 2 or 3.
 - **Zero fill only as a diagnostic.** Global output is filled beyond the exact box with the
   measured monopole/dipole/quadrupole far tail, not zeros. `--allow-field-truncation` is the
   only path that writes zeros, and it warns that those values are not bounded.

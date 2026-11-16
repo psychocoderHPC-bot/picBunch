@@ -378,8 +378,9 @@ TEST(Audit, PaddingTwoVersusThreeAtRoundoff)
     for(auto const* values : {&single1a1, &single1a4, &single10a1, &cloud1a1, &cloud1a4, &cloud10a1})
         EXPECT_LT(worstOf(*values), 1.0e-12);
 
-    // The negative control (padding 1 reproduces the wraparound artefact) is
-    // Padding.NoPaddingReproducesWraparoundAndPaddingMatchesDirectSum.
+    // The former padding-1 negative control is now a rejection test:
+    // Padding.PaddingOneIsRejectedAndPaddingTwoHitsTheSizeGuard and
+    // Deposit.InsufficientPaddingIsRejected.
 }
 
 TEST(Audit, DiscreteGaussLawOnYeeLattice)

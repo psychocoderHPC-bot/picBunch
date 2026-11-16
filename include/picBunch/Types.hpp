@@ -46,8 +46,11 @@ namespace picBunch
      * ``origin + (i,j,k) * spacing``.  ``spacing`` is the physical node spacing, i.e.
      * ``kRefinement`` PIC cells.  ``fftPadding`` is the zero-padding factor of the
      * free-space convolution: the FFT grid has ``M = fftPadding * n`` nodes per axis.
-     * It is normally selected from ``ComputeOptions::tolerance`` (never below 2);
-     * a value of 1 disables zero padding and is a test/diagnostic override only.
+     * It is normally selected from ``ComputeOptions::tolerance`` (never below 2).
+     * The deposit halo is a hard floor: every axis needs
+     * ``M - n >= 2*floor(shapeSupport)`` (2 nodes for CIC/TSC, 4 for PQS), so a
+     * factor that leaves less padding is rejected instead of wrapping charge
+     * onto the opposite side.
      */
     struct Grid
     {
@@ -440,8 +443,11 @@ namespace picBunch
         //! Physical PIC cell size (m). Node spacing is ``kRefinement * cellSize``.
         Vec3 cellSize{1.0, 1.0, 1.0};
         /*! Diagnostic override of the FFT zero-padding factor; 0 selects the
-         * tolerance policy.  A non-zero value (including 1 for the wraparound
-         * test) bypasses the policy and must be >= 1.
+         * tolerance policy.  A non-zero value bypasses the policy but must
+         * still leave the deposit halo: every axis needs
+         * ``M - n >= 2*floor(shapeSupport)`` (2 for CIC/TSC, 4 for PQS), so
+         * ``fftPadding = 1`` is rejected.  The guard names the axis, the
+         * required padding and the padding actually available.
          */
         unsigned fftPadding = 0;
         //! Empty shell margin around the particle bounding box, in PIC cells.

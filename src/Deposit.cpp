@@ -6,8 +6,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace picBunch
 {
@@ -41,6 +44,56 @@ namespace picBunch
             }
         }
         return b;
+    }
+
+    namespace
+    {
+        char const* shapeLabel(Shape shape)
+        {
+            switch(shape)
+            {
+            case Shape::CIC:
+                return "CIC";
+            case Shape::PQS:
+                return "PQS";
+            case Shape::TSC:
+            default:
+                return "TSC";
+            }
+        }
+    } // namespace
+
+    std::size_t requiredDepositPadding(Shape shape)
+    {
+        // A particle inside [0, n] reaches floor(support) nodes past either
+        // end of the physical box.  Negative and positive support share the
+        // padded region above n (from its top and bottom respectively), so
+        // that region needs twice the reach.
+        double const support = shapeSupport(shape);
+        std::size_t const reach = static_cast<std::size_t>(std::floor(support));
+        return 2u * reach;
+    }
+
+    void validateDepositPadding(Grid const& grid)
+    {
+        std::size_t const required = requiredDepositPadding(grid.shape);
+        Idx3 const padded = grid.paddedSize();
+        for(std::size_t a = 0; a < 3u; ++a)
+        {
+            std::size_t const n = grid.n[a];
+            std::size_t const m = padded[a];
+            std::size_t const actual = m > n ? m - n : 0u;
+            if(actual >= required)
+                continue;
+            char const* const axis = a == 0u ? "x" : (a == 1u ? "y" : "z");
+            std::ostringstream text;
+            text << "deposit: the " << shapeLabel(grid.shape)
+                 << " stencil requires at least " << required
+                 << " padding nodes on axis " << a << " (" << axis
+                 << "), but fftPadding=" << grid.fftPadding << " provides " << actual
+                 << " (n=" << n << ", M=" << m << ", need M >= n + " << required << ")";
+            throw std::invalid_argument(text.str());
+        }
     }
 
     template<Shape S>
@@ -103,18 +156,13 @@ namespace picBunch
     template<Shape S>
     std::vector<double> depositPaddedShape(Bunch const& bunch, Grid const& grid)
     {
-        if(grid.fftPadding < 2u)
-            throw std::invalid_argument(
-                "depositTSCPaddedHost: a source halo needs fftPadding >= 2");
+        validateDepositPadding(grid);
         std::size_t const nx = grid.n[0];
         std::size_t const ny = grid.n[1];
         std::size_t const nz = grid.n[2];
         std::size_t const Mx = nx * grid.fftPadding;
         std::size_t const My = ny * grid.fftPadding;
         std::size_t const Mz = nz * grid.fftPadding;
-        if(Mx < nx + 2u || My < ny + 2u || Mz < nz + 2u)
-            throw std::invalid_argument(
-                "depositTSCPaddedHost: the padded extent must leave room for the source halo");
         double const sp[3] = {grid.spacing[0], grid.spacing[1], grid.spacing[2]};
         double const org[3] = {grid.origin[0], grid.origin[1], grid.origin[2]};
         // The TSC shape is sampled in node units: grid.spacing already carries the
@@ -139,6 +187,30 @@ namespace picBunch
                 t[a] = (pos[a] - org[a]) / sp[a];
                 lo[a] = static_cast<long>(std::ceil(t[a] - support));
                 hi[a] = static_cast<long>(std::floor(t[a] + support));
+            }
+            // A valid grid provides `M - n` nodes in the shared padded region.
+            // The only indices that may be folded are negative support mapping
+            // into the upper part of that region.  A particle far enough
+            // outside the physical box can push its support past the padded box
+            // itself, and folding that would silently move charge to the
+            // opposite side.
+            std::size_t const halo[3] = {Mx - nx, My - ny, Mz - nz};
+            long const upper[3] = {
+                static_cast<long>(Mx) - 1,
+                static_cast<long>(My) - 1,
+                static_cast<long>(Mz) - 1};
+            for(std::size_t a = 0; a < 3u; ++a)
+            {
+                long const lowerBound = -static_cast<long>(halo[a]);
+                if(lo[a] >= lowerBound && hi[a] <= upper[a])
+                    continue;
+                char const* const axis = a == 0u ? "x" : (a == 1u ? "y" : "z");
+                std::ostringstream text;
+                text << "depositTSCPaddedHost: particle " << p << " support on axis " << a
+                     << " (" << axis << ") spans logical nodes [" << lo[a] << ", " << hi[a]
+                     << "], outside the padded halo [" << lowerBound << ", " << upper[a]
+                     << "]; the particle lies outside the output grid";
+                throw std::invalid_argument(text.str());
             }
             for(long ia = lo[0]; ia <= hi[0]; ++ia)
             {

@@ -100,7 +100,14 @@ namespace picBunch
         }
 #endif
 
-        //! Wrap a logical source index into the padded extent; the source halo lives there.
+        //! Fold a logical source index into the padded extent.
+        //!
+        //! `validateDepositPadding` guarantees `M - n >= 2*reach` on every axis,
+        //! so a particle inside the physical node box can only reach the
+        //! intentional negative halo (which maps to the top of the box) or the
+        //! upper halo `n..M-1`.  No support index can wrap onto the opposite
+        //! physical side; a particle that would leave that halo is rejected
+        //! before this function is reached.
         ALPAKA_FN_ACC inline long wrapPaddedIndex(long i, std::uint32_t m)
         {
             long const mm = static_cast<long>(m);
@@ -1701,6 +1708,10 @@ namespace picBunch
                 + " with padding " + std::to_string(padding)
                 + " is infeasible (limit " + std::to_string(kMaxPaddedNodes)
                 + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
+        // The deposit halo is a property of the grid, not of the solver path.
+        // Validate it here so every caller (replicated and distributed) fails
+        // before allocating or depositing instead of wrapping charge silently.
+        validateDepositPadding(grid);
         return grid;
     }
 
@@ -2034,6 +2045,7 @@ namespace picBunch
                                std::uint32_t rhoStride,
                                std::uint32_t zOffset,
                                std::uint32_t zExtent) {
+            validateDepositPadding(grid);
             if(grid.shape == Shape::CIC)
                 depositHostImpl(
                     std::integral_constant<Shape, Shape::CIC>{},
@@ -2068,6 +2080,7 @@ namespace picBunch
                                  auto rhoView,
                                  std::uint32_t zOffset,
                                  std::uint32_t zExtent) {
+            validateDepositPadding(grid);
             auto const numParticles = static_cast<std::uint32_t>(list.size());
             // Binned TSC path.  The particles are counting-sorted by their
             // wrapped nearest node: a parallel host pass builds the keys and the

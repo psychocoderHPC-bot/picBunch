@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
 //
-// Group 6: padding control.  A no-padding run (fftPadding = 1) must reproduce
-// the wraparound artefact, and the padded result must equal a direct, non-cyclic
+// Group 6: padding control.  The padded result must equal a direct, non-cyclic
 // convolution evaluated independently in this file.  That direct reference uses
 // its own TSC shape and its own Coulomb field, so a wrong 1/r, a wrong sign, a
 // wrong deposit weight or an unnoticed periodic image all fail the test.  A
 // converged padding-2 result alone would only prove self-consistency.
 //
+// A no-padding grid (fftPadding = 1) leaves no deposit halo and is rejected.
+// The guard is tested here and in Deposit.PaddedBoundaryParticleLandsInFullSupport.
+//
 // Bunch: 27 charges on an asymmetric 3x3x3 lattice spanning about 20 cells,
-// all at rest.  With fftPadding = 1 the FFT box equals the output box, so
-// source-observer lags beyond half the box wrap onto the wrong side; with
-// fftPadding = 2 every lag fits inside the box.
+// all at rest.  With fftPadding = 2 every source-observer lag fits inside the
+// box and the positive/negative deposit halos stay disjoint.
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Types.hpp"
@@ -22,8 +23,11 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -157,22 +161,6 @@ namespace
         return result;
     }
 
-    //! Largest difference away from the outermost ``skip`` nodes per axis.
-    double maxInteriorDifference(picBunch::Field const& a, picBunch::Field const& b, std::size_t skip)
-    {
-        double result = 0.0;
-        auto const& n = a.grid.n;
-        for(int c = 0; c < 6; ++c)
-            for(std::size_t k = skip; k + skip < n[2]; ++k)
-                for(std::size_t j = skip; j + skip < n[1]; ++j)
-                    for(std::size_t i = skip; i + skip < n[0]; ++i)
-                    {
-                        std::size_t const l = i + n[0] * (j + n[1] * k);
-                        result = std::max(result, std::abs(a.data[c][l] - b.data[c][l]));
-                    }
-        return result;
-    }
-
     double maxField(picBunch::Field const& field)
     {
         double result = 0.0;
@@ -183,7 +171,7 @@ namespace
     }
 } // namespace
 
-TEST(Padding, NoPaddingReproducesWraparoundAndPaddingMatchesDirectSum)
+TEST(Padding, PaddingTwoMatchesDirectSumAndPaddingThreeIsConverged)
 {
     picBunch::Bunch const bunch = latticeBunch();
     picBunch::ComputeOptions options;
@@ -191,21 +179,16 @@ TEST(Padding, NoPaddingReproducesWraparoundAndPaddingMatchesDirectSum)
     options.cellSize = {1.0, 1.0, 1.0};
     options.marginCells = 6.0;
 
-    options.fftPadding = 1;
-    picBunch::Field const unpadded = picBunch::computeField(bunch, options);
     options.fftPadding = 2;
     picBunch::Field const padded = picBunch::computeField(bunch, options);
     options.fftPadding = 3;
     picBunch::Field const paddedMore = picBunch::computeField(bunch, options);
 
-    ASSERT_EQ(unpadded.grid.n, padded.grid.n);
-    ASSERT_EQ(unpadded.grid.n, paddedMore.grid.n);
-    ASSERT_EQ(unpadded.grid.fftPadding, 1u);
+    ASSERT_EQ(padded.grid.n, paddedMore.grid.n);
     ASSERT_EQ(padded.grid.fftPadding, 2u);
     ASSERT_EQ(paddedMore.grid.fftPadding, 3u);
 
-    // Corners and face centres are where a periodic image is closest, so the
-    // padding-1 artefact is largest there.
+    // Corners and face centres are where a periodic image would be closest.
     auto const& n = padded.grid.n;
     std::vector<std::array<std::size_t, 3>> const probes{
         {0, 0, 0},
@@ -218,48 +201,83 @@ TEST(Padding, NoPaddingReproducesWraparoundAndPaddingMatchesDirectSum)
 
     double const scale = maxField(padded);
     ASSERT_GT(scale, 0.0);
-    double const wrapError = maxDifference(unpadded, padded) / scale;
-    double const wrapInterior = maxInteriorDifference(unpadded, padded, 2u) / scale;
     double const paddingConverged = maxDifference(padded, paddedMore) / scale;
 
     double directError = 0.0;
-    double unpaddedDirectError = 0.0;
     for(auto const& node : probes)
     {
         std::size_t const flat = node[0] + n[0] * (node[1] + n[1] * node[2]);
         auto const reference = directReference(bunch, padded.grid, node);
         for(std::size_t c = 0; c < 6; ++c)
-        {
-            directError = std::max(directError, std::abs(padded.data[c][flat] - reference[c]) / scale);
-            unpaddedDirectError = std::max(
-                unpaddedDirectError, std::abs(unpadded.data[c][flat] - reference[c]) / scale);
-        }
+            directError = std::max(
+                directError, std::abs(padded.data[c][flat] - reference[c]) / scale);
     }
 
     std::printf(
-        "padding control: max|pad1-pad2|/max|field|=%.6e, interior=%.6e, "
-        "max|pad2-pad3|/max|field|=%.6e, "
-        "probe max|pad2-direct|/max|field|=%.6e, max|pad1-direct|/max|field|=%.6e\n",
-        wrapError,
-        wrapInterior,
+        "padding control: max|pad2-pad3|/max|field|=%.6e, "
+        "probe max|pad2-direct|/max|field|=%.6e\n",
         paddingConverged,
-        directError,
-        unpaddedDirectError);
+        directError);
 
     // Padded result equals the direct free-space convolution, including the
     // sign of E and the 1/r field law, at points where an image would land.
     EXPECT_LT(directError, 1.0e-10) << "padding=2 must match the direct non-cyclic sum";
 
-    // The no-padding run must visibly disagree with that same reference: this is
-    // the wraparound the padding removes.
-    EXPECT_GT(unpaddedDirectError, 1.0e-3) << "padding=1 must differ from the direct sum";
-    EXPECT_GT(wrapError, 1.0e-3) << "padding=1 must show a wraparound artefact";
-    EXPECT_LT(wrapError, 2.0e-1) << "wraparound artefact must be a bounded correction";
-    EXPECT_GT(wrapInterior, 1.0e-3) << "the interior must also show the artefact";
-
     // Padding 2 is already converged: adding more padding changes nothing
     // beyond FFT roundoff.
     EXPECT_LT(paddingConverged, 1.0e-9) << "padding=2 must be converged";
+}
+
+TEST(Padding, InsufficientPaddingIsRejectedWithAxisAndRequirement)
+{
+    picBunch::Bunch const bunch = latticeBunch();
+    picBunch::ComputeOptions options;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.marginCells = 6.0;
+
+    // fftPadding = 1 leaves no halo at all.
+    options.fftPadding = 1;
+    try
+    {
+        (void)picBunch::makeGrid(bunch, options);
+        FAIL() << "padding 1 must be rejected";
+    }
+    catch(std::invalid_argument const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("(x)"), std::string::npos) << message;
+        EXPECT_NE(message.find("requires at least 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("fftPadding=1"), std::string::npos) << message;
+        EXPECT_NE(message.find("provides 0"), std::string::npos) << message;
+    }
+
+    // PQS needs four halo nodes.  With an 8x8x2 grid at padding 2 only the z
+    // axis is short, so the message must name axis 2 (z), not axis 0.
+    picBunch::Bunch single;
+    single.resize(1);
+    single.x[0] = 3.3;
+    single.y[0] = 4.1;
+    single.z[0] = 1.0;
+    single.weight[0] = 1.0;
+    single.charge[0] = 1.0;
+    options.gridSize = picBunch::Idx3{8u, 8u, 2u};
+    options.gridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
+    options.fftPadding = 2;
+    options.shape = picBunch::Shape::PQS;
+    try
+    {
+        (void)picBunch::makeGrid(single, options);
+        FAIL() << "PQS with a 2-node padding-2 axis must be rejected";
+    }
+    catch(std::invalid_argument const& error)
+    {
+        std::string const message = error.what();
+        EXPECT_NE(message.find("axis 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("(z)"), std::string::npos) << message;
+        EXPECT_NE(message.find("requires at least 4"), std::string::npos) << message;
+        EXPECT_NE(message.find("fftPadding=2"), std::string::npos) << message;
+    }
 }
 
 TEST(Padding, ToleranceSelectsPaddingAndRejectsUnreachableTargets)
@@ -281,17 +299,18 @@ TEST(Padding, ToleranceSelectsPaddingAndRejectsUnreachableTargets)
     options.tolerance = 1e-15;
     EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error);
 
-    // The diagnostic override still works and bypasses the policy.
+    // An explicit factor below the deposit stencil's halo requirement is
+    // rejected instead of wrapping charge onto the opposite side.
     options.tolerance = 1e-3;
     options.fftPadding = 1;
-    EXPECT_EQ(picBunch::makeGrid(bunch, options).fftPadding, 1u);
+    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::invalid_argument);
 }
 
-// The landscape production case runs at 384^3.  Padding 1 must yield a valid
-// grid there (the FFT box equals the output box), while padding 2 makes the
-// padded box 768^3, which exceeds the replicated 2^28-node cap in makeGrid and
-// must still raise the documented infeasibility error.
-TEST(Padding, ExplicitPaddingOneSupportsLargeGridAndPaddingTwoHitsTheGuard)
+// The landscape production case runs at 384^3.  Padding 1 leaves no halo and
+// is rejected before it can deposit.  Padding 2 makes the padded box 768^3,
+// which exceeds the replicated 2^28-node cap in makeGrid and must still raise
+// the documented infeasibility error.
+TEST(Padding, PaddingOneIsRejectedAndPaddingTwoHitsTheSizeGuard)
 {
     picBunch::Bunch const bunch = latticeBunch();
     picBunch::ComputeOptions options;
@@ -301,17 +320,69 @@ TEST(Padding, ExplicitPaddingOneSupportsLargeGridAndPaddingTwoHitsTheGuard)
     options.gridSize = {384u, 384u, 384u};
 
     options.fftPadding = 1;
-    picBunch::Grid const grid = picBunch::makeGrid(bunch, options);
-    EXPECT_EQ(grid.n, (picBunch::Idx3{384u, 384u, 384u}));
-    EXPECT_EQ(grid.fftPadding, 1u);
+    EXPECT_THROW(picBunch::makeGrid(bunch, options), std::invalid_argument)
+        << "padding 1 has no deposit halo and must be rejected";
 
     options.fftPadding = 2;
     EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error)
         << "padding 2 at 384^3 must hit the padded-node guard";
 
-    // The default tolerance policy also selects padding 2 here, so the same
-    // guard applies unless the user asks for --fft-padding 1 explicitly.
+    // The default tolerance policy also selects padding 2 here.
     options.fftPadding = 0;
     options.tolerance = 1e-3;
     EXPECT_THROW(picBunch::makeGrid(bunch, options), std::runtime_error);
+}
+
+TEST(Padding, InteriorParticleFieldUnchangedBitForBit)
+{
+    // The guard is pure validation; it adds no arithmetic to the deposit.  A
+    // legitimate interior particle must therefore reproduce the exact field of
+    // the pre-change build.  The hash is over the raw IEEE-754 bytes of all six
+    // components in component order.
+    picBunch::Bunch bunch;
+    bunch.resize(1);
+    bunch.x[0] = 5.3;
+    bunch.y[0] = 6.1;
+    bunch.z[0] = 5.7;
+    bunch.ux[0] = 0.0;
+    bunch.uy[0] = 0.0;
+    bunch.uz[0] = 0.0;
+    bunch.weight[0] = 1.0;
+    bunch.charge[0] = 1.0;
+
+    picBunch::ComputeOptions options;
+    options.tolerance = 1e-3;
+    options.cellSize = {1.0, 1.0, 1.0};
+    options.gridSize = picBunch::Idx3{12u, 12u, 12u};
+    options.gridOrigin = picBunch::Vec3{0.0, 0.0, 0.0};
+    options.fftPadding = 2;
+    options.deterministicDeposit = true;
+
+    auto hashField = [](picBunch::Field const& field) {
+        std::uint64_t hash = 1469598103934665603ull;
+        auto mix = [&](void const* data, std::size_t bytes) {
+            auto const* bytesPtr = static_cast<unsigned char const*>(data);
+            for(std::size_t i = 0; i < bytes; ++i)
+            {
+                hash ^= bytesPtr[i];
+                hash *= 1099511628211ull;
+            }
+        };
+        for(int c = 0; c < 6; ++c)
+            mix(field.data[c].data(), field.data[c].size() * sizeof(double));
+        return hash;
+    };
+
+    picBunch::Field const field = picBunch::computeField(bunch, options);
+    std::uint64_t const hash = hashField(field);
+#if !defined(PICBUNCH_BACKEND_CUDA) && !defined(PICBUNCH_BACKEND_HIP)
+    // Captured from main before the padded-boundary guard (host/FFTW backend).
+    EXPECT_EQ(hash, 0x16315e43730d10daull)
+        << "an interior particle must keep the exact pre-change field";
+#else
+    // cuFFT and rocFFT round differently from FFTW, so a host bit pattern is
+    // not portable.  The device deposit still has to stay deterministic.
+    picBunch::Field const again = picBunch::computeField(bunch, options);
+    EXPECT_EQ(hash, hashField(again)) << "repeated runs must stay bit-identical";
+#endif
 }
