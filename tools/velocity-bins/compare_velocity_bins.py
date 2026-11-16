@@ -43,6 +43,11 @@ YEE = indfield.OFFSETS  # (6, 3), cell units
 COMPONENTS = ("Ex", "Ey", "Ez", "Bx", "By", "Bz")
 UNITS = ("V/m", "V/m", "V/m", "T", "T", "T")
 
+#: Version of the ``metrics_v2`` payload (new keys only; legacy keys untouched).
+METRICS_V2_SCHEMA = "velocity-bin-metrics/2.0"
+#: Relative-error floor, identical to the one already used by ``error_stats``.
+REL_EPS = 1e-30
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
@@ -55,6 +60,10 @@ def parse_args() -> argparse.Namespace:
                    help="refine level used when gamma >= 100 (beamed integrands)")
     p.add_argument("--fit", action="store_true")
     p.add_argument("--bands", default="0-1,1-2,2-4,4-8,8-16,16+")
+    p.add_argument("--metrics-v2", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="emit the bunch-box / far-field metrics under 'metrics_v2' "
+                        "(default: on; --no-metrics-v2 reproduces the legacy JSON)")
     return p.parse_args()
 
 
@@ -240,6 +249,183 @@ def error_stats(mesh, ref, dist, bands, band_idx):
     }
 
 
+def bunch_bounding_box(bunch: dict) -> dict:
+    """Axis-aligned bounding box of the actual particle positions.
+
+    The box is inclusive on every axis; ``R`` is half of the largest extent,
+    which is the radius used for the far-field translation (``2 R``).
+    """
+    if len(bunch["x"]) == 0:
+        nan = [math.nan] * 3
+        return {"n_particles": 0, "min": nan, "max": nan,
+                "extent": nan, "R": 0.0}
+    lo = np.array([float(np.min(bunch[a])) for a in ("x", "y", "z")])
+    hi = np.array([float(np.max(bunch[a])) for a in ("x", "y", "z")])
+    extent = hi - lo
+    return {"n_particles": int(len(bunch["x"])),
+            "min": lo.tolist(), "max": hi.tolist(),
+            "extent": extent.tolist(),
+            "R": 0.5 * float(np.max(extent))}
+
+
+def box_node_mask(n, origin, cell, lo, hi) -> np.ndarray:
+    """Boolean ``(n0, n1, n2)`` mask of base nodes inside a closed box.
+
+    A base node sits at ``origin + index * cell`` (the same convention used by
+    :func:`nearest_distance` and by the reference accumulation in
+    :func:`worker`); the Yee half-cell offsets are not applied here, so all six
+    components share one node mask.  A tiny roundoff guard (``1e-12 * cell``)
+    is added to the inclusive bounds.
+    """
+    lo = np.asarray(lo, dtype=float)
+    hi = np.asarray(hi, dtype=float)
+    n = tuple(int(v) for v in n)
+    if not (np.all(np.isfinite(lo)) and np.all(np.isfinite(hi))):
+        return np.zeros(n, dtype=bool)
+    axis_inside = []
+    for a in range(3):
+        idx = np.arange(n[a], dtype=float)
+        pos = float(origin[a]) + idx * float(cell[a])
+        tol = 1e-12 * abs(float(cell[a]))
+        axis_inside.append((pos >= lo[a] - tol) & (pos <= hi[a] + tol))
+    return (axis_inside[0][:, None, None]
+            & axis_inside[1][None, :, None]
+            & axis_inside[2][None, None, :])
+
+
+def _node_position(node, origin, cell):
+    return [float(origin[a]) + float(node[a]) * float(cell[a]) for a in range(3)]
+
+
+def component_error_stats(mesh_c, ref_c, mask, *, eps: float = REL_EPS,
+                          origin=None, cell=None) -> dict:
+    """Robust relative-error summary for one component over one node mask.
+
+    ``rel = |mesh - ref| / max(|ref|, eps)``.  Non-finite samples are counted
+    (never silently dropped) and excluded from max/percentile/RMS.  If the mask
+    is empty or everything is non-finite the numeric fields are ``None``.
+    """
+    n = int(np.count_nonzero(mask))
+    out = {
+        "n": n, "n_finite": 0, "n_nonfinite": 0,
+        "max_rel": None, "max_abs": None,
+        "max_rel_node": None, "max_abs_node": None,
+        "max_rel_position": None, "max_abs_position": None,
+        "p99_rel": None, "rms_rel": None,
+    }
+    if n == 0:
+        return out
+    m = np.asarray(mesh_c)[mask]
+    r = np.asarray(ref_c)[mask]
+    nodes = np.argwhere(mask)
+    finite = np.isfinite(m) & np.isfinite(r)
+    n_finite = int(np.count_nonzero(finite))
+    out["n_finite"] = n_finite
+    out["n_nonfinite"] = n - n_finite
+    if n_finite == 0:
+        return out
+    mf = m[finite]
+    rf = r[finite]
+    fnodes = nodes[finite]
+    rel = np.abs(mf - rf) / np.maximum(np.abs(rf), eps)
+    absv = np.abs(mf - rf)
+    i_rel = int(np.argmax(rel))
+    i_abs = int(np.argmax(absv))
+    out["max_rel"] = float(rel[i_rel])
+    out["max_abs"] = float(absv[i_abs])
+    out["max_rel_node"] = [int(v) for v in fnodes[i_rel]]
+    out["max_abs_node"] = [int(v) for v in fnodes[i_abs]]
+    if origin is not None and cell is not None:
+        out["max_rel_position"] = _node_position(fnodes[i_rel], origin, cell)
+        out["max_abs_position"] = _node_position(fnodes[i_abs], origin, cell)
+    out["p99_rel"] = float(np.percentile(rel, 99))
+    out["rms_rel"] = float(np.sqrt(np.mean(rel * rel)))
+    return out
+
+
+def prepare_metrics_v2(bunch: dict, n, origin, cell, *,
+                       eps: float = REL_EPS) -> dict:
+    """Precompute the bunch-box and far-field masks once per bunch.
+
+    The far-field shell is the bunch bounding box translated by ``+2 R`` along
+    each axis, where ``R`` is half the largest bunch extent.  No reference field
+    is recomputed here; :func:`compute_metrics_v2` only reuses the mesh and
+    reference arrays that the caller already has.
+    """
+    bbox = bunch_bounding_box(bunch)
+    offset = 2.0 * bbox["R"]
+    ff_lo = [bbox["min"][a] + offset for a in range(3)]
+    ff_hi = [bbox["max"][a] + offset for a in range(3)]
+    return {
+        "schema": METRICS_V2_SCHEMA,
+        "eps": float(eps),
+        "n": tuple(int(v) for v in n),
+        "origin": [float(v) for v in origin],
+        "cell": [float(v) for v in cell],
+        "bbox": bbox,
+        "far_field_offset": offset,
+        "far_field_min": ff_lo,
+        "far_field_max": ff_hi,
+        "in_mask": box_node_mask(n, origin, cell, bbox["min"], bbox["max"]),
+        "far_mask": box_node_mask(n, origin, cell, ff_lo, ff_hi),
+    }
+
+
+def _region_metrics(mesh, ref, mask, origin, cell, eps: float) -> dict:
+    per_component = {}
+    for c, name in enumerate(COMPONENTS):
+        per_component[name] = component_error_stats(
+            mesh[c], ref[c], mask, eps=eps, origin=origin, cell=cell)
+    finite = [(name, s["max_rel"]) for name, s in per_component.items()
+              if s["max_rel"] is not None]
+    if finite:
+        worst_name, worst_rel = max(finite, key=lambda item: item[1])
+        worst_component = worst_name
+        worst_rel = float(worst_rel)
+    else:
+        worst_component = None
+        worst_rel = None
+    return {
+        "n_nodes": int(np.count_nonzero(mask)),
+        "per_component": per_component,
+        "worst_rel": worst_rel,
+        "worst_component": worst_component,
+    }
+
+
+def compute_metrics_v2(mesh, ref, ctx: dict) -> dict:
+    """Build the ``metrics_v2`` payload from already-computed mesh and reference.
+
+    ``mesh`` and ``ref`` are ``(6, n0, n1, n2)`` arrays in ``COMPONENTS`` order;
+    the reference evaluation is not repeated.  ``ref`` is the TSC-convolved
+    continuum target ``T``, so the reported error is ``mesh - T``.
+    """
+    origin = ctx["origin"]
+    cell = ctx["cell"]
+    eps = ctx["eps"]
+    bbox = ctx["bbox"]
+    return {
+        "schema": ctx["schema"],
+        "comparison": "mesh_vs_T",
+        "eps": eps,
+        "rel_error_definition": "|F_binned - F_ref| / max(|F_ref|, eps)",
+        "geometry": {
+            "bbox_min": list(bbox["min"]),
+            "bbox_max": list(bbox["max"]),
+            "bbox_extent": list(bbox["extent"]),
+            "R": float(bbox["R"]),
+            "far_field_offset": float(ctx["far_field_offset"]),
+            "far_field_min": list(ctx["far_field_min"]),
+            "far_field_max": list(ctx["far_field_max"]),
+            "bbox_n_particles": int(bbox["n_particles"]),
+            "node_position_convention":
+                "origin + index*cell (base node, shared by all six components)",
+        },
+        "in_bunch": _region_metrics(mesh, ref, ctx["in_mask"], origin, cell, eps),
+        "far_field": _region_metrics(mesh, ref, ctx["far_mask"], origin, cell, eps),
+    }
+
+
 def fmt(v, sig=3):
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "-"
@@ -266,6 +452,12 @@ def main() -> None:
 
     dist = nearest_distance(bunch, tuple(n), origin, cell, dmax=16.0)
     band_idx = band_index(dist, bands)
+
+    # Bunch-box and far-field masks are built once and reused for every B; the
+    # new metrics only consume the mesh and T arrays computed below, never a
+    # second reference pass.
+    metrics_ctx = (prepare_metrics_v2(bunch, n, origin, cell)
+                   if args.metrics_v2 else None)
 
     # Continuum target with per-particle velocities (independent of B).
     print("computing T (per-particle continuum reference) ...", flush=True)
@@ -310,12 +502,15 @@ def main() -> None:
         outside = dist < 0
         roundoff = float(np.max(np.abs(mesh[:, outside])) if outside.any() else 0.0)
 
-        results["runs"][str(B)] = {
+        run_result = {
             "bins_used": B_used, "per_axis": per_axis, "model_sum": model_sum,
             "model_error": model_err,
             "mesh_vs_T": stats_T, "Tb_vs_T": stats_bin, "mesh_vs_Tb": stats_disc,
             "outside_window_roundoff": roundoff,
         }
+        if metrics_ctx is not None:
+            run_result["metrics_v2"] = compute_metrics_v2(mesh, T, metrics_ctx)
+        results["runs"][str(B)] = run_result
 
         lines.append(f"## B = {B_used} (requested {B}, per-axis {per_axis[0]}x{per_axis[1]}x{per_axis[2]}, "
                      f"modelSum {model_sum:.4e}, model error {model_err:.4e})")
@@ -339,6 +534,25 @@ def main() -> None:
         lines.append(f"Dominant band: {stats_T['dominant_band']}; "
                      f"outside-window max|mesh| = {roundoff:.3e}.")
         lines.append("")
+        if metrics_ctx is not None:
+            mv = run_result["metrics_v2"]
+            lines.append("| v2 region | nodes | worst rel | worst component |")
+            lines.append("|---|---|---|---|")
+            for region in ("in_bunch", "far_field"):
+                r = mv[region]
+                lines.append(f"| {region} | {r['n_nodes']} | {fmt(r['worst_rel'])} "
+                             f"| {r['worst_component'] or '-'} |")
+            lines.append("")
+            lines.append("| v2 in-bunch | Ex | Ey | Ez | Bx | By | Bz |")
+            lines.append("|---|---|---|---|---|---|---|")
+            comp = mv["in_bunch"]["per_component"]
+            lines.append("| max rel | " + " | ".join(
+                fmt(comp[name]["max_rel"]) for name in COMPONENTS) + " |")
+            lines.append("| p99 rel | " + " | ".join(
+                fmt(comp[name]["p99_rel"]) for name in COMPONENTS) + " |")
+            lines.append("| rms rel | " + " | ".join(
+                fmt(comp[name]["rms_rel"]) for name in COMPONENTS) + " |")
+            lines.append("")
 
     if args.fit:
         lines.append("## Calibration fit")
