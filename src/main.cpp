@@ -16,6 +16,7 @@
 #include "picBunch/NearShell.hpp"
 #include "picBunch/OpenPMD.hpp"
 #include "picBunch/OpenPMDWriter.hpp"
+#include "picBunch/ChunkedWriter.hpp"
 #include "picBunch/Placement.hpp"
 #include "picBunch/Types.hpp"
 
@@ -168,6 +169,21 @@ namespace
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
             "                        when the padded box exceeds the per-rank limit\n"
+            "  --solve-mode <mode>   auto|chunked (default: auto).  chunked runs the\n"
+            "                        exact global 3-D FFT out of core: one process\n"
+            "                        splits the padded volume into chunks, stages the\n"
+            "                        transposes on disk and streams the output slabs.\n"
+            "                        Peak memory is a few chunk buffers, not the padded\n"
+            "                        volume; requires one rank and --output (or it\n"
+            "                        accumulates for the checkpoint writer)\n"
+            "  --chunk-cells <N>     cells per chunk buffer of the chunked solve\n"
+            "                        (default: 4194304); must hold one x-y plane\n"
+            "  --virtual-ranks <N>   explicit virtual-rank count for the staged\n"
+            "                        solve (default: derived from --chunk-cells);\n"
+            "                        the slab split and arithmetic match the MPI path\n"
+            "  --staging-dir <dir>   directory for the chunked staging files\n"
+            "                        (default: $TMPDIR/picbunch-staging-<pid>)\n"
+            "  --keep-staging        keep the chunked staging files (diagnostics)\n"
             "  --shape <shape>       cic|tsc|pqs particle shape for the charge deposit\n"
             "                        (default: tsc); must match the PIConGPU species shape\n"
             "  --velocity-moments <m>  off|auto|2|3 (default: off).  Replaces the\n"
@@ -234,6 +250,11 @@ namespace
         std::string shape = "tsc";
         int multipoleGroupCells = 16;
         double maxParticleChunkGb = 0.0;
+        std::string solveMode = "auto";
+        std::size_t chunkCells = std::size_t{1u} << 22;
+        int virtualRanks = 0;
+        std::optional<std::string> stagingDir;
+        bool keepStaging = false;
         std::optional<Idx3> globalGrid;
         std::optional<Vec3> globalOrigin;
         std::string restartFormat = "standard";
@@ -508,6 +529,26 @@ namespace
                 args.backend = value("--backend");
             else if(option == "--fft-mode")
                 args.fftMode = value("--fft-mode");
+            else if(option == "--solve-mode")
+                args.solveMode = value("--solve-mode");
+            else if(option == "--chunk-cells")
+            {
+                args.chunkCells = static_cast<std::size_t>(
+                    parseIteration(value("--chunk-cells"), "--chunk-cells"));
+                if(args.chunkCells == 0u)
+                    throw std::invalid_argument("--chunk-cells must be positive");
+            }
+            else if(option == "--virtual-ranks")
+            {
+                args.virtualRanks = static_cast<int>(
+                    parseIteration(value("--virtual-ranks"), "--virtual-ranks"));
+                if(args.virtualRanks < 1)
+                    throw std::invalid_argument("--virtual-ranks must be positive");
+            }
+            else if(option == "--staging-dir")
+                args.stagingDir = value("--staging-dir");
+            else if(option == "--keep-staging")
+                args.keepStaging = true;
             else if(option == "--cell-size")
                 args.cellSize = parseTripleDouble(value("--cell-size"), "--cell-size");
             else if(option == "--grid")
@@ -566,6 +607,11 @@ namespace
             throw std::invalid_argument("--velocity-moments must be 'off', 'auto', '2' or '3'");
         if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
+        if(args.solveMode != "auto" && args.solveMode != "chunked")
+            throw std::invalid_argument("--solve-mode must be 'auto' or 'chunked'");
+        if(args.solveMode == "chunked" && picBunch::mpiSize() > 1)
+            throw std::invalid_argument(
+                "--solve-mode chunked is a single-process path; run it with one rank");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         // The fast path rejects an explicit tile that leaves the measured
@@ -683,6 +729,19 @@ namespace
         double total = times.readerMs + times.depositMs + times.kernelMs + times.fftMs
             + times.transposeMs + times.readoutMs + times.writerMs;
         std::printf("  %-8s %10.3f\n", "total", total);
+        if(times.chunkCells != 0u)
+        {
+            std::printf("chunked solve (chunk=%llu cells):\n",
+                        static_cast<unsigned long long>(times.chunkCells));
+            std::printf("  staging read      %10.3f GB\n",
+                        static_cast<double>(times.chunkReadBytes) / 1e9);
+            std::printf("  staging write     %10.3f GB\n",
+                        static_cast<double>(times.chunkWrittenBytes) / 1e9);
+            std::printf("  peak staging      %10.3f GB\n",
+                        static_cast<double>(times.chunkPeakStagingBytes) / 1e9);
+            std::printf("  peak chunk buffer %10.3f GB\n",
+                        static_cast<double>(times.chunkPeakMemoryBytes) / 1e9);
+        }
     }
 
     using Clock = std::chrono::steady_clock;
@@ -694,6 +753,10 @@ namespace
 
     int runConfigured(Arguments const& args)
     {
+        if(args.solveMode == "chunked")
+            throw std::invalid_argument(
+                "--solve-mode chunked is supported on the direct --input/--output "
+                "path; the --config path keeps the in-core solve");
         picBunch::Config const config = picBunch::loadConfig(*args.config);
         picBunch::MpiParallelContext parallel;
         int const rank = picBunch::mpiRank();
@@ -1451,6 +1514,7 @@ int main(int argc, char** argv)
     {
         picBunch::BunchData bunchData;
         picBunch::Field field;
+        std::unique_ptr<picBunch::ChunkedFieldWriter> chunkedWriter;
         std::optional<picBunch::FarTail> farTail;
         bool const root = picBunch::mpiRank() == 0;
         Vec3 globalOriginResolved{0.0, 0.0, 0.0};
@@ -1481,6 +1545,39 @@ int main(int argc, char** argv)
             bunchData.bunch.size(),
             static_cast<unsigned long long>(bunchData.iteration),
             bunchData.time * bunchData.timeUnitSI);
+        {
+            double sumWeight = 0.0;
+            double totalCharge = 0.0;
+            double cx = 0.0;
+            double cy = 0.0;
+            double cz = 0.0;
+            for(std::size_t p = 0; p < bunchData.bunch.size(); ++p)
+            {
+                double const w = bunchData.bunch.weight[p];
+                sumWeight += w;
+                totalCharge += w * bunchData.bunch.charge[p];
+                cx += w * bunchData.bunch.x[p];
+                cy += w * bunchData.bunch.y[p];
+                cz += w * bunchData.bunch.z[p];
+            }
+            double const norm = std::max(sumWeight, 1.0e-300);
+            std::fprintf(
+                stderr,
+                "picBunch: input sanity: particles=%zu sum_weight=%.12g "
+                "total_charge=%.12g C centroid=(%.9g,%.9g,%.9g) m\n",
+                bunchData.bunch.size(),
+                sumWeight,
+                totalCharge,
+                cx / norm,
+                cy / norm,
+                cz / norm);
+            if(totalCharge > 0.0)
+                std::fprintf(
+                    stderr,
+                    "picBunch: warning: positive total charge %.12g C for an electron "
+                    "bunch; check the charge sign and weighting\n",
+                    totalCharge);
+        }
 
         // Geometry: an explicit --cell-size always wins over the input mesh.
         // When neither is available the run fails; nothing is assumed.
@@ -1614,6 +1711,54 @@ int main(int argc, char** argv)
             if(root && args.fftMode != "replicated")
                 std::printf(
                     "fft mode: replicated (PIConGPU checkpoint needs the full field)\n");
+        }
+        options.solveMode = (args.solveMode == "chunked")
+            ? picBunch::SolveMode::Chunked
+            : picBunch::SolveMode::InCore;
+        options.chunkCells = args.chunkCells;
+        options.virtualRanks = args.virtualRanks;
+        options.stagingDirectory = args.stagingDir.value_or("");
+        options.keepStaging = args.keepStaging;
+        if(options.solveMode == picBunch::SolveMode::Chunked)
+        {
+            if(args.globalGrid)
+                throw std::invalid_argument(
+                    "--solve-mode chunked does not combine with --global-grid; the "
+                    "chunked solve writes the compute grid and has no far-tail fill");
+            if(args.nearShell != "none")
+                throw std::invalid_argument(
+                    "--solve-mode chunked does not combine with --near-shell");
+            if(args.velocityMoments != "off")
+                throw std::invalid_argument(
+                    "--solve-mode chunked does not combine with --velocity-moments");
+            if(args.output && !args.destination)
+            {
+                // Lazily create the streaming writer from the first chunk, which
+                // carries the resolved compute grid.  The series is opened once
+                // and receives every component slab at its global offset.
+                std::string const path = *args.output;
+                std::uint64_t const iteration = args.outputIteration;
+                double const time = bunchData.time;
+                double const timeUnit = bunchData.timeUnitSI;
+                options.chunkSink
+                    = [&chunkedWriter, path, iteration, time, timeUnit](
+                          picBunch::FieldChunk const& chunk) {
+                          if(!chunkedWriter)
+                          {
+                              picBunch::FieldWriteOptions writeOptions;
+                              writeOptions.iteration = iteration;
+                              writeOptions.time = time;
+                              writeOptions.timeUnitSI = timeUnit;
+                              chunkedWriter = std::make_unique<picBunch::ChunkedFieldWriter>(
+                                  path,
+                                  writeOptions,
+                                  chunk.grid.n,
+                                  chunk.grid.origin,
+                                  chunk.grid);
+                          }
+                          chunkedWriter->write(chunk);
+                      };
+            }
         }
         options.meshGridSize = args.globalGrid ? std::nullopt : meshGridExtent;
         if(args.grid)
@@ -1942,7 +2087,10 @@ int main(int argc, char** argv)
         if(root)
         {
             printGrid(field.grid);
-            std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
+            if(chunkedWriter)
+                std::printf("field: max|E|, max|B| reported per chunk by the writer\n");
+            else
+                std::printf("field: max|E|=%g V/m  max|B|=%g T\n", maxE, maxB);
             std::printf("compute wall (all stages, rank 0): %.3f ms\n", computeWallMs);
         }
 
@@ -2084,7 +2232,17 @@ int main(int argc, char** argv)
             writeOptions.time = bunchData.time;
             writeOptions.timeUnitSI = bunchData.timeUnitSI;
             auto const writerStart = Clock::now();
-            if(args.globalGrid)
+            if(chunkedWriter)
+            {
+                chunkedWriter->close();
+                times.writerMs = elapsedMs(writerStart);
+                if(root)
+                    std::printf(
+                        "wrote %s (iteration %llu, chunked stream)\n",
+                        args.output->c_str(),
+                        static_cast<unsigned long long>(args.outputIteration));
+            }
+            else if(args.globalGrid)
                 picBunch::writeFieldToDomain(
                     field,
                     *args.output,
@@ -2136,7 +2294,7 @@ int main(int argc, char** argv)
             else if(root)
                 picBunch::writeField(field, *args.output, writeOptions);
             times.writerMs = elapsedMs(writerStart);
-            if(root)
+            if(root && !chunkedWriter)
                 std::printf(
                     "wrote %s (iteration %llu)\n",
                     args.output->c_str(),

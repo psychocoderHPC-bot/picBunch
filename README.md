@@ -23,6 +23,10 @@ gates, the near-source limitation and their provenance are recorded in
 - **Known limitations:** [docs/known-limitations.md](docs/known-limitations.md)
   records the open engineering items, their measured symptoms and the planned
   fixes.
+- **Chunked low-memory solve:**
+  [docs/chunked-field-solve.md](docs/chunked-field-solve.md) describes the
+  out-of-core staging passes, the peak-memory formula, the
+  `--solve-mode chunked` switch and the measured production limit.
 - **Near-shell scaling:** [docs/near-shell-scaling.md](docs/near-shell-scaling.md)
   gives the V100 dense-cloud measurements, the tile 2/tile 4 cost, memory,
   projections and the per-regime recommendation.
