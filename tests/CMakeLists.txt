@@ -28,6 +28,7 @@ if(PICBUNCH_BUILD_GTESTS)
         picBunchUnitTests
         test_deposit.cpp
         test_domain.cpp
+        test_device_affinity.cpp
         test_kernel.cpp
         test_fft.cpp
         test_io.cpp
@@ -76,7 +77,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField DistributedFft64Bit)
+    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField DistributedFft64Bit)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*

@@ -16,6 +16,8 @@
 #include "picBunch/NearShell.hpp"
 #include "picBunch/DistributedFft.hpp"
 #include "picBunch/Readout.hpp"
+#include "picBunch/DeviceAffinity.hpp"
+#include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/FieldGuard.hpp"
 #include "picBunch/detail/FftPlanCache.hpp"
 #include "picBunch/detail/FftSpectrumCacheControl.hpp"
@@ -1711,6 +1713,7 @@ namespace picBunch
     {
         if(outReport)
             *outReport = VelocityMomentsReport{};
+        pbfast::setFastNearDeviceIndex(options.deviceIndex);
         if(options.nearShell.mode != NearShellOptions::Mode::None
            && options.shape != Shape::TSC)
             throw std::runtime_error(
@@ -1817,7 +1820,12 @@ namespace picBunch
 #endif
         if(!selector.isAvailable())
             throw std::runtime_error("computeField: no device available for the compiled backend");
-        auto device = selector.makeDevice(0);
+        if(options.deviceIndex >= selector.getDeviceCount())
+            throw std::runtime_error(
+                "computeField: device index " + std::to_string(options.deviceIndex)
+                + " is not visible (" + std::to_string(selector.getDeviceCount())
+                + " visible device(s))");
+        auto device = selector.makeDevice(options.deviceIndex);
         auto queue = device.makeQueue();
         using KernelCache = KernelSpectrumCache<decltype(device)>;
 
@@ -1931,6 +1939,19 @@ namespace picBunch
             throw std::runtime_error(
                 "computeField: output node count " + std::to_string(outNodes)
                 + " exceeds the 32-bit gathered-index limit");
+
+        {
+            DeviceWorkload const workload{
+                static_cast<std::size_t>(paddedNodes),
+                static_cast<std::size_t>(spectrumCount),
+                outNodes,
+                bunch.size(),
+                binCount,
+                useDistributed ? parSize : 1,
+                useDistributed,
+                static_cast<unsigned>(sizeof(double))};
+            enforceRankDeviceFit(workload);
+        }
 
         // Everything a zero-field report needs to identify the run.
         auto const guardDescription = [&](Field const& result, char const* path) {

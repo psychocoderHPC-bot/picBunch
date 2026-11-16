@@ -2,12 +2,14 @@
 // SPDX-FileCopyrightText: Rene Widera
 #pragma once
 
+#include "picBunch/DeviceAffinity.hpp"
 #include "picBunch/Parallel.hpp"
 #include "picBunch/Types.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace picBunch
 {
@@ -108,6 +110,21 @@ namespace picBunch
     bool mpiActive();
     int mpiRank();
     int mpiSize();
+
+    /*! Local rank and size of the MPI shared-memory domain.
+     *
+     * Both fall back to the world rank and size when MPI is absent or the
+     * shared-memory split is unavailable.  The automatic device mapping uses the
+     * local rank so a multi-node launch starts each node at device 0.
+     */
+    int mpiLocalRank();
+    int mpiLocalSize();
+
+    /*! Allgather the resolved rank-to-device mapping.
+     *
+     * Rank order is the world rank.  A serial build returns ``local``.
+     */
+    std::vector<RankDeviceMapping> mpiGatherDeviceMappings(RankDeviceMapping const& local);
 
     void mpiBarrier();
 

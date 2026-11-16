@@ -500,6 +500,13 @@ namespace picBunch
          * field components and the six arrays are summed after the loop.
          */
         ParallelContext const* parallel = nullptr;
+        /*! Rank-local device index of the compiled backend.
+         *
+         * Filled from the automatic rank-to-device mapping after the option
+         * broadcast, so it is deliberately not part of the wire format or the
+         * fingerprint.  Every rank keeps its own value.
+         */
+        unsigned deviceIndex = 0;
         //! Opt-in exact near shell.  The default stays the plain mesh.
         NearShellOptions nearShell;
         //! Velocity-bin policy for multi-velocity bunches (see
