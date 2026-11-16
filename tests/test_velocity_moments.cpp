@@ -8,8 +8,10 @@
 // finite differences: the value at the centre matches ``pointFieldNormalized``,
 // the reconstructed field converges at the order the Taylor should, and the
 // first-derivative coefficients match central differences.  Second, the whole
-// moment pipeline is checked against the 256-velocity-box binned reference on a
-// gamma-10 bunch with a 5% energy spread (worst relative L2).
+// moment pipeline is checked against an exact per-particle velocity reference
+// (the binned path refined until every velocity box holds a single particle) on
+// a gamma-10 bunch with a 5% energy spread, and the order-2 -> order-3 reduction
+// of the Taylor remainder is pinned.
 
 #include "picBunch/Compute.hpp"
 #include "picBunch/Kernel.hpp"
@@ -85,6 +87,73 @@ namespace
             }
         }
         return std::sqrt(num) / std::sqrt(den);
+    }
+
+    /*! Binned reference refined until every velocity box holds one particle.
+     *
+     * The binned path evaluates the point kernel at each box's
+     * absolute-charge-weighted mean momentum.  With a single particle per box
+     * that mean is the particle momentum itself, so the reference carries no
+     * velocity discretisation error: it is the exact per-particle-kernel field
+     * on the shared TSC deposit and FFT grid.  The spatial deposit cancels in
+     * the comparison (the moment path deposits the same stencil at the same
+     * positions; an order-0 moment field matches the one-box binned field to
+     * 3.3e-16), so the remaining difference is the Taylor remainder alone.
+     *
+     * Uniform edges make the box width the only refinement parameter.  The
+     * candidate counts are refined until the occupancy is one; the exact count
+     * depends on the particle velocity spacing, so it is found rather than
+     * hard-coded.
+     */
+    struct ExactVelocityReference
+    {
+        picBunch::Field field;
+        picBunch::VelocityBinning binning;
+        std::size_t maxMultiplicity = 0u;
+        double maxRepresentativeError = 0.0;
+    };
+
+    ExactVelocityReference exactVelocityReference(Bunch const& bunch, ComputeOptions options)
+    {
+        options.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
+        options.velocityBinning.edgeRule = picBunch::VelocityBinning::EdgeRule::Uniform;
+        ExactVelocityReference reference;
+        for(std::size_t const bins : {4096u, 16384u, 65536u, 262144u, 1048576u})
+        {
+            options.velocityBinning.explicitBins = bins;
+            picBunch::VelocityBinning const probe = picBunch::deriveVelocityBinning(
+                bunch,
+                options.tolerance,
+                options.velocityBinning);
+            std::vector<std::size_t> occupancy(probe.count, 0u);
+            for(std::size_t const box : probe.boxOf)
+                ++occupancy[box];
+            std::size_t const maxMultiplicity
+                = *std::max_element(occupancy.begin(), occupancy.end());
+            if(maxMultiplicity != 1u)
+                continue;
+            reference.field = picBunch::computeField(bunch, options, nullptr, &reference.binning);
+            // Recompute the occupancy from the binning the field actually used,
+            // so the assertion checks the delivered reference and not just the
+            // probe derivation.
+            std::fill(occupancy.begin(), occupancy.end(), 0u);
+            for(std::size_t const box : reference.binning.boxOf)
+                ++occupancy[box];
+            reference.maxMultiplicity
+                = *std::max_element(occupancy.begin(), occupancy.end());
+            for(std::size_t p = 0; p < bunch.size(); ++p)
+            {
+                auto const& u = reference.binning.representativeU[reference.binning.boxOf[p]];
+                double const dx = u[0] - bunch.ux[p];
+                double const dy = u[1] - bunch.uy[p];
+                double const dz = u[2] - bunch.uz[p];
+                reference.maxRepresentativeError = std::max(
+                    reference.maxRepresentativeError,
+                    std::sqrt(dx * dx + dy * dy + dz * dz));
+            }
+            return reference;
+        }
+        return reference; // empty data: the caller's ASSERT_EQ fires
     }
 
     //! Fill ``out`` with the order-3 Taylor coefficients of the kernel at (R, u0).
@@ -178,17 +247,23 @@ TEST(VelocityMoments, FirstDerivativesMatchFiniteDifferences)
 
 // ---------------------------------------------------------------- the pipeline
 
-TEST(VelocityMoments, MomentFieldMatchesTwoHundredFiftySixBoxReference)
+TEST(VelocityMoments, MomentFieldConvergesAgainstExactVelocityReference)
 {
     Bunch const bunch = spreadBunch(216, 10.0, 0.05);
 
-    // Reference: the 256-velocity-box binned field.
-    auto refOptions = momentOptions();
-    refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
-    refOptions.velocityBinning.explicitBins = 256u;
-    picBunch::VelocityBinning refBinning;
-    picBunch::Field const ref = picBunch::computeField(bunch, refOptions, nullptr, &refBinning);
-    ASSERT_EQ(refBinning.count, 256u);
+    // The reference is the binned path refined until every velocity box holds a
+    // single particle, so its representative is that particle's momentum and
+    // its own velocity discretisation error is zero.  Measured on jureca-h100:
+    // a 256-box uniform reference still carries 1.12e-5 and a 2048-box one
+    // 3.16e-7 of discretisation error; the latter is 0.77x the order-2 ->
+    // order-3 gap (4.11e-7), so even 2048 boxes cannot resolve the two orders.
+    // The former 256-box reference used the default auto edges and carried
+    // 4.75e-5 of error, 60x the order-2 remainder (7.89e-7): both moment fields
+    // measured the reference, which is why they agreed to 1.5e-5 relative.
+    ExactVelocityReference const reference = exactVelocityReference(bunch, momentOptions());
+    ASSERT_EQ(reference.maxMultiplicity, 1u)
+        << "the refined reference still puts several particles in one velocity box";
+    ASSERT_FALSE(reference.field.data[0].empty());
 
     auto makeMomentOptions = []() {
         ComputeOptions options = momentOptions();
@@ -213,15 +288,25 @@ TEST(VelocityMoments, MomentFieldMatchesTwoHundredFiftySixBoxReference)
         = picBunch::computeField(bunch, o2, nullptr, nullptr, &rep2);
     ASSERT_TRUE(rep2.used) << "order-2 moment path should be used";
 
-    double const rel3 = relativeL2(field3, ref);
-    double const rel2 = relativeL2(field2, ref);
+    double const rel3 = relativeL2(field3, reference.field);
+    double const rel2 = relativeL2(field2, reference.field);
     std::printf(
-        "[velocity-moments] gamma-10 5%% spread: order-3 relL2 = %.3e, "
-        "order-2 relL2 = %.3e (vs 256 boxes)\n",
+        "[velocity-moments] gamma-10 5%% spread vs exact (%zu boxes, <=1 particle/box, "
+        "max representative error %.1e): order-3 relL2 = %.3e, order-2 relL2 = %.3e, "
+        "ratio = %.3f\n",
+        reference.binning.count,
+        reference.maxRepresentativeError,
         rel3,
-        rel2);
-    EXPECT_LT(rel3, 5.0e-2) << "order-3 worst relative L2 vs 256 boxes";
+        rel2,
+        rel3 / rel2);
+    EXPECT_LT(rel3, 1.0e-5) << "order-3 accuracy against the exact velocity reference";
+    // Measured: rel2 = 7.89e-7, rel3 = 4.83e-7 (ratio 0.61); the differential
+    // order-2 -> order-3 term is 4.11e-7.  The strict inequality is the claim.
+    // The 0.85 band requires the measured-order improvement with margin and
+    // still rejects an order-2 evaluation (ratio 1.0) and an order-1 evaluation
+    // (ratio 115).
     EXPECT_LT(rel3, rel2) << "order 3 should beat order 2";
+    EXPECT_LT(rel3, 0.85 * rel2) << "order-2 -> order-3 reduction outside the measured band";
 }
 
 TEST(VelocityMoments, AutoSelectsOrderThreeAndMatches)
