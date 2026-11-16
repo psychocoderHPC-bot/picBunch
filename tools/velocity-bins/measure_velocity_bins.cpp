@@ -140,7 +140,7 @@ int main(int argc, char** argv)
         double tolerance = 1.0e-3;
         double modelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxBins = picBunch::kDefaultMaxVelocityBins;
-        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
+        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Auto;
         std::size_t momentOrder = 0; //!< 0 = off; else run the moment path at this order
         unsigned fftPadding = 2u;
         bool deterministicDeposit = false;
@@ -194,7 +194,7 @@ int main(int argc, char** argv)
                 modelConstant = std::stod(next());
             else if(a == "--max-bins")
                 maxBins = static_cast<std::size_t>(std::stoul(next()));
-            else if(a == "--bin-edges")
+            else if(a == "--velocity-bin-edges")
             {
                 std::string const text = next();
                 if(text == "uniform")
@@ -203,9 +203,11 @@ int main(int argc, char** argv)
                     binEdges = picBunch::VelocityBinning::EdgeRule::Quantile;
                 else if(text == "adaptive")
                     binEdges = picBunch::VelocityBinning::EdgeRule::Adaptive;
+                else if(text == "auto")
+                    binEdges = picBunch::VelocityBinning::EdgeRule::Auto;
                 else
                     throw std::runtime_error(
-                        "--bin-edges must be uniform, quantile or adaptive");
+                        "--velocity-bin-edges must be auto, uniform, quantile or adaptive");
             }
             else if(a == "--moments")
             {
@@ -416,12 +418,32 @@ int main(int argc, char** argv)
             meta << "near_shell_radius " << nearShellRadius << "\n";
             meta << "bin_model_constant " << modelConstant << "\n";
             meta << "max_bins " << maxBins << "\n";
-            meta << "bin_edges " << (binEdges == picBunch::VelocityBinning::EdgeRule::Quantile
-                                         ? "quantile"
-                                         : (binEdges == picBunch::VelocityBinning::EdgeRule::Adaptive
-                                                ? "adaptive"
-                                                : "uniform"))
-                  << "\n";
+            auto edgeName = [](picBunch::VelocityBinning::EdgeRule r) -> const char* {
+                switch(r)
+                {
+                    case picBunch::VelocityBinning::EdgeRule::Auto: return "auto";
+                    case picBunch::VelocityBinning::EdgeRule::Quantile: return "quantile";
+                    case picBunch::VelocityBinning::EdgeRule::Adaptive: return "adaptive";
+                    default: return "uniform";
+                }
+            };
+            meta << "bin_edges " << edgeName(binEdges) << "\n";
+            if(binEdges == picBunch::VelocityBinning::EdgeRule::Auto)
+            {
+                // Per-axis winner of the uniform/adaptive comparison, with both
+                // predicted model errors, so the choice is auditable from the
+                // meta file.
+                meta << "axis_edges "
+                     << edgeName(binning.axisEdgeRule[0])
+                     << " " << binning.axisEdgeModelErrorUniform[0] << "/"
+                     << binning.axisEdgeModelErrorAdaptive[0] << ","
+                     << edgeName(binning.axisEdgeRule[1])
+                     << " " << binning.axisEdgeModelErrorUniform[1] << "/"
+                     << binning.axisEdgeModelErrorAdaptive[1] << ","
+                     << edgeName(binning.axisEdgeRule[2])
+                     << " " << binning.axisEdgeModelErrorUniform[2] << "/"
+                     << binning.axisEdgeModelErrorAdaptive[2] << "\n";
+            }
             meta << "requested_bins " << requested << "\n";
             meta << "bins_used " << B << "\n";
             meta << "per_axis " << binning.perAxis[0] << " " << binning.perAxis[1] << " "

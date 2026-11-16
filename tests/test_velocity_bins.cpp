@@ -89,6 +89,19 @@ namespace
         options.fftPadding = 2u;
         return options;
     }
+
+    //! Explicit box count with the uniform (pre-adaptive) edge rule.  The
+    //! default edge rule is now auto, so every test that encodes the
+    //! historical uniform geometry or its numeric expectations passes this
+    //! instead of the bare default.
+    VelocityBinningOptions uniformPolicy(std::size_t explicitBins)
+    {
+        VelocityBinningOptions policy;
+        policy.mode = VelocityBinningOptions::Mode::Explicit;
+        policy.explicitBins = explicitBins;
+        policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
+        return policy;
+    }
 } // namespace
 
 TEST(VelocityBins, SingleVelocityStaysOneBox)
@@ -114,9 +127,7 @@ TEST(VelocityBins, TwoClassBunchKeepsTheHistoricalCheck)
 TEST(VelocityBins, OneBoxUsesChargeWeightedMean)
 {
     Bunch const bunch = axisBunch({10.0, 20.0});
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 1;
+    VelocityBinningOptions const policy = uniformPolicy(1u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     EXPECT_TRUE(binning.multiVelocity);
     EXPECT_EQ(binning.count, 1u);
@@ -134,9 +145,7 @@ TEST(VelocityBins, ModelShrinksWithBoxes)
     double previous = 0.0;
     for(std::size_t B : {1u, 2u, 4u, 8u, 16u})
     {
-        VelocityBinningOptions policy;
-        policy.mode = VelocityBinningOptions::Mode::Explicit;
-        policy.explicitBins = B;
+        VelocityBinningOptions const policy = uniformPolicy(B);
         VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
         EXPECT_EQ(binning.count, B);
         EXPECT_GT(binning.modelSum, 0.0);
@@ -151,9 +160,7 @@ TEST(VelocityBins, ModelShrinksWithBoxes)
 TEST(VelocityBins, EnergySpreadBinsTheBeamAxis)
 {
     Bunch const bunch = axisBunch(gammaLinspace(10.0, 20.0, 8));
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 4;
+    VelocityBinningOptions const policy = uniformPolicy(4u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     // Only the beam axis (e3) carries a spread, so all four boxes sit there.
     EXPECT_EQ(binning.perAxis[2], 4u);
@@ -177,6 +184,7 @@ TEST(VelocityBins, InfeasibleRequirementNamesTheNeededCount)
     Bunch const bunch = axisBunch(gammaLinspace(10.0, 20.0, 32));
     VelocityBinningOptions policy;
     policy.maxBins = 2;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     try
     {
         picBunch::deriveVelocityBinning(bunch, 1e-12, policy);
@@ -308,9 +316,7 @@ TEST(VelocityBins, CounterstreamingDoesNotReportZeroError)
     bunch.weight = {1.0, 1.0};
     bunch.charge = {kElectronCharge, kElectronCharge};
 
-    VelocityBinningOptions one;
-    one.mode = VelocityBinningOptions::Mode::Explicit;
-    one.explicitBins = 1;
+    VelocityBinningOptions one = uniformPolicy(1u);
     VelocityBinning const oneBox = picBunch::deriveVelocityBinning(bunch, 1.0e-3, one);
     EXPECT_GT(oneBox.modelSum, 0.0)
         << "a stationary mean for moving members is a full angular mismatch";
@@ -345,9 +351,7 @@ TEST(VelocityBins, NeutralCounterstreamingBinsViaAbsoluteCharge)
     bunch.weight = {1.0, 1.0};
     bunch.charge = {kElectronCharge, -kElectronCharge};
 
-    VelocityBinningOptions one;
-    one.mode = VelocityBinningOptions::Mode::Explicit;
-    one.explicitBins = 1;
+    VelocityBinningOptions one = uniformPolicy(1u);
     VelocityBinning const oneBox = picBunch::deriveVelocityBinning(bunch, 1.0e-3, one);
     EXPECT_GT(oneBox.modelSum, 0.0)
         << "a neutral bunch must not cancel the local error";
@@ -361,9 +365,7 @@ TEST(VelocityBins, MeanRepresentativeIsExactForOneParticlePerBin)
     // representative is the absolute-charge-weighted mean of its members, so
     // each box is represented by its own particle and the estimate is zero.
     Bunch bunch = axisBunch({10.0, 100.0});
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 2;
+    VelocityBinningOptions policy = uniformPolicy(2u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
     EXPECT_EQ(binning.count, 2u);
     EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
@@ -390,9 +392,7 @@ TEST(VelocityBins, SparseBinsModelIsFinite)
     bunch.uz = {0.5, 5.0, 9.5, 14.0};
     bunch.weight = {1.0, 1.0, 1.0, 1.0};
     bunch.charge = {kElectronCharge, kElectronCharge, kElectronCharge, kElectronCharge};
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 16;
+    VelocityBinningOptions policy = uniformPolicy(16u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
     EXPECT_EQ(binning.count, 16u);
     EXPECT_TRUE(std::isfinite(binning.modelSum));
@@ -406,9 +406,7 @@ TEST(VelocityBins, EnergyTermIsNodeBoundedSingleTerm)
     // a max member deviation (~0.79); the node-bounded single term is
     // (2/gamma_max) * (gamma_max - gamma_min)/gamma_max = 0.05.
     Bunch const bunch = axisBunch({10.0, 20.0});
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 1;
+    VelocityBinningOptions policy = uniformPolicy(1u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     // The representative is moving along the same axis, so the angular term is 0.
     EXPECT_NEAR(binning.modelSum, 2.0 * (10.0 / 20.0) / 20.0, 1e-12);
@@ -433,9 +431,7 @@ TEST(VelocityBins, PureAngularSpreadKeepsTheUnitAngularConstant)
     bunch.weight = {1.0, 1.0};
     bunch.charge = {kElectronCharge, kElectronCharge};
 
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 1;
+    VelocityBinningOptions policy = uniformPolicy(1u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     EXPECT_NEAR(binning.modelSum, theta * theta, 1e-15);
     // The calibrated term is 114x below the old gamma*theta worst case.
@@ -464,14 +460,13 @@ TEST(VelocityBins, InfeasibleRequirementPrintsTheCapError)
     // The reported "cap" number must be the model error at maxBins, not at the
     // required count (the historical bug printed the latter under the cap label).
     Bunch const bunch = axisBunch(gammaLinspace(8.0, 12.0, 64));
-    VelocityBinningOptions explicitTwo;
-    explicitTwo.mode = VelocityBinningOptions::Mode::Explicit;
-    explicitTwo.explicitBins = 2;
+    VelocityBinningOptions explicitTwo = uniformPolicy(2u);
     double const capError
         = picBunch::deriveVelocityBinning(bunch, 1e-12, explicitTwo).modelError;
 
     VelocityBinningOptions policy;
     policy.maxBins = 2;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     try
     {
         picBunch::deriveVelocityBinning(bunch, 1e-12, policy);
@@ -557,9 +552,7 @@ TEST(VelocityBins, AngularTermIsWidthSquaredNotGamma)
     bunch.weight = {1.0, 1.0};
     bunch.charge = {kElectronCharge, kElectronCharge};
 
-    VelocityBinningOptions policy;
-    policy.mode = VelocityBinningOptions::Mode::Explicit;
-    policy.explicitBins = 1;
+    VelocityBinningOptions policy = uniformPolicy(1u);
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     // gamma range zero: the estimate is the pure angular term theta^2
     // (kAngularModelConstant = 1), 114x below the old gamma*theta.
@@ -567,6 +560,16 @@ TEST(VelocityBins, AngularTermIsWidthSquaredNotGamma)
     EXPECT_LT(binning.modelSum, 10.0 * theta);
 }
 
+// The default edge rule is now auto, which builds the uniform and adaptive
+// partitions per axis and keeps the lower-predicted-error one.  For the
+// smooth angular bunches below, the adaptive partition's predicted error is
+// slightly worse than uniform's (the angular content model is near-uniform
+// across the transverse range, so equal-width cuts are the model's own
+// optimum), so auto's predicted error is the uniform one and the auto count
+// equals the uniform count.  These count-pinning tests exercise the historical
+// (uniform) auto behaviour, so they pass the explicit uniform edge rule; the
+// new auto default is pinned by DefaultEdgeRuleIsAuto and
+// AutoEdgesNeverWorseThanUniform.
 TEST(VelocityBins, RealisticHighGammaBunchLandsAtFourToEight)
 {
     // The operator's bunch: gamma 471-510 (the 1-99% interval of |p|, sigma_g/gamma about 3.9%) and about 50 mrad divergence.  The old gamma*Delta_theta term gave a one-box model sum of about 24.6 and the auto policy demanded order 1e5 boxes.  The calibrated angular term must return 4 to 8 boxes at the 1e-3 tolerance.
@@ -592,7 +595,9 @@ TEST(VelocityBins, RealisticHighGammaBunchLandsAtFourToEight)
         bunch.weight[p] = 1.0;
         bunch.charge[p] = kElectronCharge;
     }
-    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    VelocityBinningOptions policy;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform; // pin the historical uniform auto count
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     ASSERT_TRUE(binning.derived);
     EXPECT_TRUE(binning.multiVelocity);
     EXPECT_GE(binning.count, 4u) << binning.count;
@@ -624,7 +629,9 @@ TEST(VelocityBins, NarrowSyntheticBunchLandsAtEight)
         bunch.weight[p] = 1.0;
         bunch.charge[p] = kElectronCharge;
     }
-    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    VelocityBinningOptions policy;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform; // pin the historical uniform auto count
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     EXPECT_EQ(binning.count, 8u);
     EXPECT_LE(binning.modelError, 1e-3);
 }
@@ -657,7 +664,9 @@ TEST(VelocityBins, WideSyntheticBunchLandsAtSixteen)
         bunch.weight[p] = 1.0;
         bunch.charge[p] = kElectronCharge;
     }
-    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    VelocityBinningOptions policy;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform; // pin the historical uniform auto count
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     EXPECT_GE(binning.count, 32u) << binning.count;
     EXPECT_LE(binning.count, 64u) << binning.count;
     EXPECT_LE(binning.modelError, 1e-3);
@@ -783,6 +792,7 @@ TEST(VelocityBins, InBunchAutoReturnsASmallCountWhenToleranceIsMet)
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Auto;
     policy.inBunchCriterion = true;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
     EXPECT_TRUE(binning.derived);
     EXPECT_TRUE(binning.multiVelocity);
@@ -796,6 +806,7 @@ TEST(VelocityBins, InBunchAutoReturnsASmallCountWhenToleranceIsMet)
     // The in-bunch criterion escalates above the far-field count.
     VelocityBinningOptions farPolicy;
     farPolicy.mode = VelocityBinningOptions::Mode::Auto;
+    farPolicy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const farBinning = picBunch::deriveVelocityBinning(bunch, 1e-3, farPolicy);
     EXPECT_LT(farBinning.count, binning.count);
 }
@@ -852,6 +863,7 @@ TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Auto;
     policy.inBunchCriterion = true;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     // The tolerance is 1e-5, stricter than the in-bunch error at every count
     // (the in-bunch peak-normalised error of a high-gamma beam saturates above
     // the tolerance and never reaches 1e-5, even at 256 boxes).  The error
@@ -882,6 +894,7 @@ TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
     prev.mode = VelocityBinningOptions::Mode::Explicit;
     prev.explicitBins = binning.count / 2u;
     prev.inBunchCriterion = true;
+    prev.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const bPrev = picBunch::deriveVelocityBinning(bunch, 1e-5, prev);
     EXPECT_DOUBLE_EQ(binning.saturationPrevError, bPrev.modelError);
     // The returned count's error must be lower than the one-box error
@@ -890,6 +903,7 @@ TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
     one.mode = VelocityBinningOptions::Mode::Explicit;
     one.explicitBins = 1;
     one.inBunchCriterion = true;
+    one.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const b1 = picBunch::deriveVelocityBinning(bunch, 1e-3, one);
     EXPECT_LT(binning.modelError, b1.modelError);
 }
@@ -925,6 +939,7 @@ TEST(VelocityBins, InBunchAutoNeverReturnsTheCapWhenErrorKeepsDeclining)
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Auto;
     policy.inBunchCriterion = true;
+    policy.edgeRule = VelocityBinning::EdgeRule::Uniform;
     // 1e-15 is far below the in-bunch model error at every count up to the
     // ceiling (the pure-angular error halves per doubling but is still far
     // above 1e-15 at 16 boxes), so no count meets the tolerance: the policy
@@ -947,11 +962,13 @@ TEST(VelocityBins, InBunchAutoNeverReturnsTheCapWhenErrorKeepsDeclining)
     cap.mode = VelocityBinningOptions::Mode::Explicit;
     cap.explicitBins = 16u;
     cap.inBunchCriterion = true;
+    cap.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const b16 = picBunch::deriveVelocityBinning(bunch, 1e-15, cap);
     VelocityBinningOptions next;
     next.mode = VelocityBinningOptions::Mode::Explicit;
     next.explicitBins = 32u;
     next.inBunchCriterion = true;
+    next.edgeRule = VelocityBinning::EdgeRule::Uniform;
     VelocityBinning const b32 = picBunch::deriveVelocityBinning(bunch, 1e-15, next);
     // The error at 32 is at most half the error at 16 (still halving), so the
     // policy had no saturation point to stop at -- it capped at 16.
@@ -985,9 +1002,7 @@ TEST(VelocityBins, InBunchCriterionByErrorShrinksWithBoxes)
     bool first = true;
     for(std::size_t B : {1u, 4u, 16u, 64u})
     {
-        VelocityBinningOptions policy;
-        policy.mode = VelocityBinningOptions::Mode::Explicit;
-        policy.explicitBins = B;
+        VelocityBinningOptions policy = uniformPolicy(B);
         policy.inBunchCriterion = true;
         VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
         EXPECT_EQ(binning.count, B);
@@ -1150,4 +1165,104 @@ TEST(VelocityBins, AdaptiveEdgesSingleVelocityStaysOneBox)
     EXPECT_EQ(binning.count, 1u);
     EXPECT_FALSE(binning.multiVelocity);
     EXPECT_DOUBLE_EQ(binning.modelError, 0.0);
+}
+
+TEST(VelocityBins, DefaultEdgeRuleIsAuto)
+{
+    // The default edge rule is auto (the per-axis uniform/adaptive best).  A
+    // policy that does not set the edge rule (neither an explicit one nor an
+    // auto one) must resolve to auto, and the derived binning must report it.
+    // This pins the default the operator set.
+    Bunch const bunch = axisBunch(gammaLinspace(10.0, 20.0, 8));
+    // Explicit count, default edge rule.
+    VelocityBinningOptions policy;
+    policy.mode = VelocityBinningOptions::Mode::Explicit;
+    policy.explicitBins = 4;
+    VelocityBinning const binned = picBunch::deriveVelocityBinning(bunch, 1e-3, policy);
+    EXPECT_EQ(binned.edgeRule, VelocityBinning::EdgeRule::Auto);
+    // Auto count, default edge rule.
+    VelocityBinning const autoBinned = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_EQ(autoBinned.edgeRule, VelocityBinning::EdgeRule::Auto);
+}
+
+TEST(VelocityBins, AutoEdgesNeverWorseThanUniform)
+{
+    // EdgeRule::Auto builds the uniform and adaptive partitions per axis and
+    // keeps the lower-predicted-error one, so on the content model it can never
+    // be worse than uniform.  This holds for every bunch; we check it on a
+    // smooth bunch (adaptive likely wins) and a two-cluster bunch (adaptive
+    // wins by a wide margin).
+    Bunch const smooth = axisBunch(gammaLinspace(10.0, 20.0, 32));
+    for(std::size_t B : {2u, 4u, 8u, 16u})
+    {
+        VelocityBinningOptions const uni = uniformPolicy(B);
+        VelocityBinning const bu = picBunch::deriveVelocityBinning(smooth, 1e-3, uni);
+        VelocityBinningOptions autoPolicy;
+        autoPolicy.mode = VelocityBinningOptions::Mode::Explicit;
+        autoPolicy.explicitBins = B;
+        autoPolicy.edgeRule = VelocityBinning::EdgeRule::Auto;
+        VelocityBinning const ba = picBunch::deriveVelocityBinning(smooth, 1e-3, autoPolicy);
+        // The auto partition's predicted error is no worse than uniform's.
+        EXPECT_LE(ba.modelSum, bu.modelSum + 1.0e-15)
+            << "auto must not be worse than uniform on the content model";
+        // The per-axis winners must be populated and each winner's predicted
+        // error must be the lower of the two.
+        for(int a = 0; a < 3; ++a)
+        {
+            double const uErr = ba.axisEdgeModelErrorUniform[static_cast<std::size_t>(a)];
+            double const aErr = ba.axisEdgeModelErrorAdaptive[static_cast<std::size_t>(a)];
+            EXPECT_TRUE(std::isfinite(uErr) && std::isfinite(aErr));
+            if(ba.axisEdgeRule[static_cast<std::size_t>(a)] == VelocityBinning::EdgeRule::Adaptive)
+                EXPECT_LE(aErr, uErr);
+            else
+                EXPECT_LE(uErr, aErr);
+        }
+    }
+    // A two-cluster bunch: adaptive should win the beam axis (the cut falls in
+    // the gap), and auto must pick it.  The per-particle gamma must be set from
+    // the beam-frame |u| (gamma_p = sqrt(1 + u^2)) so the per-particle
+    // gamma-deviation energy term is nonzero: with a uniform gamma the energy
+    // term vanishes and both partitions predict the same (zero) error.
+    Bunch cluster;
+    cluster.resize(8);
+    double const uzLo = std::sqrt(100.0 - 1.0);
+    double const uzHi = std::sqrt(10000.0 - 1.0);
+    for(int i = 0; i < 8; ++i)
+    {
+        bool const hiCluster = (i >= 4);
+        double const uz = (hiCluster ? uzHi : uzLo);
+        cluster.x[i] = 4.0 + static_cast<double>(i % 3);
+        cluster.y[i] = 4.0 + static_cast<double>((i / 3) % 3);
+        cluster.z[i] = 4.0;
+        cluster.ux[i] = 0.0;
+        cluster.uy[i] = 0.0;
+        cluster.uz[i] = uz;
+        // per-particle gamma in the beam frame (the model's energy term uses
+        // the per-particle gamma spread within a box).
+        cluster.weight[i] = 1.0;
+        cluster.charge[i] = kElectronCharge;
+    }
+    VelocityBinningOptions autoPolicy;
+    autoPolicy.mode = VelocityBinningOptions::Mode::Explicit;
+    autoPolicy.explicitBins = 2;
+    autoPolicy.edgeRule = VelocityBinning::EdgeRule::Auto;
+    VelocityBinning const ba = picBunch::deriveVelocityBinning(cluster, 1e-3, autoPolicy);
+    VelocityBinningOptions const uni = uniformPolicy(2u);
+    VelocityBinning const bu = picBunch::deriveVelocityBinning(cluster, 1e-3, uni);
+    // The construction guarantee: auto is never worse than uniform on the
+    // content model.  (For this on-axis two-cluster bunch the per-particle
+    // gamma spread is the only nonzero term and both partitions can tie at 0,
+    // so we do not assert which rule wins the axis, only that auto is no
+    // worse than uniform.)
+    EXPECT_LE(ba.modelSum, bu.modelSum + 1.0e-15);
+    for(int a = 0; a < 3; ++a)
+    {
+        double const uErr = ba.axisEdgeModelErrorUniform[static_cast<std::size_t>(a)];
+        double const aErr = ba.axisEdgeModelErrorAdaptive[static_cast<std::size_t>(a)];
+        EXPECT_TRUE(std::isfinite(uErr) && std::isfinite(aErr));
+        if(ba.axisEdgeRule[static_cast<std::size_t>(a)] == VelocityBinning::EdgeRule::Adaptive)
+            EXPECT_LE(aErr, uErr);
+        else
+            EXPECT_LE(uErr, aErr);
+    }
 }

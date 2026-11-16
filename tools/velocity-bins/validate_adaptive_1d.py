@@ -129,7 +129,7 @@ def main():
         probes = inbunch_nodes(xs, zs, args.n_nodes, cell=cell)
         ref = [field_1d(xs, zs, us, gammas, weights, x) for x in probes]
         row = {}
-        for edge in ("uniform", "adaptive"):
+        for edge in ("uniform", "adaptive", "auto"):
             for count in counts:
                 prefix = os.path.join(args.outdir, f"{case}_{edge}_B{count}")
                 meta_path = f"{prefix}_meta_B{count}.txt"
@@ -137,7 +137,7 @@ def main():
                     # run the driver
                     import subprocess
                     measure = args.measure or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "build-cpu", "picBunchVelocityBinsMeasure")
-                    cmd = [measure, "--bunch", bf, "--bin-edges", edge, "--bins", str(count),
+                    cmd = [measure, "--bunch", bf, "--velocity-bin-edges", edge, "--bins", str(count),
                            "--gamma", str(args.gamma),
                            "--cell", f"{cell},{cell},{cell}",
                            "--grid", f"{grid},{grid},{grid}",
@@ -213,7 +213,7 @@ def main():
     print("\n=== 1D ANALYTIC TABLE (on-axis Ez, off-axis By; max in-bunch relative error) ===")
     for case in cases:
         print(f"\n{case}:")
-        for edge in ("uniform", "adaptive"):
+        for edge in ("uniform", "adaptive", "auto"):
             for count in counts:
                 r = results[case][f"{edge}_B{count}"]
                 print(f"  {edge:9s} B{count}: Ez={r['err_ez']:.3g}  By={r['err_by']:.3g}")

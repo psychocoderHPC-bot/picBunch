@@ -58,7 +58,7 @@ int main(int argc, char** argv)
             };
             if(a == "--bunch")
                 bunchPath = next();
-            else if(a == "--bin-edges")
+            else if(a == "--velocity-bin-edges")
                 edges = next();
             else if(a == "--bins")
                 bins = parseSizeList(next());
@@ -67,8 +67,9 @@ int main(int argc, char** argv)
         }
         if(bunchPath.empty())
             throw std::runtime_error("--bunch is required");
-        if(edges != "uniform" && edges != "quantile")
-            throw std::runtime_error("--bin-edges must be uniform or quantile");
+        if(edges != "uniform" && edges != "quantile" && edges != "adaptive" && edges != "auto")
+            throw std::runtime_error(
+                "--velocity-bin-edges must be uniform, quantile, adaptive or auto");
 
         std::ifstream f(bunchPath);
         if(!f)
@@ -95,9 +96,14 @@ int main(int argc, char** argv)
 
         picBunch::VelocityBinningOptions policy;
         policy.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
-        policy.edgeRule
-            = (edges == "quantile") ? picBunch::VelocityBinning::EdgeRule::Quantile
-                                    : picBunch::VelocityBinning::EdgeRule::Uniform;
+        if(edges == "quantile")
+            policy.edgeRule = picBunch::VelocityBinning::EdgeRule::Quantile;
+        else if(edges == "adaptive")
+            policy.edgeRule = picBunch::VelocityBinning::EdgeRule::Adaptive;
+        else if(edges == "auto")
+            policy.edgeRule = picBunch::VelocityBinning::EdgeRule::Auto;
+        else
+            policy.edgeRule = picBunch::VelocityBinning::EdgeRule::Uniform;
         for(std::size_t const B : bins)
         {
             policy.explicitBins = B;
@@ -106,14 +112,21 @@ int main(int argc, char** argv)
                 = picBunch::deriveVelocityBinning(bunch, 1.0e-3, policy);
             auto const t1 = std::chrono::steady_clock::now();
             double const wallS = std::chrono::duration<double>(t1 - t0).count();
+            auto const edgeName = [](picBunch::VelocityBinning::EdgeRule r) -> char const* {
+                switch(r)
+                {
+                    case picBunch::VelocityBinning::EdgeRule::Auto: return "auto";
+                    case picBunch::VelocityBinning::EdgeRule::Quantile: return "quantile";
+                    case picBunch::VelocityBinning::EdgeRule::Adaptive: return "adaptive";
+                    case picBunch::VelocityBinning::EdgeRule::Uniform: return "uniform";
+                }
+                return "uniform";
+            };
             std::printf(
                 "B=%zu per_axis=%zux%zux%zu edge_rule=%s model_sum=%.6e model_error=%.6e "
                 "wall_s=%.6f\n",
                 binning.count, binning.perAxis[0], binning.perAxis[1], binning.perAxis[2],
-                (binning.edgeRule == picBunch::VelocityBinning::EdgeRule::Quantile)
-                    ? "quantile"
-                    : "uniform",
-                binning.modelSum, binning.modelError, wallS);
+                edgeName(binning.edgeRule), binning.modelSum, binning.modelError, wallS);
             std::printf("  u_min  %.10e %.10e %.10e\n", binning.uMin[0], binning.uMin[1],
                         binning.uMin[2]);
             std::printf("  u_max  %.10e %.10e %.10e\n", binning.uMax[0], binning.uMax[1],

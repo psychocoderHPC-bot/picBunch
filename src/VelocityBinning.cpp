@@ -808,6 +808,104 @@ namespace picBunch
             return out;
         }
 
+        //! 1-D content-model error of a per-axis partition: the sum of the
+        //! calibrated content over the ``nBoxes`` 1-D bins defined by the
+        //! interior cuts.  This is exactly the quantity the adaptive DP
+        //! minimises, so comparing the uniform and adaptive partitions with
+        //! this is a fair, model-consistent choice for ``EdgeRule::Auto``.
+        //! The particle order is by the reduced velocity on axis ``a``.
+        double partitionAxisCost(
+            std::vector<Vec3> const& uBeam,
+            int a,
+            std::size_t nBoxes,
+            std::vector<double> const& absCharge,
+            std::vector<double> const& particleGamma,
+            double totalAbsoluteCharge,
+            double modelConstant,
+            bool inBunch,
+            std::vector<double> const& cuts)
+        {
+            if(nBoxes <= 1u || cuts.empty())
+                return 0.0;
+            std::size_t const count = uBeam.size();
+            std::vector<std::size_t> order(count);
+            std::iota(order.begin(), order.end(), 0u);
+            std::stable_sort(
+                order.begin(), order.end(), [&](std::size_t const p, std::size_t const q) {
+                    return uBeam[p][static_cast<std::size_t>(a)]
+                        < uBeam[q][static_cast<std::size_t>(a)];
+                });
+            std::vector<double> prefixQ(count + 1u, 0.0);
+            std::vector<double> prefixQu(count + 1u, 0.0);
+            std::vector<double> prefixQu2(count + 1u, 0.0);
+            std::vector<double> prefixQg(count + 1u, 0.0);
+            std::vector<double> prefixQg2(count + 1u, 0.0);
+            for(std::size_t i = 0u; i < count; ++i)
+            {
+                std::size_t const p = order[i];
+                double const w = absCharge[p];
+                double const mag = std::sqrt(
+                    uBeam[p][0] * uBeam[p][0] + uBeam[p][1] * uBeam[p][1]
+                    + uBeam[p][2] * uBeam[p][2]);
+                double const g = particleGamma[p];
+                prefixQ[i + 1u] = prefixQ[i] + w;
+                prefixQu[i + 1u] = prefixQu[i] + w * mag;
+                prefixQu2[i + 1u] = prefixQu2[i] + w * mag * mag;
+                prefixQg[i + 1u] = prefixQg[i] + w * g;
+                prefixQg2[i + 1u] = prefixQg2[i] + w * g * g;
+            }
+            // Bin [cut[i-1], cut[i]) for i in [0, nBoxes); cut[-1] = -inf (the
+            // first particle), cut[nBoxes-1] = +inf (to the last particle).
+            auto firstAt = [&](double value, bool rightOpen) -> std::size_t {
+                std::size_t lo = 0u, hi = count;
+                while(lo < hi)
+                {
+                    std::size_t const mid = (lo + hi) / 2u;
+                    bool const less = rightOpen
+                        ? uBeam[order[mid]][static_cast<std::size_t>(a)] < value
+                        : uBeam[order[mid]][static_cast<std::size_t>(a)] <= value;
+                    if(less)
+                        lo = mid + 1u;
+                    else
+                        hi = mid;
+                }
+                return lo;
+            };
+            auto binCost = [&](std::size_t first, std::size_t last) -> double {
+                if(last <= first)
+                    return 0.0;
+                double const q = prefixQ[last] - prefixQ[first];
+                if(q <= 0.0)
+                    return 0.0;
+                double const uBar = (prefixQu[last] - prefixQu[first]) / q;
+                double const uBar2 = (prefixQu2[last] - prefixQu2[first]) / q;
+                double const gammaBar = (prefixQg[last] - prefixQg[first]) / q;
+                double const gammaBar2 = (prefixQg2[last] - prefixQg2[first]) / q;
+                double const spread2 = uBar2 - uBar * uBar;
+                double const gSpread2 = gammaBar2 - gammaBar * gammaBar;
+                double const angle = std::sqrt(std::max(0.0, spread2)) / std::max(uBar, 1.0e-30);
+                double const energy = std::max(0.0, gSpread2) / std::max(gammaBar, 1.0e-30);
+                return (q / totalAbsoluteCharge)
+                    * modelConstant
+                    * (kAngularModelConstant
+                           * (inBunch ? kInBunchAngularGammaAmplification * gammaBar : 1.0)
+                           * angle * angle
+                       + 2.0 * energy / gammaBar);
+            };
+            double total = 0.0;
+            for(std::size_t i = 0u; i < nBoxes; ++i)
+            {
+                double const loBound = (i == 0u) ? -1.0e300 : cuts[i - 1u];
+                double const hiBound = (i + 1u == nBoxes) ? 1.0e300 : cuts[i];
+                // left-closed: first particle >= loBound; right-open: last
+                // particle < hiBound.
+                std::size_t const first = firstAt(loBound, /*rightOpen=*/false);
+                std::size_t const last = firstAt(hiBound, /*rightOpen=*/true);
+                total += binCost(first, last);
+            }
+            return total;
+        }
+
         Idx3 chooseSplit(
             std::size_t B,
             Vec3 const& range,
@@ -1346,6 +1444,69 @@ namespace picBunch
             }
             return axes;
         };
+        //! Per-axis Auto decision: the selected cuts plus the winner and both
+        //! predicted 1-D errors, so the final geometry and its diagnostic log
+        //! reuse the values computed here instead of running the comparison a
+        //! second time.
+        struct AutoAxes
+        {
+            std::array<QuantileAxis, 3> axes;
+            std::array<VelocityBinning::EdgeRule, 3> axisRule{
+                VelocityBinning::EdgeRule::Uniform,
+                VelocityBinning::EdgeRule::Uniform,
+                VelocityBinning::EdgeRule::Uniform};
+            std::array<double, 3> uniformError{};
+            std::array<double, 3> adaptiveError{};
+        };
+        // Per-axis Auto cuts: for each axis with more than one box, build both
+        // the uniform and the adaptive partitions, evaluate each with the 1-D
+        // content model, and keep the lower-predicted-error partition.  Because
+        // the box decomposition is a product of per-axis partitions and the
+        // model is additive, choosing the per-axis minimum gives the globally
+        // minimum predicted error among the uniform/adaptive partitions, so
+        // Auto can never be worse than uniform by construction.
+        auto autoAxesFor = [&](std::size_t B) -> AutoAxes {
+            AutoAxes choice;
+            Idx3 const N = chooseSplit(B, frame.range, frame.active, gammaWeighted);
+            for(int a = 0; a < 3; ++a)
+            {
+                std::size_t const n = N[static_cast<std::size_t>(a)];
+                double const lo = frame.uMin[static_cast<std::size_t>(a)];
+                double const hi = frame.uMax[static_cast<std::size_t>(a)];
+                if(n <= 1u || hi <= lo)
+                {
+                    choice.axes[a].cuts.clear();
+                    continue;
+                }
+                // Uniform partition: equal-width interior cuts.
+                std::vector<double> uniCuts(n - 1u);
+                double const width = (hi - lo) / static_cast<double>(n);
+                for(std::size_t i = 0u; i + 1u < n; ++i)
+                    uniCuts[i] = lo + static_cast<double>(i + 1u) * width;
+                // Adaptive partition: the DP cuts.
+                std::vector<double> const adaCuts = adaptiveAxisCuts(
+                    frame.uBeam, a, n, absCharge, particleGamma,
+                    totalAbsoluteCharge, policy.modelConstant, policy.inBunchCriterion);
+                double const uniCost = partitionAxisCost(
+                    frame.uBeam, a, n, absCharge, particleGamma,
+                    totalAbsoluteCharge, policy.modelConstant,
+                    policy.inBunchCriterion, uniCuts);
+                double const adaCost = partitionAxisCost(
+                    frame.uBeam, a, n, absCharge, particleGamma,
+                    totalAbsoluteCharge, policy.modelConstant,
+                    policy.inBunchCriterion, adaCuts);
+                // Keep the lower-predicted-error partition; ties go to uniform
+                // (the cheaper, historical rule).
+                bool const useAdaptive = (adaCost < uniCost);
+                choice.axes[a].cuts = useAdaptive ? adaCuts : uniCuts;
+                choice.axes[a].range = frame.range[static_cast<std::size_t>(a)];
+                choice.axisRule[a] = useAdaptive ? VelocityBinning::EdgeRule::Adaptive
+                                                 : VelocityBinning::EdgeRule::Uniform;
+                choice.uniformError[a] = uniCost;
+                choice.adaptiveError[a] = adaCost;
+            }
+            return choice;
+        };
         auto modelSumFor = [&](std::size_t B, VelocityBinning& probe) {
             if(policy.edgeRule == VelocityBinning::EdgeRule::Quantile)
             {
@@ -1358,6 +1519,12 @@ namespace picBunch
                 return evaluateSplit(
                     bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
                     policy.modelConstant, policy.inBunchCriterion, probe, adaptiveAxesFor(B));
+            }
+            if(policy.edgeRule == VelocityBinning::EdgeRule::Auto)
+            {
+                return evaluateSplit(
+                    bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
+                    policy.modelConstant, policy.inBunchCriterion, probe, autoAxesFor(B).axes);
             }
             return evaluateSplit(
                 bunch, frame, splitsFor(B), absCharge, particleGamma, totalAbsoluteCharge,
@@ -1537,17 +1704,52 @@ namespace picBunch
         }
 
         Idx3 const finalSplit = splitsFor(targetBins);
+        bool const isAuto = (policy.edgeRule == VelocityBinning::EdgeRule::Auto);
+        // The per-axis comparison is computed once and reused for both the
+        // final geometry and the diagnostic log below; recomputing it would
+        // repeat the (potentially expensive) DP and model sums.
+        AutoAxes const autoChoice = isAuto ? autoAxesFor(targetBins) : AutoAxes{};
         std::array<QuantileAxis, 3> const finalAxes
-            = (policy.edgeRule == VelocityBinning::EdgeRule::Adaptive)
-                  ? adaptiveAxesFor(targetBins)
-                  : quantileAxesFor(targetBins);
+            = isAuto
+                  ? autoChoice.axes
+                  : (policy.edgeRule == VelocityBinning::EdgeRule::Adaptive)
+                        ? adaptiveAxesFor(targetBins)
+                        : quantileAxesFor(targetBins);
         out.edgeRule = policy.edgeRule;
         evaluateSplit(
             bunch, frame, finalSplit, absCharge, particleGamma, totalAbsoluteCharge,
             policy.modelConstant, policy.inBunchCriterion, out, finalAxes);
-        // Populate ``axisBoundaries`` for the final split (uniform or
-        // quantile).  A degenerate axis (no extent, or one box) has all
-        // boundaries equal to ``uMin[a]``, so the half-open floor lookup in
+        // For the Auto rule, record which partition won per axis and the two
+        // predicted 1-D errors, then report the choice in the run log so a
+        // user can see it.
+        if(isAuto)
+        {
+            out.axisEdgeRule = autoChoice.axisRule;
+            out.axisEdgeModelErrorUniform = autoChoice.uniformError;
+            out.axisEdgeModelErrorAdaptive = autoChoice.adaptiveError;
+            char const* const names[3] = {"x", "y", "z"};
+            for(int a = 0; a < 3; ++a)
+            {
+                std::size_t const n = out.perAxis[static_cast<std::size_t>(a)];
+                if(n <= 1u || out.uMax[static_cast<std::size_t>(a)]
+                       <= out.uMin[static_cast<std::size_t>(a)])
+                    continue;
+                char const* const winner
+                    = (autoChoice.axisRule[static_cast<std::size_t>(a)]
+                       == VelocityBinning::EdgeRule::Adaptive)
+                          ? "adaptive"
+                          : "uniform";
+                std::fprintf(stderr,
+                    "picBunch: velocity-bin edges axis %s (%zu boxes): chose %s "
+                    "(predicted model uniform %.4g, adaptive %.4g)\n",
+                    names[a], n, winner,
+                    autoChoice.uniformError[static_cast<std::size_t>(a)],
+                    autoChoice.adaptiveError[static_cast<std::size_t>(a)]);
+            }
+        }
+        // Populate ``axisBoundaries`` for the final split (uniform, adaptive,
+        // quantile, or auto).  A degenerate axis (no extent, or one box) has
+        // all boundaries equal to ``uMin[a]``, so the half-open floor lookup in
         // ``boxIndex`` and the kernel never divide by zero.
         {
             std::size_t const N0 = out.perAxis[0], N1 = out.perAxis[1], N2 = out.perAxis[2];
@@ -1564,6 +1766,10 @@ namespace picBunch
                         b.push_back(lo);
                     continue;
                 }
+                // Uniform is the equal subdivision of [uMin, uMax]; every other
+                // rule (adaptive, quantile, auto) uses the per-axis cuts the
+                // model used during the search, so the final geometry matches
+                // the model's geometry exactly.
                 if(policy.edgeRule == VelocityBinning::EdgeRule::Uniform)
                 {
                     double const width = (hi - lo) / static_cast<double>(n);
@@ -1572,9 +1778,6 @@ namespace picBunch
                 }
                 else
                 {
-                    // Quantile or adaptive: the same cuts the model used during
-                    // the search, so the final geometry matches the model's
-                    // geometry exactly.
                     b.push_back(lo);
                     for(std::size_t i = 0; i + 1u < n; ++i)
                         b.push_back(finalAxes[static_cast<std::size_t>(a)].cuts[i]);
