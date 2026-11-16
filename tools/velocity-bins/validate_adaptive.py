@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MPL-2.0
 #
 # Orchestrate the adaptive edge validation: for each synthetic bunch case, run
-# the measurement driver with uniform and adaptive edges at fixed counts
+# the measurement driver with uniform, adaptive and auto edges at fixed counts
 # (2, 4, 8), compute the in-bunch per-component relative error against the
 # TSC-convolved direct-sum reference (tools/velocity-bins/compare_velocity_bins.py
-# machinery), and assemble the uniform-vs-adaptive table (transverse B included).
+# machinery), and assemble the uniform/adaptive/auto table (transverse B included).
 #
 # Usage:
 #   validate_adaptive.py CASES_DIR OUTDIR [--sources 512] [--gamma 50] [--workers 24]
@@ -25,7 +25,7 @@ COMPONENTS = ("Ex", "Ey", "Ez", "Bx", "By", "Bz")
 def run_driver(measure, case, edge, count, prefix, sources, gamma, cell, grid, origin, bunch_file):
     cmd = [measure,
            "--bunch", bunch_file,
-           "--bin-edges", edge,
+           "--velocity-bin-edges", edge,
            "--bins", str(count),
            "--gamma", str(gamma),
            "--cell", f"{cell},{cell},{cell}",
@@ -103,7 +103,7 @@ def main():
         bunch_file = os.path.join(args.cases_dir, case + ".bunch")
         bunch = load_bunch(bunch_file)
         row = {}
-        for edge in ("uniform", "adaptive"):
+        for edge in ("uniform", "adaptive", "auto"):
             for count in counts:
                 prefix = os.path.join(args.outdir, f"{case}_{edge}_B{count}")
                 run_driver(measure, case, edge, count, prefix, args.sources, args.gamma, cell_scalar, args.grid, origin, bunch_file)
@@ -121,7 +121,7 @@ def main():
     print("\n=== TABLE (max in-bunch relative error per component) ===")
     for case in cases:
         print(f"\n{case}:")
-        for edge in ("uniform", "adaptive"):
+        for edge in ("uniform", "adaptive", "auto"):
             for count in counts:
                 r = results[case][f"{edge}_B{count}"]
                 print(f"  {edge:9s} B{count}: " + " ".join(f"{c}={e:.3g}" for c, e in zip(COMPONENTS, r["err"])) + f"  By_abs={r['by_abs']:.3g}")

@@ -24,6 +24,9 @@ CMakeUserPresets.json
 *.h5
 *.hdf5
 *.bp
+# Raw BP5 simulation data: single steps and openPMD dataset directories
+*.bp5
+/particles_*.bp5/
 *.json.tmp
 *.log
 

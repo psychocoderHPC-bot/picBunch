@@ -435,17 +435,16 @@ The single-velocity case is detected within `1e-12` relative and returns one box
 field is bitwise the unbinned field.
 
 The per-axis box edges are placed by `--velocity-bin-edges`, which defaults to `auto`
-for both an explicit `--velocity-bins N` and the auto count. `auto` builds a uniform and
-an adaptive partition per axis and keeps the lower predicted error, so it cannot be worse
-than uniform by construction; the run log names the winner and both predicted errors for
-each axis. `adaptive` chooses the interior edges by dynamic programming that minimises
-the calibrated content model for the requested count (per-axis, `O(K^2 * N)` at startup,
-`K` candidates capped at 96): it puts the cuts at the gaps between distinct velocity
-clusters, so a two-cluster bunch spends its boxes on the clusters rather than on the gap.
-`uniform` divides each axis range equally (the pre-adaptive behaviour); pass
-`--velocity-bin-edges uniform` to reproduce an earlier run exactly. `quantile` places the
-interior edges at equal cumulative charge fraction along each axis. On five synthetic
-non-uniform bunches (512 sources, gamma 50,
+for both an explicit `--velocity-bins N` and the auto count:
+
+| rule | edge placement |
+| --- | --- |
+| `auto` | builds a uniform and an adaptive partition per axis and keeps the lower predicted error, so it cannot be worse than uniform by construction; the run log names the winner and both predicted errors for each axis |
+| `adaptive` | chooses the interior edges by dynamic programming that minimises the calibrated content model for the requested count (per-axis, `O(K^2 * N)` at startup, `K` candidates capped at 96), so it puts the cuts at the gaps between distinct velocity clusters and a two-cluster bunch spends its boxes on the clusters rather than on the gap |
+| `uniform` | divides each axis range equally (the pre-adaptive behaviour); pass `--velocity-bin-edges uniform` to reproduce an earlier run exactly |
+| `quantile` | places the interior edges at equal cumulative charge fraction along each axis |
+
+On five synthetic non-uniform bunches (512 sources, gamma 50,
 32^3 grid, 2/4/8 boxes, 1D analytic reference) adaptive improves the on-axis E error
 5.2x, 15x and 8.1x on a two-halo core, 2.8x on a skewed distribution, 2.1x and 1.5x on
 an exponential tail, and 1.1-1.3x on two clusters, and it is within 2x of uniform on the
