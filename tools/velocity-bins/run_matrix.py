@@ -19,10 +19,29 @@ section 6.  Missing metrics are never invented: each manifest row carries a
 ``missing_metrics`` list and the driver prints a machine-readable summary.
 See ``MISSING_METRIC_NOTES`` for the exact gaps.
 
+The measurement driver's real CLI is used verbatim: ``--bins K`` (or the
+literal ``--bins auto`` for the automatic count; ``0`` is *not* an alias and
+would request one explicit box), ``--velocity-bin-edges uniform|adaptive|auto``
+and ``--moments 0``.  Every run also receives the resolved ``--cell``,
+``--grid`` and ``--origin``.
+
+Observability recorded per run from the driver's own outputs:
+
+  startup_us       ``_meta_B<N>.txt`` ``bin_derive_ms`` * 1000
+  nonempty_bins    distinct non-negative ``box_of`` values in ``_bunch.txt``
+                   (fallback: the ``box_of`` list in the meta file)
+  chosen_bins      ``_meta_B<N>.txt`` ``bins_used``
+  requested_bins   ``_meta_B<N>.txt`` ``requested_bins``
+  per_axis         ``_meta_B<N>.txt`` ``per_axis`` as a string
+  per_axis_rules   ``_meta_B<N>.txt`` ``axis_edges`` per-axis rule list
+  metrics_v2       whether the comparison JSON carries the ``metrics_v2`` block
+
 Usage:
   run_matrix.py --binary PATH --cases-dir DIR --out DIR [--lane I --lanes N]
-                [--bins 2 4 8] [--rules uniform adaptive auto] [--jobs 1]
-                [--dry-run] [--resume] [--timeout SEC]
+                [--geometry matrix] [--cell hx,hy,hz] [--grid nx,ny,nz]
+                [--origin ox,oy,oz] [--center x,y,z] [--profile LABEL]
+                [--generate] [--bins 2 4 8] [--rules uniform adaptive auto]
+                [--jobs 1] [--dry-run] [--resume] [--timeout SEC]
 """
 
 from __future__ import annotations
@@ -33,6 +52,7 @@ import dataclasses
 import glob
 import hashlib
 import json
+import math
 import os
 import shlex
 import shutil
@@ -48,34 +68,61 @@ CASE_ORDER = ("uniform", "two_cluster", "core_halo", "exp_tail", "skewed", "sing
 DEFAULT_BINS = (2, 4, 8)
 DEFAULT_RULES = ("uniform", "adaptive", "auto")
 AUTO_RULE = "auto"
+#: measure_velocity_bins.cpp compares the *literal* "auto" (line 186) and sets
+#: autoBins=true; any other token is parsed as an explicit bin list.  "0" is an
+#: explicit request that is clamped to one box, so it must never be used here.
+AUTO_COUNT_BINS_ARG = "auto"
+AUTO_COUNT_EDGES = "auto"
+
+#: Named geometries.  "matrix" is the decided campaign geometry: 0.25 um cells
+#: on 24 x 16 x 16 nodes from origin 0, 2R = 2 um cube at the domain centre.
+GEOMETRIES = {
+    "matrix": {
+        "cell": (2.5e-7, 2.5e-7, 2.5e-7),
+        "grid": (24, 16, 16),
+        "origin": (0.0, 0.0, 0.0),
+        "center": (3.0e-6, 2.0e-6, 2.0e-6),
+    },
+    # The measurement driver's own historical default, kept as a named
+    # alternative for reproducing older outputs.
+    "legacy48": {
+        "cell": (1.0e-6, 1.0e-6, 1.0e-6),
+        "grid": (48, 48, 48),
+        "origin": (0.0, 0.0, 0.0),
+        "center": (24.0e-6, 24.0e-6, 24.0e-6),
+    },
+}
+DEFAULT_GEOMETRY = "matrix"
+TSC_SUPPORT_CELLS = 1.5
+R_BUNCH_M = 1.0e-6
 
 MISSING_METRIC_NOTES = {
-    "far_field_rel": (
-        "compare_velocity_bins.py has no 2R-offset far-field shell: error_stats() "
-        "is evaluated only on nodes within 16 cells of a particle (distance bands), "
-        "and outside_window_roundoff is max|mesh|, not a reference error."
+    "metrics_v2": (
+        "the comparison JSON has no metrics_v2 block, so the bunch-box / "
+        "far-field / p99 / RMS metrics cannot be evaluated.  The summarizer "
+        "reports those criteria as UNVERIFIABLE rather than falling back to the "
+        "legacy 16-cell window."
     ),
-    "p99_rel": (
-        "compare_velocity_bins.py stores only the per-component maximum relative "
-        "error (runs[B].mesh_vs_T.rel); no 99th percentile is emitted."
-    ),
-    "rms_rel": (
-        "compare_velocity_bins.py stores only the per-component maximum relative "
-        "error (runs[B].mesh_vs_T.rel); no RMS is emitted."
-    ),
+    "in_bunch_max": "metrics_v2.in_bunch.worst_rel is absent.",
+    "far_field_max": "metrics_v2.far_field.worst_rel is absent (empty mask or no metrics_v2).",
+    "p99_rel": "metrics_v2.*.per_component[*].p99_rel is absent.",
+    "rms_rel": "metrics_v2.*.per_component[*].rms_rel is absent.",
     "startup_us": (
         "the measurement meta file has no bin_derive_ms line (older binary); this "
         "is the edge-selection/derivation cost."
     ),
     "nonempty_bins": (
-        "the measurement meta file has no box_of/bins_used lines, so the number "
-        "of occupied boxes cannot be recovered."
+        "neither _bunch.txt nor the meta file exposes a box_of column, so the "
+        "number of occupied boxes cannot be recovered."
     ),
     "proxy_error": "the comparison JSON has no model_error entry for this run.",
-    "chosen_bins": "neither the report nor the meta file exposes bins_used.",
+    "chosen_bins": "the measurement meta file has no bins_used line.",
+    "per_axis": "the measurement meta file has no per_axis line.",
+    "axis_edges": (
+        "the measurement meta file has no axis_edges line; it is emitted only "
+        "when the auto edge rule selects per axis."
+    ),
     "wall_time_s": "a resumed run has no recoverable wall time.",
-    "in_bunch_rel": "the per-run comparison JSON has no mesh_vs_T.rel vector.",
-    "in_bunch_max": "the per-run comparison JSON has no mesh_vs_T.worst_rel.",
 }
 
 
@@ -199,25 +246,59 @@ def lane_counts(runs: Sequence[Run], lanes: int) -> List[int]:
 # command lines and manifest helpers
 
 
+def format_triple(values: Sequence) -> str:
+    """Comma-separated CLI triple; grid values are printed as integers."""
+    parts = []
+    for value in values:
+        if isinstance(value, int) or float(value).is_integer():
+            parts.append(str(int(value)))
+        else:
+            parts.append(f"{float(value):.17g}")
+    return ",".join(parts)
+
+
 def measurement_argv(
     binary: str,
     bunch: Path,
     run: Run,
     prefix: Path,
-    auto_count_arg: str,
-    auto_count_edges: str = AUTO_RULE,
+    geometry: dict,
 ) -> List[str]:
-    argv = [
-        binary,
-        "--bunch",
-        str(bunch),
-    ]
+    """Build one measurement call with the driver's post-rename CLI.
+
+    The automatic count is the literal ``--bins auto`` (measure_velocity_bins.cpp
+    line 186) and its edge rule is pinned to ``auto``.  ``--moments 0`` is the
+    driver's off switch for the velocity-moment path.
+    """
+    argv = [binary, "--bunch", str(bunch)]
     if run.auto_count:
-        argv += ["--bins", auto_count_arg, "--velocity-bin-edges", auto_count_edges]
+        argv += ["--bins", AUTO_COUNT_BINS_ARG,
+                 "--velocity-bin-edges", AUTO_COUNT_EDGES]
     else:
-        argv += ["--bins", str(run.requested_bins), "--velocity-bin-edges", run.rule]
-    argv += ["--output", str(prefix)]
+        argv += ["--bins", str(run.requested_bins),
+                 "--velocity-bin-edges", run.rule]
+    argv += [
+        "--cell", format_triple(geometry["cell"]),
+        "--grid", format_triple(geometry["grid"]),
+        "--origin", format_triple(geometry["origin"]),
+        "--moments", "0",
+        "--output", str(prefix),
+    ]
     return argv
+
+
+def generator_argv(
+    python: str, script: Path, cases_dir: Path, geometry: dict
+) -> List[str]:
+    return [
+        python,
+        str(script),
+        "--out", str(cases_dir),
+        "--cell", format_triple(geometry["cell"]),
+        "--grid", format_triple(geometry["grid"]),
+        "--origin", format_triple(geometry["origin"]),
+        "--center", format_triple(geometry["center"]),
+    ]
 
 
 def compare_argv(
@@ -244,6 +325,102 @@ def parse_meta(path: Path) -> Dict[str, List[str]]:
 def meta_scalar(meta: Dict[str, List[str]], key: str) -> Optional[str]:
     values = meta.get(key)
     return values[0] if values else None
+
+
+def parse_per_axis(meta: Dict[str, List[str]]) -> Optional[str]:
+    """``per_axis 2 2 1`` -> "2 2 1" (the total K distributed over three axes)."""
+    values = meta.get("per_axis")
+    if not values or len(values) < 3:
+        return None
+    return " ".join(values[:3])
+
+
+def parse_axis_edges(meta: Dict[str, List[str]]) -> Optional[List[str]]:
+    """Per-axis rule list from ``axis_edges``.
+
+    The driver writes ``axis_edges <rule> <uniErr>/<adaErr>,<rule> ...``, e.g.
+    ``axis_edges auto 0.1/0.2,adaptive 0.3/0.1,uniform 0.05/0.2``.  Splitting
+    the re-joined token string on commas keeps a rule and its error pair
+    together regardless of how whitespace falls.
+    """
+    tokens = meta.get("axis_edges")
+    if not tokens:
+        return None
+    parts = " ".join(tokens).split(",")
+    rules = []
+    for part in parts:
+        fields = part.split()
+        if not fields:
+            continue
+        rules.append(fields[0])
+    return rules or None
+
+
+def parse_axis_edge_errors(meta: Dict[str, List[str]]) -> Optional[List[List[float]]]:
+    tokens = meta.get("axis_edges")
+    if not tokens:
+        return None
+    parts = " ".join(tokens).split(",")
+    out: List[List[float]] = []
+    for part in parts:
+        fields = part.split()
+        if len(fields) < 2 or "/" not in fields[1]:
+            return None
+        try:
+            uni, ada = (float(v) for v in fields[1].split("/", 1))
+        except ValueError:
+            return None
+        out.append([uni, ada])
+    return out
+
+
+def count_distinct_box_of(path: Path) -> Optional[int]:
+    """Number of distinct non-negative box ids in the bunch file's box_of column."""
+    if not path.is_file():
+        return None
+    boxes = set()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                fields = line.split()
+                if len(fields) < 9:
+                    return None
+                try:
+                    value = int(fields[8])
+                except ValueError:
+                    return None
+                if value >= 0:
+                    boxes.add(value)
+    except OSError:
+        return None
+    return len(boxes)
+
+
+def metrics_v2_summary(compare_run: dict) -> dict:
+    """Presence and mask sizes of the comparison JSON's metrics_v2 block."""
+    block = compare_run.get("metrics_v2")
+    if not isinstance(block, dict):
+        return {"present": False, "in_bunch_nodes": None, "far_field_nodes": None}
+    in_bunch = block.get("in_bunch")
+    far_field = block.get("far_field")
+    return {
+        "present": True,
+        "schema": block.get("schema"),
+        "in_bunch_nodes": (
+            in_bunch.get("n_nodes") if isinstance(in_bunch, dict) else None
+        ),
+        "far_field_nodes": (
+            far_field.get("n_nodes") if isinstance(far_field, dict) else None
+        ),
+        "in_bunch_worst_rel": (
+            in_bunch.get("worst_rel") if isinstance(in_bunch, dict) else None
+        ),
+        "far_field_worst_rel": (
+            far_field.get("worst_rel") if isinstance(far_field, dict) else None
+        ),
+    }
 
 
 def discover_run_meta(prefix: Path) -> Path:
@@ -307,36 +484,45 @@ def compare_bins_key(payload: dict) -> int:
 def missing_for_run(
     startup_us: Optional[float],
     nonempty_bins: Optional[int],
+    chosen_bins: Optional[int],
+    per_axis: Optional[str],
+    axis_rules: Optional[List[str]],
     compare_run: dict,
 ) -> Tuple[List[str], List[str]]:
-    """Return (missing keys, notes) for one run."""
+    """Return (missing keys, notes) for one run, from its own outputs only."""
+    v2 = metrics_v2_summary(compare_run)
     present = {
         "startup_us": startup_us is not None,
         "nonempty_bins": nonempty_bins is not None,
+        "chosen_bins": chosen_bins is not None,
+        "per_axis": per_axis is not None,
+        "axis_edges": axis_rules is not None,
         "proxy_error": isinstance(compare_run.get("model_error"), (int, float)),
-        "far_field_rel": False,
+        "metrics_v2": v2["present"],
+        "in_bunch_max": v2["in_bunch_worst_rel"] is not None,
+        "far_field_max": v2["far_field_worst_rel"] is not None,
         "p99_rel": False,
         "rms_rel": False,
     }
-    stats = compare_run.get("mesh_vs_T")
-    if isinstance(stats, dict):
-        present["in_bunch_rel"] = bool(stats.get("rel"))
-        present["far_field_rel"] = any(
-            isinstance(compare_run.get(key), dict)
-            and bool(compare_run[key].get("rel"))
-            for key in ("far_field_rel", "far_field", "far_field_shell")
-        ) or any(
-            isinstance(stats.get(key), (list, tuple)) and len(stats.get(key, [])) == 6
-            for key in ("far_field_rel", "far_field", "far_field_shell")
-        )
-        present["p99_rel"] = any(
-            key in stats for key in ("p99_rel", "rel_p99", "p99")
-        ) or any(key in compare_run for key in ("p99_rel", "rel_p99", "p99"))
-        present["rms_rel"] = any(
-            key in stats for key in ("rms_rel", "rel_rms", "rms")
-        ) or any(key in compare_run for key in ("rms_rel", "rel_rms", "rms"))
-    else:
-        present["in_bunch_rel"] = False
+    block = compare_run.get("metrics_v2")
+    if isinstance(block, dict):
+        for region in ("in_bunch", "far_field"):
+            region_block = block.get(region)
+            if not isinstance(region_block, dict):
+                continue
+            per_component = region_block.get("per_component")
+            if not isinstance(per_component, dict):
+                continue
+            has_p99 = all(
+                isinstance(stats, dict) and stats.get("p99_rel") is not None
+                for stats in per_component.values()
+            ) and bool(per_component)
+            has_rms = all(
+                isinstance(stats, dict) and stats.get("rms_rel") is not None
+                for stats in per_component.values()
+            ) and bool(per_component)
+            present["p99_rel"] = present["p99_rel"] or has_p99
+            present["rms_rel"] = present["rms_rel"] or has_rms
     missing = [key for key, ok in present.items() if not ok]
     notes = [MISSING_METRIC_NOTES[k] for k in missing if k in MISSING_METRIC_NOTES]
     return missing, notes
@@ -347,8 +533,12 @@ def manifest_row(
     output: Path,
     out_dir: Path,
     chosen_bins: Optional[int],
+    requested_bins: Optional[int],
     startup_us: Optional[float],
     nonempty_bins: Optional[int],
+    per_axis: Optional[str],
+    axis_rules: Optional[List[str]],
+    axis_edge_errors: Optional[List[List[float]]],
     proxy_error: Optional[float],
     wall_time_s: Optional[float],
     measure_wall_s: Optional[float],
@@ -356,11 +546,14 @@ def manifest_row(
     compare_payload: dict,
     missing: Sequence[str],
     notes: Sequence[str],
+    profile: str,
 ) -> dict:
     try:
         rel_output = os.path.relpath(output, out_dir)
     except ValueError:
         rel_output = str(output)
+    v2 = metrics_v2_summary(compare_payload.get("runs", {}).get(
+        str(chosen_bins) if chosen_bins is not None else "", {}))
     return {
         "id": run.run_id,
         "index": run.index,
@@ -369,8 +562,13 @@ def manifest_row(
         "rule": run.rule,
         "kind": run.kind,
         "auto_count": run.auto_count,
-        "requested_bins": run.requested_bins,
+        "requested_bins": (
+            requested_bins if requested_bins is not None else run.requested_bins
+        ),
         "chosen_bins": chosen_bins,
+        "per_axis": per_axis,
+        "per_axis_rules": axis_rules,
+        "axis_edge_errors": axis_edge_errors,
         "output": rel_output,
         "sha256": sha256_file(output),
         "wall_time_s": wall_time_s,
@@ -379,7 +577,9 @@ def manifest_row(
         "startup_us": startup_us,
         "nonempty_bins": nonempty_bins,
         "proxy_error": proxy_error,
+        "metrics_v2": v2,
         "compare_bins_key": str(chosen_bins) if chosen_bins is not None else None,
+        "profile": profile,
         "missing_metrics": list(missing),
         "missing_metric_notes": list(notes),
         "status": "ok",
@@ -422,6 +622,46 @@ def run_process(
     return elapsed
 
 
+def _observe(meta: Dict[str, List[str]], prefix: Path) -> dict:
+    """Extract the meta-file and bunch-file observability fields.
+
+    ``startup_us`` is the driver's standalone edge-derivation time
+    (``bin_derive_ms``).  ``nonempty_bins`` counts distinct non-negative
+    ``box_of`` ids in ``_bunch.txt``; the meta ``box_of`` list is only a
+    fallback for a resumed or partially cleaned work directory.
+    """
+    derive = meta_scalar(meta, "bin_derive_ms")
+    startup_us = None
+    if derive is not None:
+        try:
+            startup_us = float(derive) * 1000.0
+        except ValueError:
+            startup_us = None
+    used = meta_scalar(meta, "bins_used")
+    chosen_bins = int(float(used)) if used is not None else None
+    requested = meta_scalar(meta, "requested_bins")
+    requested_bins = int(float(requested)) if requested is not None else None
+    per_axis = parse_per_axis(meta)
+    axis_rules = parse_axis_edges(meta)
+    axis_edge_errors = parse_axis_edge_errors(meta)
+    nonempty_bins = count_distinct_box_of(Path(str(prefix) + "_bunch.txt"))
+    box_of = meta.get("box_of")
+    if nonempty_bins is None and box_of:
+        try:
+            nonempty_bins = len({int(v) for v in box_of if int(v) >= 0})
+        except ValueError:
+            nonempty_bins = None
+    return {
+        "chosen_bins": chosen_bins,
+        "requested_bins": requested_bins,
+        "startup_us": startup_us,
+        "nonempty_bins": nonempty_bins,
+        "per_axis": per_axis,
+        "axis_rules": axis_rules,
+        "axis_edge_errors": axis_edge_errors,
+    }
+
+
 def execute_run(
     run: Run,
     *,
@@ -430,8 +670,8 @@ def execute_run(
     out_dir: Path,
     python: str,
     compare: Path,
-    auto_count_arg: str,
-    auto_count_edges: str,
+    geometry: dict,
+    profile: str,
     compare_workers: int,
     timeout: Optional[float],
     resume: bool,
@@ -460,30 +700,39 @@ def execute_run(
         # Recover what can be recovered without the binary.
         chosen = compare_bins_key(payload)
         compare_run = payload["runs"][str(chosen)]
-        startup_us = None
-        nonempty_bins = None
+        observed = {
+            "chosen_bins": chosen,
+            "requested_bins": None,
+            "startup_us": None,
+            "nonempty_bins": None,
+            "per_axis": None,
+            "axis_rules": None,
+            "axis_edge_errors": None,
+        }
         measure_wall = None
         meta_paths = sorted(glob.glob(str(prefix) + "_meta_B*.txt"))
         if len(meta_paths) == 1:
-            meta = parse_meta(Path(meta_paths[0]))
-            derive = meta_scalar(meta, "bin_derive_ms")
-            if derive is not None:
-                startup_us = float(derive) * 1000.0
-            box_of = meta.get("box_of")
-            if box_of:
-                nonempty_bins = len({int(v) for v in box_of if int(v) >= 0})
-            wall = meta_scalar(meta, "wall_seconds")
+            observed = _observe(parse_meta(Path(meta_paths[0])), prefix)
+            observed["chosen_bins"] = chosen or observed["chosen_bins"]
+            wall = meta_scalar(parse_meta(Path(meta_paths[0])), "wall_seconds")
             if wall is not None:
                 measure_wall = float(wall)
         proxy = compare_run.get("model_error")
         proxy = float(proxy) if isinstance(proxy, (int, float)) else None
-        missing, notes = missing_for_run(startup_us, nonempty_bins, compare_run)
+        missing, notes = missing_for_run(
+            observed["startup_us"], observed["nonempty_bins"],
+            observed["chosen_bins"], observed["per_axis"],
+            observed["axis_rules"], compare_run,
+        )
         if measure_wall is None:
             missing = sorted(set(missing) | {"wall_time_s"})
             notes = list(notes) + ["the resumed run has no recoverable wall time."]
         return manifest_row(
-            run, output, out_dir, chosen, startup_us, nonempty_bins, proxy,
-            measure_wall, measure_wall, None, payload, missing, notes,
+            run, output, out_dir, chosen, observed["requested_bins"],
+            observed["startup_us"], observed["nonempty_bins"],
+            observed["per_axis"], observed["axis_rules"],
+            observed["axis_edge_errors"], proxy,
+            measure_wall, measure_wall, None, payload, missing, notes, profile,
         )
 
     bunch = bunch_file(cases_dir, run.case, require=True)
@@ -491,9 +740,7 @@ def execute_run(
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
-    m_argv = measurement_argv(
-        binary, bunch, run, prefix, auto_count_arg, auto_count_edges
-    )
+    m_argv = measurement_argv(binary, bunch, run, prefix, geometry)
     with print_lock:
         print(f"START {run.run_id} lane={run.lane} K={run.requested_bins or 'auto'}",
               flush=True)
@@ -501,21 +748,13 @@ def execute_run(
 
     meta_path = discover_run_meta(prefix)
     meta = parse_meta(meta_path)
-    used = meta_scalar(meta, "bins_used")
-    if used is None:
+    observed = _observe(meta, prefix)
+    chosen_bins = observed["chosen_bins"]
+    if chosen_bins is None:
         raise MatrixError(
             f"{run.run_id}: meta file {meta_path} has no bins_used line; "
             "the automatic count cannot be recovered"
         )
-    chosen_bins = int(float(used))
-    startup_us = None
-    derive = meta_scalar(meta, "bin_derive_ms")
-    if derive is not None:
-        startup_us = float(derive) * 1000.0
-    nonempty_bins = None
-    box_of = meta.get("box_of")
-    if box_of:
-        nonempty_bins = len({int(v) for v in box_of if int(v) >= 0})
 
     c_argv = compare_argv(python, compare, prefix, chosen_bins, compare_workers)
     compare_wall = run_process(c_argv, workdir / "compare.log", timeout, run.run_id + ":compare")
@@ -535,18 +774,25 @@ def execute_run(
     tmp_output = output.with_name(output.name + ".tmp")
     shutil.copyfile(compare_path, tmp_output)
     os.replace(tmp_output, output)
-    missing, notes = missing_for_run(startup_us, nonempty_bins, compare_run)
+    missing, notes = missing_for_run(
+        observed["startup_us"], observed["nonempty_bins"], chosen_bins,
+        observed["per_axis"], observed["axis_rules"], compare_run,
+    )
 
     row = manifest_row(
-        run, output, out_dir, chosen_bins, startup_us, nonempty_bins, proxy,
+        run, output, out_dir, chosen_bins, observed["requested_bins"],
+        observed["startup_us"], observed["nonempty_bins"], observed["per_axis"],
+        observed["axis_rules"], observed["axis_edge_errors"], proxy,
         measure_wall + compare_wall, measure_wall, compare_wall, payload,
-        missing, notes,
+        missing, notes, profile,
     )
     atomic_write_json(sidecar, row)
     with print_lock:
         print(
             f"DONE  {run.run_id} lane={run.lane} chosen_bins={chosen_bins} "
-            f"wall={row['wall_time_s']:.2f}s startup_us={startup_us}",
+            f"per_axis={observed['per_axis']} "
+            f"nonempty={observed['nonempty_bins']} "
+            f"wall={row['wall_time_s']:.2f}s startup_us={observed['startup_us']}",
             flush=True,
         )
     return row
@@ -610,6 +856,9 @@ def assemble_manifest(
     cases_dir: Path,
     bins: Sequence[int],
     rules: Sequence[str],
+    geometry: dict,
+    geometry_name: str,
+    profile: str,
 ) -> dict:
     complete = all_rows is not None
     rows = list(all_rows if complete else lane_rows)
@@ -626,6 +875,15 @@ def assemble_manifest(
         "out_dir": str(out_dir),
         "bins": list(bins),
         "rules": list(rules),
+        "geometry": dict(geometry),
+        "geometry_name": geometry_name,
+        "profile": profile,
+        "auto_count": {
+            "bins_arg": AUTO_COUNT_BINS_ARG,
+            "velocity_bin_edges": AUTO_COUNT_EDGES,
+            "note": "measure_velocity_bins.cpp:186 compares the literal 'auto'; "
+                    "'0' would be an explicit one-box request",
+        },
         "expected": {
             "total": expected_matrix + expected_auto,
             "explicit": expected_matrix,
@@ -644,10 +902,16 @@ def assemble_manifest(
         },
         "missing_metrics": aggregate_missing(rows),
         "metric_sources": {
-            "startup_us": "PREFIX_meta_B<B>.txt bin_derive_ms (standalone edge derivation)",
-            "nonempty_bins": "PREFIX_meta_B<B>.txt box_of distinct values",
+            "startup_us": "PREFIX_meta_B<B>.txt bin_derive_ms * 1000",
+            "nonempty_bins": "PREFIX_bunch.txt distinct non-negative box_of values "
+                             "(fallback: meta box_of)",
             "chosen_bins": "PREFIX_meta_B<B>.txt bins_used",
-            "in_bunch_error": "PREFIX_compare.json runs[B].mesh_vs_T",
+            "requested_bins": "PREFIX_meta_B<B>.txt requested_bins",
+            "per_axis": "PREFIX_meta_B<B>.txt per_axis (total K over three axes)",
+            "per_axis_rules": "PREFIX_meta_B<B>.txt axis_edges rule list",
+            "in_bunch_max": "PREFIX_compare.json runs[B].metrics_v2.in_bunch.worst_rel",
+            "far_field_max": "PREFIX_compare.json runs[B].metrics_v2.far_field.worst_rel",
+            "p99_rel_rms_rel": "PREFIX_compare.json runs[B].metrics_v2.*.per_component",
             "proxy_error": "PREFIX_compare.json runs[B].model_error",
         },
         "runs": rows,
@@ -703,11 +967,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="Python interpreter used for compare_velocity_bins.py")
     parser.add_argument("--compare-workers", type=int, default=0,
                         help="workers for compare_velocity_bins.py (0 = cpu/jobs)")
-    parser.add_argument("--auto-count-arg", default="auto",
-                        help="value passed to --bins for the automatic count "
-                             "(default 'auto'; pass '0' if the binary maps 0 to auto)")
-    parser.add_argument("--auto-count-edges", default=AUTO_RULE,
-                        help="edge rule passed for automatic-count runs (default auto)")
+    parser.add_argument("--geometry", choices=sorted(GEOMETRIES), default=DEFAULT_GEOMETRY,
+                        help="named geometry baseline (default: matrix)")
+    parser.add_argument("--cell", default=None,
+                        help="override cell hx,hy,hz in metres")
+    parser.add_argument("--grid", default=None,
+                        help="override grid nx,ny,nz")
+    parser.add_argument("--origin", default=None,
+                        help="override origin ox,oy,oz in metres")
+    parser.add_argument("--center", default=None,
+                        help="override cube centre x,y,z in metres")
+    parser.add_argument("--profile", default="default",
+                        help="label written into the manifest, e.g. "
+                             "'low-gamma' for a supplementary campaign")
+    parser.add_argument("--generate", action="store_true",
+                        help="run gen_synthetic_bunches.py with the resolved "
+                             "geometry into --cases-dir before the matrix")
+    parser.add_argument("--gen-script", type=Path,
+                        default=here / "gen_synthetic_bunches.py",
+                        help="path to gen_synthetic_bunches.py (for --generate)")
     args = parser.parse_args(argv)
 
     if args.lanes < 1:
@@ -722,8 +1000,63 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         parser.error("--bins values must be >= 1")
     if len(set(args.bins)) != len(args.bins):
         parser.error("--bins values must be unique")
-    args.auto_count_arg = str(args.auto_count_arg)
+    if not args.profile:
+        parser.error("--profile must not be empty")
+    try:
+        args.geometry = resolve_geometry(args)
+    except MatrixError as exc:
+        parser.error(str(exc))
     return args
+
+
+def _parse_triple(text: str, label: str) -> tuple:
+    try:
+        values = tuple(float(v) for v in text.split(","))
+    except ValueError:
+        raise MatrixError(f"{label} expects three comma-separated numbers, got {text!r}")
+    if len(values) != 3 or any(not math.isfinite(v) for v in values):
+        raise MatrixError(f"{label} expects three finite values, got {text!r}")
+    return values
+
+
+def _parse_grid(text: str) -> tuple:
+    values = _parse_triple(text, "--grid")
+    if any(v != int(v) or v < 1 for v in values):
+        raise MatrixError(f"--grid expects three positive integers, got {text!r}")
+    return tuple(int(v) for v in values)
+
+
+def resolve_geometry(args: argparse.Namespace) -> dict:
+    """Named baseline plus explicit overrides; centre defaults to domain centre."""
+    base = GEOMETRIES[args.geometry]
+    cell = _parse_triple(args.cell, "--cell") if args.cell else tuple(base["cell"])
+    grid = _parse_grid(args.grid) if args.grid else tuple(base["grid"])
+    origin = _parse_triple(args.origin, "--origin") if args.origin else tuple(base["origin"])
+    center = (
+        _parse_triple(args.center, "--center")
+        if args.center
+        else tuple(origin[a] + 0.5 * grid[a] * cell[a] for a in range(3))
+    )
+    for axis, name in enumerate(("x", "y", "z")):
+        if cell[axis] <= 0.0:
+            raise MatrixError(f"cell[{name}] must be > 0")
+        margin = TSC_SUPPORT_CELLS * cell[axis]
+        lo = center[axis] - R_BUNCH_M - margin
+        hi = center[axis] + R_BUNCH_M + margin
+        dlo = origin[axis]
+        dhi = origin[axis] + grid[axis] * cell[axis]
+        if lo < dlo - 1e-12 or hi > dhi + 1e-12:
+            raise MatrixError(
+                f"geometry {name}: cube + TSC support [{lo:.6e}, {hi:.6e}] m "
+                f"does not fit in the domain [{dlo:.6e}, {dhi:.6e}] m"
+            )
+    return {
+        "name": args.geometry,
+        "cell": cell,
+        "grid": grid,
+        "origin": origin,
+        "center": center,
+    }
 
 
 def cpu_workers(requested: int, jobs: int) -> int:
@@ -737,9 +1070,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     out_dir: Path = args.out
     cases_dir: Path = args.cases_dir
+    geometry = args.geometry
+
+    if args.generate:
+        gen_argv = generator_argv(args.python, args.gen_script, cases_dir, geometry)
+        if args.dry_run:
+            print(f"GENERATE: {shlex.join(gen_argv)}")
+        else:
+            try:
+                if not args.gen_script.is_file():
+                    raise MatrixError(f"generator not found: {args.gen_script}")
+                run_process(gen_argv, out_dir / ".work" / "generate.log",
+                            args.timeout if args.timeout > 0 else None, "generate")
+            except MatrixError as exc:
+                print(f"run_matrix: {exc}", file=sys.stderr)
+                return 1
 
     try:
-        cases = discover_cases(cases_dir)
+        try:
+            cases = discover_cases(cases_dir)
+        except MatrixError:
+            # A dry run that plans the generator has no case files yet; the
+            # generator's canonical six cases are the plan.
+            if not (args.dry_run and args.generate):
+                raise
+            cases = list(CASE_ORDER)
         runs = build_plan(cases, args.rules, args.bins, args.lanes)
         n_matrix = len(cases) * len(args.rules) * len(args.bins)
         n_auto = len(cases)
@@ -752,20 +1107,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.dry_run:
         print(f"CASES {len(cases)}: {' '.join(cases)}")
         print(
+            "GEOMETRY name={} cell={} grid={} origin={} center={}".format(
+                geometry["name"],
+                format_triple(geometry["cell"]),
+                format_triple(geometry["grid"]),
+                format_triple(geometry["origin"]),
+                format_triple(geometry["center"]),
+            )
+        )
+        print(f"PROFILE {args.profile}")
+        print(
             f"MATRIX {n_matrix} explicit + {n_auto} auto = {n_matrix + n_auto} runs; "
             f"lanes={args.lanes} per_lane={counts}"
         )
         for run in runs:
             bunch = bunch_file(cases_dir, run.case, require=False)
             prefix = out_dir / ".work" / run.run_id / run.run_id
-            m_argv = measurement_argv(
-                args.binary,
-                bunch,
-                run,
-                prefix,
-                args.auto_count_arg,
-                args.auto_count_edges,
-            )
+            m_argv = measurement_argv(args.binary, bunch, run, prefix, geometry)
             c_argv = compare_argv(
                 args.python, args.compare, prefix, run.requested_bins, compare_workers
             )
@@ -788,6 +1146,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "total": n_matrix + n_auto,
                     "lanes": args.lanes,
                     "per_lane": counts,
+                    "geometry": geometry,
+                    "profile": args.profile,
+                    "auto_count_bins_arg": AUTO_COUNT_BINS_ARG,
                 },
                 sort_keys=True,
             )
@@ -831,8 +1192,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             out_dir=out_dir,
             python=args.python,
             compare=args.compare,
-            auto_count_arg=args.auto_count_arg,
-            auto_count_edges=args.auto_count_edges,
+            geometry=geometry,
+            profile=args.profile,
             compare_workers=compare_workers,
             timeout=timeout,
             resume=args.resume,
@@ -864,6 +1225,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "schema": SCHEMA,
             "lane": args.lane,
             "lanes": args.lanes,
+            "geometry": dict(geometry),
+            "profile": args.profile,
             "runs": lane_rows,
         },
     )
@@ -882,6 +1245,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cases_dir=cases_dir,
             bins=args.bins,
             rules=args.rules,
+            geometry=geometry,
+            geometry_name=geometry["name"],
+            profile=args.profile,
         )
     except MatrixError as exc:
         print(f"run_matrix: {exc}", file=sys.stderr)
