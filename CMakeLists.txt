@@ -592,6 +592,12 @@ target_compile_features(picBunchVelocityBinsMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchVelocityBinsMeasure)
 
+add_executable(picBunchBunchBinsMeasure tools/velocity-bins/measure_bunch_bins.cpp)
+picbunch_target_warnings(picBunchBunchBinsMeasure)
+target_compile_features(picBunchBunchBinsMeasure PUBLIC cxx_std_20)
+target_link_libraries(picBunchBunchBinsMeasure PRIVATE picBunch::openPMD picBunch::picBunch)
+alpaka_finalize(picBunchBunchBinsMeasure)
+
 # ---------------------------------------------------------------------------
 # Synthetic scaling benchmark (additive, opt-in)
 #

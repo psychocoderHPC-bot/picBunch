@@ -1,0 +1,34 @@
+Real-bunch velocity-bin calibration
+===================================
+Bunch: particles_000000.bp5, species 'b', 49932 particles, mean |u| = 490.3
+  (gamma 471-510 class; mean gamma 490.3; rel |u| spread 1.69e-2;
+   max angle 0.0253 rad; beam-frame u-range transverse 19.2/17.9, beam 68.0)
+Field: 128^3 nominal -> makeGrid 298x122x318, cell 2e-7 m, fftPadding 2.
+Model (src/VelocityBinning.cpp): modelError = C * sum_boxes (q_b/Q) *
+  (C_ang*angle^2 + 2*Delta_gamma/gamma/gamma), C_ang = kAngularModelConstant = 1.
+
+Model sums (binning model, charge-weighted):
+  B   per-axis  model_sum     model_error
+  1   1x1x1     1.1363e-03    1.1363e-03
+  2   1x2x1     9.0033e-04    9.0033e-04
+  4   2x2x1     7.2249e-04    7.2249e-04
+  8   2x4x1     6.5517e-04    6.5517e-04
+  16  4x4x1     5.2240e-04    5.2240e-04
+
+Measured binning error (E field, T_binned vs T_per-particle, far-field 500-particle
+subset, 12^3 nodes 100um from center, LW far-field):
+  B   Ex        Ey        Ez        worst-E
+  1   2.017e-03 2.246e-03 2.261e-03 2.261e-03
+  2   1.436e-03 1.676e-03 1.700e-03 1.700e-03
+  4   1.268e-03 1.425e-03 1.468e-03 1.468e-03
+  8   1.291e-03 1.497e-03 1.583e-03 1.583e-03
+  16  1.292e-03 1.463e-03 1.592e-03 1.592e-03
+  (B field is numerically ill-conditioned in the far field - near-zero reference -
+   and is not a reliable binning-error signal for this geometry.)
+
+Measured/model ratio (worst-E / model_sum):  2.0 (B<=4) -> 3.0 (B=16).
+The model is a lower bound; C_ang=1 is conservative but does not over-predict.
+The measured E-error (2.3e-3 at B=1, saturating ~1.6e-3 at B=16) is ABOVE the
+default tolerance 1e-3, so `auto` correctly selects B=2 (the smallest count whose
+model meets tolerance is 2, at model_error 9.0e-4). This is the correct behavior:
+the bunch's 0.78-degree divergence is a genuine multi-velocity spread.

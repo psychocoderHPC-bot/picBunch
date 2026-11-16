@@ -699,3 +699,72 @@ TEST(VelocityBins, CapFailureNamesTheRequiredCount)
         EXPECT_NE(message.find("at the 256-box cap: "), std::string::npos) << message;
     }
 }
+
+namespace
+{
+    //! Mirror the calibrated real bunch (particles_000000.bp5 species 'b'):
+    //! gamma ~490, 0.78-degree (0.0136 rad) transverse divergence, ~1.7%
+    //! relative momentum spread, 256 sources on a lattice.  The binning model
+    //! is calibrated on this geometry; the auto policy must return a small
+    //! power-of-two count (the model meets the tolerance at B=2), not an
+    //! extreme count, and the model error must shrink with the box count.
+    Bunch realBunchLike()
+    {
+        Bunch bunch;
+        bunch.resize(256);
+        double const u = std::sqrt(490.0 * 490.0 - 1.0);
+        double const div = 0.0136; // ~0.78 degrees
+        for(std::size_t p = 0; p < 256; ++p)
+        {
+            double const phi = 2.0 * std::acos(-1.0) * (2.0 * static_cast<double>(p % 16) + 1.0) / 32.0;
+            double const theta = div * (1.0 + 0.25 * ((p / 16) % 2));
+            // a small relative energy spread (~1.7%) across the sources
+            double const g = 490.0 * (1.0 + 0.017 * (static_cast<double>(p % 5) / 4.0 - 0.5));
+            double const gu = std::sqrt(g * g - 1.0);
+            bunch.x[p] = 4.0 + static_cast<double>(p % 3);
+            bunch.y[p] = 4.0 + static_cast<double>((p / 3) % 3);
+            bunch.z[p] = 4.0 + static_cast<double>((p / 9) % 3);
+            bunch.ux[p] = gu * std::sin(theta) * std::cos(phi);
+            bunch.uy[p] = gu * std::sin(theta) * std::sin(phi);
+            bunch.uz[p] = gu * std::cos(theta);
+            bunch.weight[p] = 1.0;
+            bunch.charge[p] = kElectronCharge;
+        }
+        return bunch;
+    }
+} // namespace
+
+TEST(VelocityBins, RealBunchAutoReturnsASmallCount)
+{
+    Bunch const bunch = realBunchLike();
+    VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-3);
+    EXPECT_TRUE(binning.derived);
+    EXPECT_TRUE(binning.multiVelocity);
+    // The auto policy picks a small power-of-two count, not an extreme one.
+    EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    EXPECT_GE(binning.count, 1u);
+    EXPECT_LE(binning.count, 32u);
+    // The selected count's model error meets the tolerance.
+    EXPECT_LE(binning.modelError, 1e-3 + 1e-15);
+}
+
+TEST(VelocityBins, RealBunchOneBoxHasFiniteModelError)
+{
+    // The one-box estimate for the real-bunch-like geometry must be finite and
+    // positive (a genuine spread), and the 16-box estimate must be lower than
+    // the one-box estimate: refining the boxes reduces the model error.  This
+    // is the calibration anchor -- the 16-box model error is the value the
+    // auto policy compares against the tolerance.
+    Bunch const bunch = realBunchLike();
+    VelocityBinningOptions one;
+    one.mode = VelocityBinningOptions::Mode::Explicit;
+    one.explicitBins = 1;
+    VelocityBinning const b1 = picBunch::deriveVelocityBinning(bunch, 1e-3, one);
+    VelocityBinningOptions sixteen;
+    sixteen.mode = VelocityBinningOptions::Mode::Explicit;
+    sixteen.explicitBins = 16;
+    VelocityBinning const b16 = picBunch::deriveVelocityBinning(bunch, 1e-3, sixteen);
+    EXPECT_GT(b1.modelSum, 0.0);
+    EXPECT_TRUE(std::isfinite(b1.modelSum));
+    EXPECT_LT(b16.modelSum, b1.modelSum);
+}
