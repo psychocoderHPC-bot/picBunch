@@ -171,6 +171,14 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=NearShellSlab.*
             )
+            # The centre field must stay grid-independent on a distributed
+            # z-slab transform too, so the group also runs under four ranks.
+            add_test(
+                NAME picBunch.GridIndependenceN4
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=GridIndependence.*
+            )
             # The distributed FFT boundary pair (below/above 2^28 padded nodes
             # per rank) allocates more than 4 GiB per rank.  Opt-in: the
             # operator sets PICBUNCH_LARGE_FFT_GPUS to the device list, e.g.

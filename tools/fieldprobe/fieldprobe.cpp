@@ -33,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,16 @@ namespace pb = picBunch;
 
 namespace
 {
+    char const* const kUsage
+        = "usage: fieldprobe --input <openPMD file> [--species <name>] [--count <n>]\n"
+          "                  [--cell <h>] --grids <n>[,<n>...] [--mode none|fast|fast-gpu]\n"
+          "                  [--tolerance <tol>] [--near-radius <cells>] [--near-tile <n>]\n"
+          "                  [--fft-mode auto|replicated|distributed] [--fft-padding <cells>]\n"
+          "\n"
+          "The probe never writes an output file.  The reported energy is the total\n"
+          "over the full grid and does not depend on the rank count.  The grid is\n"
+          "nx = nz = N and ny = 2 N, the shape used for the large-domain scan.\n";
+
     double parseDouble(char const* s)
     {
         return std::atof(s);
@@ -112,7 +123,6 @@ namespace
         double nearRadius,
         std::size_t nearTile,
         char const* fftMode,
-        int rank,
         int size,
         unsigned fftPadding)
     {
@@ -235,9 +245,8 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
+static int probeMain(int argc, char** argv)
 {
-    pb::MpiGuard guard(argc, argv);
     pb::MpiParallelContext par;
     int const rank = pb::mpiRank();
     int const size = pb::mpiSize();
@@ -256,6 +265,12 @@ int main(int argc, char** argv)
     for(int i = 1; i < argc; ++i)
     {
         std::string const o = argv[i];
+        if(o == "--help" || o == "-h")
+        {
+            if(rank == 0)
+                std::fputs(kUsage, stdout);
+            return 0;
+        }
         auto next = [&]() -> char const* {
             if(i + 1 >= argc)
                 throw std::runtime_error("missing value for " + o);
@@ -288,7 +303,7 @@ int main(int argc, char** argv)
             throw std::runtime_error("unknown argument " + o);
     }
     if(input.empty() || grids.empty())
-        throw std::runtime_error("fieldprobe: --input and --grids are required");
+        throw std::runtime_error("--input and --grids are required");
 
     pb::Bunch const bunch = readBroadcast(input, species, count, rank);
 
@@ -309,7 +324,7 @@ int main(int argc, char** argv)
         pb::ComputeOptions options
             = makeOptions(
                 bunch, baseN, cell, mode.c_str(), tolerance, nearRadius, nearTile,
-                fftMode.c_str(), rank, size, fftPadding);
+                fftMode.c_str(), size, fftPadding);
         options.parallel = &par;
         pb::Field field = pb::computeField(bunch, options);
 
@@ -332,10 +347,9 @@ int main(int argc, char** argv)
                 globalMax = std::max(globalMax, std::abs(v));
                 energy += v * v;
             }
-        par.allreduceMax(&globalMax, 1);
-        par.allreduceMax(&eCentroid, 1);
-        par.allreduceMax(&eCorner, 1);
-        par.allreduceSum(&energy, 1);
+        // gatherFull leaves the complete field on every rank, so the
+        // statistics above are already global.  Reducing them again would
+        // multiply the energy by the rank count.
         energy *= 0.5 * eps0 * dV;
 
         if(rank == 0)
@@ -349,4 +363,18 @@ int main(int argc, char** argv)
         }
     }
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+    pb::MpiGuard guard(argc, argv);
+    try
+    {
+        return probeMain(argc, argv);
+    }
+    catch(std::exception const& e)
+    {
+        std::fprintf(stderr, "fieldprobe: %s\n\n%s", e.what(), kUsage);
+        return 2;
+    }
 }
