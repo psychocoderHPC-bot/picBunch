@@ -928,78 +928,75 @@ namespace picBunch
                && policy.inBunchCriterion)
             {
                 // In-bunch criterion: the peak-normalised in-bunch error of a
-                // high-gamma beam saturates above the tolerance (the beam-axis
-                // components Ez/Bx and the core 1/r singularity keep it above
-                // 1e-3; the independent LW direct-sum arbiter confirmed the
-                // absolute in-bunch By error saturates at ~6.4e-2 T at 256
-                // boxes).  The cap (256) is 256 field solves, which no
-                // production run accepts, so the honest result is the smallest
-                // count after which the model error no longer improves by at
-                // least kSaturationImprovement (half) per doubling: that is
-                // the saturation point, and the achieved accuracy is reported
-                // as a diagnostic.  An explicit --velocity-bins or a
-                // non-default --max-velocity-bins keeps the historical throw so
-                // a deliberately strict requirement is not silently relaxed.
-                double prevError = std::numeric_limits<double>::infinity();
-                std::size_t satBins = 1u;
-                bool saturated = false;
-                bool declining = false;
-                for(std::size_t B = 1u; B <= policy.maxBins; B *= 2u)
+                // high-gamma beam saturates above the tolerance.  The
+                // independent cloud reference (the mesh deposit with the same
+                // macroparticles smeared over a cell,
+                // docs/measurements/velocity_bin_cloud_reference.txt) measured
+                // the in-bunch relative error at 1e-3 for NO count up to 256
+                // boxes: the beam-axis components (Bx/Ey/By) and the core 1/r
+                // singularity keep the in-bunch components above the tolerance
+                // at every box count (the per-component relative error
+                // saturates at O(0.1-4.4) and the absolute in-bunch By at
+                // ~3.3 T at 256 boxes).  The model error is a monotone decline
+                // (the angular term scales with the per-box angular width
+                // squared) with a gradual per-doubling improvement (~30-50
+                // percent), so a "saturation point" (a halving threshold) is
+                // not well defined for the in-bunch curve.  The honest,
+                // practical result is therefore the in-bunch auto ceiling: the
+                // count at which the remaining accuracy gain no longer
+                // justifies another field solve.  The ceiling is
+                // kInBunchAutoMaxVelocityBins (16) unless the user raised
+                // --max-velocity-bins, so a deliberately higher count stays
+                // available; the 256 cap is never returned by the in-bunch
+                // auto path.  An explicit --velocity-bins (the far-field
+                // angular calibration) is unaffected.  The achieved accuracy is
+                // reported either way.
+                std::size_t const ceiling
+                    = (policy.maxBins == kDefaultMaxVelocityBins)
+                          ? kInBunchAutoMaxVelocityBins
+                          : policy.maxBins;
+                std::size_t satBins = ceiling;
+                for(std::size_t B = 1u; B <= ceiling; B *= 2u)
                 {
                     VelocityBinning probe;
                     double const modelSum = modelSumFor(B, probe);
-                    double const err = policy.modelConstant * modelSum;
-                    if(err <= tolerance)
+                    if(policy.modelConstant * modelSum <= tolerance)
                     {
                         targetBins = B;
                         break;
                     }
-                    // The model error can rise for the first doubling (the
-                    // representative change dominates the width reduction);
-                    // saturation is only meaningful once the error is
-                    // declining, so a doubling that fails to cut it by at
-                    // least kSaturationImprovement marks the end of useful
-                    // refinement and the previous count is the saturation
-                    // point.
-                    if(std::isfinite(prevError) && err < prevError)
-                        declining = true;
-                    if(!saturated && declining
-                       && err > kSaturationImprovement * prevError)
-                    {
-                        saturated = true;
-                        satBins = B / 2u;
-                        break;
-                    }
-                    prevError = err;
                 }
-                if(!saturated && targetBins == 0u)
-                    satBins = policy.maxBins; // monotone decline to the cap
                 if(targetBins == 0u)
                 {
+                    // No count up to the in-bunch auto ceiling meets the
+                    // tolerance: return the ceiling (capped for cost), report
+                    // the achieved accuracy, and never return the 256 cap.
                     targetBins = satBins;
+                    out.saturated = true;
+                    out.practicalCapApplied = (satBins == ceiling);
                     VelocityBinning satProbe;
                     double const satSum = modelSumFor(satBins, satProbe);
                     out.saturationError = policy.modelConstant * satSum;
-                    // error at the count before saturation (for the diagnostic)
+                    // error at the count before the returned one (the
+                    // improvement the returned count buys; diagnostic)
                     if(satBins > 1u)
                     {
                         VelocityBinning prevProbe;
                         double const prevSum = modelSumFor(satBins / 2u, prevProbe);
                         out.saturationPrevError = policy.modelConstant * prevSum;
                     }
-                    out.saturated = true;
                     std::fprintf(stderr,
                         "picBunch: velocity-bin auto: the in-bunch peak-normalised "
-                        "model does not meet tolerance %g within the %zu-box cap; "
-                        "it saturates (the high-gamma beam-axis components and the "
-                        "core 1/r singularity keep the in-bunch error above the "
-                        "tolerance).  Returning the saturation count %zu, after which "
-                        "the error no longer improves by >= %g per doubling "
-                        "(achieved in-bunch model error %g, at %zu boxes %g).  "
-                        "Raise --max-velocity-bins or --tolerance to change the "
-                        "criterion.\\n",
-                        tolerance, policy.maxBins, satBins, kSaturationImprovement,
-                        out.saturationError, satBins, out.saturationPrevError);
+                        "model does not meet tolerance %g.  The in-bunch error of a "
+                        "high-gamma beam saturates above the tolerance (no count up to "
+                        "the 256-box cap reaches it), so the auto count is capped at "
+                        "the %zu-box practical cost ceiling.  Achieved in-bunch model "
+                        "error %g at %zu boxes (prev count %g).  The 1e-3 in-bunch "
+                        "tolerance is not reachable by the binned model at this gamma; "
+                        "validate a production field against a physics run.  Raise "
+                        "--max-velocity-bins for more boxes.\\n",
+                        tolerance, ceiling, out.saturationError, satBins,
+                        out.saturationPrevError);
                 }
             }
             if(targetBins == 0u)

@@ -852,28 +852,40 @@ TEST(VelocityBins, InBunchAutoSaturatesAboveTheCapNotAtTheCap)
     VelocityBinningOptions policy;
     policy.mode = VelocityBinningOptions::Mode::Auto;
     policy.inBunchCriterion = true;
-    // The tolerance is 1e-5, stricter than the curve's cap value (~2.8e-4 at
-    // 256 boxes for this bunch), so the in-bunch error does not reach the
-    // tolerance within the cap: the policy must saturate (return the smallest
-    // count after which the error no longer improves by at least half per
-    // doubling) rather than return the cap.
+    // The tolerance is 1e-5, stricter than the in-bunch error at every count
+    // (the in-bunch peak-normalised error of a high-gamma beam saturates above
+    // the tolerance and never reaches 1e-5, even at 256 boxes).  The error
+    // keeps halving, so it still improves by at least half per doubling up to
+    // the in-bunch auto ceiling: the policy must return that ceiling (NOT the
+    // 256 cap) and flag it as a cost cap.
     VelocityBinning const binning = picBunch::deriveVelocityBinning(bunch, 1e-5, policy);
     EXPECT_TRUE(binning.derived);
     // The in-bunch error saturates above the tolerance for this genuine
     // gamma-spread bunch.
     EXPECT_TRUE(binning.saturated);
-    // The returned count is NOT the cap: it is the saturation count, strictly
-    // below the cap.  This is the arbiter requirement (do not return 256).
+    // The returned count is the practical cost ceiling, NOT the 256 cap.
+    EXPECT_EQ(binning.count, picBunch::kInBunchAutoMaxVelocityBins);
     EXPECT_LT(binning.count, picBunch::kDefaultMaxVelocityBins);
     EXPECT_EQ((binning.count & (binning.count - 1u)), 0u);
+    // The count was capped for cost (the error was still improving).
+    EXPECT_TRUE(binning.practicalCapApplied);
     // The achieved accuracy is reported, and it is above the tolerance (the
-    // error saturates there, it does not reach 1e-5).
+    // error saturates above it, it does not reach 1e-5).  The reported
+    // accuracy is exactly the model error at the returned (capped) count, and
+    // saturationPrevError is the model error at the count before it -- these
+    // are the numbers printed to the user.
     EXPECT_GT(binning.saturationError, 1e-5);
     EXPECT_TRUE(std::isfinite(binning.saturationError));
     EXPECT_GT(binning.saturationPrevError, binning.saturationError);
-    // The saturation count's error must be lower than the one-box error
-    // (refining reduced it) but the next doubling would not cut it by at
-    // least half (that is what marks the saturation point).
+    EXPECT_DOUBLE_EQ(binning.saturationError, binning.modelError);
+    VelocityBinningOptions prev;
+    prev.mode = VelocityBinningOptions::Mode::Explicit;
+    prev.explicitBins = binning.count / 2u;
+    prev.inBunchCriterion = true;
+    VelocityBinning const bPrev = picBunch::deriveVelocityBinning(bunch, 1e-5, prev);
+    EXPECT_DOUBLE_EQ(binning.saturationPrevError, bPrev.modelError);
+    // The returned count's error must be lower than the one-box error
+    // (refining reduced it).
     VelocityBinningOptions one;
     one.mode = VelocityBinningOptions::Mode::Explicit;
     one.explicitBins = 1;

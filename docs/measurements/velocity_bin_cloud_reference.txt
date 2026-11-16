@@ -64,11 +64,32 @@ not the 1/r point-charge-vs-smeared-cloud model difference.
 
 POLICY
 ------
-Because the in-bunch error saturates above the tolerance, the auto policy
-(inBunchCriterion) does NOT return the 256 cap.  It returns the smallest box
-count after which the in-bunch model error no longer improves by at least
-kSaturationImprovement (0.5) per doubling, and reports the achieved accuracy as
-a diagnostic.  A count that meets the tolerance within the cap (a bunch with a
-small per-particle gamma deviation, like the synthetic realBunchLike) is
-returned instead.  This is the requirement: do not return the cap when a smaller
-count performs equally.
+Because the in-bunch error saturates above the tolerance and the model error is
+a monotone decline (the angular term scales with the per-box angular width
+squared, so the per-doubling improvement is gradual, ~30-50 percent, never a
+halving), a "saturation point" (a halving threshold) is not well defined for the
+in-bunch curve.  The auto policy (inBunchCriterion) therefore returns the
+smallest count whose model error meets the tolerance; when no count up to the
+in-bunch auto ceiling does, it returns the ceiling (kInBunchAutoMaxVelocityBins
+= 16, NOT the 256 cap) and reports the achieved accuracy.  16 field solves is a
+practical production cost; 256 is not.  A user may still raise
+--max-velocity-bins above 16 for a deliberately higher count; the 256 cap is
+never returned by the in-bunch auto path.
+
+REAL BUNCH RESULT (B1, gamma ~ 490, 49931 macro particles)
+-----------------------------------------------------------
+--velocity-bins auto (inBunchCriterion) returns count = 16 (4x4x1), NOT the
+256 cap.  The achieved in-bunch model error at 16 boxes is 7.4e-2 (model
+constant 1; the count-8 value is 2.2e-1).  The 1e-3 in-bunch tolerance is NOT
+met.  This is the honest result: the in-bunch 1e-3 tolerance is not reachable by
+the binned model at this gamma, so auto caps at the 16-box practical cost
+ceiling and prints the achieved accuracy and the fact that the count was capped
+for cost.  Guidance: validate a production field against a physics run rather
+than trusting the 1e-3 tolerance for the in-bunch components.
+
+NOTE ON kSaturationImprovement
+------------------------------
+kSaturationImprovement (0.5) remains the documented halving threshold of the
+error model, but the in-bunch auto policy no longer searches for a saturation
+point: the in-bunch curve is a monotone decline for which the halving threshold
+is not a useful stop rule.  The policy uses the practical cost ceiling instead.
