@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -94,6 +95,39 @@ TEST(MpiOptions, FingerprintCoversEveryVelocityBinningField)
     changed = options;
     changed.velocityBinning.maxBins = 64;
     EXPECT_NE(picBunch::computeOptionsFingerprint(changed), base);
+
+    // The edge rule selects the per-axis geometry, and the in-bunch criterion
+    // changes the count the auto policy accepts: both are physics options and
+    // must move the digest.  This is the regression guard for the MPI
+    // divergence where only the root rank applied ``--velocity-bin-edges``.
+    changed = options;
+    changed.velocityBinning.edgeRule = picBunch::VelocityBinning::EdgeRule::Quantile;
+    EXPECT_NE(picBunch::computeOptionsFingerprint(changed), base);
+
+    changed = options;
+    changed.velocityBinning.edgeRule = picBunch::VelocityBinning::EdgeRule::Uniform;
+    EXPECT_NE(picBunch::computeOptionsFingerprint(changed), base);
+
+    changed = options;
+    changed.velocityBinning.inBunchCriterion = true;
+    EXPECT_NE(picBunch::computeOptionsFingerprint(changed), base);
+
+    // Every edge rule is distinguishable from every other one.
+    std::array<std::uint64_t, 4> ruleDigests{};
+    picBunch::VelocityBinning::EdgeRule const rules[4] = {
+        picBunch::VelocityBinning::EdgeRule::Auto,
+        picBunch::VelocityBinning::EdgeRule::Adaptive,
+        picBunch::VelocityBinning::EdgeRule::Uniform,
+        picBunch::VelocityBinning::EdgeRule::Quantile};
+    for(std::size_t r = 0; r < 4u; ++r)
+    {
+        changed = options;
+        changed.velocityBinning.edgeRule = rules[r];
+        ruleDigests[r] = picBunch::computeOptionsFingerprint(changed);
+        for(std::size_t q = 0; q < r; ++q)
+            EXPECT_NE(ruleDigests[r], ruleDigests[q])
+                << "edge rules " << r << " and " << q << " share a fingerprint";
+    }
 }
 
 #if defined(PICBUNCH_ENABLE_MPI)
@@ -116,6 +150,8 @@ TEST(MpiOptions, BroadcastDeliversRootPhysicsToEveryRank)
         options.velocityBinning.explicitBins = 16;
         options.velocityBinning.modelConstant = 3.0;
         options.velocityBinning.maxBins = 64;
+        options.velocityBinning.edgeRule = picBunch::VelocityBinning::EdgeRule::Quantile;
+        options.velocityBinning.inBunchCriterion = true;
     }
 
     picBunch::mpiBroadcastComputeOptions(options, 0);
@@ -132,6 +168,10 @@ TEST(MpiOptions, BroadcastDeliversRootPhysicsToEveryRank)
     EXPECT_EQ(options.velocityBinning.explicitBins, 16u);
     EXPECT_DOUBLE_EQ(options.velocityBinning.modelConstant, 3.0);
     EXPECT_EQ(options.velocityBinning.maxBins, 64u);
+    EXPECT_EQ(
+        options.velocityBinning.edgeRule,
+        picBunch::VelocityBinning::EdgeRule::Quantile);
+    EXPECT_TRUE(options.velocityBinning.inBunchCriterion);
 
     // Independently confirm that every rank holds the same digest.
     std::uint64_t local = picBunch::computeOptionsFingerprint(options);

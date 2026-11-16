@@ -64,7 +64,7 @@ namespace picBunch
         }
 
         //! Version of the compute-options wire layout and fingerprint.
-        constexpr std::uint64_t kComputeOptionsWireVersion = 4u;
+        constexpr std::uint64_t kComputeOptionsWireVersion = 5u;
 
         /*! Deterministic FNV-1a hasher over the logical option fields.
          *
@@ -288,6 +288,11 @@ namespace picBunch
         hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.mode));
         hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.explicitBins));
         hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.maxBins));
+        // The edge rule and the in-bunch criterion change the per-axis
+        // geometry and the count the auto policy accepts, so they are physics
+        // options like the ones above and must be in the digest.
+        hasher.u64(static_cast<std::uint64_t>(options.velocityBinning.edgeRule));
+        hasher.u64(options.velocityBinning.inBunchCriterion ? 1u : 0u);
         hasher.u64(static_cast<std::uint64_t>(options.fftMode));
         hasher.u64(static_cast<std::uint64_t>(options.distributedFftMinNodes));
         hasher.u64(static_cast<std::uint64_t>(options.shape));
@@ -316,7 +321,7 @@ namespace picBunch
             options.marginCells,
             options.nearShell.radiusCells,
             options.velocityBinning.modelConstant};
-        std::uint64_t integers[14] = {
+        std::uint64_t integers[16] = {
             static_cast<std::uint64_t>(options.fftPadding),
             options.deterministicDeposit ? 1u : 0u,
             static_cast<std::uint64_t>(options.nearShell.mode),
@@ -330,14 +335,19 @@ namespace picBunch
             static_cast<std::uint64_t>(options.distributedFftMinNodes),
             static_cast<std::uint64_t>(options.shape),
             static_cast<std::uint64_t>(options.velocityMoments.mode),
-            static_cast<std::uint64_t>(options.velocityMoments.order)};
+            static_cast<std::uint64_t>(options.velocityMoments.order),
+            // Per-axis edge placement and the in-bunch criterion: both change
+            // the geometry / the accepted count, so a non-root rank must not
+            // keep its own value.
+            static_cast<std::uint64_t>(options.velocityBinning.edgeRule),
+            options.velocityBinning.inBunchCriterion ? 1u : 0u};
         double cell[3] = {options.cellSize[0], options.cellSize[1], options.cellSize[2]};
         std::uint64_t version = kComputeOptionsWireVersion;
         MPI_Bcast(&version, 1, MPI_UINT64_T, root, MPI_COMM_WORLD);
         if(version != kComputeOptionsWireVersion)
             throw std::runtime_error("MPI compute-options wire version mismatch");
         MPI_Bcast(scalars, 4, MPI_DOUBLE, root, MPI_COMM_WORLD);
-        MPI_Bcast(integers, 14, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(integers, 16, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(cell, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         // Optional arrays: one presence flag, then three values each.
         auto broadcastOptional = [&](std::optional<Idx3>& value) {
@@ -401,6 +411,9 @@ namespace picBunch
             options.velocityMoments.mode
                 = static_cast<VelocityMomentsOptions::Mode>(integers[12]);
             options.velocityMoments.order = static_cast<std::size_t>(integers[13]);
+            options.velocityBinning.edgeRule
+                = static_cast<VelocityBinning::EdgeRule>(integers[14]);
+            options.velocityBinning.inBunchCriterion = integers[15] != 0u;
             options.cellSize = {cell[0], cell[1], cell[2]};
         }
         // Verify that every rank ended up with root's effective options.
