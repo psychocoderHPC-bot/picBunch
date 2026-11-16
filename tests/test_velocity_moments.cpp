@@ -431,6 +431,20 @@ TEST(VelocityMoments, Gamma100ExplicitOrdersConvergeOrFallBack)
         refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
         refOptions.velocityBinning.explicitBins = 256u;
         picBunch::Field const reference = picBunch::computeField(bunch, refOptions);
+        // The binned field the configured auto policy selects for this bunch.
+        // This is what a moment fallback must return; the 256-box reference is
+        // a separate accuracy point.
+        auto autoOptions = gamma100Options();
+        picBunch::VelocityBinning autoBinning{};
+        picBunch::Field const autoBinned
+            = picBunch::computeField(bunch, autoOptions, nullptr, &autoBinning);
+        double const autoAgainstReference = relativeL2(autoBinned, reference);
+        std::printf(
+            "[velocity-moments] gamma-100 div %.0f deg auto binned: %zu boxes, "
+            "relL2 vs 256 boxes %.3e\n",
+            divergence,
+            autoBinning.count,
+            autoAgainstReference);
 
         for(std::size_t const order : {2u, 3u})
         {
@@ -462,16 +476,31 @@ TEST(VelocityMoments, Gamma100ExplicitOrdersConvergeOrFallBack)
             }
             else
             {
-                // The fallback must deliver the binned result, which with the
-                // 256-box cap is the reference here.
+                // The fallback must deliver the binned field of the configured
+                // policy, i.e. the auto count, not the 256-box reference.  The
+                // former 1e-12 comparison against the 256-box reference encoded
+                // the pre-calibration behaviour: the old gamma*Delta_theta
+                // angular model demanded more than 256 boxes, so the fallback
+                // was forced onto the explicit 256-box cap and matched the
+                // reference bit for bit.  With the calibrated Delta_theta^2
+                // angular term the auto model meets the 1e-3 tolerance at 128
+                // boxes for this bunch (model error 5.3e-4 at 1 deg, 5.5e-4 at
+                // 5 deg).  The difference to the 256-box reference is then the
+                // binning error itself, measured 1.55e-2 at 1 deg and 8.47e-2
+                // at 5 deg, so the exact check is against the auto binned field
+                // and the 256-box comparison keeps a 15% bound.
                 std::printf(
                     "[velocity-moments] gamma-100 order %zu div %.0f deg fell back: "
-                    "probe %.3e\n",
+                    "probe %.3e, auto count %zu, relL2 vs auto %.3e\n",
                     order,
                     divergence,
-                    rep.probe);
-                EXPECT_LT(relativeL2(field, reference), 1e-12)
-                    << "fallback did not return the binned field";
+                    rep.probe,
+                    autoBinning.count,
+                    relativeL2(field, autoBinned));
+                EXPECT_LT(relativeL2(field, autoBinned), 1e-12)
+                    << "fallback did not return the configured auto binned field";
+                EXPECT_LT(autoAgainstReference, 0.15)
+                    << "auto binned field is not close to the 256-box reference";
             }
         }
     }
@@ -485,6 +514,16 @@ TEST(VelocityMoments, Gamma100AutoMatchesOrBeatsBinned)
     refOptions.velocityBinning.mode = picBunch::VelocityBinningOptions::Mode::Explicit;
     refOptions.velocityBinning.explicitBins = 256u;
     picBunch::Field const binned = picBunch::computeField(bunch, refOptions);
+
+    // The binned field of the same auto policy without the moment path.  Since
+    // the angular-term calibration the auto model meets the 1e-3 tolerance at
+    // 128 boxes, so a moment fallback returns that field and not the 256-box
+    // cap it was formerly forced onto (measured relL2 to 256 boxes 1.55e-2).
+    auto autoOptions = gamma100Options();
+    picBunch::VelocityBinning autoBinning{};
+    picBunch::Field const binnedAuto
+        = picBunch::computeField(bunch, autoOptions, nullptr, &autoBinning);
+    double const autoAgainstBinned = relativeL2(binnedAuto, binned);
 
     auto options = gamma100Options();
     options.velocityMoments.mode = VelocityMomentsOptions::Mode::Auto;
@@ -503,7 +542,17 @@ TEST(VelocityMoments, Gamma100AutoMatchesOrBeatsBinned)
         rep.probe,
         rel);
     if(rep.fellBack)
-        EXPECT_LT(rel, 1e-12) << "auto fallback must reproduce the binned capped result";
+    {
+        std::printf(
+            "[velocity-moments] gamma-100 auto fallback: auto count %zu, "
+            "auto binned relL2 vs 256 boxes %.3e, relL2 vs auto %.3e\n",
+            autoBinning.count,
+            autoAgainstBinned,
+            relativeL2(field, binnedAuto));
+        EXPECT_LT(relativeL2(field, binnedAuto), 1e-12)
+            << "auto fallback must reproduce the auto binned field";
+        EXPECT_LT(rel, 0.05) << "auto binned fallback differs from the 256-box reference";
+    }
     else
     {
         EXPECT_LT(rep.probe, 0.05);
