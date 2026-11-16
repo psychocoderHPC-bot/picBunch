@@ -29,3 +29,7 @@ CMakeUserPresets.json
 
 # Reduced figure data committed so the paper figures are reproducible
 !docs/paper/data/**/*.npz
+
+# Python byte-compile artefacts (tools/velocity-bins/*.py)
+__pycache__/
+*.pyc

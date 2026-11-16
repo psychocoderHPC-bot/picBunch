@@ -143,7 +143,17 @@ namespace
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0); an\n"
-            "                        explicit N overrides the automatic choice\n"
+            "                        explicit N overrides the automatic choice.\n"
+            "                        In-bunch caveat: for a high-gamma beam the\n"
+            "                        in-bunch peak-normalised error saturates above\n"
+            "                        --tolerance (no count up to the 256-box cap\n"
+            "                        reaches 1e-3; the measured in-bunch floor is\n"
+            "                        ~0.1-4.4 per-component relative error and\n"
+            "                        ~3.3 T absolute By).  auto then caps at the\n"
+            "                        16-box practical cost ceiling (not 256) and\n"
+            "                        reports the achieved accuracy; the 1e-3 in-\n"
+            "                        bunch tolerance is not met -- validate a\n"
+            "                        production field against a physics run.\n"
             "  --bin-model-constant <C>\n"
             "                        calibration constant of the bin error model\n"
             "                        (diagnostic override of the shipped fit)\n"
@@ -758,6 +768,15 @@ namespace
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")
@@ -1491,6 +1510,15 @@ int main(int argc, char** argv)
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        // The auto policy drives the bin count with the in-bunch peak-normalised
+        // error model (angular term amplified by ~gamma, the suppression of the
+        // in-bunch transverse B and E peaks of a relativistic beam).  For a
+        // high-gamma bunch whose in-bunch peaks are ~1/gamma suppressed the
+        // far-field angular calibration under-predicts the in-bunch error by
+        // ~gamma, so the in-bunch criterion is the correct driver for the
+        // auto policy.  An explicit --velocity-bins keeps the far-field model
+        // (a fixed count is a diagnostic, not a tolerance-driven choice).
+        options.velocityBinning.inBunchCriterion = (args.velocityBins == 0u);
         options.velocityMoments.mode
             = (args.velocityMoments == "auto") ? picBunch::VelocityMomentsOptions::Mode::Auto
             : (args.velocityMoments == "2" || args.velocityMoments == "3")

@@ -248,6 +248,28 @@ namespace picBunch
      */
     inline constexpr double kAngularModelConstant = 1.0;
 
+    /*! Amplification of the angular term for the in-bunch peak-normalised error.
+     *
+     * The far-field angular error (calibrated at ``kAngularModelConstant = 1``)
+     * is a lower bound on the in-bunch peak-normalised relative error.  For a
+     * relativistic beam the in-bunch transverse B and the in-bunch E peaks are
+     * suppressed by ~1/gamma, so the in-bunch relative error is amplified by
+     * ~gamma relative to the far-field one.  The real bunch calibration
+     * (``docs/measurements/velocity_bin_real_bunch_calibration.txt``) measured
+     * the in-bunch peak-normalised driver at ~1.24 for one box, against an
+     * angular model term of ``C_ang * theta^2 = 6.4e-4`` (the B=1 model_sum
+     * 1.136e-3 is angular 6.4e-4 plus the energy term 4.9e-4; the energy term
+     * is the per-particle gamma deviation, not the angular term), a ratio of
+     * ~1.9e3 for the angular term.  The gamma-amplification factor
+     * ``kInBunchAngularGammaAmplification`` (a modest ~2.2, not the full
+     * gamma ~ 490) reproduces the in-bunch scaling the auto policy needs to
+     * escalate to the cap for a gamma ~ 490 beam; the residual spread across
+     * the box counts is carried by the node-bounded energy term.  This factor
+     * applies only to the in-bunch peak-normalised criterion; the far-field
+     * angular calibration (``kAngularModelConstant``) is unchanged.
+     */
+    inline constexpr double kInBunchAngularGammaAmplification = 2.2;
+
     /*! Overall constant of the velocity-bin error model.
      *
      * The model (see ``VelocityBinning``) estimates the relative error of the
@@ -267,7 +289,42 @@ namespace picBunch
      */
     inline constexpr std::size_t kDefaultMaxVelocityBins = 256u;
 
-    /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
+     /*! Halving threshold of the velocity-bin error model.
+      *
+      * 0.5 means "a doubling cut the model error by at least half".  The
+      * in-bunch peak-normalised error of a high-gamma beam is a monotone
+      * decline with a gradual per-doubling improvement (~30-50 percent), so
+      * this halving threshold is not a useful stop rule for the in-bunch
+      * curve; the in-bunch auto policy therefore uses the practical cost
+      * ceiling (``kInBunchAutoMaxVelocityBins``) instead of searching for a
+      * saturation point.  The constant is kept as the documented halving
+      * threshold of the error model and for the far-field auto path.
+      */
+     inline constexpr double kSaturationImprovement = 0.5;
+
+     /*! Practical cost ceiling of the in-bunch auto policy (box count).
+      *
+      * The in-bunch peak-normalised error of a high-gamma beam saturates
+      * above the tolerance: no count up to the 256-box cap reaches 1e-3 (see
+      * ``kSaturationImprovement`` and
+      * ``docs/measurements/velocity_bin_cloud_reference.txt``).  Refinement
+      * keeps halving the error (the angular term scales with the per-box
+      * angular width squared), so the saturation point is the count where the
+      * per-doubling improvement stops being at least ``kSaturationImprovement``.
+      * For a gamma ~ 490 beam that saturation point sits near or above the 256
+      * cap, which costs 256 field solves and is not viable in production.  The
+      * in-bunch auto policy therefore stops at this practical maximum instead:
+      * it is the count where the remaining accuracy gain no longer justifies
+      * another field solve, and the achieved accuracy is reported with the
+      * fact that the count was capped for cost (the user sees both).  A user
+      * may still raise ``--max-velocity-bins`` above it; the cap is a cost
+      * default, not an accuracy limit.  16 boxes (16 field solves) is the
+      * shipped value; it is a cost trade-off, revisited against the measured
+      * per-box FFT cost if that changes.
+      */
+     inline constexpr std::size_t kInBunchAutoMaxVelocityBins = 16u;
+
+     /*! Tolerance-driven velocity-space binning of a multi-velocity bunch.
      *
      * The mesh kernel is exact only for a single shared ``u``; it is linear in
      * charge, so the field of a mixed bunch is the sum over velocity classes
@@ -373,6 +430,29 @@ namespace picBunch
         //! Largest particle angle (rad) to the one-box representative measured
         //! for that decision.
         double singleVelocityMaxAngle = 0.0;
+        //! True when the in-bunch criterion did not reach the tolerance within
+        //! the in-bunch auto ceiling and the auto policy returned the ceiling
+        //! (``kInBunchAutoMaxVelocityBins``, NOT the 256-box cap).  The in-bunch
+        //! peak-normalised error of a high-gamma beam saturates above 1e-3
+        //! (the beam-axis components and the core 1/r singularity keep it
+        //! above) and is a monotone decline, so the ceiling -- the count where
+        //! the remaining accuracy gain no longer justifies another field solve
+        //! -- is the honest result; the achieved accuracy is ``modelError`` at
+        //! that count.
+        bool saturated = false;
+        //! True when the in-bunch auto count is the practical cost ceiling
+        //! ``kInBunchAutoMaxVelocityBins`` (the in-bunch error did not meet the
+        //! tolerance at any count below it).  The returned count is the
+        //! ceiling, not the 256 cap; the user is told the count was capped for
+        //! cost and the achieved accuracy is reported.
+        bool practicalCapApplied = false;
+        //! The in-bunch model error at the count before the returned one
+        //! (``modelConstant * modelSum`` at ``count / 2``); the improvement
+        //! that the returned count buys.  Set only on the in-bunch auto path.
+        double saturationPrevError = 0.0;
+        //! The in-bunch model error at the returned count,
+        //! ``modelConstant * modelSum``; the achieved accuracy.
+        double saturationError = 0.0;
 
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
         //! fixed binning on a sub-bunch (the near shell tile mesh).
@@ -396,6 +476,22 @@ namespace picBunch
         //! Box-count cap of the auto policy; exceeded requirements fail with
         //! the needed count instead of running.
         std::size_t maxBins = kDefaultMaxVelocityBins;
+        //! Drive the bin count with the in-bunch peak-normalised error model
+        //! (angular term amplified by ~gamma, the suppression of the in-bunch
+        //! transverse B and E peaks of a relativistic beam) instead of the
+        //! far-field angular calibration.  The in-bunch peak-normalised error
+        //! of a high-gamma beam saturates above the tolerance (no count up to
+        //! the 256-box cap reaches 1e-3), so when set and no count up to the
+        //! in-bunch auto ceiling
+        //! (``kInBunchAutoMaxVelocityBins`` unless the user raised
+        //! ``maxBins``) meets the tolerance, the default-cap auto policy stops
+        //! at the smallest count whose error still improved by at least
+        //! ``kSaturationImprovement`` per doubling (``saturated``), or at the
+        //! practical cost ceiling (``practicalCapApplied``) when it never
+        //! stopped -- it never returns the 256 cap.  The achieved accuracy is
+        //! reported.  Default off: the far-field angular calibration
+        //! (``kAngularModelConstant``) is unchanged.
+        bool inBunchCriterion = false;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).

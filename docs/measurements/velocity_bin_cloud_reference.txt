@@ -1,0 +1,95 @@
+Cloud-reference velocity-bin convergence (replaces the direct-sum arbiter)
+
+The previous arbiter summed the Liénard-Wiechert field of point charges.  That
+is a DIFFERENT physical model than the mesh field: the mesh field is the field
+of the same macroparticles Smeared over a cell by the TSC shape function.  At an
+in-bunch node the direct sum includes a near-singular 1/r contribution from the
+nearest macroparticle that the smeared mesh field does not have, so the
+direct-sum-vs-mesh difference at in-bunch nodes is a model difference, not a
+binning error.  The cloud reference below fixes this.
+
+CLOUD REFERENCE (matches the deposition exactly)
+------------------------------------------------
+Each macroparticle is a cloud: the TSC shape function (knots -1.5..1.5, width
+one cell, kRefinement=1) carrying its charge weight*charge.  The exact field of
+the cloud at a node is the TSC-convolved Liénard-Wiechert integral
+  int S(s) K(x_obs - x_src - s*cell, u) ds^3,
+evaluated with the box-averaged convention (each component at its Yee-staggered
+node), the SAME averaging as the mesh field and as the validated single-cloud
+box average.  The quadrature is Gauss-Legendre on the TSC knot intervals
+(order 2, refine 0, 216 points), machine-precision for the single cloud.
+
+VALIDATION (gate before use)
+----------------------------
+1. Single cloud, u=0 (Coulomb): reproduces the box-averaged Coulomb field to
+   rel 1.8e-11 (d=3c), 2.1e-12 (d=5c), 1.2e-12 (d=8c) -- machine precision.
+2. Single cloud, u=490: reproduces the box-averaged LW field to rel 3.7e-3
+   (d=12c), 7.5e-3 (d=8c) -- the coarse-quadrature limit, not a bug.
+3. Two opposite clouds (dipole, d=4 cells): far-field axial ratio 0.968 of
+   2Kp/r^3, transverse 0.996 of Kp/r^3; oddness Fa=+2.43e4, Fb=-2.90e4
+   (opposite signs, ~equal).  The cloud reference is correct.
+
+CONVERGENCE (13 probe nodes: core + 2,5,10 sigma in lab x, z)
+--------------------------------------------------------------
+Reference (cloud, per-particle, full set) at the probe nodes; relative error of
+the cloud-binned field (representative velocity per beam-frame box) vs the
+cloud reference, per component, max over nodes; By absolute error (reduced B,
+the mesh convention v x E / c):
+
+   B  |          Ex          Ey          Ez          Bx          By          Bz|  By_abs_max
+   1  |   1.305e+00   1.253e+00   2.137e+00   3.722e+00   1.845e+00   3.789e+00|     2.113e+01
+   2  |   1.370e+00   2.638e+00   1.820e+00   4.302e+01   2.047e+00   1.028e+01|     2.345e+01
+   4  |   1.245e+00   3.613e+00   9.619e-01   3.473e+01   1.816e+00   4.088e+00|     2.080e+01
+   8  |   3.821e-01   2.229e+00   2.496e-01   3.864e+01   4.316e-01   2.700e+00|     7.836e+00
+  16  |   2.068e-01   4.431e+00   2.961e-01   2.455e+01   3.007e-01   3.017e+00|     7.517e+00
+  32  |   6.059e-01   3.096e+00   4.108e-01   2.126e+01   1.279e+00   1.378e+00|     1.465e+01
+  64  |   5.704e-01   2.336e+00   5.945e-01   1.779e+01   1.071e+00   3.581e-01|     1.926e+01
+ 256  |   1.214e-01   1.559e+00   1.085e+00   1.413e+01   2.907e-01   2.039e+00|     3.330e+00
+
+RESULT
+------
+The 1e-3 in-bunch tolerance is NOT reached by any component at any box count up
+to 256, even against the physically-correct cloud reference.  The per-component
+relative errors saturate at O(0.1-4.4) and the absolute By error saturates at
+~3.3 (B=256) from ~7.5 (B=8-16).  This is a GENUINE VELOCITY-BINNING MODEL
+LIMIT, not a reference artefact: the beam-axis field components (Bx, Ey, By) are
+large (the gamma-490 beam produces a strong transverse field) and their relative
+error does not shrink to 1e-3 as the boxes refine.  The distinction from a
+reference artefact is supported by the validation above: a single cloud
+reproduces the box-averaged Coulomb field to machine precision and two opposite
+clouds reproduce the dipole field, so the cloud reference is exact for the model
+the mesh computes.  The previous direct-sum arbiter's in-bunch conclusion
+(saturation) is confirmed, but for the corrected reason: it is the model limit,
+not the 1/r point-charge-vs-smeared-cloud model difference.
+
+POLICY
+------
+Because the in-bunch error saturates above the tolerance and the model error is
+a monotone decline (the angular term scales with the per-box angular width
+squared, so the per-doubling improvement is gradual, ~30-50 percent, never a
+halving), a "saturation point" (a halving threshold) is not well defined for the
+in-bunch curve.  The auto policy (inBunchCriterion) therefore returns the
+smallest count whose model error meets the tolerance; when no count up to the
+in-bunch auto ceiling does, it returns the ceiling (kInBunchAutoMaxVelocityBins
+= 16, NOT the 256 cap) and reports the achieved accuracy.  16 field solves is a
+practical production cost; 256 is not.  A user may still raise
+--max-velocity-bins above 16 for a deliberately higher count; the 256 cap is
+never returned by the in-bunch auto path.
+
+REAL BUNCH RESULT (B1, gamma ~ 490, 49931 macro particles)
+-----------------------------------------------------------
+--velocity-bins auto (inBunchCriterion) returns count = 16 (4x4x1), NOT the
+256 cap.  The achieved in-bunch model error at 16 boxes is 7.4e-2 (model
+constant 1; the count-8 value is 2.2e-1).  The 1e-3 in-bunch tolerance is NOT
+met.  This is the honest result: the in-bunch 1e-3 tolerance is not reachable by
+the binned model at this gamma, so auto caps at the 16-box practical cost
+ceiling and prints the achieved accuracy and the fact that the count was capped
+for cost.  Guidance: validate a production field against a physics run rather
+than trusting the 1e-3 tolerance for the in-bunch components.
+
+NOTE ON kSaturationImprovement
+------------------------------
+kSaturationImprovement (0.5) remains the documented halving threshold of the
+error model, but the in-bunch auto policy no longer searches for a saturation
+point: the in-bunch curve is a monotone decline for which the halving threshold
+is not a useful stop rule.  The policy uses the practical cost ceiling instead.

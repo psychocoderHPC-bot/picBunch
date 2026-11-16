@@ -592,6 +592,66 @@ target_compile_features(picBunchVelocityBinsMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchVelocityBinsMeasure)
 
+add_executable(picBunchBunchBinsMeasure tools/velocity-bins/measure_bunch_bins.cpp)
+picbunch_target_warnings(picBunchBunchBinsMeasure)
+target_compile_features(picBunchBunchBinsMeasure PUBLIC cxx_std_20)
+target_link_libraries(picBunchBunchBinsMeasure PRIVATE picBunch::openPMD picBunch::picBunch)
+alpaka_finalize(picBunchBunchBinsMeasure)
+
+# Region-aware in-bunch reference measurement (the command that reproduces
+# docs/measurements/velocity_bin_real_bunch_calibration.txt).  The Python
+# reference is runnable from the checkout; the C++ driver is the source of
+# the binned fields.  A small synthetic region test exercises the reference
+# pipeline (per-particle continuum vs binned, peak-normalised, driver = max
+# over E and B) without the intractable full-bunch cost.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(PICBUNCH_BUILD_TESTS AND Python3_FOUND)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/region_test_bunch.txt
+        "# x y z ux uy uz weight charge boxOf\n"
+        "1.0e-05 1.0e-04 1.0e-05 0.0 100.0 0.0 50000 -1.602176634e-19 0\n"
+        "1.0e-05 1.0e-04 1.0e-05 0.0 100.0 0.0 50000 -1.602176634e-19 0\n"
+        "1.0e-05 1.0e-04 1.0e-05 0.05 100.0 0.05 50000 -1.602176634e-19 0\n"
+        "1.0e-05 1.0e-04 1.0e-05 -0.05 100.0 -0.05 50000 -1.602176634e-19 0\n"
+    )
+    add_test(
+        NAME VelocityBinsRegionReference
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/velocity-bins/measure_region_bins.py
+            --bunch ${CMAKE_CURRENT_BINARY_DIR}/region_test_bunch.txt
+            --cell 1e-05 --origin 0,0,0 --grid 8,8,8
+            --bins 1,2 --cell-region 4,4,4 --cell-radius 1 --subset 4 --order 4
+    )
+    set_tests_properties(VelocityBinsRegionReference PROPERTIES
+        TIMEOUT 600 PASS_REGULAR_EXPRESSION "DRIVER=")
+    # The arbiter: exact LW direct-sum reference (full set, no proxy, no TSC)
+    # at in-bunch probe nodes.  Exercises the pipeline on a small bunch and
+    # confirms the per-component relative-error + By-absolute report format.
+    add_test(
+        NAME VelocityBinsArbiterReference
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/velocity-bins/arbiter_in_bunch.py
+            --bunch ${CMAKE_CURRENT_BINARY_DIR}/region_test_bunch.txt
+            --bins 1,2
+    )
+    set_tests_properties(VelocityBinsArbiterReference PROPERTIES
+        TIMEOUT 600 PASS_REGULAR_EXPRESSION "By_abs_max")
+    # Full-set saturation revalidation from the committed real-bunch fixture
+    # (49931 particles, gamma ~ 490).  Runs the exact LW direct-sum arbiter at
+    # the FULL set of bin counts (1..256) and checks (1) the published
+    # per-component relative-error table is reproduced and (2) the saturation
+    # invariant holds: no component reaches the 1e-3 in-bunch tolerance at any
+    # count up to 256.  This is the claim the auto policy rests on, so it is
+    # revalidated by CI from the fixture, not only from a 4-particle synthetic.
+    add_test(
+        NAME VelocityBinsSaturationReference
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/velocity-bins/validate_saturation.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/velocity_bins_real_bunch.txt
+    )
+    set_tests_properties(VelocityBinsSaturationReference PROPERTIES
+        TIMEOUT 300 PASS_REGULAR_EXPRESSION "PASS: velocity-bin in-bunch saturation revalidated")
+endif()
+
 # ---------------------------------------------------------------------------
 # Synthetic scaling benchmark (additive, opt-in)
 #
