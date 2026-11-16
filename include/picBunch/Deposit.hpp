@@ -24,12 +24,13 @@ namespace picBunch
      * Same recipe as the device deposit used by ``computeField``: the TSC
      * support of a particle whose centre lies in the physical node box
      * ``[0, n)`` is kept whole.  Logical indices outside ``0..n-1`` wrap
-     * circularly into the padded extent ``M = fftPadding*n``: negative support
+     * circularly into the padded extent ``M = paddedSize()``: negative support
      * lands at ``M-1, M-2, ...`` and support beyond ``n-1`` lands in the upper
-     * padding ``n, n+1, ...``.  The physical grid ``n`` and the FFT layout are
-     * unchanged.  ``validateDepositPadding`` rejects a grid whose halo is too
-     * small for the shape; a particle whose support would leave that halo is
-     * rejected instead of wrapped onto the opposite side.
+     * halo ``n, n+1, ...``.  The physical grid ``n`` and the FFT layout are
+     * unchanged.  ``validateDepositPadding`` compares the halo nodes actually
+     * available (``M - n``, from the FFT padding factor plus ``depositHalo``)
+     * with the stencil requirement; a particle whose support would leave that
+     * halo is rejected instead of wrapped onto the opposite side.
      *
      * The TSC shape is sampled in node units: ``grid.spacing`` already contains
      * the number of nodes per PIC cell (``kRefinement``), so no additional
@@ -50,12 +51,14 @@ namespace picBunch
 
     /** Refuse a grid whose padded extent cannot hold the deposit halo.
      *
-     * ``M = fftPadding * n`` must satisfy
-     * ``M - n >= requiredDepositPadding(shape)`` on every axis.  Otherwise the
-     * index wrap that maps negative support into the upper halo would fold
-     * support that belongs in the halo onto the opposite side of the grid.
-     * Throws ``std::invalid_argument`` naming the axis, the required padding
-     * and the padding actually available.
+     * The check uses ``M = grid.paddedSize()`` and the actual halo
+     * ``M - n`` on every axis, whether that halo comes from the FFT padding
+     * factor, an explicit ``Grid::depositHalo``, or both.  It must satisfy
+     * ``M - n >= requiredDepositPadding(shape)``.  Otherwise the index
+     * wrap that maps negative support into the upper halo would fold support
+     * that belongs in the halo onto the opposite side of the grid.  Throws
+     * ``std::invalid_argument`` naming the axis, the required halo nodes and
+     * the halo nodes actually available.
      */
     void validateDepositPadding(Grid const& grid);
 

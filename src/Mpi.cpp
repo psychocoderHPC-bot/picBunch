@@ -665,11 +665,14 @@ namespace picBunch
 #if defined(PICBUNCH_ENABLE_MPI)
         if(!initialized() || mpiSize() <= 1)
             return;
-        std::uint64_t meta[6] = {
+        std::uint64_t meta[9] = {
             field.grid.n[0],
             field.grid.n[1],
             field.grid.n[2],
             field.grid.fftPadding,
+            field.grid.depositHalo[0],
+            field.grid.depositHalo[1],
+            field.grid.depositHalo[2],
             0,
             0};
         double spacing[3] = {
@@ -677,7 +680,7 @@ namespace picBunch
             field.grid.spacing[1],
             field.grid.spacing[2]};
         double origin[3] = {field.grid.origin[0], field.grid.origin[1], field.grid.origin[2]};
-        MPI_Bcast(meta, 6, MPI_UINT64_T, root, MPI_COMM_WORLD);
+        MPI_Bcast(meta, 9, MPI_UINT64_T, root, MPI_COMM_WORLD);
         MPI_Bcast(spacing, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         MPI_Bcast(origin, 3, MPI_DOUBLE, root, MPI_COMM_WORLD);
         field.grid.n = {
@@ -685,6 +688,10 @@ namespace picBunch
             static_cast<std::size_t>(meta[1]),
             static_cast<std::size_t>(meta[2])};
         field.grid.fftPadding = static_cast<unsigned>(meta[3]);
+        field.grid.depositHalo = {
+            static_cast<std::size_t>(meta[4]),
+            static_cast<std::size_t>(meta[5]),
+            static_cast<std::size_t>(meta[6])};
         field.grid.spacing = {spacing[0], spacing[1], spacing[2]};
         field.grid.origin = {origin[0], origin[1], origin[2]};
         for(auto& component : field.data)

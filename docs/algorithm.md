@@ -223,26 +223,33 @@ historical split-or-fail behaviour.
 The deposit needs a source halo. A particle inside the physical node box
 `[0, n-1]` reaches `floor(shapeSupport)` nodes past either end (1 for CIC and
 TSC, 2 for PQS), and the negative and positive halo must stay disjoint. Every
-axis therefore needs at least `2*floor(shapeSupport)` padding nodes between the
+axis therefore needs at least `2*floor(shapeSupport)` halo nodes between the
 physical grid and the padded box: `M - n >= 2` for CIC/TSC and `M - n >= 4` for
-PQS. `makeGrid` and the shared deposit path enforce this, so the replicated and
-distributed solvers reject the same configurations with the same message. The
-message names the axis, the required padding and the padding actually available.
+PQS. `makeGrid` and the shared deposit path enforce this and name the axis, the
+required halo nodes and the halo nodes actually available.
 
-`fftPadding = 1` leaves `M = n` and is rejected. Before the guard it folded the
-support that belongs in the halo onto the opposite side: a TSC particle at
-`t = n - 0.4` on a `16^3` padding-1 box deposited `0.595` of its unit weight at
-nodes 0 and 1 instead of nodes 16 and 17 (59.5% of the particle weight). A
-legitimate boundary particle on a valid grid keeps its full weight: for
-`t = n` the TSC weights `0.125 / 0.75 / 0.125` land at `n-1 / n / n+1`, with
-`n` and `n+1` in the upper halo.
+`--fft-padding N` is an oversampling factor, not a halo count: the transform
+extent would be `N*n`. Those are different quantities. The deposit halo is
+independent of the factor, and `makeGrid` appends whatever the factor does not
+already provide to `Grid::depositHalo`. So `fftPadding = 1` is a valid
+no-oversampling choice: for CIC/TSC it produces `M = n + 2`, and for PQS on a
+short axis it fills the remaining deficit up to `M = n + 4`. A hand-built grid
+whose padded extent is still too small is rejected by `validateDepositPadding`
+before it can fold the support that belongs in the halo onto the opposite side.
+The failure mode this prevents was a TSC particle at `t = n - 0.4` on a `16^3`
+padding-1 box depositing `0.595` of its unit weight at nodes 0 and 1 instead of
+nodes 16 and 17 (59.5% of the particle weight). A legitimate boundary particle
+keeps its full weight: for `t = n` the TSC weights `0.125 / 0.75 / 0.125` land
+at `n-1 / n / n+1`, with `n` and `n+1` in the upper halo.
 
 The free-space convolution also needs zero padding. With `fftPadding >= 2`
 every source-observer lag fits inside the box and the FFT result equals the
 free-space discrete TSC sum (no images). The unit test evaluates a direct,
 non-cyclic sum with its own TSC shape and its own Coulomb field at probe nodes
 where a periodic image would be closest; the padded result matches that
-reference to better than `1e-10` relative.
+reference to better than `1e-10` relative. `fftPadding = 1` does not remove the
+periodic images; it remains a diagnostic/no-oversampling choice with the
+deposit halo attached.
 
 The padding-2 vs padding-3 convergence is geometry- and box-dependent; quote it
 only together with the geometry. Measured values (rosi_v100, CUDA/V100, `-j 8`):

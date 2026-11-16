@@ -302,8 +302,9 @@ TEST(Deposit, InsufficientPaddingIsRejected)
         EXPECT_NE(message.find("axis 0"), std::string::npos) << message;
         EXPECT_NE(message.find("(x)"), std::string::npos) << message;
         EXPECT_NE(message.find("requires at least 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("only 0 are available"), std::string::npos) << message;
         EXPECT_NE(message.find("fftPadding=1"), std::string::npos) << message;
-        EXPECT_NE(message.find("provides 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("depositHalo=0"), std::string::npos) << message;
     }
 
     // PQS needs four halo nodes per side; padding 2 on a 2-node z axis leaves
