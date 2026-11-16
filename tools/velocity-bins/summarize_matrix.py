@@ -4,15 +4,20 @@
 """Summarise the nextTests.md velocity-binning matrix.
 
 Reads ``manifest.json`` and every per-run comparison JSON written by
-``run_matrix.py`` and emits
+``run_matrix.py``.  All acceptance verdicts and reported errors come from the
+comparison JSON's ``metrics_v2`` block:
 
-  * a Markdown report with the per-case/per-K metrics, and
-  * ``criteria.json`` with exactly six acceptance verdicts (section 7) plus
-    the section 9 proxy check and the transverse-component view.
+  ``runs[B].metrics_v2.in_bunch``    nodes inside the particle bounding box
+  ``runs[B].metrics_v2.far_field``   the bounding box translated by +2 R
 
-Every verdict is PASS, FAIL, or UNVERIFIABLE.  A metric that the measurement
-pipeline does not provide is reported as UNVERIFIABLE with the missing key; it
-is never replaced by an assumed value.
+Each region carries ``n_nodes``, ``worst_rel``, ``worst_component`` and
+``per_component{Ex..Bz}`` with ``n``, ``max_rel``, ``max_abs``,
+``max_rel_node``, ``max_rel_position``, ``p99_rel`` and ``rms_rel``.
+
+The legacy ``mesh_vs_T`` window (all nodes within 16 cells of a particle) is
+*not* used for any criterion.  When ``metrics_v2`` or one of its keys is absent,
+the affected verdict is UNVERIFIABLE and the missing key is printed.  A value is
+never substituted.
 
 Usage:
   summarize_matrix.py [--manifest PATH] [--out DIR] [--markdown PATH]
@@ -27,60 +32,38 @@ import math
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-SCHEMA = "picbunch.velocity-matrix-report/v1"
+SCHEMA = "picbunch.velocity-matrix-report/v2"
 COMPONENTS = ("Ex", "Ey", "Ez", "Bx", "By", "Bz")
 TRANSVERSE = ("Ey", "Ez", "By", "Bz")
-FAR_FIELD_KEYS = ("far_field_rel", "far_field", "far_field_shell")
-P99_KEYS = ("p99_rel", "rel_p99", "p99")
-RMS_KEYS = ("rms_rel", "rel_rms", "rms")
+REGIONS = ("in_bunch", "far_field")
+REGION_LABELS = {"in_bunch": "in-bunch (particle bbox)", "far_field": "far-field (bbox +2R)"}
+PER_COMPONENT_KEYS = (
+    "max_rel", "max_abs", "max_rel_node", "max_rel_position", "p99_rel",
+    "rms_rel", "n", "n_finite", "n_nonfinite",
+)
 
 MISSING_NOTES = {
-    "far_field_rel": (
-        "compare_velocity_bins.py has no 2R-offset far-field shell; its error "
-        "window is nodes within 16 cells of a particle."
+    "metrics_v2": (
+        "the comparison JSON has no metrics_v2 block; the bunch-box, far-field, "
+        "p99 and RMS metrics are unavailable. The legacy 16-cell mesh_vs_T "
+        "window is not used as a substitute."
     ),
-    "p99_rel": (
-        "compare_velocity_bins.py writes only the max relative error; no 99th "
-        "percentile is available."
-    ),
-    "rms_rel": (
-        "compare_velocity_bins.py writes only the max relative error; no RMS is "
-        "available."
-    ),
-    "in_bunch_rel": "the per-run comparison JSON has no mesh_vs_T.rel vector.",
-    "in_bunch_max": "the per-run comparison JSON has no mesh_vs_T.worst_rel.",
-    "startup_us": "the manifest/meta has no edge-selection startup time.",
-    "nonempty_bins": "the manifest/meta has no non-empty box count.",
-    "proxy_error": "the per-run comparison JSON has no model_error entry.",
+    "in_bunch_max": "metrics_v2.in_bunch.worst_rel is absent.",
+    "far_field_max": "metrics_v2.far_field.worst_rel is absent.",
+    "p99_rel": "metrics_v2.*.per_component[*].p99_rel is absent.",
+    "rms_rel": "metrics_v2.*.per_component[*].rms_rel is absent.",
+    "startup_us": "the manifest row has no edge-selection startup time.",
+    "nonempty_bins": "the manifest row has no non-empty box count.",
+    "proxy_error": "the comparison JSON has no model_error entry.",
     "chosen_bins": "the automatic-count K is not recoverable.",
     "output_json": "the per-run comparison JSON is missing or unreadable.",
-    "wall_time_s": "a resumed run has no recoverable wall time.",
 }
 
 
 # ---------------------------------------------------------------------------
 # loading
-
-
-def _probe6(source: dict, keys: Iterable[str]) -> Optional[List[float]]:
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, (list, tuple)) and len(value) == 6:
-            try:
-                return [float(v) for v in value]
-            except (TypeError, ValueError):
-                continue
-    return None
-
-
-def _probe_scalar(source: dict, keys: Iterable[str]) -> Optional[float]:
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, (int, float)) and math.isfinite(float(value)):
-            return float(value)
-    return None
 
 
 def _resolve_output(manifest_path: Path, payload: dict, rel: str) -> Path:
@@ -101,9 +84,39 @@ def _single_run_key(payload: dict) -> Optional[str]:
     return next(iter(runs))
 
 
+def _finite(value) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def _extract_region(block: dict, name: str) -> Optional[dict]:
+    region = block.get(name)
+    if not isinstance(region, dict):
+        return None
+    per_component: Dict[str, dict] = {}
+    raw = region.get("per_component")
+    if isinstance(raw, dict):
+        for component in COMPONENTS:
+            stats = raw.get(component)
+            if not isinstance(stats, dict):
+                continue
+            per_component[component] = {
+                key: stats.get(key) for key in PER_COMPONENT_KEYS
+            }
+    return {
+        "n_nodes": region.get("n_nodes"),
+        "worst_rel": _finite(region.get("worst_rel")),
+        "worst_component": region.get("worst_component"),
+        "per_component": per_component,
+    }
+
+
 def extract_run(row: dict, payload: Optional[dict]) -> dict:
     """Flatten one manifest row plus its comparison JSON into a metric dict."""
-    missing = list(row.get("missing_metrics") or [])
+    missing: List[str] = []
     data = {
         "id": row.get("id"),
         "case": row.get("case"),
@@ -112,19 +125,20 @@ def extract_run(row: dict, payload: Optional[dict]) -> dict:
         "auto_count": bool(row.get("auto_count")),
         "requested_bins": row.get("requested_bins"),
         "chosen_bins": row.get("chosen_bins"),
-        "in_bunch_rel": None,
-        "in_bunch_max": None,
-        "far_field_rel": None,
-        "startup_us": row.get("startup_us"),
+        "per_axis": row.get("per_axis"),
+        "per_axis_rules": row.get("per_axis_rules"),
+        "startup_us": _finite(row.get("startup_us")),
         "nonempty_bins": row.get("nonempty_bins"),
-        "proxy_error": row.get("proxy_error"),
-        "p99_rel": None,
-        "rms_rel": None,
+        "proxy_error": _finite(row.get("proxy_error")),
+        "metrics_v2_present": False,
+        "in_bunch": None,
+        "far_field": None,
         "missing": missing,
     }
     if payload is None:
-        data["missing"] = sorted(set(missing) | {"output_json"})
+        missing.append("output_json")
         return data
+
     key = str(data["chosen_bins"]) if data["chosen_bins"] is not None else None
     runs = payload.get("runs", {})
     if key is None or key not in runs:
@@ -135,34 +149,43 @@ def extract_run(row: dict, payload: Optional[dict]) -> dict:
             except ValueError:
                 pass
     if key is None or key not in runs:
-        data["missing"] = sorted(set(missing) | {"output_json"})
+        missing.append("output_json")
         return data
     compare_run = runs[key]
-    stats = compare_run.get("mesh_vs_T")
-    if isinstance(stats, dict):
-        rel = _probe6(stats, ("rel",))
-        if rel is not None:
-            data["in_bunch_rel"] = rel
-            data["in_bunch_max"] = _probe_scalar(stats, ("worst_rel",))
-            if data["in_bunch_max"] is None:
-                data["in_bunch_max"] = max(rel)
-        else:
-            data["missing"] = sorted(set(data["missing"]) | {"in_bunch_rel"})
-        far = _probe6(stats, FAR_FIELD_KEYS) or _probe6(compare_run, FAR_FIELD_KEYS)
-        data["far_field_rel"] = far
-        data["p99_rel"] = _probe_scalar(stats, P99_KEYS)
-        data["rms_rel"] = _probe_scalar(stats, RMS_KEYS)
+
+    block = compare_run.get("metrics_v2")
+    if not isinstance(block, dict):
+        missing.append("metrics_v2")
     else:
-        data["missing"] = sorted(set(data["missing"]) | {"in_bunch_rel", "in_bunch_max"})
+        data["metrics_v2_present"] = True
+        for name in REGIONS:
+            region = _extract_region(block, name)
+            data[name] = region
+            if region is None:
+                missing.append(f"metrics_v2.{name}")
+                continue
+            if region["worst_rel"] is None:
+                missing.append(f"metrics_v2.{name}.worst_rel")
+            per_component = region["per_component"]
+            if per_component:
+                if any(s.get("p99_rel") is None for s in per_component.values()):
+                    missing.append(f"metrics_v2.{name}.per_component.p99_rel")
+                if any(s.get("rms_rel") is None for s in per_component.values()):
+                    missing.append(f"metrics_v2.{name}.per_component.rms_rel")
+            else:
+                missing.append(f"metrics_v2.{name}.per_component")
+
     if data["proxy_error"] is None:
-        proxy = compare_run.get("model_error")
-        if isinstance(proxy, (int, float)) and math.isfinite(float(proxy)):
-            data["proxy_error"] = float(proxy)
-    for key_name in ("far_field_rel", "p99_rel", "rms_rel", "startup_us",
-                     "nonempty_bins", "proxy_error", "chosen_bins"):
-        if data.get(key_name) is None:
-            data["missing"] = sorted(set(data["missing"]) | {key_name})
-    data["missing"] = sorted(set(data["missing"]))
+        data["proxy_error"] = _finite(compare_run.get("model_error"))
+    if data["startup_us"] is None:
+        missing.append("startup_us")
+    if data["nonempty_bins"] is None:
+        missing.append("nonempty_bins")
+    if data["proxy_error"] is None:
+        missing.append("proxy_error")
+    if data["chosen_bins"] is None:
+        missing.append("chosen_bins")
+    data["missing"] = sorted(set(missing))
     return data
 
 
@@ -213,7 +236,8 @@ def _verdict(missing: Sequence[str], outcomes: Sequence[bool]) -> str:
     return "PASS" if all(outcomes) else "FAIL"
 
 
-def _criterion(cid: int, name: str, verdict: str, driving: dict, missing: Sequence[str]) -> dict:
+def _criterion(cid: int, name: str, verdict: str, driving: dict,
+               missing: Sequence[str]) -> dict:
     return {
         "id": cid,
         "name": name,
@@ -223,30 +247,35 @@ def _criterion(cid: int, name: str, verdict: str, driving: dict, missing: Sequen
     }
 
 
-def _max_of(run: Optional[dict], missing: List[str]) -> Optional[float]:
+def _region_max(run: Optional[dict], region: str, missing: List[str],
+                label: str) -> Optional[float]:
     if run is None:
-        missing.append("run")
+        missing.append(f"{label}:run")
         return None
-    value = run.get("in_bunch_max")
+    block = run.get(region) or {}
+    value = block.get("worst_rel")
     if value is None:
-        missing.append(f"{run.get('id')}:in_bunch_max")
+        missing.append(f"{label}:metrics_v2.{region}.worst_rel")
         return None
     return float(value)
 
 
-def criterion_control(matrix: Dict[Tuple[str, str, int], dict], bins: Sequence[int]) -> dict:
+def criterion_control(matrix: Dict[Tuple[str, str, int], dict],
+                      bins: Sequence[int]) -> dict:
     rows: List[dict] = []
     missing: List[str] = []
     outcomes: List[bool] = []
     for k in bins:
         uniform = matrix.get(("uniform", "uniform", int(k)))
         auto = matrix.get(("uniform", "auto", int(k)))
+        um = _region_max(uniform, "in_bunch", missing,
+                         f"uniform/uniform_K{k}") if uniform else None
+        am = _region_max(auto, "in_bunch", missing,
+                         f"uniform/auto_K{k}") if auto else None
         if uniform is None:
-            missing.append(f"uniform K={k} uniform-rule run")
+            missing.append(f"uniform/uniform_K{k}:run")
         if auto is None:
-            missing.append(f"uniform K={k} auto-rule run")
-        um = _max_of(uniform, missing) if uniform is not None else None
-        am = _max_of(auto, missing) if auto is not None else None
+            missing.append(f"uniform/auto_K{k}:run")
         if um is None or am is None:
             continue
         ok = am <= 1.05 * um
@@ -257,26 +286,29 @@ def criterion_control(matrix: Dict[Tuple[str, str, int], dict], bins: Sequence[i
         outcomes.append(ok)
     return _criterion(
         1,
-        "control: auto not worse than uniform by more than 5% (all K)",
+        "uniform: auto in-bunch max relative error within 5% of uniform (all K)",
         _verdict(missing, outcomes),
         {"per_K": rows, "tolerance": 1.05},
         missing,
     )
 
 
-def criterion_factor(cid: int, case: str, matrix: Dict[Tuple[str, str, int], dict]) -> dict:
+def criterion_factor(cid: int, case: str,
+                     matrix: Dict[Tuple[str, str, int], dict]) -> dict:
     rows: List[dict] = []
     missing: List[str] = []
     outcomes: List[bool] = []
     for k in (4, 8):
         uniform = matrix.get((case, "uniform", k))
         auto = matrix.get((case, "auto", k))
+        um = _region_max(uniform, "in_bunch", missing,
+                         f"{case}/uniform_K{k}") if uniform else None
+        am = _region_max(auto, "in_bunch", missing,
+                         f"{case}/auto_K{k}") if auto else None
         if uniform is None:
-            missing.append(f"{case} K={k} uniform-rule run")
+            missing.append(f"{case}/uniform_K{k}:run")
         if auto is None:
-            missing.append(f"{case} K={k} auto-rule run")
-        um = _max_of(uniform, missing) if uniform is not None else None
-        am = _max_of(auto, missing) if auto is not None else None
+            missing.append(f"{case}/auto_K{k}:run")
         if um is None or am is None:
             continue
         factor = (um / am) if am > 0 else (math.inf if um > 0 else 1.0)
@@ -300,12 +332,12 @@ def criterion_single(auto: Dict[str, dict]) -> dict:
     run = auto.get("single_velocity")
     missing: List[str] = []
     if run is None:
-        missing.append("single_velocity automatic-count run")
+        missing.append("single_velocity_auto_Kauto:run")
         chosen = None
     else:
         chosen = run.get("chosen_bins")
         if chosen is None:
-            missing.append(f"{run.get('id')}:chosen_bins")
+            missing.append("single_velocity_auto_Kauto:chosen_bins")
     verdict = _verdict(missing, [chosen == 1] if chosen is not None else [])
     return _criterion(
         5,
@@ -316,45 +348,42 @@ def criterion_single(auto: Dict[str, dict]) -> dict:
     )
 
 
-def criterion_monotonic(
-    matrix: Dict[Tuple[str, str, int], dict], cases: Sequence[str]
-) -> dict:
+def criterion_monotonic(matrix: Dict[Tuple[str, str, int], dict],
+                        cases: Sequence[str]) -> dict:
     per_case: List[dict] = []
     missing: List[str] = []
     outcomes: List[bool] = []
     for case in cases:
-        vals: List[Optional[float]] = []
+        values: List[Optional[float]] = []
         for k in (2, 4, 8):
             run = matrix.get((case, "auto", k))
             if run is None:
-                missing.append(f"{case} K={k} auto-rule run")
-                vals.append(None)
+                missing.append(f"{case}/auto_K{k}:run")
+                values.append(None)
                 continue
-            value = run.get("in_bunch_max")
-            if value is None:
-                missing.append(f"{run.get('id')}:in_bunch_max")
-            vals.append(None if value is None else float(value))
-        if any(v is None for v in vals):
-            per_case.append({"case": case, "K2": vals[0], "K4": vals[1],
-                             "K8": vals[2], "non_increasing": None})
+            values.append(_region_max(run, "in_bunch", missing,
+                                      f"{case}/auto_K{k}"))
+        if any(v is None for v in values):
+            per_case.append({"case": case, "K2": values[0], "K4": values[1],
+                             "K8": values[2], "strictly_decreasing": None})
             continue
-        ok = vals[0] >= vals[1] >= vals[2]  # type: ignore[operator]
+        ok = values[0] > values[1] > values[2]  # type: ignore[operator]
         per_case.append({
             "case": case,
-            "K2": vals[0],
-            "K4": vals[1],
-            "K8": vals[2],
-            "delta_2_4": vals[1] - vals[0],  # type: ignore[operator]
-            "delta_4_8": vals[2] - vals[1],  # type: ignore[operator]
-            "non_increasing": ok,
+            "K2": values[0],
+            "K4": values[1],
+            "K8": values[2],
+            "delta_2_4": values[1] - values[0],  # type: ignore[operator]
+            "delta_4_8": values[2] - values[1],  # type: ignore[operator]
+            "strictly_decreasing": ok,
         })
         outcomes.append(ok)
     return _criterion(
         6,
-        "monotonicity (auto rule): in-bunch max relative error does not increase "
-        "for K=2 -> 4 -> 8 on uniform, core_halo, exp_tail",
+        "uniform, core_halo, exp_tail: auto in-bunch max strictly decreases "
+        "for K=2 -> 4 -> 8",
         _verdict(missing, outcomes),
-        {"per_case": per_case, "strict_decrease_required": False},
+        {"per_case": per_case, "strict_decrease_required": True},
         missing,
     )
 
@@ -362,12 +391,12 @@ def criterion_monotonic(
 def proxy_check(data: Sequence[dict]) -> List[dict]:
     rows: List[dict] = []
     for run in data:
-        measured = run.get("in_bunch_max")
+        block = run.get("in_bunch") or {}
+        measured = block.get("worst_rel")
         proxy = run.get("proxy_error")
         if measured is None or proxy is None:
             continue
         ratio = (measured / proxy) if proxy > 0 else None
-        flag = ratio is not None and (ratio > 2.0 or ratio < 0.5)
         rows.append({
             "id": run.get("id"),
             "case": run.get("case"),
@@ -375,22 +404,19 @@ def proxy_check(data: Sequence[dict]) -> List[dict]:
             "kind": run.get("kind"),
             "K": run.get("requested_bins"),
             "chosen_bins": run.get("chosen_bins"),
-            "measured_max": measured,
+            "measured_in_bunch_max": measured,
             "proxy_error": proxy,
             "measured_over_proxy": ratio,
             "exceeds_2x": ratio is not None and ratio > 2.0,
-            "below_half": ratio is not None and ratio < 0.5,
-            "flag": flag,
+            "flag": ratio is not None and ratio > 2.0,
         })
     return rows
 
 
-def transverse_view(data: Sequence[dict]) -> List[dict]:
+def component_table(data: Sequence[dict]) -> List[dict]:
+    """Per-transverse-component max/p99/RMS for in-bunch and far-field."""
     rows: List[dict] = []
     for run in data:
-        if run.get("rule") not in ("auto", "uniform"):
-            continue
-        rel = run.get("in_bunch_rel")
         row = {
             "id": run.get("id"),
             "case": run.get("case"),
@@ -398,37 +424,39 @@ def transverse_view(data: Sequence[dict]) -> List[dict]:
             "kind": run.get("kind"),
             "K": run.get("requested_bins"),
             "chosen_bins": run.get("chosen_bins"),
+            "regions": {},
         }
-        for component in TRANSVERSE:
-            row[component] = rel[COMPONENTS.index(component)] if rel else None
+        for region in REGIONS:
+            block = run.get(region) or {}
+            per_component = block.get("per_component") or {}
+            row["regions"][region] = {
+                component: per_component.get(component) or {}
+                for component in TRANSVERSE
+            }
         rows.append(row)
     return rows
 
 
-def tail_diagnostics(data: Sequence[dict]) -> List[dict]:
+def box_count_view(data: Sequence[dict]) -> List[dict]:
     rows: List[dict] = []
     for run in data:
-        if run.get("rule") != "auto":
-            continue
-        maximum = run.get("in_bunch_max")
-        p99 = run.get("p99_rel")
-        rms = run.get("rms_rel")
-        dominated = (
-            maximum is not None and p99 is not None and p99 > 0 and maximum > 10.0 * p99
-        )
+        k_value = (run.get("chosen_bins") if run.get("kind") == "auto_count"
+                   else run.get("requested_bins"))
+        nonempty = run.get("nonempty_bins")
         rows.append({
             "id": run.get("id"),
             "case": run.get("case"),
+            "rule": run.get("rule"),
             "kind": run.get("kind"),
-            "K": run.get("requested_bins"),
-            "chosen_bins": run.get("chosen_bins"),
-            "max": maximum,
-            "p99": p99,
-            "rms": rms,
-            "max_over_p99": (maximum / p99) if (maximum is not None and p99) else None,
-            "near_singular_dominated": dominated,
-            "missing": [key for key, value in
-                        (("p99_rel", p99), ("rms_rel", rms)) if value is None],
+            "K": k_value,
+            "nonempty_bins": nonempty,
+            "nonempty_over_K": (
+                (nonempty / k_value)
+                if (nonempty is not None and isinstance(k_value, int) and k_value > 0)
+                else None
+            ),
+            "per_axis": run.get("per_axis"),
+            "per_axis_rules": run.get("per_axis_rules"),
         })
     return rows
 
@@ -446,34 +474,40 @@ def evaluate_criteria(data: Sequence[dict], bins: Sequence[int]) -> dict:
     missing_metrics: Dict[str, dict] = {}
     for run in data:
         for key in run.get("missing", []):
-            if key not in MISSING_NOTES:
-                continue
+            base = key.split(":", 1)[-1]
+            if base.startswith("metrics_v2.") and base.endswith("per_component"):
+                base = "metrics_v2"
+            if base.endswith(".worst_rel"):
+                base = "in_bunch_max" if ".in_bunch." in base else "far_field_max"
+            if base.endswith("p99_rel"):
+                base = "p99_rel"
+            if base.endswith("rms_rel"):
+                base = "rms_rel"
             entry = missing_metrics.setdefault(
-                key, {"count": 0, "note": MISSING_NOTES[key]}
+                base, {"count": 0, "note": MISSING_NOTES.get(base, "")}
             )
             entry["count"] += 1
     return {
         "criteria": criteria,
         "extra": {
             "proxy_vs_measured": proxy_check(data),
-            "transverse_components": transverse_view(data),
-            "tail_diagnostics": tail_diagnostics(data),
+            "per_transverse_component": component_table(data),
+            "nonempty_vs_K": box_count_view(data),
         },
         "missing_metrics": missing_metrics,
         "notes": [
-            "in_bunch_max is runs[B].mesh_vs_T.worst_rel from "
-            "compare_velocity_bins.py. That error window is every node within 16 "
-            "cells of a particle, not strictly the bunch bounding box; the two "
-            "coincide only when the bunch is small compared with 16 cells.",
-            "Criterion 6 uses the auto edge rule (the rule under test), not the "
-            "uniform or adaptive rule.",
-            "The far-field 2R-offset shell, the 99th percentile, and the RMS of "
-            "the relative error are absent from the current comparison JSON. "
-            "They are reported as n/a and listed under missing_metrics.",
-            "startup_us comes from PREFIX_meta_B<B>.txt bin_derive_ms, a "
-            "standalone re-derivation of the edge set measured after the field "
-            "solve. It is the edge-selection cost, but it is not in the "
-            "comparison JSON.",
+            "Every criterion uses metrics_v2.in_bunch.worst_rel, which is the "
+            "maximum relative error over base nodes inside the particle bounding "
+            "box. The legacy mesh_vs_T window (all nodes within 16 cells of a "
+            "particle) is not used.",
+            "far_field is the particle bounding box translated by +2R on every "
+            "axis, clipped to the domain by compare_velocity_bins.py. A clipped "
+            "or empty mask is reported as-is; it is not widened.",
+            "Criterion 6 requires a strict decrease, not a non-increase.",
+            "p99 and RMS are per-component metrics_v2 values; they are shown "
+            "next to every max instead of being folded into one number.",
+            "Criterion verdicts are always PASS, FAIL or UNVERIFIABLE. A missing "
+            "key yields UNVERIFIABLE with that key listed.",
         ],
     }
 
@@ -482,15 +516,23 @@ def evaluate_criteria(data: Sequence[dict], bins: Sequence[int]) -> dict:
 # rendering
 
 
-def fmt(value: Optional[float], digits: int = 3) -> str:
+def fmt(value, digits: int = 3) -> str:
+    number = _finite(value)
+    if number is None:
+        return "n/a"
+    return f"{number:.{digits}e}"
+
+
+def _component_cell(stats: dict, key: str) -> str:
+    if not stats:
+        return "UNVERIFIABLE(metrics_v2)"
+    value = stats.get(key)
+    if key in ("p99_rel", "rms_rel") and value is None:
+        return f"UNVERIFIABLE({key})"
     if value is None:
         return "n/a"
-    if isinstance(value, float) and not math.isfinite(value):
-        return "inf"
-    return f"{value:.{digits}e}"
-
-
-def _cell(value: Optional[float]) -> str:
+    if isinstance(value, list):
+        return "(" + ",".join(str(int(v)) for v in value) + ")"
     return fmt(value)
 
 
@@ -507,21 +549,20 @@ def render_markdown(manifest: dict, data: Sequence[dict], evaluation: dict,
         f"({counts.get('explicit', '?')} explicit + {counts.get('auto', '?')} auto); "
         f"complete: {manifest.get('complete')}."
     )
-    rows = manifest.get("runs", [])
-    if rows:
-        keys = sorted({(run.get("case"), run.get("rule"), run.get("requested_bins"),
-                        run.get("chosen_bins")) for run in data},
-                      key=lambda item: (
-                          str(item[0]),
-                          -1 if item[2] is None else int(item[2]),
-                          str(item[1]),
-                      ))
-        lines.append(f"Distinct (case, rule, K) combinations: {len(keys)}.")
+    geometry = manifest.get("geometry")
+    if isinstance(geometry, dict):
+        lines.append(
+            "Geometry: cell={} m, grid={}, origin={} m, centre={} m, profile={}.".format(
+                geometry.get("cell"), geometry.get("grid"),
+                geometry.get("origin"), geometry.get("center"),
+                manifest.get("profile", "default"))
+        )
     lines.append("")
     lines.append(
-        "In-bunch errors are `runs[B].mesh_vs_T` from "
-        "`compare_velocity_bins.py` (the TSC-convolved continuum reference). "
-        "`n/a` means the metric is absent; it is never assumed."
+        "Verdicts and numbers use `metrics_v2` from the comparison JSON: "
+        "`in_bunch` is the particle bounding box, `far_field` is that box "
+        "translated by +2R on every axis and clipped to the domain. "
+        "`UNVERIFIABLE` means the key is absent; no value is substituted."
     )
     lines.append("")
 
@@ -531,119 +572,91 @@ def render_markdown(manifest: dict, data: Sequence[dict], evaluation: dict,
     lines.append("|---|---|---|---|")
     for item in evaluation["criteria"]:
         driving = json.dumps(item["driving"], sort_keys=True)
-        missing = item["missing"]
-        if missing:
-            driving += " | missing: " + ", ".join(missing)
+        if item["missing"]:
+            driving += " | missing: " + ", ".join(item["missing"])
         lines.append(
             f"| {item['id']} | {item['name']} | **{item['verdict']}** | "
             f"`{driving}` |"
         )
     lines.append("")
 
-    lines.append("## Section 9 proxy vs measured (factor-2 check)")
+    lines.append("## Non-empty boxes versus K")
     lines.append("")
-    lines.append("| run | case | rule | K | measured max | proxy | measured/proxy | flag |")
+    lines.append("| run | case | rule | K | non-empty | non-empty/K | per-axis | axis_edges |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for row in evaluation["extra"]["nonempty_vs_K"]:
+        rules = row.get("per_axis_rules")
+        rules_label = ",".join(rules) if rules else "UNVERIFIABLE(axis_edges)"
+        nonempty = (row["nonempty_bins"] if row["nonempty_bins"] is not None
+                    else "UNVERIFIABLE(nonempty_bins)")
+        lines.append(
+            f"| {row['id']} | {row['case']} | {row['rule']} | {row['K']} | "
+            f"{nonempty} | {fmt(row['nonempty_over_K'])} | "
+            f"{row['per_axis'] or 'UNVERIFIABLE(per_axis)'} | {rules_label} |"
+        )
+    lines.append("")
+    lines.append(
+        "`per_axis` is the total K distributed over x,y,z (for example "
+        "`2 2 1` for K=4), never K per axis. `axis_edges` is the per-axis rule "
+        "list the auto edge policy chose."
+    )
+    lines.append("")
+
+    lines.append("## Section 9 proxy vs measured (flag when > 2)")
+    lines.append("")
+    lines.append("| run | case | rule | K | in-bunch max | proxy | measured/proxy | flag |")
     lines.append("|---|---|---|---|---|---|---|---|")
     for row in evaluation["extra"]["proxy_vs_measured"]:
         k = row["chosen_bins"] if row["kind"] == "auto_count" else row["K"]
         lines.append(
             f"| {row['id']} | {row['case']} | {row['rule']} | {k} | "
-            f"{fmt(row['measured_max'])} | {fmt(row['proxy_error'])} | "
+            f"{fmt(row['measured_in_bunch_max'])} | {fmt(row['proxy_error'])} | "
             f"{fmt(row['measured_over_proxy'])} | "
             f"{'FLAG' if row['flag'] else '-'} |"
         )
     lines.append("")
     lines.append(
-        "A flag means measured/proxy is above 2 or below 0.5. "
-        "Section 9 says to record both numbers and not change the rule."
+        "Section 9 says to record both numbers; a flag means the measured "
+        "in-bunch error exceeds twice the analytic proxy. The rule is not changed."
     )
     lines.append("")
 
-    lines.append("## Per-transverse-component view (Ey, Ez, By, Bz)")
-    lines.append("")
-    lines.append("| run | case | rule | K | Ey | Ez | By | Bz |")
-    lines.append("|---|---|---|---|---|---|---|---|")
-    for row in evaluation["extra"]["transverse_components"]:
-        k = row["chosen_bins"] if row["kind"] == "auto_count" else row["K"]
-        lines.append(
-            f"| {row['id']} | {row['case']} | {row['rule']} | {k} | "
-            + " | ".join(_cell(row.get(component)) for component in TRANSVERSE)
-            + " |"
-        )
-    lines.append("")
-    lines.append(
-        "These four components are the honest surrogate for the transverse-drift "
-        "motivation; the beam-axis components are excluded."
-    )
-    lines.append("")
-
-    lines.append("## Tail diagnostics (max vs 99th percentile vs RMS)")
-    lines.append("")
-    lines.append("| run | case | K | max | p99 | RMS | max/p99 | near-singular |")
-    lines.append("|---|---|---|---|---|---|---|---|")
-    for row in evaluation["extra"]["tail_diagnostics"]:
-        k = row["chosen_bins"] if row["kind"] == "auto_count" else row["K"]
-        lines.append(
-            f"| {row['id']} | {row['case']} | {k} | {fmt(row['max'])} | "
-            f"{fmt(row['p99'])} | {fmt(row['rms'])} | "
-            f"{fmt(row['max_over_p99'])} | "
-            f"{'yes' if row['near_singular_dominated'] else '-'} |"
-        )
-    if any(row["missing"] for row in evaluation["extra"]["tail_diagnostics"]):
+    for region in REGIONS:
+        lines.append(f"## Per-transverse-component max / p99 / RMS: {REGION_LABELS[region]}")
         lines.append("")
-        lines.append(
-            "`n/a` here is a pipeline gap: `compare_velocity_bins.py` writes only "
-            "the maximum relative error, so a non-monotone max cannot be diagnosed "
-            "from percentiles or RMS until that script emits them."
-        )
-    lines.append("")
-
-    lines.append("## Per-case tables")
-    for case in sorted({run["case"] for run in data if run.get("case")}):
-        lines.append("")
-        lines.append(f"### {case}")
-        lines.append("")
-        lines.append(
-            "| rule | K | Ex | Ey | Ez | Bx | By | Bz | "
-            "FF Ex | FF Ey | FF Ez | FF Bx | FF By | FF Bz | "
-            "non-empty/K | startup_us | proxy | measured | measured/proxy |"
-        )
-        lines.append("|" + "---|" * 19)
-        case_runs = [run for run in data if run.get("case") == case]
-        case_runs.sort(key=lambda run: (
-            0 if run.get("requested_bins") is not None else 1,
-            -1 if run.get("requested_bins") is None else int(run["requested_bins"]),
-            {"uniform": 0, "adaptive": 1, "auto": 2}.get(run.get("rule"), 9),
-        ))
-        for run in case_runs:
-            rel = run.get("in_bunch_rel") or [None] * 6
-            far = run.get("far_field_rel") or [None] * 6
-            k_value = (run.get("chosen_bins") if run.get("kind") == "auto_count"
-                       else run.get("requested_bins"))
-            k_label = f"auto({k_value})" if run.get("kind") == "auto_count" else str(k_value)
-            nonempty = run.get("nonempty_bins")
-            nonempty_label = (
-                f"{nonempty}/{k_value}" if nonempty is not None and k_value is not None
-                else "n/a"
-            )
-            measured = run.get("in_bunch_max")
-            proxy = run.get("proxy_error")
-            ratio = (measured / proxy) if (measured is not None and proxy) else None
+        header = "| run | case | rule | K |"
+        divider = "|---|---|---|---|"
+        for component in TRANSVERSE:
+            header += f" {component} max | {component} p99 | {component} RMS |"
+            divider += "---|---|---|"
+        lines.append(header)
+        lines.append(divider)
+        for row in evaluation["extra"]["per_transverse_component"]:
+            stats = row["regions"].get(region, {})
+            k = row["chosen_bins"] if row["kind"] == "auto_count" else row["K"]
+            cells = []
+            for component in TRANSVERSE:
+                values = stats.get(component) or {}
+                cells.append(_component_cell(values, "max_rel"))
+                cells.append(_component_cell(values, "p99_rel"))
+                cells.append(_component_cell(values, "rms_rel"))
             lines.append(
-                f"| {run.get('rule')} | {k_label} | "
-                + " | ".join(_cell(v) for v in rel)
-                + " | "
-                + " | ".join(_cell(v) for v in far)
-                + f" | {nonempty_label} | {fmt(run.get('startup_us'), 1)} | "
-                f"{fmt(proxy)} | {fmt(measured)} | {fmt(ratio)} |"
+                f"| {row['id']} | {row['case']} | {row['rule']} | {k} | "
+                + " | ".join(cells) + " |"
             )
-    lines.append("")
-
-    lines.append("## Interpretation notes")
-    lines.append("")
-    for note in evaluation.get("notes", []):
-        lines.append(f"- {note}")
-    lines.append("")
+        appended = any(
+            any(any(component is not None for component in
+                    (row["regions"].get(region, {}).get(name) or {}).values())
+                for name in TRANSVERSE)
+            for row in evaluation["extra"]["per_transverse_component"]
+        )
+        if not appended:
+            lines.append("")
+            lines.append(
+                "All cells are UNVERIFIABLE: this region has no per-component "
+                "metrics (missing metrics_v2 or an empty mask)."
+            )
+        lines.append("")
 
     lines.append("## Missing metrics")
     lines.append("")
@@ -657,17 +670,47 @@ def render_markdown(manifest: dict, data: Sequence[dict], evaluation: dict,
             entry = missing[key]
             lines.append(f"| {key} | {entry['count']} | {entry.get('note', '')} |")
     lines.append("")
-    lines.append(
-        "These are gaps in the current measurement/comparison outputs, reported "
-        "so the C++ measurement node can add them. The runner does not fabricate "
-        "values."
-    )
+
+    lines.append("## Interpretation notes")
+    lines.append("")
+    for note in evaluation.get("notes", []):
+        lines.append(f"- {note}")
     lines.append("")
     return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # self-test
+
+
+def _per_component(value: float) -> dict:
+    out = {}
+    for component in COMPONENTS:
+        out[component] = {
+            "n": 64, "n_finite": 64, "n_nonfinite": 0,
+            "max_rel": value, "max_abs": value * 1.0e3,
+            "max_rel_node": [1, 1, 1],
+            "max_rel_position": [1.0e-6, 1.0e-6, 1.0e-6],
+            "p99_rel": value * 0.5, "rms_rel": value * 0.25,
+        }
+    return out
+
+
+def _metrics_v2(in_max: float, far_max: float) -> dict:
+    return {
+        "schema": "velocity-bin-metrics/2.0",
+        "comparison": "mesh_vs_T",
+        "in_bunch": {
+            "n_nodes": 512, "worst_rel": in_max,
+            "worst_component": "Ex",
+            "per_component": _per_component(in_max),
+        },
+        "far_field": {
+            "n_nodes": 96, "worst_rel": far_max,
+            "worst_component": "Bz",
+            "per_component": _per_component(far_max),
+        },
+    }
 
 
 def _base_errors(profile: str) -> Dict[Tuple[str, str, int], float]:
@@ -709,57 +752,53 @@ def _base_errors(profile: str) -> Dict[Tuple[str, str, int], float]:
 def _synthetic_data(profile: str) -> List[dict]:
     cases = ("uniform", "two_cluster", "core_halo", "exp_tail", "skewed", "single_velocity")
     errors = _base_errors(profile)
+    if profile == "in_bunch_fail_far_ok":
+        # Criterion 2 fails on the in-bunch metric at K=4 while the far-field
+        # metric stays small: the summarizer must not let far-field rescue it.
+        errors[("two_cluster", "auto", 4)] = 0.3
     data: List[dict] = []
-    index = 0
-    for case in cases:
-        for rule in ("uniform", "adaptive", "auto"):
-            for k in (2, 4, 8):
-                value = errors[(case, rule, k)]
-                data.append({
-                    "id": f"{case}_{rule}_K{k}",
-                    "index": index,
-                    "case": case,
-                    "rule": rule,
-                    "kind": "matrix",
-                    "auto_count": False,
-                    "requested_bins": k,
-                    "chosen_bins": k,
-                    "in_bunch_rel": [value] * 6,
-                    "in_bunch_max": value,
-                    "far_field_rel": None,
-                    "startup_us": 500.0,
-                    "nonempty_bins": k,
-                    "proxy_error": value * 1.1,
-                    "p99_rel": None,
-                    "rms_rel": None,
-                    "missing": ["far_field_rel", "p99_rel", "rms_rel"],
-                })
-                index += 1
-        chosen = 2
-        if profile != "fail" and case == "single_velocity":
-            chosen = 1
-        value = errors[(case, "auto", 2)]
+
+    def add(case: str, rule: str, kind: str, requested, chosen, value: float) -> None:
+        in_max = value
+        far_max = 1.0e-9
+        if profile == "no_metrics_v2":
+            in_region = None
+            far_region = None
+            block_present = False
+            missing = ["metrics_v2"]
+        else:
+            in_region = _metrics_v2(in_max, far_max)["in_bunch"]
+            far_region = _metrics_v2(in_max, far_max)["far_field"]
+            block_present = True
+            missing = []
         data.append({
-            "id": f"{case}_auto_Kauto",
-            "index": index,
+            "id": f"{case}_{rule}_K{requested if requested else 'auto'}",
             "case": case,
-            "rule": "auto",
-            "kind": "auto_count",
-            "auto_count": True,
-            "requested_bins": None,
+            "rule": rule,
+            "kind": kind,
+            "auto_count": kind == "auto_count",
+            "requested_bins": requested,
             "chosen_bins": chosen,
-            "in_bunch_rel": [value] * 6,
-            "in_bunch_max": value,
-            "far_field_rel": None,
+            "per_axis": None,
+            "per_axis_rules": None,
             "startup_us": 500.0,
             "nonempty_bins": chosen,
             "proxy_error": value * 1.1,
-            "p99_rel": None,
-            "rms_rel": None,
-            "missing": ["far_field_rel", "p99_rel", "rms_rel"],
+            "metrics_v2_present": block_present,
+            "in_bunch": in_region,
+            "far_field": far_region,
+            "missing": missing,
         })
-        index += 1
-    if profile == "missing":
+
+    for case in cases:
+        for rule in ("uniform", "adaptive", "auto"):
+            for k in (2, 4, 8):
+                add(case, rule, "matrix", k, k, errors[(case, rule, k)])
+        chosen = 2
+        if profile != "fail" and case == "single_velocity":
+            chosen = 1
+        add(case, "auto", "auto_count", None, chosen, errors[(case, "auto", 2)])
+    if profile == "missing_run":
         data = [run for run in data
                 if run["id"] not in ("two_cluster_auto_K8", "single_velocity_auto_Kauto")]
     return data
@@ -783,25 +822,22 @@ def _write_synthetic_tree(tmp: Path, profile: str) -> Path:
                     "per_axis": [k, 1, 1],
                     "model_sum": run["proxy_error"],
                     "model_error": run["proxy_error"],
-                    "mesh_vs_T": {
-                        "rel": run["in_bunch_rel"],
-                        "worst_rel": run["in_bunch_max"],
-                        "bands": [],
-                        "dominant_band": None,
-                    },
-                    "Tb_vs_T": {"rel": run["in_bunch_rel"], "worst_rel": run["in_bunch_max"]},
-                    "mesh_vs_Tb": {"rel": run["in_bunch_rel"], "worst_rel": run["in_bunch_max"]},
-                    "outside_window_roundoff": 0.0,
+                    "mesh_vs_T": {"rel": [0.9] * 6, "worst_rel": 0.9},
                 }
             },
         }
+        if run.get("metrics_v2_present"):
+            block = _metrics_v2(0.0, 0.0)
+            block["in_bunch"] = run["in_bunch"]
+            block["far_field"] = run["far_field"]
+            compare["runs"][str(k)]["metrics_v2"] = block
         name = f"{run['id']}.json"
         (tmp / name).write_text(json.dumps(compare))
         import hashlib
         digest = hashlib.sha256((tmp / name).read_bytes()).hexdigest()
         runs.append({
             "id": run["id"],
-            "index": run["index"],
+            "index": len(runs),
             "lane": 0,
             "case": run["case"],
             "rule": run["rule"],
@@ -809,6 +845,8 @@ def _write_synthetic_tree(tmp: Path, profile: str) -> Path:
             "auto_count": run["auto_count"],
             "requested_bins": run["requested_bins"],
             "chosen_bins": run["chosen_bins"],
+            "per_axis": run["per_axis"],
+            "per_axis_rules": run["per_axis_rules"],
             "output": name,
             "sha256": digest,
             "wall_time_s": 1.0,
@@ -817,9 +855,11 @@ def _write_synthetic_tree(tmp: Path, profile: str) -> Path:
             "startup_us": run["startup_us"],
             "nonempty_bins": run["nonempty_bins"],
             "proxy_error": run["proxy_error"],
+            "metrics_v2": {"present": run.get("metrics_v2_present", False)},
             "compare_bins_key": str(k),
             "missing_metrics": run["missing"],
             "missing_metric_notes": [],
+            "profile": "self-test",
             "status": "ok",
         })
     manifest = {
@@ -829,6 +869,9 @@ def _write_synthetic_tree(tmp: Path, profile: str) -> Path:
         "lanes": 1,
         "bins": [2, 4, 8],
         "rules": ["uniform", "adaptive", "auto"],
+        "geometry": {"cell": [2.5e-7] * 3, "grid": [24, 16, 16],
+                     "origin": [0.0] * 3, "center": [3e-6, 2e-6, 2e-6]},
+        "profile": "self-test",
         "out_dir": str(tmp),
         "counts": {"rows": len(runs),
                    "explicit": sum(1 for r in runs if not r["auto_count"]),
@@ -857,17 +900,56 @@ def self_test() -> int:
 
     check("pass", {1: "PASS", 2: "PASS", 3: "PASS", 4: "PASS", 5: "PASS", 6: "PASS"})
     check("fail", {1: "FAIL", 2: "FAIL", 3: "FAIL", 4: "FAIL", 5: "FAIL", 6: "FAIL"})
-    check("missing", {1: "PASS", 2: "UNVERIFIABLE", 3: "PASS", 4: "PASS",
-                      5: "UNVERIFIABLE", 6: "PASS"})
+    check("missing_run", {1: "PASS", 2: "UNVERIFIABLE", 3: "PASS", 4: "PASS",
+                          5: "UNVERIFIABLE", 6: "PASS"})
+    # in-bunch fails while far-field stays small: verdict must come from
+    # in-bunch, and far-field must still be reported.
+    check("in_bunch_fail_far_ok", {2: "FAIL"})
+    # no metrics_v2 at all: every criterion UNVERIFIABLE and no crash.
+    # Criterion 5 reads chosen_bins from the meta/manifest, not metrics_v2, so
+    # it stays verifiable; the five error-based criteria do not.
+    check("no_metrics_v2", {1: "UNVERIFIABLE", 2: "UNVERIFIABLE", 3: "UNVERIFIABLE",
+                            4: "UNVERIFIABLE", 5: "PASS", 6: "UNVERIFIABLE"})
+
+    # The in-bunch/far-field split is visible in the extras.
+    data = _synthetic_data("in_bunch_fail_far_ok")
+    evaluation = evaluate_criteria(data, (2, 4, 8))
+    try:
+        crit2 = evaluation["criteria"][1]
+        _assert(crit2["id"] == 2 and crit2["verdict"] == "FAIL",
+                "criterion 2 does not fail on the in-bunch metric")
+        row = next(r for r in evaluation["extra"]["per_transverse_component"]
+                   if r["case"] == "two_cluster" and r["rule"] == "auto"
+                   and r["K"] == 4)
+        _assert(row["regions"]["in_bunch"]["Ey"]["max_rel"] > 0.1,
+                "in-bunch Ey max missing from the transverse table")
+        _assert(row["regions"]["far_field"]["Ey"]["max_rel"] < 1e-8,
+                "far-field Ey max missing from the transverse table")
+    except (AssertionError, StopIteration) as exc:
+        failures.append(f"in_bunch_fail_far_ok extras: {exc}")
+
+    # No metrics_v2: UNVERIFIABLE with the key, not a crash.
+    evaluation = evaluate_criteria(_synthetic_data("no_metrics_v2"), (2, 4, 8))
+    try:
+        error_based = [item for item in evaluation["criteria"] if item["id"] != 5]
+        _assert(all(item["verdict"] == "UNVERIFIABLE" for item in error_based),
+                "no_metrics_v2 did not mark the error-based criteria UNVERIFIABLE")
+        joined = " ".join(" ".join(item["missing"]) for item in evaluation["criteria"])
+        _assert("metrics_v2" in joined,
+                "no_metrics_v2 verdicts do not name the missing key")
+        _assert(evaluation["extra"]["per_transverse_component"],
+                "no_metrics_v2 dropped the per-component table")
+    except AssertionError as exc:
+        failures.append(f"no_metrics_v2: {exc}")
 
     # File-driven round trip: manifest + per-run JSONs -> markdown + criteria.
     with tempfile.TemporaryDirectory(prefix="velocity-summary-selftest-") as tmp_name:
         tmp = Path(tmp_name)
         try:
             manifest_path = _write_synthetic_tree(tmp, "pass")
-            manifest, data = load_inputs(manifest_path)
-            evaluation = evaluate_criteria(data, tuple(manifest.get("bins", [2, 4, 8])))
-            markdown = render_markdown(manifest, data, evaluation, manifest_path)
+            manifest, loaded = load_inputs(manifest_path)
+            evaluation = evaluate_criteria(loaded, tuple(manifest.get("bins", [2, 4, 8])))
+            markdown = render_markdown(manifest, loaded, evaluation, manifest_path)
             criteria = {
                 "schema": SCHEMA,
                 "manifest": str(manifest_path),
@@ -882,6 +964,8 @@ def self_test() -> int:
             _assert(len(reloaded["criteria"]) == 6, "criteria.json does not have six entries")
             _assert(bool(markdown.strip()), "markdown report is empty")
             _assert("Acceptance criteria" in markdown, "markdown lacks the criteria section")
+            _assert("Per-transverse-component" in markdown,
+                    "markdown lacks the per-transverse-component section")
             _assert(all(item["verdict"] == "PASS" for item in reloaded["criteria"]),
                     "file-driven pass profile did not give six PASS verdicts")
         except (AssertionError, OSError, ValueError) as exc:
@@ -892,7 +976,9 @@ def self_test() -> int:
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
         return 1
-    print("SELF-TEST OK: 3 profiles, 6 criteria each, file round trip")
+    print("SELF-TEST OK: 5 profiles, 6 metrics_v2 criteria each, "
+          "in-bunch/far-field split, boundary case without metrics_v2, "
+          "file round trip")
     return 0
 
 
@@ -939,6 +1025,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "manifest": str(manifest_path),
         "complete": manifest.get("complete"),
         "bins": list(bins),
+        "geometry": manifest.get("geometry"),
+        "profile": manifest.get("profile"),
         "criteria": evaluation["criteria"],
         "extra": evaluation["extra"],
         "missing_metrics": evaluation["missing_metrics"],
