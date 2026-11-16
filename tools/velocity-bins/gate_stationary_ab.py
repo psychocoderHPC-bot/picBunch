@@ -309,17 +309,21 @@ def write_bunches(directory: Path) -> dict[str, Path]:
 def measurement_command(binary: str, bunch_path: Path, prefix: Path) -> list[str]:
     """Build one arm's command line.
 
-    ``--bins 1 --bin-edges uniform`` is the driver's only way to request an
-    explicit one-box uniform binning: ``--bin-edges`` accepts the rule names
-    ``uniform|quantile|adaptive`` (measure_velocity_bins.cpp lines 197-209),
-    there is no option that takes numeric edges.  Both arms use the same grid,
-    cell, origin, box count and edge rule; only the bunch file differs.
+    ``--bins 1 --velocity-bin-edges uniform`` is the driver's only way to
+    request an explicit one-box uniform binning: ``--velocity-bin-edges``
+    accepts the rule names ``auto|uniform|quantile|adaptive``
+    (measure_velocity_bins.cpp lines 197-211), and the bin count flag is
+    ``--bins`` (there is no ``--velocity-bins`` and no numeric-edge option).
+    Both arms use the same grid, cell, origin, box count and edge rule; only the
+    bunch file differs.  The 32^3 / 1 um box is deliberately disjoint from the
+    24x16x16 / 0.25 um matrix geometry, so the gate never collides with a matrix
+    work directory.
     """
     return [
         binary,
         "--bunch", str(bunch_path),
         "--bins", "1",
-        "--bin-edges", "uniform",
+        "--velocity-bin-edges", "uniform",
         *MOMENT_ARGS,
         "--grid", ",".join(str(n) for n in GRID),
         "--cell", ",".join(format(v, ".17g") for v in CELL_M),
@@ -939,6 +943,39 @@ def run_self_test(verbose: bool = True) -> int:
     check(abs(raw / fraction_ex - gamma_a) / gamma_a < 1e-12,
           "TSC correction recovers gamma from a raw ratio of gamma*f")
 
+    # Command-line fixtures: the gate must speak the measurement driver's real
+    # (post-rename) CLI.  measure_velocity_bins.cpp accepts --bins (with the
+    # literal "auto" for the automatic policy), --velocity-bin-edges and
+    # --moments; it has no --help, no --velocity-bins, no --bin-edges and no
+    # "--velocity-moments off".
+    command = measurement_command(
+        "measure_velocity_bins",
+        Path("pairA_stationary.txt"), Path("A_stationary"))
+    check("--velocity-bin-edges" in command
+          and command[command.index("--velocity-bin-edges") + 1] == "uniform",
+          "gate passes the renamed --velocity-bin-edges uniform")
+    check("--bin-edges" not in command,
+          "gate does not pass the obsolete --bin-edges")
+    check("--velocity-bins" not in command,
+          "gate does not pass the nonexistent --velocity-bins")
+    check(command[command.index("--bins") + 1] == "1",
+          "gate requests exactly one box with --bins 1")
+    check("--moments" in command
+          and command[command.index("--moments") + 1] == "0",
+          "gate disables the moment path with --moments 0")
+    for flag in ("--bunch", "--output", "--grid", "--cell", "--origin"):
+        check(flag in command, "gate passes " + flag)
+    gate_grid = tuple(int(v) for v in
+                      command[command.index("--grid") + 1].split(","))
+    gate_cell = tuple(float(v) for v in
+                      command[command.index("--cell") + 1].split(","))
+    check(gate_grid == GRID and all(abs(v - 1.0e-6) < 1e-18 for v in gate_cell),
+          "gate pins its own 32^3 / 1 um box")
+    check(any(value.startswith("2.5e-07") for value in command) is False,
+          "gate geometry does not reuse the matrix cell size")
+    check(GRID != (24, 16, 16) and abs(CELL_M[0] - 2.5e-7) > 1e-12,
+          "gate geometry is disjoint from the 24x16x16 / 0.25 um matrix geometry")
+
     if failures:
         print("SELF_TEST=FAIL ({} failure(s))".format(len(failures)))
         return 1
@@ -963,7 +1000,7 @@ def print_dry_run(args: argparse.Namespace) -> int:
     print("GATE: stationary versus moving gamma-ratio A/B")
     print("binary: {} (not required for --dry-run)".format(binary))
     print("run dir: {}".format(run_dir))
-    print("grid={} cell={} origin={} bins=1 bin-edges=uniform".format(
+    print("grid={} cell={} origin={} bins=1 velocity-bin-edges=uniform".format(
         GRID, CELL_M, ORIGIN_M))
     print("moment switch: {} (the measurement driver's off switch; "
           "--velocity-moments off belongs to picBunchApp)".format(
