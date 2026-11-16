@@ -384,6 +384,112 @@ namespace picBunch
                 m_fftMs += elapsed(t2);
             }
 
+            // ---------------------------------------------------- staged exchange
+            // The staged chunked path reuses this class unchanged for the local
+            // transforms and the pack/unpack arithmetic; only the collective
+            // call is replaced.  These entry points expose exactly the pieces
+            // that forwardTo()/inverseToWork() use, so the staged path and the
+            // MPI path execute the same operations in the same order.
+
+            //! x transform plus the y planes, the local part of the forward pass.
+            void forwardLocal()
+            {
+                auto const t0 = Clock::now();
+                alpaka::fft::onHost::executeForward(m_queue, *m_xPlan, *m_work, *m_work);
+                executeYPlanes(true);
+                alpaka::onHost::wait(m_queue);
+                m_fftMs += elapsed(t0);
+            }
+
+            //! inverse y planes plus the inverse x transform.
+            void inverseLocal()
+            {
+                auto const t0 = Clock::now();
+                executeYPlanes(false);
+                alpaka::fft::onHost::executeBackward(m_queue, *m_xPlan, *m_work, *m_work);
+                alpaka::onHost::wait(m_queue);
+                m_fftMs += elapsed(t0);
+            }
+
+            //! z transform of the source (``kernel == false``) or kernel spectrum.
+            void forwardZ(bool kernel)
+            {
+                auto const t0 = Clock::now();
+                auto& buffer = kernel ? *m_kernel : *m_spectrum;
+                alpaka::fft::onHost::executeForward(m_queue, *m_zPlan, buffer, buffer);
+                alpaka::onHost::wait(m_queue);
+                m_fftMs += elapsed(t0);
+            }
+
+            //! inverse z transform of the product held in the kernel spectrum.
+            void inverseZ()
+            {
+                auto const t0 = Clock::now();
+                alpaka::fft::onHost::executeBackward(m_queue, *m_zPlan, *m_kernel, *m_kernel);
+                alpaka::onHost::wait(m_queue);
+                m_fftMs += elapsed(t0);
+            }
+
+            void packForwardSlice(std::uint32_t y)
+            {
+                packForward(y);
+            }
+            void unpackForwardSlice(std::uint32_t y)
+            {
+                unpackForward(y, *m_spectrum);
+            }
+            void unpackForwardSliceKernel(std::uint32_t y)
+            {
+                unpackForward(y, *m_kernel);
+            }
+            void packBackwardSlice(std::uint32_t y)
+            {
+                packBackward(y);
+            }
+            void unpackBackwardSlice(std::uint32_t y)
+            {
+                unpackBackward(y);
+            }
+
+            [[nodiscard]] Complex* spectrumData()
+            {
+                return m_spectrum->data();
+            }
+            [[nodiscard]] Complex* kernelData()
+            {
+                return m_kernel->data();
+            }
+            [[nodiscard]] double* sendDoubles()
+            {
+                return reinterpret_cast<double*>(m_send->data());
+            }
+            [[nodiscard]] double* recvDoubles()
+            {
+                return reinterpret_cast<double*>(m_recv->data());
+            }
+            //! Doubles in one forward send slice (all destinations).
+            [[nodiscard]] std::size_t forwardSendDoubles() const
+            {
+                return static_cast<std::size_t>(m_Mx) * m_nz * 2u;
+            }
+            //! Doubles in one backward send slice (all destinations).
+            [[nodiscard]] std::size_t backwardSendDoubles() const
+            {
+                return static_cast<std::size_t>(m_Mz) * m_nx * 2u;
+            }
+            [[nodiscard]] std::vector<std::size_t> const& recvDisplacements() const
+            {
+                return m_recvDispls;
+            }
+            [[nodiscard]] std::vector<std::size_t> const& backRecvDisplacements() const
+            {
+                return m_backRecvDispls;
+            }
+            [[nodiscard]] std::vector<std::size_t> const& backRecvCounts() const
+            {
+                return m_backRecvCounts;
+            }
+
             [[nodiscard]] double fftMilliseconds() const
             {
                 return m_fftMs;
@@ -748,8 +854,8 @@ namespace picBunch
                 }
             }
 
-            //! Transpose one y slice back from the z-local spectrum to the z-slab work array.
-            void transposeBackward(std::uint32_t y)
+            //! Pack one y slice of the z-local product for the backward exchange.
+            void packBackward(std::uint32_t y)
             {
                 for(int r = 0; r < m_parallel->size; ++r)
                 {
@@ -768,13 +874,11 @@ namespace picBunch
                             static_cast<std::size_t>(m_nx) * sizeof(Complex));
                     }
                 }
-                alltoallvChunked(
-                    reinterpret_cast<double*>(m_send->data()),
-                    m_backSendCounts,
-                    m_backSendDispls,
-                    reinterpret_cast<double*>(m_recv->data()),
-                    m_backRecvCounts,
-                    m_backRecvDispls);
+            }
+
+            //! Scatter one received y slice back into the z-slab work array.
+            void unpackBackward(std::uint32_t y)
+            {
                 for(int r = 0; r < m_parallel->size; ++r)
                 {
                     auto const x = slabRange(m_Mx, m_parallel->size, r);
@@ -792,6 +896,20 @@ namespace picBunch
                             static_cast<std::size_t>(x.second) * sizeof(Complex));
                     }
                 }
+            }
+
+            //! Transpose one y slice back from the z-local spectrum to the z-slab work array.
+            void transposeBackward(std::uint32_t y)
+            {
+                packBackward(y);
+                alltoallvChunked(
+                    reinterpret_cast<double*>(m_send->data()),
+                    m_backSendCounts,
+                    m_backSendDispls,
+                    reinterpret_cast<double*>(m_recv->data()),
+                    m_backRecvCounts,
+                    m_backRecvDispls);
+                unpackBackward(y);
             }
 
             T_Queue& m_queue;

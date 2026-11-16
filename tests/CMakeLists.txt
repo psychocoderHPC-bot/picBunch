@@ -61,6 +61,9 @@ if(PICBUNCH_BUILD_GTESTS)
         test_multirank_patches.cpp
         test_grid_independence.cpp
         test_distributed_fft_64bit.cpp
+        test_chunked_field.cpp
+        test_chunked_writer.cpp
+        test_chunked_density.cpp
     )
     picbunch_target_warnings(picBunchUnitTests)
     target_compile_features(picBunchUnitTests PUBLIC cxx_std_20)
@@ -79,7 +82,7 @@ if(PICBUNCH_BUILD_GTESTS)
     alpaka_finalize(picBunchUnitTests)
 
     # One CTest entry per required test group.
-    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField NearShellSlab DistributedFft64Bit GridIndependence)
+    foreach(group Deposit Domain DeviceAffinity Kernel Fft Io Physics Padding Restart Audit Margin Config Placement VelocityBins VelocityMoments AlpakaReductions MpiOptions MpiFailure NearShellAccuracy NearShellGuard Readout NearShellAlpaka AlpakaReadout OpenPmdWait FastNearConsistency CheckpointFieldUnits MultiRankField NearShellSlab DistributedFft64Bit GridIndependence Chunked ChunkedWriter ChunkedDensity)
         add_test(
             NAME picBunch.${group}
             COMMAND picBunchUnitTests --gtest_filter=${group}.*
@@ -210,6 +213,19 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
                     --gtest_filter=MultiRankPatches.*
             )
+
+            # The staged chunked path replaces only MPI_Alltoallv.  Run the same
+            # case with 4 real ranks and with 4 virtual ranks and require the
+            # six field components to agree to round-off.
+            find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            add_test(
+                NAME picBunch.ChunkedVirtualVsMpi
+                COMMAND
+                    ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/compare_chunked_mpi.py
+                    ${MPIEXEC_EXECUTABLE} $<TARGET_FILE:picBunchApp>
+                    ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(picBunch.ChunkedVirtualVsMpi PROPERTIES TIMEOUT 300)
         endif()
     else()
         add_test(
