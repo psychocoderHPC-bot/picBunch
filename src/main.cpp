@@ -144,7 +144,9 @@ namespace
             "  --velocity-bins <N>   velocity box count for a multi-velocity bunch;\n"
             "                        0 = auto: smallest count whose error-model\n"
             "                        estimate is below --tolerance (default: 0); an\n"
-            "                        explicit N overrides the automatic choice.\n"
+            "                        explicit N overrides the automatic choice.  Both\n"
+            "                        the explicit N and the auto count use the edge\n"
+            "                        rule from --velocity-bin-edges (default auto).\n"
             "                        In-bunch caveat: for a high-gamma beam the\n"
             "                        in-bunch peak-normalised error saturates above\n"
             "                        --tolerance (no count up to the 256-box cap\n"
@@ -165,6 +167,33 @@ namespace
             "                        velocity (charge-weighted |u| spread <= 2%% and\n"
             "                        divergence <= 50 mrad) at the default cap, where\n"
             "                        one box is used\n"
+            "  --velocity-bin-edges <rule>\n"
+            "                        auto|adaptive|uniform|quantile (default: auto).\n"
+            "                        auto (default): for each axis it builds both the\n"
+            "                        uniform and the adaptive partitions, evaluates\n"
+            "                        each with the calibrated content model, and keeps\n"
+            "                        the lower-predicted-error partition.  Because the\n"
+            "                        box decomposition is a product of per-axis\n"
+            "                        partitions, this can never be worse than uniform\n"
+            "                        by construction; the run log names the winner per\n"
+            "                        axis with both predicted errors.  adaptive:\n"
+            "                        interior edges chosen by dynamic programming to\n"
+            "                        minimise the calibrated content model for the\n"
+            "                        requested count (per-axis, O(K^2*N) at startup;\n"
+            "                        K candidates capped at 96), placing the cuts at the\n"
+            "                        gaps between distinct velocity clusters.  uniform:\n"
+            "                        equal-width edges in reduced velocity u = p/(m c)\n"
+            "                        per axis, the pre-adaptive behaviour (reproduces\n"
+            "                        earlier runs exactly; use it when comparing\n"
+            "                        against a run made before the default changed).\n"
+            "                        quantile: interior edges at equal cumulative\n"
+            "                        charge fraction along each axis.  The box\n"
+            "                        decomposition and the field construction are\n"
+            "                        unchanged for all four.  The count-auto policy\n"
+            "                        (the smallest count whose model error meets\n"
+            "                        --tolerance) runs against the selected rule, so\n"
+            "                        auto is the default for both an explicit N and the\n"
+            "                        auto count.\n"
             "  --fft-mode <mode>     auto|replicated|distributed (default: auto).\n"
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
@@ -244,6 +273,7 @@ namespace
         std::size_t velocityBins = 0; //!< 0 = auto (tolerance-driven)
         double binModelConstant = picBunch::kDefaultVelocityModelConstant;
         std::size_t maxVelocityBins = picBunch::kDefaultMaxVelocityBins;
+        picBunch::VelocityBinning::EdgeRule binEdges = picBunch::VelocityBinning::EdgeRule::Auto;
         std::optional<Vec3> cellSize;
         std::optional<Idx3> grid;
         std::optional<Vec3> origin;
@@ -502,6 +532,21 @@ namespace
             else if(option == "--max-velocity-bins")
                 args.maxVelocityBins
                     = parseIteration(value("--max-velocity-bins"), "--max-velocity-bins");
+            else if(option == "--velocity-bin-edges")
+            {
+                std::string const text = value("--velocity-bin-edges");
+                if(text == "uniform")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Uniform;
+                else if(text == "quantile")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Quantile;
+                else if(text == "adaptive")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Adaptive;
+                else if(text == "auto")
+                    args.binEdges = picBunch::VelocityBinning::EdgeRule::Auto;
+                else
+                    throw std::invalid_argument(
+                        "--velocity-bin-edges must be auto, uniform, quantile or adaptive");
+            }
             else if(option == "--deterministic-deposit")
                 args.deterministicDeposit = true;
             else if(option == "--allow-field-truncation")
@@ -831,6 +876,7 @@ namespace
         options.velocityBinning.explicitBins = std::max<std::size_t>(1u, args.velocityBins);
         options.velocityBinning.modelConstant = args.binModelConstant;
         options.velocityBinning.maxBins = args.maxVelocityBins;
+        options.velocityBinning.edgeRule = args.binEdges;
         // The auto policy drives the bin count with the in-bunch peak-normalised
         // error model (angular term amplified by ~gamma, the suppression of the
         // in-bunch transverse B and E peaks of a relativistic beam).  For a

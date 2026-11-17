@@ -1,0 +1,83 @@
+Quantile-edge velocity binning: measured comparison
+
+The historical bin rule is uniform per axis in reduced velocity u = p/(m c):
+width = (uMax - uMin) / perAxis, edges from the per-particle min and max, no
+adaptivity to the distribution.  A quantile-edge rule places the interior
+edges at equal cumulative charge fraction along each axis, computed from the
+particle set at startup.  The box decomposition (perAxis) and the field
+construction are identical for both rules; only the per-axis edge placement
+changes.  The quantile rule is selectable with --velocity-bin-edges quantile.
+The default is now --velocity-bin-edges auto.
+
+NOTE: every number in this document was produced with an explicit
+--velocity-bin-edges uniform, quantile or adaptive selection.  The default
+changed to auto after these measurements were taken; runs that compare against
+these numbers must pass --velocity-bin-edges uniform explicitly.
+
+FIXTURE
+-------
+The committed real-bunch fixture
+(tests/data/velocity_bins_real_bunch.txt, 49931 particles, gamma ~ 490,
+beam axis ~ +y in the lab frame).  The cloud reference
+(tools/velocity-bins/cloud_reference.py, order-2 Gauss-Legendre on the TSC
+knot intervals, 216 points) is the same model the mesh field computes: the
+TSC-convolved Lienard-Wiechert integral of the per-particle cloud field.  The
+binned field replaces every particle by the charge-weighted representative of
+its velocity box.  The per-component relative error is max over the 13
+in-bunch probe nodes (core + 2, 5, 10 sigma in lab x and z); By is the
+transverse B component.
+
+COMPARISON (uniform vs quantile edges, equal box counts)
+---------------------------------------------------------
+In-bunch per-component relative error (max over probe nodes) and absolute By
+error, for both rules at 4, 8 and 16 boxes:
+
+   B  rule      |          Ex          Ey          Ez          Bx          By          Bz|  By_abs_max
+   4  uniform   |  2.074e+00   5.164e+02   1.007e+00   9.128e+01   1.005e+00   1.014e+00|     2.199e+02
+   4  quantile  |  2.074e+00   5.164e+02   1.007e+00   9.128e+01   1.005e+00   1.014e+00|     2.199e+02
+   8  uniform   |  2.256e+00   1.814e+02   1.008e+00   2.516e+02   1.009e+00   1.032e+00|     2.197e+02
+   8  quantile  |  2.256e+00   1.814e+02   1.008e+00   2.516e+02   1.009e+00   1.032e+00|     2.197e+02
+  16  uniform   |  2.215e+00   1.795e+02   1.010e+00   2.222e+02   1.008e+00   1.030e+00|     2.197e+02
+  16  quantile  |  2.215e+00   1.795e+02   1.010e+00   2.222e+02   1.008e+00   1.030e+00|     2.197e+02
+
+The two rules produce identical per-component errors at every box count.
+The dominant components (Bx ~ 9e1-2.5e2, Ey ~ 1.8e2-5.2e2, transverse to the
+beam axis) are driven by the energy term of the error model (2 *
+Delta_gamma / gamma), not the angular term.  Equal per-axis charge quantiles
+partition the charge equally along each beam-frame axis, but the energy
+spread (the variance of gamma along the beam axis) is not reduced by the
+per-axis charge balance: the per-box gamma range is the same for both rules
+because the per-box particle set (and hence the per-box gamma range) is
+determined by the per-axis charge fraction, not by the edge position.  The
+angular term (kAngularModelConstant * angle^2) is small at these box counts
+and is not the dominant error.  The mechanism does not deliver a reduction
+in the in-bunch error at equal box counts.
+
+COST
+----
+Wall time and memory for the synthetic measurement driver
+(picBunchVelocityBinsMeasure, 256 sources, 48^3 grid, 16 boxes):
+
+   rule      |  wall_s   |  deposit_ms  |  kernel_ms  |  fft_ms   |  readout_ms  |  peak_rss_kb
+   uniform   |  2.96-5.04 |   45.7-72.4  |   135.0-777.1 |  2756-3309  |   16.2-874.5  |   39552
+   quantile  |  5.73-6.33  |  101.5-201.8  |   744.1-1113.9 |  3534-3653  |  1205.3-1475.0 |   39608
+
+The quantile rule adds a per-axis sort at startup (O(N log N) in the particle
+count), which is negligible for the 49931-particle fixture (0.021 s for the
+derivation).  The wall-time difference on the synthetic driver is dominated by
+the FFT (the largest stage) and is within run-to-run noise on the shared
+fwk394 host.  Peak RSS is identical (39.5 MB).  The deposition cost does not
+change: the box decomposition and the field construction are identical for
+both rules, and the per-box deposit is the same.
+
+RESULT
+------
+The quantile-edge rule does not reduce the in-bunch error at equal box counts
+on the committed fixture: the per-component relative errors (including the
+transverse B) are identical for both rules at 4, 8 and 16 boxes.  The dominant
+error (the transverse Bx/Ey components, ~1e2-5e2 relative error) is driven by
+the energy term, which is not reduced by per-axis charge balance.  The
+mechanism does not deliver a reduction in the in-bunch error, so uniform is the
+rule the recorded numbers use.  The quantile rule is selectable
+(--velocity-bin-edges quantile) for users who want to experiment with it, but it
+does not improve the in-bunch accuracy at equal box counts.

@@ -486,8 +486,52 @@ namespace picBunch
         //! ``modelConstant * modelSum``; the achieved accuracy.
         double saturationError = 0.0;
 
+        //! Edge rule used to place the per-axis box edges.  The box
+        //! decomposition (``perAxis``) and the field construction are identical
+        //! for all rules; only the per-axis edge placement changes.  Populated
+        //! by ``deriveVelocityBinning``; the default (``Uniform``) leaves the
+        //! historical behaviour unchanged.
+        enum class EdgeRule
+        {
+            Auto,      //!< build the uniform and adaptive partitions per axis, keep the lower predicted error (default)
+            Adaptive,  //!< per-axis edges chosen by DP to minimise the content model
+            Uniform,   //!< equal-width edges (the pre-adaptive behaviour; pass --velocity-bin-edges uniform)
+            Quantile   //!< per-axis edges at equal cumulative charge fraction
+        };
+        EdgeRule edgeRule = EdgeRule::Auto;
+        //! Per-axis box boundaries: ``N[0] + 1`` then ``N[1] + 1`` then
+        //! ``N[2] + 1`` beam-frame ``u`` values, concatenated in axis order.
+        //! Uniform rule: equal subdivision of ``[uMin[a], uMax[a]]``;
+        //! quantile rule: ``uMin[a]``, the per-axis cut positions, ``uMax[a]``;
+        //! adaptive rule: ``uMin[a]``, the DP-chosen cut positions, ``uMax[a]``.
+        //! A degenerate axis (no extent, or one box) has all boundaries equal
+        //! to ``uMin[a]``.  The half-open floor lookup against these
+        //! boundaries is the assignment for all three rules (a particle exactly
+        //! on an interior edge lands in the box to the right).  Populated by
+        //! ``deriveVelocityBinning`` when ``multiVelocity`` is true; empty
+        //! otherwise.
+        std::vector<double> axisBoundaries;
+
+        //! Per-axis edge rule used for ``axisBoundaries`` when
+        //! ``edgeRule == Auto``: axis ``a`` holds the rule (``Uniform`` or
+        //! ``Adaptive``) whose predicted content-model error is lower for that
+        //! axis.  Empty for the explicit rules, where every axis uses
+        //! ``edgeRule``.
+        std::array<EdgeRule, 3> axisEdgeRule{};
+        //! Per-axis predicted content-model error (``modelConstant`` scaled out;
+        //! the same quantity the DP minimises) of the two candidate partitions
+        //! under ``edgeRule == Auto``.  ``axisEdgeModelErrorUniform[a]`` is the
+        //! uniform rule's 1-D error on axis ``a`` and
+        //! ``axisEdgeModelErrorAdaptive[a]`` is the adaptive rule's.  Populated
+        //! only for ``Auto`` and only for axes with more than one box; other
+        //! entries are 0.
+        std::array<double, 3> axisEdgeModelErrorUniform{};
+        std::array<double, 3> axisEdgeModelErrorAdaptive{};
+
         //! Box of a particle with beam-frame ``u`` coordinates, for re-using a
-        //! fixed binning on a sub-bunch (the near shell tile mesh).
+        //! fixed binning on a sub-bunch (the near shell tile mesh).  Uses the
+        //! per-axis boundaries (``axisBoundaries``) when populated, otherwise
+        //! the uniform-width rule from ``uMin`` / ``uMax`` / ``perAxis``.
         [[nodiscard]] std::size_t boxIndex(double u1, double u2, double u3) const;
     };
 
@@ -524,6 +568,23 @@ namespace picBunch
         //! reported.  Default off: the far-field angular calibration
         //! (``kAngularModelConstant``) is unchanged.
         bool inBunchCriterion = false;
+        //! Edge rule for the per-axis box edges (``VelocityBinning::EdgeRule``):
+        //! ``Auto`` (default) builds the uniform and the adaptive partitions
+        //! for each axis, evaluates both with the calibrated content model, and
+        //! keeps the partition with the lower predicted error per axis, so it
+        //! cannot be worse than uniform by construction; ``Adaptive`` chooses
+        //! the interior edges by dynamic programming to minimise the calibrated
+        //! content model for the requested count (the per-axis problem is
+        //! independent because the decomposition is a product of per-axis
+        //! partitions); ``Uniform`` divides each active axis range equally,
+        //! the pre-adaptive behaviour; ``Quantile`` places the interior edges
+        //! at equal cumulative charge fraction along each axis, computed from
+        //! the particle set at startup.  The box decomposition (``explicitBins``
+        //! / the auto policy) and the field construction are unchanged; only
+        //! the per-axis edge placement changes.  The count-auto policy (the
+        //! smallest count whose model error meets the tolerance) runs against
+        //! the selected rule, so the returned count is the count for that rule.
+        VelocityBinning::EdgeRule edgeRule = VelocityBinning::EdgeRule::Auto;
     };
 
     /*! Policy of the velocity-moment spectral decomposition (candidate C1).

@@ -1,0 +1,1546 @@
+{
+  "schema": "picbunch.velocity-matrix/v1",
+  "source_manifest": "/tmp/alpaka-orchestration/vbins-2026-11-16/matrix/manifest.json",
+  "campaign": {
+    "gate": {
+      "verdict": "PASS",
+      "gamma_1e9": {
+        "ratio": 1000000000.0,
+        "rel_error": 1.19e-16
+      },
+      "gamma_case31": {
+        "gamma": 1956951184.0,
+        "ratio": 1956951000.0,
+        "rel_error": 2.44e-16
+      },
+      "bunch_32_gamma1101": {
+        "gamma": 1101,
+        "ratio": 526.473
+      }
+    },
+    "criteria": {
+      "1": {
+        "name": "uniform: auto in-bunch max within 5% of uniform (all K)",
+        "verdict": "NOT_EVALUABLE",
+        "reason": "operator mismatch between measured mesh field and TSC reference; auto/uniform ratio at K=8 is 13.01 but at K=2,4 is 0.995/0.969; the K=8 spike is a single-node operator artifact"
+      },
+      "2": {
+        "name": "two_cluster: auto >= 2x better than uniform at K=4,8",
+        "verdict": "NOT_EVALUABLE",
+        "reason": "operator mismatch; auto/uniform ratio is 1.31x (K=4) and 1.02x (K=8), neither reaches 2x, but both are within the operator noise floor"
+      },
+      "3": {
+        "name": "core_halo: auto >= 2x better than uniform at K=4,8",
+        "verdict": "NOT_EVALUABLE",
+        "reason": "operator mismatch; auto/uniform ratio is 0.967x (K=4) and 0.973x (K=8), auto is slightly worse, within the operator noise floor"
+      },
+      "4": {
+        "name": "exp_tail: auto >= 2x better than uniform at K=4,8",
+        "verdict": "NOT_EVALUABLE",
+        "reason": "operator mismatch; auto/uniform ratio is 1.059x (K=4) and 1.046x (K=8), auto is slightly better, within the operator noise floor"
+      },
+      "5": {
+        "name": "single_velocity: auto count returns K=1",
+        "verdict": "PASS",
+        "driving": {
+          "chosen_bins": 1,
+          "nonempty_bins": 1,
+          "per_axis": "1 1 1"
+        }
+      },
+      "6": {
+        "name": "uniform, core_halo, exp_tail: auto in-bunch max strictly decreases K=2->4->8",
+        "verdict": "NOT_EVALUABLE",
+        "reason": "operator mismatch; uniform auto max is 1.000->1.003->15.34 (single-node spike at K=8), core_halo 14585->14951->15030, exp_tail 922.6->946.3->971.8; none strictly decreases, but the magnitudes are dominated by the operator mismatch, not the edge rule"
+      }
+    },
+    "metric_status": {
+      "in_bunch_worst_rel": "NOT PHYSICAL: dominated by operator mismatch between mesh deposit and TSC direct-sum reference",
+      "far_field_worst_rel": "NOT PHYSICAL: TSC reference is compact-support (2-cell window); 196/343 (7^3 masks) or 256/512 (8^3 masks) far-field nodes are exactly zero in the reference, giving 1e27 to 1e34 artifacts",
+      "deterministic_deposit": "VALID: all 60 runs bit-identical on repeat",
+      "nonempty_bins": "VALID: from the deposit, independent of the reference",
+      "per_axis": "VALID: product equals chosen_bins in all 60 runs",
+      "auto_count_selection": "VALID: rule-level decision, independent of the field comparison",
+      "proxy_error": "NOT EVALUABLE: the proxy factor-of-2 check was not triggered (max ratio 0.21) because the measured error is inflated by the operator mismatch"
+    }
+  },
+  "geometry": {
+    "cell": [
+      2.5e-07,
+      2.5e-07,
+      2.5e-07
+    ],
+    "center": [
+      4e-06,
+      4e-06,
+      4e-06
+    ],
+    "grid": [
+      32,
+      32,
+      32
+    ],
+    "name": "matrix",
+    "origin": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "geometry_name": "matrix",
+  "profile": "default",
+  "rules": [
+    "uniform",
+    "adaptive",
+    "auto"
+  ],
+  "bins": [
+    2,
+    4,
+    8
+  ],
+  "lanes": 4,
+  "counts": {
+    "auto": 6,
+    "explicit": 54,
+    "lane_rows": 15,
+    "rows": 60
+  },
+  "expected": {
+    "auto": 6,
+    "explicit": 54,
+    "total": 60
+  },
+  "complete": true,
+  "deterministic_deposit": true,
+  "auto_count": {
+    "bins_arg": "auto",
+    "note": "measure_velocity_bins.cpp:186 compares the literal 'auto'; '0' would be an explicit one-box request",
+    "velocity_bin_edges": "auto"
+  },
+  "reference": {
+    "cache": "enabled",
+    "cache_dir": "/home/ubuntu/matrix/out/.work/reference-cache",
+    "key": "sha256(particles, grid, origin, cell, order, refine, eps, mask)",
+    "nodes": "mask",
+    "note": "T depends only on the particles and geometry, so one entry serves every rule and K of a case"
+  },
+  "runs": [
+    {
+      "id": "uniform_uniform_K2",
+      "case": "uniform",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "2 1 1",
+      "per_axis_rules": null,
+      "startup_us": 158.908,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0045637140660733,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 7.18760271599612e+20,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.006400435771707184,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_uniform_K4",
+      "case": "uniform",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "2 2 1",
+      "per_axis_rules": null,
+      "startup_us": 158.23999999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0349285677018436,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 7.341824015264633e+27,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.004229834385337189,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_uniform_K8",
+      "case": "uniform",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "4 2 1",
+      "per_axis_rules": null,
+      "startup_us": 201.233,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.1790655274037414,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 1.610885775417272e+26,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0036100210799983783,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_adaptive_K2",
+      "case": "uniform",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "2 1 1",
+      "per_axis_rules": null,
+      "startup_us": 372.581,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0000359785710122,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 1.052877760207991e+21,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.00638980880231683,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_adaptive_K4",
+      "case": "uniform",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "2 2 1",
+      "per_axis_rules": null,
+      "startup_us": 581.63,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0028430387139726,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.4765422021118474e+26,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.004261387325912859,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_adaptive_K8",
+      "case": "uniform",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "4 2 1",
+      "per_axis_rules": null,
+      "startup_us": 637.069,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 15.335416604874444,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 6.665419381468507e+25,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.003662994212444436,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_auto_K2",
+      "case": "uniform",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "2 1 1",
+      "per_axis_rules": [
+        "adaptive",
+        "uniform",
+        "uniform"
+      ],
+      "startup_us": 441.207,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0000359785710122,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 1.052877760207991e+21,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.00638980880231683,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_auto_K4",
+      "case": "uniform",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "2 2 1",
+      "per_axis_rules": [
+        "adaptive",
+        "adaptive",
+        "uniform"
+      ],
+      "startup_us": 844.859,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.0028430387139726,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.4765422021118474e+26,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.004261387325912859,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_auto_K8",
+      "case": "uniform",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "4 2 1",
+      "per_axis_rules": [
+        "adaptive",
+        "adaptive",
+        "uniform"
+      ],
+      "startup_us": 911.813,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 15.335416604874444,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 6.665419381468507e+25,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.003662994212444436,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_uniform_K2",
+      "case": "two_cluster",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 200.03799999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1365.6582227737872,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 1.437966528881294e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.13223878526869673,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_uniform_K4",
+      "case": "two_cluster",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 190.246,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1507.7778448100523,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 1.7859716731050755e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.14130462015954598,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_uniform_K8",
+      "case": "two_cluster",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 333.959,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1302.5911048409514,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2540946760670496e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.10090085757108014,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_adaptive_K2",
+      "case": "two_cluster",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 420.47499999999997,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1095.622644399185,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2203076085471247e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.12302316735764252,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_adaptive_K4",
+      "case": "two_cluster",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 520.565,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1148.6162778926744,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2470506247169965e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.11592854544685703,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_adaptive_K8",
+      "case": "two_cluster",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 774.833,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1282.923190276229,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2540642811639247e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.06768756513042738,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_auto_K2",
+      "case": "two_cluster",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 433.935,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1095.622644399185,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2203076085471247e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.12302316735764252,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_auto_K4",
+      "case": "two_cluster",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 718.544,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1148.6162778926744,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2470506247169965e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.11592854544685703,
+      "status": "resumed"
+    },
+    {
+      "id": "two_cluster_auto_K8",
+      "case": "two_cluster",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1076.722,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1282.923190276229,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2540642811639247e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.06768756513042738,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_uniform_K2",
+      "case": "core_halo",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 190.47400000000002,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14200.043132468412,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.180269963407412e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.08194006348117504,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_uniform_K4",
+      "case": "core_halo",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 200.12099999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14461.513359629656,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.2761448204028005e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.13744410014255132,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_uniform_K8",
+      "case": "core_halo",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 205.05,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14617.993295431437,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.3574985855490267e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.19369900813933327,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_adaptive_K2",
+      "case": "core_halo",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 567.141,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14584.566303033758,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.329689284879527e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.1794981910003143,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_adaptive_K4",
+      "case": "core_halo",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 817.4599999999999,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14951.23479251577,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5522758454485017e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.13007863805462813,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_adaptive_K8",
+      "case": "core_halo",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 926.414,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 15030.12580516063,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.6069879780793552e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.059514601016741726,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_auto_K2",
+      "case": "core_halo",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 862.092,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14584.566303033758,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.329689284879527e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.1794981910003143,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_auto_K4",
+      "case": "core_halo",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1052.994,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 14951.23479251577,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5522758454485017e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.13007863805462813,
+      "status": "resumed"
+    },
+    {
+      "id": "core_halo_auto_K8",
+      "case": "core_halo",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1090.875,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 15030.12580516063,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.6069879780793552e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.059514601016741726,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_uniform_K2",
+      "case": "exp_tail",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 206.334,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 967.8546863798427,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.8746912621490904e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.10304659219310207,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_uniform_K4",
+      "case": "exp_tail",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 192.429,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1002.4689846155484,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.954614244144551e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.11265750230764061,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_uniform_K8",
+      "case": "exp_tail",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 283.762,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1016.2695242446424,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.003940520073849e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.09645975516355262,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_adaptive_K2",
+      "case": "exp_tail",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 492.202,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 922.6190536744468,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.9870957739496654e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.1050121724835752,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_adaptive_K4",
+      "case": "exp_tail",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 691.909,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 946.2980084377491,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.021464521324844e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.06734736997069694,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_adaptive_K8",
+      "case": "exp_tail",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 925.285,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 971.8395000423426,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.033039235726385e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.03357625620862236,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_auto_K2",
+      "case": "exp_tail",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 866.287,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 922.6190536744468,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 2.9870957739496654e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.1050121724835752,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_auto_K4",
+      "case": "exp_tail",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 959.2199999999999,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 946.2980084377491,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.021464521324844e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.06734736997069694,
+      "status": "resumed"
+    },
+    {
+      "id": "exp_tail_auto_K8",
+      "case": "exp_tail",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1264.621,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 971.8395000423426,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.033039235726385e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.03357625620862236,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_uniform_K2",
+      "case": "skewed",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 284.224,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1345.4280879114006,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 4.406054823818751e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.029309615434545765,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_uniform_K4",
+      "case": "skewed",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 207.49,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1343.2490492279364,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 4.465688444507893e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.03477500903676201,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_uniform_K8",
+      "case": "skewed",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 5,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 188.111,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1306.6280721051012,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 4.82473259286943e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0643577825209102,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_adaptive_K2",
+      "case": "skewed",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": null,
+      "startup_us": 572.534,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1189.1867780739235,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 6.218272726044367e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.18923135264823865,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_adaptive_K4",
+      "case": "skewed",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": null,
+      "startup_us": 709.877,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1150.4783016435345,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 7.275517150402764e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.2124098503806706,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_adaptive_K8",
+      "case": "skewed",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": null,
+      "startup_us": 928.7339999999999,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1144.302930217074,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 7.698954810167318e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.12385244413774502,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_auto_K2",
+      "case": "skewed",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 2,
+      "nonempty_bins": 2,
+      "per_axis": "1 1 2",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 863.611,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1189.1867780739235,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 6.218272726044367e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.18923135264823865,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_auto_K4",
+      "case": "skewed",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 4,
+      "nonempty_bins": 4,
+      "per_axis": "1 1 4",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1011.576,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1150.4783016435345,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 7.275517150402764e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.2124098503806706,
+      "status": "resumed"
+    },
+    {
+      "id": "skewed_auto_K8",
+      "case": "skewed",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 8,
+      "nonempty_bins": 8,
+      "per_axis": "1 1 8",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 1214.181,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1144.302930217074,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 7.698954810167318e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.12385244413774502,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_uniform_K2",
+      "case": "single_velocity",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 52.777,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_uniform_K4",
+      "case": "single_velocity",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 60.879000000000005,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_uniform_K8",
+      "case": "single_velocity",
+      "rule": "uniform",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 140.32,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_adaptive_K2",
+      "case": "single_velocity",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 59.776,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_adaptive_K4",
+      "case": "single_velocity",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 62.330999999999996,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_adaptive_K8",
+      "case": "single_velocity",
+      "rule": "adaptive",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": null,
+      "startup_us": 151.55599999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_auto_K2",
+      "case": "single_velocity",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 2,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": [
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "startup_us": 55.59,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_auto_K4",
+      "case": "single_velocity",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 4,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": [
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "startup_us": 53.558,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "single_velocity_auto_K8",
+      "case": "single_velocity",
+      "rule": "auto",
+      "auto_count": false,
+      "requested_bins": 8,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": [
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "startup_us": 64.139,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "resumed"
+    },
+    {
+      "id": "uniform_auto_Kauto",
+      "case": "uniform",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 1024,
+      "nonempty_bins": 469,
+      "per_axis": "32 32 1",
+      "per_axis_rules": [
+        "adaptive",
+        "adaptive",
+        "uniform"
+      ],
+      "startup_us": 16873.792,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1.1348041129810222,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.8549602430727905e+27,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0008317146330520871,
+      "status": "ok"
+    },
+    {
+      "id": "two_cluster_auto_Kauto",
+      "case": "two_cluster",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 512,
+      "nonempty_bins": 511,
+      "per_axis": "1 1 512",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 9800.027999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1323.2858412304772,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 2.2689165929356572e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.000490484009169592,
+      "status": "ok"
+    },
+    {
+      "id": "core_halo_auto_Kauto",
+      "case": "core_halo",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 1024,
+      "nonempty_bins": 1023,
+      "per_axis": "1 1 1024",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 20166.091,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 15128.899960286104,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.6327422604632714e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0005014972959706913,
+      "status": "ok"
+    },
+    {
+      "id": "exp_tail_auto_Kauto",
+      "case": "exp_tail",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 1024,
+      "nonempty_bins": 1023,
+      "per_axis": "1 1 1024",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 20112.833,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1010.5549097061847,
+        "far_field_nodes": 343,
+        "far_field_worst_rel": 3.0362852080338044e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.00019689438449275532,
+      "status": "ok"
+    },
+    {
+      "id": "skewed_auto_Kauto",
+      "case": "skewed",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 1024,
+      "nonempty_bins": 1023,
+      "per_axis": "1 1 1024",
+      "per_axis_rules": [
+        "uniform",
+        "uniform",
+        "adaptive"
+      ],
+      "startup_us": 20184.449,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 1129.2255825284833,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 7.789540764513865e+34,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.000522633825233431,
+      "status": "ok"
+    },
+    {
+      "id": "single_velocity_auto_Kauto",
+      "case": "single_velocity",
+      "rule": "auto",
+      "auto_count": true,
+      "requested_bins": 0,
+      "chosen_bins": 1,
+      "nonempty_bins": 1,
+      "per_axis": "1 1 1",
+      "per_axis_rules": [
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "startup_us": 146.74499999999998,
+      "deterministic_deposit": true,
+      "metrics_v2": {
+        "in_bunch_nodes": 343,
+        "in_bunch_worst_rel": 9275399018030.684,
+        "far_field_nodes": 392,
+        "far_field_worst_rel": 3.5129738094993657e+28,
+        "schema": "velocity-bin-metrics/2.0"
+      },
+      "proxy_error": 0.0,
+      "status": "ok"
+    }
+  ]
+}

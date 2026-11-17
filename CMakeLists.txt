@@ -601,6 +601,21 @@ target_compile_features(picBunchVelocityBinsMeasure PUBLIC cxx_std_20)
 target_link_libraries(picBunchVelocityBinsMeasure PRIVATE picBunch::picBunch)
 alpaka_finalize(picBunchVelocityBinsMeasure)
 
+# Reference driver for the quantile-edge comparison: loads the committed
+# real-bunch fixture, derives the velocity binning (uniform or quantile edges)
+# at each requested box count, and prints the beam frame, the per-axis
+# boundaries, the model numbers and the per-particle assignment.  The cloud
+# reference (tools/velocity-bins/cloud_reference.py) consumes the
+# representative velocities and the assignment to build the binned field and
+# compare it against the per-particle cloud field at the in-bunch probe nodes.
+# It does not compute the field itself; the field solve is the
+# measure_velocity_bins driver's job.
+add_executable(picBunchLoadFixture tools/velocity-bins/load_fixture.cpp)
+picbunch_target_warnings(picBunchLoadFixture)
+target_compile_features(picBunchLoadFixture PUBLIC cxx_std_20)
+target_link_libraries(picBunchLoadFixture PRIVATE picBunch::picBunch)
+alpaka_finalize(picBunchLoadFixture)
+
 add_executable(picBunchBunchBinsMeasure tools/velocity-bins/measure_bunch_bins.cpp)
 picbunch_target_warnings(picBunchBunchBinsMeasure)
 target_compile_features(picBunchBunchBinsMeasure PUBLIC cxx_std_20)
