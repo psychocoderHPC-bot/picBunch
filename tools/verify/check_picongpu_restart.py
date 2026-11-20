@@ -114,11 +114,18 @@ def main() -> int:
                     fail(f"{record}: dataOrder is {decode(mesh.attrs['dataOrder'])!r}")
                 if decode(mesh.attrs["geometry"]) != "cartesian":
                     fail(f"{record}: geometry is {decode(mesh.attrs['geometry'])!r}")
+                # The writer computes these in C++; the reference is the
+                # same division in Python.  A different libm or compiler can
+                # move the last bit, so compare to round-off, not bit equality.
                 expected_spacing = np.array([2.5, 1.5, 0.5]) / STEP_UNIT
-                if not np.array_equal(mesh.attrs["gridSpacing"], expected_spacing):
+                if not np.allclose(
+                    mesh.attrs["gridSpacing"], expected_spacing, rtol=1e-12, atol=0.0
+                ):
                     fail(f"{record}: gridSpacing is {mesh.attrs['gridSpacing']!r}")
                 expected_offset = np.array([3.0, 2.0, 1.0]) / STEP_UNIT
-                if not np.array_equal(mesh.attrs["gridGlobalOffset"], expected_offset):
+                if not np.allclose(
+                    mesh.attrs["gridGlobalOffset"], expected_offset, rtol=1e-12, atol=0.0
+                ):
                     fail(f"{record}: gridGlobalOffset is {mesh.attrs['gridGlobalOffset']!r}")
                 if float(mesh.attrs["gridUnitSI"]) != STEP_UNIT:
                     fail(f"{record}: gridUnitSI is {mesh.attrs['gridUnitSI']!r}")
