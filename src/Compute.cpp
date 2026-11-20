@@ -2245,7 +2245,11 @@ namespace picBunch
                 else if(decision.refused)
                     enforceSolveMode(decision);
 
-                if(mpiRank() == 0)
+                // The command line already logs an explicit override.  Only
+                // the automatic decision is new here, and it is logged once
+                // per process even when several species or the far-tail pass
+                // resolve again.
+                if(mpiRank() == 0 && options.solveMode == SolveMode::Auto)
                 {
                     static bool decisionLogged = false;
                     if(!decisionLogged)
