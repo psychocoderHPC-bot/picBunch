@@ -239,6 +239,17 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${CMAKE_CURRENT_BINARY_DIR}
             )
             set_tests_properties(picBunch.ChunkedVirtualVsMpi PROPERTIES TIMEOUT 300)
+
+            # The chunked path must reproduce the in-core distributed reference
+            # for the 16x16x16, 11x9x13 and 8x8x17 configs at 1/3/4 ranks.
+            add_test(
+                NAME picBunch.ChunkedMpiVsDistributedConfig
+                COMMAND
+                    ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/compare_chunked_config_mpi.py
+                    ${MPIEXEC_EXECUTABLE} $<TARGET_FILE:picBunchApp>
+                    ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(picBunch.ChunkedMpiVsDistributedConfig PROPERTIES TIMEOUT 300)
         endif()
     else()
         add_test(
@@ -314,6 +325,17 @@ if(Python3_Interpreter_FOUND)
                 --app $<TARGET_FILE:picBunchApp>
                 --workdir ${CMAKE_CURRENT_BINARY_DIR}
         )
+        # End-to-end --solve-mode contract: the four accepted spellings run, the
+        # removed ``incore`` alias exits 2, and --help lists only four values.
+        add_test(
+            NAME picBunch.SolveModeCli
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/check_solve_mode_cli.py
+                $<TARGET_FILE:picBunchApp>
+                ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        set_tests_properties(picBunch.SolveModeCli PROPERTIES TIMEOUT 120)
         # h5py builds the openPMD 2.0 scalar-record layout; the C++ test then
         # reads it through picBunch::readBunch.
         set(PICBUNCH_SCALAR_RECORD_FILE ${CMAKE_CURRENT_BINARY_DIR}/scalar_record_sample.h5)

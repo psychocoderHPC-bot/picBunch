@@ -60,13 +60,13 @@ tolerance = 1.0e-3
     }
 } // namespace
 
-TEST(SolveMode, ParseAcceptsTheFiveSpellings)
+TEST(SolveMode, ParseAcceptsTheFourSpellings)
 {
     ASSERT_TRUE(picBunch::parseSolveMode("auto").has_value());
     EXPECT_EQ(*picBunch::parseSolveMode("auto"), picBunch::SolveMode::Auto);
     ASSERT_TRUE(picBunch::parseSolveMode("chunked").has_value());
     EXPECT_EQ(*picBunch::parseSolveMode("chunked"), picBunch::SolveMode::Chunked);
-    for(char const* text : {"none", "in-core", "incore"})
+    for(char const* text : {"none", "in-core"})
     {
         ASSERT_TRUE(picBunch::parseSolveMode(text).has_value());
         EXPECT_EQ(*picBunch::parseSolveMode(text), picBunch::SolveMode::InCore);
@@ -75,7 +75,7 @@ TEST(SolveMode, ParseAcceptsTheFiveSpellings)
 
 TEST(SolveMode, ParseRejectsGarbage)
 {
-    for(char const* text : {"", "AUTO", "core", "auto ", "chunk", "in_core"})
+    for(char const* text : {"", "AUTO", "core", "auto ", "chunk", "in_core", "incore"})
         EXPECT_FALSE(picBunch::parseSolveMode(text).has_value());
 }
 

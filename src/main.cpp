@@ -48,7 +48,7 @@ namespace
         auto const mode = picBunch::parseSolveMode(text);
         if(!mode)
             throw std::invalid_argument(
-                "--solve-mode must be 'auto', 'chunked', 'none', 'in-core' or 'incore' (got '"
+                "--solve-mode must be 'auto', 'chunked', 'none' or 'in-core' (got '"
                 + text + "')");
         return *mode;
     }
@@ -226,11 +226,11 @@ namespace
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
             "                        when the padded box exceeds the per-rank limit\n"
-            "  --solve-mode <mode>   auto|chunked|none|in-core|incore (default: auto).\n"
+            "  --solve-mode <mode>   auto|chunked|none|in-core (default: auto).\n"
             "                        auto keeps the in-core solve when it fits the\n"
             "                        per-rank budget and otherwise switches to chunked;\n"
             "                        it prints the decision and its reason once on\n"
-            "                        rank 0.  none, in-core and incore are synonyms\n"
+            "                        rank 0.  none and in-core are synonyms\n"
             "                        for the in-core path.  chunked runs the exact\n"
             "                        global 3-D FFT out of core: one process splits the\n"
             "                        padded volume into chunks, stages the transposes on\n"
@@ -701,7 +701,7 @@ namespace
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
         if(!picBunch::parseSolveMode(args.solveMode))
             throw std::invalid_argument(
-                "--solve-mode must be 'auto', 'chunked', 'none', 'in-core' or 'incore' (got '"
+                "--solve-mode must be 'auto', 'chunked', 'none' or 'in-core' (got '"
                 + args.solveMode + "')");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");

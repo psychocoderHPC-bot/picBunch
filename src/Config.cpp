@@ -498,8 +498,8 @@ namespace picBunch
                 if(!mode)
                     fail(
                         "solve.solve_mode",
-                        "must be \"auto\", \"chunked\", \"none\", \"in-core\" or "
-                        "\"incore\" (got \"" + text + "\")");
+                        "must be \"auto\", \"chunked\", \"none\" or \"in-core\" "
+                        "(got \"" + text + "\")");
                 config.solve.solveMode = *mode;
             }
         }

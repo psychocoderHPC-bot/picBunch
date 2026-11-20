@@ -4,11 +4,12 @@
 """Exercise the --solve-mode aliases on the direct --input/--output path.
 
 No MPI is needed.  A tiny deterministic bunch is deposited once per mode; the
-default (no flag), ``auto``, ``none``, ``in-core`` and ``incore`` must all
-produce the same six field components.  ``chunked`` must also run at one rank
-and match the in-core field.  The last two checks cover the CLI contract of
-the option itself: a bogus value exits 2 with all five spellings in its
-stderr, and ``--help`` documents all five.
+default (no flag), ``auto``, ``none`` and ``in-core`` must all produce the
+same six field components.  ``chunked`` must also run at one rank and match
+the in-core field.  The last three checks cover the CLI contract of the
+option itself: a bogus value exits 2 with all four accepted spellings in its
+stderr, ``incore`` exits 2 as a removed alias, and ``--help`` documents
+exactly the four accepted spellings.
 
 Every generated file is removed at the end; ``PICBUNCH_KEEP_TEST_OUTPUT=1``
 keeps the per-run directory for debugging.
@@ -30,7 +31,7 @@ N_PARTICLES = 128
 Q_E = 1.602176634e-19
 M_E = 9.1093837015e-31
 GRID = (8, 8, 8)
-SPELLINGS = ("auto", "chunked", "none", "in-core", "incore")
+SPELLINGS = ("auto", "chunked", "none", "in-core")
 
 DIM_POS = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 DIM_MOM = np.array([1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0])
@@ -186,7 +187,7 @@ def main():
         ]
 
         outputs = {}
-        modes = (None, "auto", "none", "in-core", "incore", "chunked")
+        modes = (None, "auto", "none", "in-core", "chunked")
         for mode in modes:
             name = "default" if mode is None else mode
             output = os.path.join(root, f"{name}.h5")
@@ -213,7 +214,7 @@ def main():
             print(f"run {label} status=OK")
 
         reference = outputs.get("default")
-        for mode in ("auto", "none", "in-core", "incore", "chunked"):
+        for mode in ("auto", "none", "in-core", "chunked"):
             if reference is None or mode not in outputs:
                 print(f"compare default_vs_{mode} status=SKIP missing run")
                 failures += 1
@@ -248,19 +249,44 @@ def main():
             )
             failures += 1
         else:
-            print("bogus status=OK exit=2 stderr lists all five spellings")
+            print("bogus status=OK exit=2 stderr lists all four spellings")
+
+        # ``incore`` was a removed alias; keep it pinned as a rejection.
+        incore = run([binary, "--solve-mode", "incore"])
+        missing = [word for word in SPELLINGS if word not in incore.stderr]
+        if incore.returncode != 2:
+            print(
+                f"incore status=FAIL exit={incore.returncode} expected=2"
+            )
+            failures += 1
+        elif missing:
+            print(
+                "incore status=FAIL stderr lacks " + ", ".join(missing)
+            )
+            failures += 1
+        else:
+            print("incore status=OK exit=2 stderr lists all four spellings")
 
         helped = run([binary, "--help"])
         section = solve_mode_section(helped.stdout + helped.stderr)
         missing = [word for word in SPELLINGS if word not in section]
+        stale = "incore" in section
         if helped.returncode != 0:
             print(f"help status=FAIL exit={helped.returncode}")
             failures += 1
-        elif missing:
-            print("help status=FAIL --solve-mode section lacks " + ", ".join(missing))
+        elif missing or stale:
+            problems = []
+            if missing:
+                problems.append("lacks " + ", ".join(missing))
+            if stale:
+                problems.append("still lists incore")
+            print("help status=FAIL --solve-mode section " + "; ".join(problems))
             failures += 1
         else:
-            print("help status=OK --solve-mode section lists all five spellings")
+            print(
+                "help status=OK --solve-mode section lists exactly the four "
+                "accepted spellings"
+            )
 
         return 1 if failures else 0
     finally:

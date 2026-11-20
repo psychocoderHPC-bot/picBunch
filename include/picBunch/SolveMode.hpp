@@ -32,7 +32,7 @@ namespace picBunch
     };
 
     //! Accepted command-line spellings, in the order the help lists them.
-    inline constexpr char const* kSolveModeSpellings = "auto|chunked|none|in-core|incore";
+    inline constexpr char const* kSolveModeSpellings = "auto|chunked|none|in-core";
 
     //! Parse a solve-mode spelling.  Returns nullopt for an unknown value.
     inline std::optional<SolveMode> parseSolveMode(std::string_view text)
@@ -41,7 +41,7 @@ namespace picBunch
             return SolveMode::Auto;
         if(text == "chunked")
             return SolveMode::Chunked;
-        if(text == "none" || text == "in-core" || text == "incore")
+        if(text == "none" || text == "in-core")
             return SolveMode::InCore;
         return std::nullopt;
     }
