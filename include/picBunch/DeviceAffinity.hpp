@@ -108,7 +108,11 @@ namespace picBunch
     //! Estimated peak device bytes for one rank.
     std::size_t estimateDeviceRequirementBytes(DeviceWorkload const& workload);
 
-    //! Result of comparing the estimate with the device's per-rank capacity share.
+    //! True when the summed requirement fits the summed capacity.  A zero
+    //! capacity means the backend did not report a limit and is not enforced.
+    bool totalDeviceMemoryFits(std::size_t totalRequiredBytes, std::size_t totalCapacityBytes);
+
+    //! Result of comparing the summed estimate with the summed device capacity.
     struct DeviceFit
     {
         std::size_t requiredBytes = 0;
@@ -117,6 +121,9 @@ namespace picBunch
         int ranksPerDevice = 1;
         int deviceIndex = 0;
         int rank = 0;
+        std::size_t totalRequiredBytes = 0;
+        std::size_t totalCapacityBytes = 0;
+        int rankCount = 1;
         bool warning = false;
         bool refused = false;
         std::string warningMessage;
@@ -130,7 +137,7 @@ namespace picBunch
     //! Throw ``std::runtime_error`` with the refusal text when the estimate does not fit.
     void enforceDeviceFit(DeviceFit const& fit);
 
-    //! Evaluate, warn once, and refuse when the estimate exceeds the capacity share.
+    //! Evaluate, sum over the shared-memory domain, and refuse when the total exceeds capacity.
     DeviceFit enforceRankDeviceFit(DeviceWorkload const& workload);
 
     //! Human-readable byte count (GiB/MiB) used by the warning and refusal text.

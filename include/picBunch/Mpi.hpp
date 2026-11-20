@@ -126,6 +126,12 @@ namespace picBunch
      */
     std::vector<RankDeviceMapping> mpiGatherDeviceMappings(RankDeviceMapping const& local);
 
+    /*! Sum required and capacity bytes over the shared-memory domain.
+     *
+     * A serial build or a single rank leaves both values unchanged.
+     */
+    void mpiSumLocal(std::uint64_t& requiredBytes, std::uint64_t& capacityBytes);
+
     void mpiBarrier();
 
     //! Broadcast ``count`` doubles from ``root``; no-op for a single rank.

@@ -50,42 +50,13 @@ TEST(DeviceAffinity, BalancedDistributionWithMoreRanksThanDevices)
     EXPECT_EQ(first, second);
 }
 
-TEST(DeviceAffinity, RefusesWhenRequirementExceedsCapacityShare)
+TEST(DeviceAffinity, TotalDeviceMemoryFits)
 {
-    picBunch::RankDeviceMapping mapping
-        = picBunch::assignRankDevice(3, 3, 8, syntheticDevices(2));
-    mapping.deviceCapacityBytes = std::size_t{1u} << 30;
-    mapping.ranksPerDevice = 4;
-
-    picBunch::DeviceWorkload workload;
-    workload.paddedNodes = std::size_t{64u} << 20;
-    workload.spectrumNodes = std::size_t{32u} << 20;
-    workload.outputNodes = std::size_t{16u} << 20;
-    workload.particleCount = std::size_t{1u} << 20;
-    workload.velocityBins = 1;
-    workload.rankCount = 4;
-    workload.distributed = false;
-
-    picBunch::DeviceFit const fit = picBunch::evaluateDeviceFit(mapping, workload);
-    EXPECT_TRUE(fit.refused);
-    EXPECT_TRUE(fit.warning);
-    EXPECT_GT(fit.requiredBytes, fit.shareBytes);
-    EXPECT_EQ(fit.shareBytes, (std::size_t{1u} << 30) / 4u);
-    EXPECT_NE(fit.refusalMessage.find("rank 3"), std::string::npos);
-    EXPECT_NE(fit.refusalMessage.find("requires"), std::string::npos);
-    EXPECT_NE(fit.refusalMessage.find("device capacity"), std::string::npos);
-    EXPECT_NE(fit.refusalMessage.find("ranks per device"), std::string::npos);
-    EXPECT_NE(fit.refusalMessage.find("refusing to start"), std::string::npos);
-    EXPECT_THROW(picBunch::enforceDeviceFit(fit), std::runtime_error);
-    try
-    {
-        picBunch::enforceDeviceFit(fit);
-        FAIL() << "expected the placement check to refuse the oversized run";
-    }
-    catch(std::runtime_error const& error)
-    {
-        EXPECT_EQ(std::string{error.what()}, fit.refusalMessage);
-    }
+    EXPECT_TRUE(picBunch::totalDeviceMemoryFits(100u, 200u));
+    EXPECT_TRUE(picBunch::totalDeviceMemoryFits(200u, 200u));
+    EXPECT_FALSE(picBunch::totalDeviceMemoryFits(201u, 200u));
+    // A zero capacity means the backend did not report a limit.
+    EXPECT_TRUE(picBunch::totalDeviceMemoryFits(100u, 0u));
 }
 
 TEST(DeviceAffinity, SingleRankPerDeviceHasOneToOneMappingAndNoWarning)

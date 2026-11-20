@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -630,6 +631,49 @@ namespace picBunch
         }
 #endif
         return {local};
+    }
+
+    void mpiSumLocal(std::uint64_t& requiredBytes, std::uint64_t& capacityBytes)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            MPI_Comm shared = MPI_COMM_NULL;
+            int const splitStatus = MPI_Comm_split_type(
+                MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared);
+            if(splitStatus != MPI_SUCCESS)
+            {
+                // A failed split on a single rank would leave the successful ranks
+                // blocked in the collective below, so abort uniformly.
+                std::fprintf(
+                    stderr,
+                    "picBunch: error: MPI_Comm_split_type(MPI_COMM_TYPE_SHARED) failed with"
+                    " status %d; aborting to avoid a collective mismatch\n",
+                    splitStatus);
+                std::fflush(stderr);
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                return;
+            }
+            std::uint64_t values[2] = {requiredBytes, capacityBytes};
+            int const reduceStatus
+                = MPI_Allreduce(MPI_IN_PLACE, values, 2, MPI_UINT64_T, MPI_SUM, shared);
+            if(reduceStatus != MPI_SUCCESS)
+            {
+                std::fprintf(
+                    stderr,
+                    "picBunch: error: MPI_Allreduce over the shared-memory domain failed with"
+                    " status %d; aborting\n",
+                    reduceStatus);
+                std::fflush(stderr);
+                MPI_Comm_free(&shared);
+                MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+                return;
+            }
+            requiredBytes = values[0];
+            capacityBytes = values[1];
+            MPI_Comm_free(&shared);
+        }
+#endif
     }
 
     void mpiBarrier()

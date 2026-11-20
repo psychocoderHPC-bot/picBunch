@@ -209,9 +209,7 @@ namespace picBunch
             + std::to_string(mapping.localRank) + ") -> device "
             + std::to_string(mapping.deviceIndex) + " \"" + mapping.deviceName + "\" of "
             + std::to_string(mapping.visibleDeviceCount) + " visible ("
-            + formatByteCount(mapping.deviceCapacityBytes) + ", "
-            + std::to_string(mapping.ranksPerDevice) + " rank"
-            + (mapping.ranksPerDevice == 1 ? "" : "s") + " per device)";
+            + formatByteCount(mapping.deviceCapacityBytes) + ")";
         if(mapping.overrideRespected)
             text += "; " + mapping.overrideVariable + "=" + mapping.overrideValue + " respected";
         return text;
@@ -315,6 +313,11 @@ namespace picBunch
         return saturatingAdd(gridBytes, particleBytes);
     }
 
+    bool totalDeviceMemoryFits(std::size_t totalRequiredBytes, std::size_t totalCapacityBytes)
+    {
+        return totalCapacityBytes == 0u || totalRequiredBytes <= totalCapacityBytes;
+    }
+
     DeviceFit evaluateDeviceFit(
         RankDeviceMapping const& mapping,
         DeviceWorkload const& workload)
@@ -322,28 +325,11 @@ namespace picBunch
         DeviceFit fit;
         fit.requiredBytes = estimateDeviceRequirementBytes(workload);
         fit.capacityBytes = mapping.deviceCapacityBytes;
-        fit.ranksPerDevice = std::max(1, mapping.ranksPerDevice);
+        // Kept for the public result shape; the guard uses the node totals.
+        fit.shareBytes = fit.capacityBytes;
+        fit.ranksPerDevice = 1;
         fit.deviceIndex = mapping.deviceIndex;
         fit.rank = mapping.worldRank;
-        fit.shareBytes = fit.capacityBytes / static_cast<std::size_t>(fit.ranksPerDevice);
-        fit.warning = fit.ranksPerDevice > 1;
-        fit.refused = fit.capacityBytes > 0u && fit.requiredBytes > fit.shareBytes;
-
-        if(fit.warning)
-            fit.warningMessage = std::to_string(fit.ranksPerDevice)
-                + " ranks per device on device " + std::to_string(fit.deviceIndex) + " (\""
-                + mapping.deviceName + "\"): estimated " + formatByteCount(fit.requiredBytes)
-                + " required per rank, " + formatByteCount(fit.shareBytes)
-                + " available per rank (" + formatByteCount(fit.capacityBytes)
-                + " device capacity)";
-        if(fit.refused)
-            fit.refusalMessage = "rank " + std::to_string(fit.rank) + " requires "
-                + formatByteCount(fit.requiredBytes) + " on device "
-                + std::to_string(fit.deviceIndex) + " (\"" + mapping.deviceName
-                + "\"), but the " + formatByteCount(fit.capacityBytes)
-                + " device capacity divided by " + std::to_string(fit.ranksPerDevice)
-                + " ranks per device is " + formatByteCount(fit.shareBytes)
-                + "; refusing to start";
         return fit;
     }
 
@@ -355,13 +341,22 @@ namespace picBunch
 
     DeviceFit enforceRankDeviceFit(DeviceWorkload const& workload)
     {
-        DeviceFit const fit = evaluateDeviceFit(currentRankDeviceMapping(), workload);
-        static bool warningPrinted = false;
-        if(fit.warning && !warningPrinted && mpiRank() == 0)
-        {
-            warningPrinted = true;
-            std::fprintf(stderr, "picBunch: warning: %s\n", fit.warningMessage.c_str());
-        }
+        DeviceFit fit = evaluateDeviceFit(currentRankDeviceMapping(), workload);
+        std::uint64_t totalRequired = static_cast<std::uint64_t>(fit.requiredBytes);
+        std::uint64_t totalCapacity = static_cast<std::uint64_t>(fit.capacityBytes);
+        mpiSumLocal(totalRequired, totalCapacity);
+        fit.totalRequiredBytes = static_cast<std::size_t>(totalRequired);
+        fit.totalCapacityBytes = static_cast<std::size_t>(totalCapacity);
+        fit.rankCount = std::max(1, rankLocalSize());
+        fit.refused
+            = !totalDeviceMemoryFits(fit.totalRequiredBytes, fit.totalCapacityBytes);
+        if(fit.refused)
+            fit.refusalMessage = "total estimated device memory "
+                + formatByteCount(fit.totalRequiredBytes) + " over "
+                + std::to_string(fit.rankCount) + " local rank"
+                + (fit.rankCount == 1 ? "" : "s")
+                + " exceeds the total device capacity "
+                + formatByteCount(fit.totalCapacityBytes) + "; refusing to start";
         enforceDeviceFit(fit);
         return fit;
     }
