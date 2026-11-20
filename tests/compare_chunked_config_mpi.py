@@ -191,8 +191,19 @@ def failure_tail(result):
     return " | ".join((interesting or lines)[-3:]) or "no output"
 
 
+def child_environment():
+    """Environment with inherited PICBUNCH_TEST_* variables removed."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
+
+
 def run(command, label):
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = subprocess.run(
+        command, text=True, capture_output=True, env=child_environment()
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{label}: command failed with exit {result.returncode}: "

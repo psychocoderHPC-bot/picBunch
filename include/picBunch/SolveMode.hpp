@@ -110,19 +110,25 @@ namespace picBunch
      * ``estimateChunkedRequirementBytes`` covers one virtual-rank solver
      * workspace and the particle staging.  While the solver is alive the
      * caller also retains the six-component output slab it just read out, so
-     * the true peak adds ``6 * slabPlanes * planeElems`` doubles.  For a
+     * the true peak adds ``6 * slabPlanes * planeElems`` doubles.  The
+     * per-component emitter in ``StagedDistributedFft`` also holds one
+     * ``std::vector<double> output`` of up to ``emitterPlanes`` planes
+     * (``ceil(Mz / virtualRanks)``) while that slab and the workspace are
+     * alive, so the peak adds ``emitterPlanes * planeElems`` doubles.  For a
      * single rank ``slabPlanes`` is the whole output volume.  Kept pure so the
      * gate can be unit-tested without a build- or device-dependent path.
      */
     inline std::size_t chunkedResidentBytes(
         std::size_t solverBytes,
         std::size_t slabPlanes,
-        std::size_t planeElems)
+        std::size_t planeElems,
+        std::size_t emitterPlanes)
     {
         constexpr std::size_t componentCount = 6u;
         constexpr std::size_t valueBytes = sizeof(double);
         return solverBytes
-            + componentCount * slabPlanes * planeElems * valueBytes;
+            + componentCount * slabPlanes * planeElems * valueBytes
+            + emitterPlanes * planeElems * valueBytes;
     }
 
     /*! Number of output z-planes owned by ``rank`` in a ``parSize``-way split.

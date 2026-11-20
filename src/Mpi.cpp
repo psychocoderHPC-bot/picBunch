@@ -595,16 +595,24 @@ namespace picBunch
             constexpr int nameLength = 128;
             constexpr int variableLength = 32;
             constexpr int valueLength = 256;
-            std::uint64_t mine[7] = {
+            // The eight-word encoding carries both the reported hardware
+            // capacity (word 5) and the decision budget (word 7).  A gathered
+            // mapping without the budget word would default it to zero and
+            // ``evaluateDeviceFit`` would read that as "capacity unknown" and
+            // silently disable the fit, so keep the two in lockstep.  All
+            // ranks run this same executable, so the layout needs no separate
+            // version word.
+            std::uint64_t mine[8] = {
                 static_cast<std::uint64_t>(local.worldRank),
                 static_cast<std::uint64_t>(local.localRank),
                 static_cast<std::uint64_t>(local.deviceIndex),
                 static_cast<std::uint64_t>(local.visibleDeviceCount),
                 static_cast<std::uint64_t>(local.ranksPerDevice),
                 static_cast<std::uint64_t>(local.deviceCapacityBytes),
-                local.overrideRespected ? 1u : 0u};
-            std::vector<std::uint64_t> gathered(7u * static_cast<std::size_t>(count));
-            MPI_Allgather(mine, 7, MPI_UINT64_T, gathered.data(), 7, MPI_UINT64_T, MPI_COMM_WORLD);
+                local.overrideRespected ? 1u : 0u,
+                static_cast<std::uint64_t>(local.deviceBudgetBytes)};
+            std::vector<std::uint64_t> gathered(8u * static_cast<std::size_t>(count));
+            MPI_Allgather(mine, 8, MPI_UINT64_T, gathered.data(), 8, MPI_UINT64_T, MPI_COMM_WORLD);
 
             auto gatherString = [&](std::string const& text, int length) {
                 std::vector<char> mineText(static_cast<std::size_t>(length), '\0');
@@ -634,7 +642,7 @@ namespace picBunch
             for(int rank = 0; rank < count; ++rank)
             {
                 std::size_t const i = static_cast<std::size_t>(rank);
-                std::uint64_t const* wire = gathered.data() + i * 7u;
+                std::uint64_t const* wire = gathered.data() + i * 8u;
                 RankDeviceMapping& mapping = result[i];
                 mapping.worldRank = static_cast<int>(wire[0]);
                 mapping.localRank = static_cast<int>(wire[1]);
@@ -643,6 +651,7 @@ namespace picBunch
                 mapping.ranksPerDevice = static_cast<int>(wire[4]);
                 mapping.deviceCapacityBytes = static_cast<std::size_t>(wire[5]);
                 mapping.overrideRespected = wire[6] != 0u;
+                mapping.deviceBudgetBytes = static_cast<std::size_t>(wire[7]);
                 mapping.deviceName = names[i];
                 mapping.overrideVariable = variables[i];
                 mapping.overrideValue = values[i];
