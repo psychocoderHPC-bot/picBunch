@@ -185,6 +185,12 @@ message names the axis, the required halo nodes and the halo nodes actually
 available. `tolerance` never selects a factor below 2, so the automatic policy
 is unchanged.
 
+### `[solve]`
+
+| key | required | meaning |
+| --- | --- | --- |
+| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"`, `"in-core"` or `"incore"`. `auto` keeps the in-core solve when the per-rank estimate fits and otherwise switches to the staged chunked solve when that path is available and its peak fits. The three in-core spellings force the whole-grid path. An explicit `--solve-mode` wins over this key. |
+
 ### `[checkpoint]`
 
 | key | required | meaning |
@@ -287,30 +293,34 @@ datasets, and stores only its own z-slab at its global offset. No rank gathers
 or allocates the full field, and the checkpoint tree is independent of the rank
 count. Particle records and `checkpoints.txt` stay on rank 0.
 
-## Chunked field computation is not supported
+## Solve mode and the config path
 
-picBunch does **not** ship a chunked or slab-tiled field-computation path, and
-there is no `accuracy.field_slab_planes` configuration key. A checkpoint is
-written only from a fully materialised field; the peak device memory is
-therefore the full padded FFT box plus the six output components (about 370
-bytes per grid cell on the reference small case, 400x160x440 cells at 2e-7 m;
-measured 10.5 GiB on the GV100). Host RSS on the same case was 1.6 GiB.
+`--solve-mode` accepts `auto`, `chunked`, `none`, `in-core` and `incore`.
+`none`, `in-core` and `incore` select the whole-grid in-core solve. `auto`
+(default) keeps the in-core solve when the per-rank device estimate fits, and
+otherwise switches to the staged chunked solve when that path is available and
+its peak fits the same per-rank budget. The switch is logged once on rank 0
+with the required and budget bytes and a stable reason key.
 
-The slab approach was implemented and measured, then removed. Two wrapper bugs
-were fixed first: a wrong `idist` that aliased every z-row, and a batched 2-D
-plan that never transformed z. The slab field still disagreed with the untiled
-reference: the relative E error was 0.45-0.67, and the spectral-curl B path
-overflowed to about `1e307` because the half-spectrum Hermitian symmetry is
-broken on the DC and Nyquist planes. That is a correctness gap, not a tuning
-problem, so the feature is not shippable.
+An explicit `--solve-mode` overrides the optional TOML key:
 
-The correct future approach is a decomposition that preserves the global z
-spectrum: either a distributed FFT along z with the correct global halo, or an
-overlap-save scheme whose per-slab transform is embedded in the full-plane
-spectrum rather than an independent small transform. Any such path must prove
-all six components against the untiled field to a stated tolerance before it is
-accepted, and it must keep one full-shape record component per field component
-in the checkpoint.
+```toml
+[solve]
+solve_mode = "auto"   # auto|chunked|none; in-core and incore are also accepted
+```
+
+The `--config` path accepts the chunked solve; it no longer keeps the in-core
+path unconditionally. The staged solve is host/CPU-only and single-process and
+stages the global transforms on disk exactly as the direct path does. It is
+not the removed per-slab field approximation: the global z spectrum is
+preserved, so there is still no `accuracy.field_slab_planes` key.
+
+The config path applies the same lowered knobs as the direct path:
+`--chunk-cells`, `--virtual-ranks`, `--staging-dir`, `--keep-staging`,
+`--deterministic-deposit`, `--shape`, `--tolerance` (overrides
+`accuracy.tolerance`), `--input-iteration`, and `--output-iteration` (overrides
+the emitted checkpoint step). See
+[docs/chunked-field-solve.md](chunked-field-solve.md) for the memory model.
 
 ## Particle patch and records
 

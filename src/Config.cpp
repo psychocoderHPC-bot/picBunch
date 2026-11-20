@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: Rene Widera
 #include "picBunch/Config.hpp"
+#include "picBunch/SolveMode.hpp"
 
 #include <toml++/toml.hpp>
 
@@ -486,6 +487,22 @@ namespace picBunch
                 fail("accuracy.near_shell_exact_cells", "must be between -2 and 2");
             config.accuracy.nearShellExactCells = static_cast<int>(cells);
         }
+        // Optional solve policy.  The table is optional; ``solve_mode``
+        // defaults to "auto".  An explicit --solve-mode wins in the caller.
+        if(auto const* solveTable = requireTableOptional(document, "solve"))
+        {
+            if(auto const* node = solveTable->get("solve_mode"))
+            {
+                std::string const text = asString(*node, "solve.solve_mode");
+                auto const mode = parseSolveMode(text);
+                if(!mode)
+                    fail(
+                        "solve.solve_mode",
+                        "must be \"auto\", \"chunked\", \"none\", \"in-core\" or "
+                        "\"incore\" (got \"" + text + "\")");
+                config.solve.solveMode = *mode;
+            }
+        }
         // Checkpoint output backend.  The table is optional; ``backend`` defaults
         // to "auto".  Only "auto", "adios2" and "hdf5" are accepted.
         if(auto const* checkpointTable = requireTableOptional(document, "checkpoint"))
@@ -681,11 +698,17 @@ namespace picBunch
              "accuracy.near_shell_oblique_order",
              "accuracy.near_shell_exact_cells"},
             config.warnings);
+        if(auto const* solveTable = requireTableOptional(document, "solve"))
+            warnUnknown(
+                *solveTable,
+                "solve",
+                {"solve.solve_mode"},
+                config.warnings);
         for(auto const& [key, node] : document)
         {
             std::string const name(key.str());
             if(name != "strict" && name != "picongpu" && name != "domain" && name != "placement"
-               && name != "accuracy" && name != "checkpoint")
+               && name != "accuracy" && name != "checkpoint" && name != "solve")
                 config.warnings.push_back("unknown configuration key '" + name + "' was ignored");
         }
         if(config.strict && !config.warnings.empty())
