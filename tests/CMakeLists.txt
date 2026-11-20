@@ -252,8 +252,8 @@ if(PICBUNCH_BUILD_GTESTS)
             set_tests_properties(picBunch.ChunkedMpiVsDistributedConfig PROPERTIES TIMEOUT 300)
 
             # The automatic policy must actually switch on a forced budget,
-            # refuse when neither mode fits, and let the MPI Allreduce
-            # reconcile ranks with unequal per-rank budgets.
+            # refuse when neither mode fits, and reconcile the node-total
+            # decision across ranks with the shared-memory reduction.
             add_test(
                 NAME picBunch.SolveModeAutoSwitch
                 COMMAND
@@ -262,6 +262,18 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${CMAKE_CURRENT_BINARY_DIR}
             )
             set_tests_properties(picBunch.SolveModeAutoSwitch PROPERTIES TIMEOUT 180)
+
+            # The node-total criterion from the review: four ranks on one
+            # 64 GiB device, each sharing 16 GiB, per-rank in-core 18 GiB and
+            # chunked 9 GiB.  The aggregate 72 > 64 GiB must switch to chunked
+            # with the 36 GiB aggregate.
+            add_test(
+                NAME picBunch.SolveModeAggregateN4
+                COMMAND
+                    ${MPIEXEC_EXECUTABLE} -n 4 $<TARGET_FILE:picBunchUnitTests>
+                    --gtest_filter=SolveModeAggregate.*
+            )
+            set_tests_properties(picBunch.SolveModeAggregateN4 PROPERTIES TIMEOUT 120)
         endif()
     else()
         add_test(
@@ -393,6 +405,37 @@ if(picBunchTests)
             RESOURCE_LOCK picBunchGpuDevice
     )
 endif()
+
+# The blanket TIMEOUT above overwrites every earlier per-test value.  Re-apply
+# the tighter bounds after it so they are effective.  Each guard keeps the call
+# valid when the optional test was not registered in this configuration.
+foreach(_picbunch_timeout_test IN ITEMS
+    ChunkedFailureDiagnostics
+    MpiInvalidInput
+    ChunkedVirtualVsMpi
+    ChunkedMpiVsDistributedConfig
+    SolveModeAutoSwitch
+    SolveModeCli
+    SolveModeAggregateN4
+)
+    if(TEST picBunch.${_picbunch_timeout_test})
+        if(_picbunch_timeout_test STREQUAL "ChunkedFailureDiagnostics"
+           OR _picbunch_timeout_test STREQUAL "ChunkedVirtualVsMpi"
+           OR _picbunch_timeout_test STREQUAL "ChunkedMpiVsDistributedConfig")
+            set(_picbunch_timeout 300)
+        elseif(_picbunch_timeout_test STREQUAL "SolveModeAutoSwitch")
+            set(_picbunch_timeout 600)
+        elseif(_picbunch_timeout_test STREQUAL "SolveModeCli"
+               OR _picbunch_timeout_test STREQUAL "SolveModeAggregateN4")
+            set(_picbunch_timeout 120)
+        else()
+            set(_picbunch_timeout 30)
+        endif()
+        set_tests_properties(
+            picBunch.${_picbunch_timeout_test} PROPERTIES TIMEOUT ${_picbunch_timeout}
+        )
+    endif()
+endforeach()
 
 # ---------------------------------------------------------------------------
 # Configuration contract

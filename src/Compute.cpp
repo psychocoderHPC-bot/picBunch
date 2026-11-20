@@ -2173,20 +2173,23 @@ namespace picBunch
                 useDistributed ? parSize : 1,
                 useDistributed,
                 static_cast<unsigned>(sizeof(double))};
-            // The test-only budget override is applied at the capacity source,
-            // so the fit sees the same per-rank capacity in every consumer.
+            // The fit reads the budget field derived at the mapping source, so
+            // the decision and the guard agree while the reported capacity
+            // stays the true device capacity.
             DeviceFit const localFit
                 = evaluateDeviceFit(currentRankDeviceMapping(), inCoreWorkload);
 
-            /*! Worst-rank capacity picture.
+            /*! Node-total capacity picture.
              *
-             * ``localFit`` is rank-local: it comes from this rank's device
-             * mapping, so unequal device capacity or ranks-per-device lets one
-             * rank hold a much smaller share than root.  Reducing the required
-             * bytes upward and the budget share downward before the decision
-             * makes every rank resolve from the same pessimistic picture.  A
-             * refusal then reaches every rank instead of leaving one rank to
-             * throw while its peers enter the solve.
+             * ``localFit`` is rank-local.  The existing max/min reduction keeps
+             * a diagnostic picture of the worst rank; it is not the decision
+             * criterion.  Both criteria compare node totals in the same units:
+             * the in-core requirement sums to the node total and the capacity
+             * sums to the node total.  The chunked peak sums the same way
+             * below.  ``mpiSumLocal`` is only called when the shared-memory
+             * context is present, so a null context or a single rank reduces
+             * to the local value without a collective and every rank keeps the
+             * same collective call sequence.
              */
             auto const reduceFit = [&](DeviceFit const& local) {
                 DeviceFit reduced = local;
@@ -2199,21 +2202,29 @@ namespace picBunch
                     reduced.requiredBytes = static_cast<std::size_t>(required);
                     reduced.shareBytes = static_cast<std::size_t>(share);
                     reduced.capacityBytes = reduced.shareBytes;
+                    reduced.rankCount = std::max(1, rankLocalSize());
                 }
-                // ``evaluateDeviceFit`` no longer refuses: the node-total guard
-                // moved into ``enforceRankDeviceFit``.  The automatic policy
-                // still needs a per-rank refusal here, including the
-                // single-process path that skips the collectives.
-                reduced.refused
-                    = reduced.shareBytes > 0u && reduced.requiredBytes > reduced.shareBytes;
+                std::uint64_t totalRequired = static_cast<std::uint64_t>(local.requiredBytes);
+                std::uint64_t totalCapacity = static_cast<std::uint64_t>(local.capacityBytes);
+                if(par != nullptr && parSize > 1)
+                    mpiSumLocal(totalRequired, totalCapacity);
+                reduced.requiredBytes = static_cast<std::size_t>(totalRequired);
+                reduced.shareBytes = static_cast<std::size_t>(totalCapacity);
+                reduced.capacityBytes = static_cast<std::size_t>(totalCapacity);
+                reduced.refused = !totalDeviceMemoryFits(
+                    static_cast<std::size_t>(totalRequired),
+                    static_cast<std::size_t>(totalCapacity));
                 return reduced;
             };
 
-            // The staged path keeps the binned particle bookkeeping (``boxOf``
-            // plus ``members``, one size_t each) and one virtual-rank
-            // workspace.  While the solver is alive the caller also retains a
-            // six-component output slab, so the gate must budget it too; for a
-            // single rank that slab is the whole output volume.
+            // The staged path keeps the whole ``Bunch`` resident (the particle
+            // arrays ``x``, ``y``, ``z``, ``ux``, ``uy``, ``uz``, ``weight``,
+            // ``charge`` and the optional ``restMass``, all ``double``), the
+            // binned bookkeeping (``boxOf`` plus ``members``, one size_t each)
+            // and one virtual-rank workspace.  While the solver is alive the
+            // caller also retains a six-component output slab, so the gate must
+            // budget it too; for a single rank that slab is the whole output
+            // volume.
             std::size_t const outputPlane
                 = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy);
             std::size_t const slabPlanes = slabPlanesForRank(
@@ -2238,8 +2249,18 @@ namespace picBunch
                             options.virtualRanks > 0 ? options.virtualRanks : 1,
                             static_cast<int>(std::min(Mx, Mz))));
                 }
+                // Count the arrays and the element type the code actually
+                // carries, so adding a per-particle array cannot silently
+                // under-count the peak.  ``restMass`` may be empty.
+                std::size_t const particleArrayElements
+                    = bunch.x.size() + bunch.y.size() + bunch.z.size()
+                    + bunch.ux.size() + bunch.uy.size() + bunch.uz.size()
+                    + bunch.weight.size() + bunch.charge.size()
+                    + bunch.restMass.size();
                 std::size_t const particleBytes
-                    = bunch.size() * 2u * sizeof(std::size_t);
+                    = particleArrayElements
+                        * sizeof(typename std::remove_reference_t<decltype(bunch.x)>::value_type)
+                    + bunch.size() * 2u * sizeof(std::size_t);
                 return chunkedResidentBytes(
                     estimateChunkedRequirementBytes(
                         Mx,
@@ -2259,20 +2280,34 @@ namespace picBunch
                 = !gridCapacityViolation(grid, options, SolveMode::InCore);
             fit.refused = fit.refused || !inCoreGeometryFits;
 
-            // The staged estimate is reduced the same way so one rank with a
-            // larger bin/particle staging cannot slip past the budget gate and
-            // then throw after its peers entered the solve.
+            // The staged estimate is reduced with the same sum as the in-core
+            // requirement, so both sides of the comparison are node totals in
+            // the same units and one rank with a larger bin/particle staging
+            // cannot slip past the budget gate.
             std::size_t chunkedBytes = chunkedEstimateBytes();
             if(par != nullptr && parSize > 1)
             {
-                std::uint64_t reducedChunked = chunkedBytes;
-                par->allreduceMax(reducedChunked);
-                chunkedBytes = static_cast<std::size_t>(reducedChunked);
+                std::uint64_t totalChunked = chunkedBytes;
+                std::uint64_t totalCapacityScratch = 0u;
+                mpiSumLocal(totalChunked, totalCapacityScratch);
+                chunkedBytes = static_cast<std::size_t>(totalChunked);
             }
 
             bool const needResolution
                 = !options.solveModeResolved || options.solveMode == SolveMode::Auto;
-            if(needResolution)
+            if(options.perTileSolve)
+            {
+                // A per-tile local solve runs without a parallel context.  The
+                // in-core guard below contains a collective, so the call must be
+                // rank-uniform, and the tile path cannot agree on a mode across
+                // ranks: a rank that resolved chunked would skip the guard while
+                // its peers block in it.  Chunked per tile is meaningless, so
+                // force in-core on every rank and run the guard uniformly.
+                // Marked explicitly because a plain single-process call also
+                // has a null context but must keep its requested mode.
+                resolvedMode = SolveMode::InCore;
+            }
+            else if(needResolution)
             {
                 bool const chunkedAvailable = chunkedBackendAvailable
                     && options.nearShell.mode == NearShellOptions::Mode::None
@@ -2401,17 +2436,19 @@ namespace picBunch
                         std::string("solve mode: in-core field solve does not fit: ")
                         + error.what()
                         + "; use --solve-mode chunked or --fft-mode distributed to "
-                          "lower the per-rank requirement");
+                          "lower the node requirement");
                 }
             }
             else if(resolvedMode == SolveMode::Chunked)
             {
                 if(fit.shareBytes > 0u && chunkedBytes > fit.shareBytes)
                     throw SolveModeRefusal(
-                        "solve mode: chunked solve exceeds the per-rank budget: required "
-                        + formatSolveModeBytes(chunkedBytes) + " per rank, budget "
-                        + formatSolveModeBytes(fit.shareBytes)
-                        + " per rank; lower --chunk-cells or use more ranks");
+                        "solve mode: chunked solve exceeds the node capacity: required "
+                        + formatSolveModeBytes(chunkedBytes) + ", capacity "
+                        + formatSolveModeBytes(fit.shareBytes) + " over "
+                        + std::to_string(std::max(1, fit.rankCount)) + " rank"
+                        + (fit.rankCount == 1 ? "" : "s")
+                        + "; lower --chunk-cells or use more ranks");
             }
         }
 
