@@ -244,7 +244,7 @@ namespace
             "                        when the padded box exceeds the per-rank limit\n"
             "  --solve-mode <mode>   auto|chunked|none|in-core (default: auto).\n"
             "                        auto keeps the in-core solve when it fits the\n"
-            "                        per-rank budget and otherwise switches to chunked;\n"
+            "                        node memory budget and otherwise switches to chunked;\n"
             "                        it prints the decision and its reason once on\n"
             "                        rank 0.  none and in-core are synonyms\n"
             "                        for the in-core path.  chunked runs the exact\n"

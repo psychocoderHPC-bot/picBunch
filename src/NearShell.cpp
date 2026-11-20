@@ -1000,8 +1000,11 @@ namespace picBunch
 
                     ComputeOptions localOptions = tileOptions;
                     // The local subtraction is computed by this rank alone for
-                    // its own tile; never split it across ranks.
+                    // its own tile; never split it across ranks.  Mark the tile
+                    // path so the solver forces in-core instead of resolving a
+                    // mode that could differ between ranks.
                     localOptions.parallel = nullptr;
+                    localOptions.perTileSolve = true;
                     localOptions.gridSize = localN;
                     localOptions.gridOrigin = localOrigin;
                     localOptions.meshGridSize = std::nullopt;

@@ -156,8 +156,10 @@ namespace picBunch
         std::string reason;
         //! Bytes that the decision needs (in-core estimate, or chunked peak).
         std::size_t requiredBytes = 0;
-        //! Per-rank budget that was compared against ``requiredBytes``.
+        //! Node-total capacity that was compared against ``requiredBytes``.
         std::size_t budgetBytes = 0;
+        //! Ranks whose capacity/requirement sum produced ``budgetBytes``.
+        int rankCount = 1;
     };
 
     /*! Resolve the solve mode from the request and the capacity estimate.
@@ -185,6 +187,7 @@ namespace picBunch
         SolveModeDecision decision;
         decision.requiredBytes = inCoreFit.requiredBytes;
         decision.budgetBytes = inCoreFit.shareBytes;
+        decision.rankCount = std::max(1, inCoreFit.rankCount);
 
         if(requested == SolveMode::InCore)
         {
@@ -242,8 +245,9 @@ namespace picBunch
     /*! One-line decision text for stderr.
      *
      * The auto-switch form is stable and parseable:
-     * ``picBunch: solve mode: auto -> chunked (required X, budget Y per rank,
-     * reason key)``.  Explicit overrides print their final mode once.
+     * ``picBunch: solve mode: auto -> chunked (required X, capacity Y over N
+     * ranks, reason key)``.  Both numbers are node totals.  Explicit overrides
+     * print their final mode once.
      */
     inline std::string formatSolveModeDecision(SolveModeDecision const& decision)
     {
@@ -261,15 +265,19 @@ namespace picBunch
             out << solveModeName(decision.mode);
 
         if(decision.refused || decision.switched)
-            out << " (required " << formatSolveModeBytes(decision.requiredBytes) << ", budget "
-                << formatSolveModeBytes(decision.budgetBytes) << " per rank, reason "
+            out << " (required " << formatSolveModeBytes(decision.requiredBytes)
+                << ", capacity " << formatSolveModeBytes(decision.budgetBytes) << " over "
+                << std::max(1, decision.rankCount) << " rank"
+                << (std::max(1, decision.rankCount) == 1 ? "" : "s") << ", reason "
                 << decision.reason << ")";
         else if(decision.reason == "capacity-unknown")
             out << " (capacity unknown, reason capacity-unknown)";
         else if(decision.reason == "in-core-fits")
             out << " (required " << formatSolveModeBytes(decision.requiredBytes)
-                << ", budget " << formatSolveModeBytes(decision.budgetBytes)
-                << " per rank, reason in-core-fits)";
+                << ", capacity " << formatSolveModeBytes(decision.budgetBytes) << " over "
+                << std::max(1, decision.rankCount) << " rank"
+                << (std::max(1, decision.rankCount) == 1 ? "" : "s")
+                << ", reason in-core-fits)";
         else
             out << " (explicit override, reason " << decision.reason << ")";
         return out.str();
@@ -290,10 +298,12 @@ namespace picBunch
                    "unavailable in this build or process layout";
         else
             out << "the in-core field solve does not fit and the chunked solve exceeds "
-                   "the per-rank budget";
-        out << "; required " << formatSolveModeBytes(decision.requiredBytes) << " per rank, budget "
-            << formatSolveModeBytes(decision.budgetBytes)
-            << " per rank. Lower the requirement with --fft-padding 1 or fewer ranks, or use "
+                   "the node capacity";
+        out << "; required " << formatSolveModeBytes(decision.requiredBytes) << ", capacity "
+            << formatSolveModeBytes(decision.budgetBytes) << " over "
+            << std::max(1, decision.rankCount) << " rank"
+            << (std::max(1, decision.rankCount) == 1 ? "" : "s")
+            << ". Lower the requirement with --fft-padding 1 or fewer ranks, or use "
                "--fft-mode distributed";
 #if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
         out << ". The staged chunked solve is host/CPU-only in a CUDA/HIP build";

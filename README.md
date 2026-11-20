@@ -27,8 +27,8 @@ gates, the near-source limitation and their provenance are recorded in
   [docs/chunked-field-solve.md](docs/chunked-field-solve.md) describes the
   out-of-core staging passes, the peak-memory formula, the
   `--solve-mode auto|chunked|none|in-core` policy (auto decides once per run
-  and keeps the in-core solve when it fits the per-rank budget, and otherwise
-  switches to the staged solve) and the measured production limit. The staged
+  and keeps the in-core solve when it fits the node memory budget, and
+  otherwise switches to the staged solve) and the measured production limit. The staged
   solve runs on any rank count and on the `--config` path; the optional TOML
   `[solve] solve_mode` key selects the same policy.
 - **Near-shell scaling:** [docs/near-shell-scaling.md](docs/near-shell-scaling.md)
@@ -734,13 +734,13 @@ that visible list, and the log states that the override was respected. A list wi
 entries than ranks therefore puts several ranks on each entry by design.
 
 When more than one rank lands on a device, picBunch prints a warning naming the ranks per
-device and the estimated requirement per rank against the per-rank capacity share. The
-estimate comes from the padded grid, the FFT layout (replicated or distributed), the
-precision, and the velocity-bin count; buffers are reused across bins, so the peak counts
-the largest bin, not bins times the full grid. If the estimate exceeds device capacity
-divided by ranks per device, the run refuses to start with a message naming the required
-size, the capacity, the ranks per device and the rank. Select fewer ranks per device or a
-larger device; an override that pins one device per process avoids the shared-device
+device. The estimate comes from the padded grid, the FFT layout (replicated or
+distributed), the precision, and the velocity-bin count; buffers are reused across bins,
+so the peak counts the largest bin, not bins times the full grid. The guard sums the
+requirement and the capacity over the ranks of the shared-memory domain and compares the
+two node totals. If the total requirement exceeds the total capacity, the run refuses to
+start with a message naming both totals and the rank count. Select fewer ranks per device
+or a larger device; an override that pins one device per process avoids the shared-device
 estimate.
 
 **MPI limitations.** The bunch is replicated, so particle memory does not fall with rank

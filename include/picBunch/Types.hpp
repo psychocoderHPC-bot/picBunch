@@ -638,17 +638,18 @@ namespace picBunch
     //! Field-solve execution path.
     enum class SolveMode
     {
-        //! Pick in-core when it fits the per-rank budget, else the chunked solve.
-        Auto,
         //! Whole-grid FFT in host/device memory (the historical path).
-        InCore,
+        InCore = 1,
         /*! Out-of-core chunked 3-D FFT with disk-backed transposes.
          *
          * One process splits the padded volume into chunks and processes one
          * chunk at a time.  The transform stays global (it is the same exact
          * 3-D transform); only the intermediate layouts are staged on disk.
          */
-        Chunked
+        Chunked = 2,
+        //! Pick in-core when it fits the node budget, else the chunked solve.
+        //! Kept last so the explicit values of InCore/Chunked never move.
+        Auto = 3
     };
 
     struct ComputeOptions
@@ -781,6 +782,14 @@ namespace picBunch
          * automatic policy can never fire inside that path.
          */
         bool solveModeResolved = false;
+        /*! True for the near-shell per-tile local solve.
+         *
+         * The tile path runs without a parallel context and cannot agree on a
+         * solve mode across ranks, so the compute entry point forces in-core
+         * there.  A plain single-process call also has a null context but must
+         * keep its requested mode, so the tile path marks itself explicitly.
+         */
+        bool perTileSolve = false;
         //! Cells (not bytes) in the largest chunk buffer; must hold one x-y plane.
         std::size_t chunkCells = std::size_t{1u} << 22;
         /*! Explicit number of virtual ranks for the staged solve.  Zero
