@@ -2181,15 +2181,21 @@ namespace picBunch
 
             /*! Node-total capacity picture.
              *
-             * ``localFit`` is rank-local.  The existing max/min reduction keeps
-             * a diagnostic picture of the worst rank; it is not the decision
-             * criterion.  Both criteria compare node totals in the same units:
-             * the in-core requirement sums to the node total and the capacity
-             * sums to the node total.  The chunked peak sums the same way
-             * below.  ``mpiSumLocal`` is only called when the shared-memory
-             * context is present, so a null context or a single rank reduces
-             * to the local value without a collective and every rank keeps the
-             * same collective call sequence.
+             * ``localFit`` is rank-local.  The max/min reduction below is
+             * discarded when the node-total sums are formed; it does not keep
+             * a worst-rank diagnostic.  Both criteria compare node totals in
+             * the same units: the in-core requirement sums to the node total
+             * and the capacity sums to the node total.  The chunked peak sums
+             * the same way below.  ``mpiSumLocal`` is only called when the
+             * shared-memory context is present, so a null context or a single
+             * rank reduces to the local value without a collective and every
+             * rank keeps the same collective call sequence.
+             *
+             * The decision also carries a rank-local bound: a rank whose own
+             * requirement exceeds its own device budget refuses even when the
+             * node total passes.  That term is computed from local values and
+             * adds no collective; when ranks disagree, the existing broadcast
+             * disagreement abort makes the failure uniform.
              */
             auto const reduceFit = [&](DeviceFit const& local) {
                 DeviceFit reduced = local;
@@ -2199,21 +2205,21 @@ namespace picBunch
                     std::uint64_t share = local.shareBytes;
                     par->allreduceMax(required);
                     par->allreduceMin(share);
-                    reduced.requiredBytes = static_cast<std::size_t>(required);
-                    reduced.shareBytes = static_cast<std::size_t>(share);
-                    reduced.capacityBytes = reduced.shareBytes;
                     reduced.rankCount = std::max(1, rankLocalSize());
                 }
                 std::uint64_t totalRequired = static_cast<std::uint64_t>(local.requiredBytes);
-                std::uint64_t totalCapacity = static_cast<std::uint64_t>(local.capacityBytes);
+                std::uint64_t totalCapacity
+                    = static_cast<std::uint64_t>(local.decisionBudgetBytes);
                 if(par != nullptr && parSize > 1)
                     mpiSumLocal(totalRequired, totalCapacity);
                 reduced.requiredBytes = static_cast<std::size_t>(totalRequired);
                 reduced.shareBytes = static_cast<std::size_t>(totalCapacity);
-                reduced.capacityBytes = static_cast<std::size_t>(totalCapacity);
-                reduced.refused = !totalDeviceMemoryFits(
-                    static_cast<std::size_t>(totalRequired),
-                    static_cast<std::size_t>(totalCapacity));
+                reduced.decisionBudgetBytes = static_cast<std::size_t>(totalCapacity);
+                reduced.refused = deviceFitRefused(
+                    local.requiredBytes,
+                    local.decisionBudgetBytes,
+                    reduced.requiredBytes,
+                    reduced.decisionBudgetBytes);
                 return reduced;
             };
 
@@ -2261,15 +2267,22 @@ namespace picBunch
                     = particleArrayElements
                         * sizeof(typename std::remove_reference_t<decltype(bunch.x)>::value_type)
                     + bunch.size() * 2u * sizeof(std::size_t);
+                std::size_t const virtualRanks
+                    = static_cast<std::size_t>(std::max(virtualRanksForEstimate, 1));
+                // The emitter holds one virtual-rank output slab; its z extent
+                // is ceil(Mz / virtualRanks), not this MPI rank's output slab.
+                std::size_t const emitterPlanes
+                    = (static_cast<std::size_t>(Mz) + virtualRanks - 1u) / virtualRanks;
                 return chunkedResidentBytes(
                     estimateChunkedRequirementBytes(
                         Mx,
                         My,
                         Mz,
-                        static_cast<std::size_t>(std::max(virtualRanksForEstimate, 1)),
+                        virtualRanks,
                         particleBytes),
                     slabPlanes,
-                    outputPlane);
+                    outputPlane,
+                    emitterPlanes);
             };
 
             DeviceFit fit = reduceFit(localFit);
@@ -2297,12 +2310,14 @@ namespace picBunch
                 = !options.solveModeResolved || options.solveMode == SolveMode::Auto;
             if(options.perTileSolve)
             {
-                // A per-tile local solve runs without a parallel context.  The
-                // in-core guard below contains a collective, so the call must be
-                // rank-uniform, and the tile path cannot agree on a mode across
-                // ranks: a rank that resolved chunked would skip the guard while
-                // its peers block in it.  Chunked per tile is meaningless, so
-                // force in-core on every rank and run the guard uniformly.
+                // Chunked per tile is meaningless, so force in-core.  The
+                // per-tile near-shell solve is called a different number of
+                // times on each rank (a rank skips the tiles outside its
+                // slab), so this path must never enter a collective guard: a
+                // collective in the guard would be matched by a different
+                // number of calls on each rank and deadlock.  The guard below
+                // therefore uses the purely local capacity check when this
+                // flag is set.
                 // Marked explicitly because a plain single-process call also
                 // has a null context but must keep its requested mode.
                 resolvedMode = SolveMode::InCore;
@@ -2425,13 +2440,21 @@ namespace picBunch
             {
                 try
                 {
-                    enforceRankDeviceFit(inCoreWorkload);
+                    // A per-tile solve is invoked a different number of times
+                    // on each rank, so it must never enter a collective guard;
+                    // the local check keeps every rank's collective call count
+                    // at zero.
+                    if(options.perTileSolve)
+                        enforceLocalDeviceFit(inCoreWorkload);
+                    else
+                        enforceRankDeviceFit(inCoreWorkload);
                 }
                 catch(std::runtime_error const& error)
                 {
-                    // The far-tail second pass copies the options with the mode
-                    // already final, so it skips the policy but still lands
-                    // here.  Refuse its larger grid with a distinct type.
+                    // ``options`` is a const reference, so the far-tail second
+                    // pass re-enters this policy instead of inheriting a final
+                    // mode.  Refuse its larger grid with a distinct type so
+                    // the caller can tell a fit failure from a padded-node cap.
                     throw SolveModeRefusal(
                         std::string("solve mode: in-core field solve does not fit: ")
                         + error.what()

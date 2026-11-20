@@ -122,11 +122,38 @@ namespace picBunch
     //! capacity means the backend did not report a limit and is not enforced.
     bool totalDeviceMemoryFits(std::size_t totalRequiredBytes, std::size_t totalCapacityBytes);
 
+    /*! Combined node-total and per-rank refusal.
+     *
+     * The node-total criterion alone can hide a rank whose own requirement
+     * exceeds the device that rank is pinned to: another rank's unused
+     * capacity makes the sum pass.  This helper ANDs the local bound (this
+     * rank's requirement against its own decision budget) with the node-total
+     * bound.  All four arguments are rank-local values already owned by the
+     * caller, so the helper performs no collective; the caller keeps ranks
+     * consistent through its existing broadcast.
+     */
+    inline bool deviceFitRefused(
+        std::size_t localRequiredBytes,
+        std::size_t localBudgetBytes,
+        std::size_t totalRequiredBytes,
+        std::size_t totalBudgetBytes)
+    {
+        return !totalDeviceMemoryFits(localRequiredBytes, localBudgetBytes)
+            || !totalDeviceMemoryFits(totalRequiredBytes, totalBudgetBytes);
+    }
+
     //! Result of comparing the summed estimate with the summed device capacity.
     struct DeviceFit
     {
         std::size_t requiredBytes = 0;
-        std::size_t capacityBytes = 0;
+        /*! Bytes this decision may use.
+         *
+         * This is the decision budget, i.e. the mapping's ``deviceBudgetBytes``
+         * (the test override when active) rather than the hardware capacity in
+         * ``RankDeviceMapping::deviceCapacityBytes``.  Named distinctly so a
+         * reader does not mistake it for the reported device capacity.
+         */
+        std::size_t decisionBudgetBytes = 0;
         std::size_t shareBytes = 0;
         int ranksPerDevice = 1;
         int deviceIndex = 0;
@@ -147,8 +174,18 @@ namespace picBunch
     //! Throw ``std::runtime_error`` with the refusal text when the estimate does not fit.
     void enforceDeviceFit(DeviceFit const& fit);
 
-    //! Evaluate, sum over the shared-memory domain, and refuse when the total exceeds capacity.
+    //! Evaluate, sum over the shared-memory domain, and refuse when the total
+    //! or this rank's own requirement exceeds the corresponding budget.
     DeviceFit enforceRankDeviceFit(DeviceWorkload const& workload);
+
+    /*! Evaluate and refuse using only this rank's values, with no collective.
+     *
+     * The per-tile near-shell solve runs a different number of times on each
+     * rank (a rank skips the tiles outside its slab), so it must never enter a
+     * collective guard.  This guard compares the local requirement with the
+     * local decision budget and is safe to call any number of times per rank.
+     */
+    DeviceFit enforceLocalDeviceFit(DeviceWorkload const& workload);
 
     //! Human-readable byte count (GiB/MiB) used by the warning and refusal text.
     std::string formatByteCount(std::size_t bytes);
