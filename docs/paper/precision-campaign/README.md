@@ -88,6 +88,34 @@ docs/paper/precision-campaign/reference/build_reference.sh \
 Write each run into a **new** attempt directory. The campaign roots are
 append-only: do not reuse a root whose `prov/index.jsonl` already holds a run.
 
+### 2-rank rosi run (two lanes)
+
+`--mpi-ranks 2` prefixes each mesh argv with `mpiexec -n 2` and inserts
+`--fft-mode distributed` before `--output`. Split the four GPUs into two lanes
+with `--gpu-pairs`, one pair per worker. Give each lane its own append-only
+root and `--ref-workers 4`, so the two lanes share the CPU instead of each
+assuming all of it:
+
+```bash
+# lane A
+./run_campaign.py --root <attempt-A> --bin build/paper/picBunch \
+  --mpi-ranks 2 --gpu-pairs 0,1 --ref-workers 4 \
+  --only line-w4b,hires-g10
+
+# lane B
+./run_campaign.py --root <attempt-B> --bin build/paper/picBunch \
+  --mpi-ranks 2 --gpu-pairs 2,3 --ref-workers 4 \
+  --only line-gamma,var1b-1mrad
+```
+
+Each lane writes its own `prov/index.jsonl`; do not point both lanes at the
+same root. `--estimate` works with pairs and prints the pair in the `slot`
+column.
+
+Cases with more than one velocity bin pin `--velocity-bin-edges uniform` by
+default, matching the paper campaign; pass another rule explicitly when a case
+needs it. The rule is recorded in the provenance record.
+
 The driver writes a private tree under `--root`:
 
 ```

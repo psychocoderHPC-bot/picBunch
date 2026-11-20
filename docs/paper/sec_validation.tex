@@ -139,3 +139,9 @@ eight groups and the restart exits 0; the copied PML datasets are float32
 and bitwise equal to the source, initialization is $3.986$\,s, and the
 main $E$ and $B$ records are recomputed from the particles and stay
 float32.
+
+\paragraph{Two-rank reproduction.}
+Appendix~\ref{app:reproduction} reruns the campaign with two MPI ranks on
+V100.  The non-near-shell data reproduce, with the outer \texttt{line-gamma}
+ring smaller in the two-rank run, while the host near-shell evaluator shows a
+host-dependent spread at high $\gamma$ and oblique incidence.
