@@ -866,16 +866,6 @@ namespace picBunch
                         continue;
                     std::size_t const i1 = std::min(n[0], i0 + tile);
 
-                    // Node bounding box of this tile.
-                    double low[3] = {
-                        origin[0] + static_cast<double>(i0) * spacing[0],
-                        origin[1] + static_cast<double>(j0) * spacing[1],
-                        origin[2] + static_cast<double>(k0) * spacing[2]};
-                    double high[3] = {
-                        origin[0] + static_cast<double>(i1 - 1u) * spacing[0],
-                        origin[1] + static_cast<double>(j1 - 1u) * spacing[1],
-                        origin[2] + static_cast<double>(k1 - 1u) * spacing[2]};
-
                     // Near set from the per-source tile lists.  The lists
                     // are already sorted in source index order.
                     auto const& nearIndex = tileSources[
@@ -1000,8 +990,11 @@ namespace picBunch
 
                     ComputeOptions localOptions = tileOptions;
                     // The local subtraction is computed by this rank alone for
-                    // its own tile; never split it across ranks.
+                    // its own tile; never split it across ranks.  Mark the tile
+                    // path so the solver forces in-core instead of resolving a
+                    // mode that could differ between ranks.
                     localOptions.parallel = nullptr;
+                    localOptions.perTileSolve = true;
                     localOptions.gridSize = localN;
                     localOptions.gridOrigin = localOrigin;
                     localOptions.meshGridSize = std::nullopt;

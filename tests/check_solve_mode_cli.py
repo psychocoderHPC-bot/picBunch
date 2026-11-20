@@ -36,6 +36,11 @@ DEVICE_CHUNKED_REFUSAL = (
     "chunked solve is implemented for the host/CPU backend only; "
     "the staging passes hand host buffers to the FFT backend"
 )
+# Printed by ``printTimings`` only after the staged solver actually ran.  The
+# solve-mode decision line is emitted from argv parsing before any work, so a
+# binary that prints "explicit-chunked" and then solves in-core would pass a
+# reason-only check.
+CHUNKED_MARKER = "chunked solve (chunk="
 N_PARTICLES = 128
 Q_E = 1.602176634e-19
 M_E = 9.1093837015e-31
@@ -121,8 +126,19 @@ def write_input(path, grid=GRID, n=N_PARTICLES, cell=CELL):
         )
 
 
+def child_environment():
+    """Environment with inherited PICBUNCH_TEST_* variables removed."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
+
+
 def run(command):
-    return subprocess.run(command, text=True, capture_output=True)
+    return subprocess.run(
+        command, text=True, capture_output=True, env=child_environment()
+    )
 
 
 def is_device_chunked_refusal(result):
@@ -233,6 +249,15 @@ def main():
                 print(
                     f"run {label} status=FAIL exit={result.returncode} "
                     + failure_tail(result)
+                )
+                failures += 1
+                continue
+            ran_chunked = CHUNKED_MARKER in result.stdout
+            if ran_chunked != (mode == "chunked"):
+                wanted = "must print" if mode == "chunked" else "must not print"
+                print(
+                    f"run {label} status=FAIL solver output {wanted} "
+                    f"{CHUNKED_MARKER!r}"
                 )
                 failures += 1
                 continue

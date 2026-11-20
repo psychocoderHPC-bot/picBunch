@@ -191,8 +191,19 @@ def failure_tail(result):
     return " | ".join((interesting or lines)[-3:]) or "no output"
 
 
+def child_environment():
+    """Environment with inherited PICBUNCH_TEST_* variables removed."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
+
+
 def run(command, label):
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = subprocess.run(
+        command, text=True, capture_output=True, env=child_environment()
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{label}: command failed with exit {result.returncode}: "
@@ -206,6 +217,14 @@ def stderr_tail(result):
     return " | ".join(lines[-5:]) or "no stderr"
 
 
+# Printed by the staged solver itself after it ran.  The solve-mode reason line
+# is emitted from argv parsing before any work, so the reason alone cannot
+# prove the chunked path executed.  The configured path does not call
+# ``printTimings`` (that header is direct-path only), so it uses the staged
+# solver's own line instead of "chunked solve (chunk=".
+STAGED_MARKER = "picBunch: staged solve:"
+
+
 def require_reason(result, marker, label):
     """Fail when the run did not log the expected solve-mode reason.
 
@@ -217,6 +236,18 @@ def require_reason(result, marker, label):
     if marker in result.stderr:
         return None
     return f"{label}: stderr lacks {marker!r}: " + stderr_tail(result)
+
+
+def require_chunked_path(result, expected, label):
+    """Require the solver's own marker exactly where the mode says it ran."""
+    present = STAGED_MARKER in result.stderr
+    if present == expected:
+        return None
+    wanted = "must print" if expected else "must not print"
+    return (
+        f"{label}: solver output {wanted} {STAGED_MARKER!r} "
+        f"(stderr={result.stderr[-200:]!r})"
+    )
 
 
 def _checkpoint(path):
@@ -342,6 +373,10 @@ def main():
                         "reason explicit-in-core",
                         f"reference {tag} ranks={ranks}",
                     )
+                    if mismatch is None:
+                        mismatch = require_chunked_path(
+                            result, False, f"reference {tag} ranks={ranks}"
+                        )
                     if mismatch is not None:
                         print(f"refcheck {tag} ranks=1_vs_{ranks} FAIL {mismatch}")
                         return 1
@@ -404,6 +439,8 @@ def main():
                         mismatch = require_reason(
                             result, "reason explicit-chunked", label
                         )
+                        if mismatch is None:
+                            mismatch = require_chunked_path(result, True, label)
                         if mismatch is not None:
                             print(f"case {label} status=FAIL {mismatch}")
                             failures += 1

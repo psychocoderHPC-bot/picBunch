@@ -3,19 +3,27 @@
 # SPDX-FileCopyrightText: Rene Widera
 """End-to-end tests of the automatic solve-mode decision.
 
-The automatic policy keeps the in-core solve when the per-rank estimate fits
-and switches to the staged chunked solve when it does not.  Three cases pin
-that decision against the per-rank memory budget:
+The automatic policy keeps the in-core solve when the node-total estimate fits
+and switches to the staged chunked solve when it does not.  Both sides are
+node totals: the requirement and the capacity are summed over the ranks of the
+shared-memory domain.  Three single-rank cases pin that decision against the
+budget:
 
 * a budget far above the in-core requirement keeps the run in-core,
-* a budget between the chunked and in-core requirements switches to chunked
-  and must reproduce the in-core field to round-off,
-* a budget below the chunked requirement refuses with required and budget
-  bytes in the message.
+* a node capacity between the chunked and in-core aggregates switches to
+  chunked and must reproduce the in-core field to round-off,
+* a capacity below the chunked aggregate refuses with the required and
+  capacity totals in the message.
 
-A fourth case runs two ranks with unequal budgets.  The Allreduce must reconcile
-the local decisions, so both ranks either pick the same mode or abort together;
-the test captures each rank's local decision and requires them to be identical.
+Case (d) runs two ranks with equal budgets whose node total lands between the
+in-core and chunked aggregates, so both ranks must agree on chunked.  Case (e)
+runs four ranks with budgets whose sum lands in the same window and requires
+the chunked field to match the four-rank in-core reference.  Cases (f) and (g)
+exercise the ``[solve] solve_mode`` TOML key: once without a CLI flag and once
+with the CLI override winning.  Case (h) gives the two ranks unequal budgets so
+their per-rank decisions differ; the job must abort with the divergence
+message instead of hanging, which exercises the local-bound/disagreement path
+end to end.
 
 The budget is forced with the test-only ``PICBUNCH_TEST_MEMORY_BUDGET_BYTES``
 environment variable (see ``evaluateDeviceFit``).  ``PICBUNCH_TEST_SOLVE_MODE_RANKS``
@@ -66,20 +74,63 @@ def virtual_ranks(padded, chunk_cells):
     return max(1, min(wanted, min(mx, mz)))
 
 
+def chunked_particle_bytes(particles):
+    # The chunked gate counts the resident Bunch arrays (x, y, z, ux, uy, uz,
+    # weight, charge, restMass: nine doubles) plus the boxOf/members
+    # bookkeeping (two size_t).  Keep this in sync with Compute.cpp.
+    return particles * (9 * 8 + 2 * 8)
+
+
 def chunked_requirement(grid, padding, particles, chunk_cells, rank_count):
     mx, my, mz = padded_extents(grid, padding)
     ranks = virtual_ranks((mx, my, mz), chunk_cells)
     nz = (mz + ranks - 1) // ranks
     nx = (mx + ranks - 1) // ranks
     workspace = 16 * (mx * my * nz + 2 * nx * my * mz + 2 * max(mx * nz, mz * nx))
-    particle_bytes = particles * 2 * 8
+    particle_bytes = chunked_particle_bytes(particles)
     out_nz = grid[2]
     slab_planes = max(
         ((r + 1) * out_nz) // rank_count - (r * out_nz) // rank_count
         for r in range(rank_count)
     )
     plane_elems = grid[0] * grid[1]
-    return workspace + particle_bytes + 6 * slab_planes * plane_elems * 8
+    # Six resident output components plus the per-component emitter temporary
+    # of ceil(Mz / virtual_ranks) planes (``nz``), alive with the slab and the
+    # workspace.
+    emitter_planes = nz
+    return (
+        workspace
+        + particle_bytes
+        + 6 * slab_planes * plane_elems * 8
+        + emitter_planes * plane_elems * 8
+    )
+
+
+def chunked_aggregate(grid, padding, particles, chunk_cells, rank_count):
+    """Sum of the per-rank chunked peaks over ``rank_count`` ranks."""
+    mx, my, mz = padded_extents(grid, padding)
+    ranks = virtual_ranks((mx, my, mz), chunk_cells)
+    nz = (mz + ranks - 1) // ranks
+    nx = (mx + ranks - 1) // ranks
+    workspace = 16 * (mx * my * nz + 2 * nx * my * mz + 2 * max(mx * nz, mz * nx))
+    plane_elems = grid[0] * grid[1]
+    # The per-rank output slabs sum to the whole output volume; each rank also
+    # holds its own emitter temporary of ceil(Mz / virtual_ranks) planes.
+    slab_total = 6 * grid[2] * plane_elems * 8
+    emitter_total = rank_count * nz * plane_elems * 8
+    return (
+        rank_count * (workspace + chunked_particle_bytes(particles))
+        + slab_total
+        + emitter_total
+    )
+
+
+def in_core_aggregate(grid, padding, particles, rank_count):
+    """Sum of the per-rank in-core estimates over ``rank_count`` ranks."""
+    distributed = rank_count > 1
+    return rank_count * in_core_requirement(
+        grid, padding, particles, rank_count, distributed
+    )
 
 
 def in_core_requirement(grid, padding, particles, rank_count, distributed):
@@ -109,13 +160,15 @@ def parse_decision(line):
     decision = {"mode": match.group(1), "detail": match.group(2) or ""}
     detail = decision["detail"]
     fields = re.search(
-        r"required ([0-9.]+) GiB, budget ([0-9.]+) GiB per rank, reason ([^)]+)",
+        r"required ([0-9.]+) GiB, capacity ([0-9.]+) GiB over (\d+) ranks?, "
+        r"reason ([^)]+)",
         detail,
     )
     if fields is not None:
         decision["required"] = fields.group(1)
-        decision["budget"] = fields.group(2)
-        decision["reason"] = fields.group(3)
+        decision["capacity"] = fields.group(2)
+        decision["ranks"] = fields.group(3)
+        decision["reason"] = fields.group(4)
         return decision
     reason = re.search(r"reason ([^)]+)", detail)
     if reason is not None:
@@ -148,11 +201,28 @@ def rank_decisions(stderr, label):
     return found
 
 
-def run(command, label, env_extra=None):
-    env = os.environ.copy()
+def child_environment(env_extra=None):
+    """Environment for a child run with inherited PICBUNCH_TEST_* removed.
+
+    A stale PICBUNCH_TEST_MEMORY_BUDGET_BYTES in the caller's environment
+    would silently change every case, so scrub the test-only namespace and
+    re-add only the values the case sets explicitly.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
     if env_extra:
         env.update(env_extra)
-    result = subprocess.run(command, text=True, capture_output=True, env=env)
+    return env
+
+
+def run(command, label, env_extra=None):
+    env = child_environment(env_extra)
+    result = subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=600
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{label}: command failed with exit {result.returncode}: "
@@ -162,10 +232,10 @@ def run(command, label, env_extra=None):
 
 
 def run_expect_failure(command, label, env_extra=None):
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-    return subprocess.run(command, text=True, capture_output=True, env=env)
+    env = child_environment(env_extra)
+    return subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=600
+    )
 
 
 def main():
@@ -182,17 +252,23 @@ def main():
 
     chunked_one = chunked_requirement(GRID, PADDING, N_PARTICLES, CHUNK_CELLS, 1)
     in_core_one = in_core_requirement(GRID, PADDING, N_PARTICLES, 1, False)
-    chunked_two = chunked_requirement(GRID, PADDING, N_PARTICLES, CHUNK_CELLS, 2)
-    in_core_two = in_core_requirement(GRID, PADDING, N_PARTICLES, 2, True)
+    chunked_two_total = chunked_aggregate(GRID, PADDING, N_PARTICLES, CHUNK_CELLS, 2)
+    in_core_two_total = in_core_aggregate(GRID, PADDING, N_PARTICLES, 2)
+    chunked_four_total = chunked_aggregate(GRID, PADDING, N_PARTICLES, CHUNK_CELLS, 4)
+    in_core_four_total = in_core_aggregate(GRID, PADDING, N_PARTICLES, 4)
     if not chunked_one < in_core_one:
         raise SystemExit(
             f"test setup: chunked ({chunked_one}) must stay below in-core ({in_core_one})"
         )
-    if not chunked_two < in_core_two:
-        raise SystemExit(
-            f"test setup: 2-rank chunked ({chunked_two}) must stay below "
-            f"in-core ({in_core_two})"
-        )
+    for ranks, chunked_total, in_core_total in (
+        (2, chunked_two_total, in_core_two_total),
+        (4, chunked_four_total, in_core_four_total),
+    ):
+        if not chunked_total < in_core_total:
+            raise SystemExit(
+                f"test setup: {ranks}-rank chunked aggregate ({chunked_total}) must stay "
+                f"below the in-core aggregate ({in_core_total})"
+            )
 
     failures = 0
     try:
@@ -217,6 +293,10 @@ def main():
             "--chunk-cells",
             str(CHUNK_CELLS),
         ]
+        # Same launch without the CLI solve-mode flag, for the TOML cases.
+        common_no_solve = list(common)
+        solve_flag = common_no_solve.index("--solve-mode")
+        del common_no_solve[solve_flag:solve_flag + 2]
 
         def case_dir(name):
             path = os.path.join(root, name)
@@ -240,8 +320,8 @@ def main():
         line, decision = only_decision(result.stderr, "case a")
         expected_line = (
             "picBunch: solve mode: auto -> in-core "
-            f"(required {format_bytes(in_core_one)}, budget {format_bytes(large)} "
-            "per rank, reason in-core-fits)"
+            f"(required {format_bytes(in_core_one)}, capacity {format_bytes(large)} "
+            "over 1 rank, reason in-core-fits)"
         )
         if line != expected_line:
             print(f"case a status=FAIL decision {line!r} != {expected_line!r}")
@@ -249,10 +329,9 @@ def main():
         else:
             print(f"case a status=OK decision={line}")
 
-        # (b) A budget between the chunked and in-core requirements switches.
-        # Precondition: ``between`` must stay below the real device capacity.
-        # The decision budget is shareBytes = min(capacity, override), so a
-        # larger override would not exercise a genuinely reduced budget.
+        # (b) A capacity between the chunked and in-core aggregates switches.
+        # The override replaces the reported capacity for the decision, so a
+        # larger value would not exercise a genuinely reduced budget.
         between = (chunked_one + in_core_one) // 2
         auto_dir = case_dir("b_auto_chunked")
         reference_dir = case_dir("b_reference_in_core")
@@ -270,8 +349,8 @@ def main():
         line, decision = only_decision(result.stderr, "case b auto")
         expected_line = (
             "picBunch: solve mode: auto -> chunked "
-            f"(required {format_bytes(chunked_one)}, budget {format_bytes(between)} "
-            "per rank, reason in-core-does-not-fit;chunked-fits)"
+            f"(required {format_bytes(chunked_one)}, capacity {format_bytes(between)} "
+            "over 1 rank, reason in-core-does-not-fit;chunked-fits)"
         )
         if line != expected_line or decision["mode"] != "auto -> chunked":
             print(f"case b status=FAIL decision {line!r} != {expected_line!r}")
@@ -309,10 +388,7 @@ def main():
                 print(diff_summary(reference_dir, auto_dir, details))
                 failures += 1
 
-        # (c) A budget below the chunked requirement refuses and names both.
-        # Precondition: ``too_small`` must stay below the real device capacity.
-        # The decision budget is shareBytes = min(capacity, override), so a
-        # larger override would not exercise a genuinely reduced budget.
+        # (c) A capacity below the chunked aggregate refuses and names both.
         too_small = chunked_one // 2
         refused_destination = case_dir("c_refused")
         result = run_expect_failure(
@@ -326,8 +402,8 @@ def main():
             {"PICBUNCH_TEST_MEMORY_BUDGET_BYTES": str(too_small)},
         )
         message = result.stderr
-        required_text = f"required {format_bytes(chunked_one)} per rank"
-        budget_text = f"budget {format_bytes(too_small)} per rank"
+        required_text = f"required {format_bytes(chunked_one)}"
+        budget_text = f"capacity {format_bytes(too_small)} over 1 rank"
         if (
             result.returncode == 0
             or required_text not in message
@@ -342,8 +418,15 @@ def main():
         else:
             print(f"case c status=OK exit={result.returncode}")
 
-        # (d) Unequal budgets across two ranks: the Allreduce must reconcile.
-        small_two = (chunked_two + in_core_two) // 2
+        # (d) Two ranks, equal budgets whose node total lies between the
+        # chunked and in-core aggregates: both ranks must agree on chunked.
+        budget_two = ((chunked_two_total + in_core_two_total) // 2) // 2
+        if not chunked_two_total < 2 * budget_two < in_core_two_total:
+            raise SystemExit(
+                "test setup: 2-rank budget total "
+                f"{2 * budget_two} is not between chunked {chunked_two_total} and "
+                f"in-core {in_core_two_total}"
+            )
         destination = case_dir("d_two_ranks")
         result = run(
             mpi_command(
@@ -354,7 +437,7 @@ def main():
             ),
             "case d",
             {
-                "PICBUNCH_TEST_MEMORY_BUDGET_BYTES": f"{large},{small_two}",
+                "PICBUNCH_TEST_MEMORY_BUDGET_BYTES": f"{budget_two},{budget_two}",
                 "PICBUNCH_TEST_SOLVE_MODE_RANKS": "1",
             },
         )
@@ -373,6 +456,202 @@ def main():
             failures += 1
         else:
             print(f"case d status=OK both ranks: {decisions[0]}")
+
+        # (e) Four ranks with equal budgets whose sum stays between the chunked
+        # and in-core aggregates.  The auto decision must switch to chunked and
+        # the field must match the four-rank in-core reference.
+        budget_four = ((chunked_four_total + in_core_four_total) // 2) // 4
+        if not chunked_four_total < 4 * budget_four < in_core_four_total:
+            raise SystemExit(
+                "test setup: 4-rank budget total "
+                f"{4 * budget_four} is not between chunked {chunked_four_total} and "
+                f"in-core {in_core_four_total}"
+            )
+        auto_four_dir = case_dir("e_auto_chunked")
+        reference_four_dir = case_dir("e_reference_in_core")
+        result = run(
+            mpi_command(
+                mpiexec,
+                4,
+                binary,
+                [
+                    *common,
+                    "--destination",
+                    auto_four_dir,
+                    "--staging-dir",
+                    auto_four_dir + "-staging",
+                ],
+            ),
+            "case e auto",
+            {"PICBUNCH_TEST_MEMORY_BUDGET_BYTES": ",".join([str(budget_four)] * 4)},
+        )
+        line, decision = only_decision(result.stderr, "case e auto")
+        expected_line = (
+            "picBunch: solve mode: auto -> chunked "
+            f"(required {format_bytes(chunked_four_total)}, "
+            f"capacity {format_bytes(4 * budget_four)} over 4 ranks, "
+            "reason in-core-does-not-fit;chunked-fits)"
+        )
+        if line != expected_line or decision["mode"] != "auto -> chunked":
+            print(f"case e status=FAIL decision {line!r} != {expected_line!r}")
+            failures += 1
+        else:
+            print(f"case e status=OK decision={line}")
+        reference = run(
+            mpi_command(
+                mpiexec,
+                4,
+                binary,
+                [
+                    *common,
+                    "--solve-mode",
+                    "in-core",
+                    "--fft-mode",
+                    "distributed",
+                    "--destination",
+                    reference_four_dir,
+                ],
+            ),
+            "case e reference",
+        )
+        if "reason explicit-in-core" not in reference.stderr:
+            print(
+                "case e status=FAIL reference did not resolve in-core: "
+                + failure_tail(reference)
+            )
+            failures += 1
+        else:
+            worst, details = compare_fields(reference_four_dir, auto_four_dir)
+            status = "OK" if worst <= TOL else "FAIL"
+            print(f"case e fields worst={worst:.3e} status={status}")
+            if worst > TOL:
+                from compare_chunked_config_mpi import diff_summary
+
+                print(diff_summary(reference_four_dir, auto_four_dir, details))
+                failures += 1
+
+        # (f) The optional [solve] solve_mode TOML key selects chunked with no
+        # CLI solve-mode flag.
+        config_toml = os.path.join(root, "CFG-chunked.toml")
+        write_config(config_toml, GRID)
+        with open(config_toml, "a") as handle:
+            handle.write('\n[solve]\nsolve_mode = "chunked"\n')
+        toml_common = list(common_no_solve)
+        toml_common[toml_common.index("--config") + 1] = config_toml
+        destination = case_dir("f_toml_chunked")
+        result = run(
+            mpi_command(
+                mpiexec,
+                1,
+                binary,
+                [*toml_common, "--destination", destination,
+                 "--staging-dir", destination + "-staging"],
+            ),
+            "case f",
+        )
+        if (
+            "reason explicit-chunked" not in result.stderr
+            or "picBunch: staged solve:" not in result.stderr
+        ):
+            print("case f status=FAIL TOML solve_mode did not select chunked: "
+                  + failure_tail(result))
+            failures += 1
+        else:
+            print("case f status=OK TOML solve_mode=chunked with no CLI flag")
+
+        # (g) The CLI --solve-mode wins over the TOML value.
+        config_toml_in_core = os.path.join(root, "CFG-in-core.toml")
+        write_config(config_toml_in_core, GRID)
+        with open(config_toml_in_core, "a") as handle:
+            handle.write('\n[solve]\nsolve_mode = "in-core"\n')
+        cli_common = list(common_no_solve)
+        cli_common[cli_common.index("--config") + 1] = config_toml_in_core
+        destination = case_dir("g_cli_wins")
+        result = run(
+            mpi_command(
+                mpiexec,
+                1,
+                binary,
+                [*cli_common, "--solve-mode", "chunked", "--destination", destination,
+                 "--staging-dir", destination + "-staging"],
+            ),
+            "case g",
+        )
+        if (
+            "reason explicit-chunked" not in result.stderr
+            or "picBunch: staged solve:" not in result.stderr
+            or "reason explicit-in-core" in result.stderr
+        ):
+            print("case g status=FAIL CLI did not override the TOML value: "
+                  + failure_tail(result))
+            failures += 1
+        else:
+            print("case g status=OK CLI solve_mode overrides the TOML value")
+
+        # (h) Two ranks with asymmetric budgets: rank 0's budget covers its own
+        # in-core requirement and the node total, so it resolves in-core, while
+        # rank 1's budget does not cover its own in-core requirement, so the
+        # local bound makes it resolve chunked (or refuse).  The root broadcast
+        # then disagrees with rank 1 and the job must abort instead of hanging.
+        # Both budgets keep the node total above the in-core aggregate, so the
+        # aggregate criterion alone would let both ranks run in-core.
+        local_in_core_two = in_core_requirement(
+            GRID, PADDING, N_PARTICLES, 2, distributed=True
+        )
+        large_budget = 4 * local_in_core_two
+        small_budget = chunked_two_total // 2
+        if not local_in_core_two > small_budget:
+            raise SystemExit(
+                "test setup: rank-1 budget "
+                f"{small_budget} does not fall below its local in-core requirement "
+                f"{local_in_core_two}"
+            )
+        if not 2 * local_in_core_two <= large_budget + small_budget:
+            raise SystemExit(
+                "test setup: asymmetric budgets do not keep the node total above "
+                "the in-core aggregate"
+            )
+        if not chunked_two_total <= large_budget + small_budget:
+            raise SystemExit(
+                "test setup: asymmetric budgets do not let rank 1 reach chunked"
+            )
+        destination = case_dir("h_divergent_budgets")
+        try:
+            result = run_expect_failure(
+                mpi_command(
+                    mpiexec,
+                    2,
+                    binary,
+                    [
+                        *common,
+                        "--destination",
+                        destination,
+                        "--staging-dir",
+                        destination + "-staging",
+                    ],
+                ),
+                "case h",
+                {
+                    "PICBUNCH_TEST_MEMORY_BUDGET_BYTES": f"{large_budget},{small_budget}",
+                    "PICBUNCH_TEST_SOLVE_MODE_RANKS": "1",
+                },
+            )
+        except subprocess.TimeoutExpired:
+            print("case h status=FAIL timed out after 600 s (deadlock)")
+            failures += 1
+        else:
+            divergence = "the rank set has divergent capacity or solver state"
+            if result.returncode == 0 or divergence not in result.stderr:
+                print(
+                    f"case h status=FAIL exit={result.returncode} "
+                    f"stderr={failure_tail(result)}"
+                )
+                failures += 1
+            else:
+                print(
+                    f"case h status=OK exit={result.returncode} "
+                    f"message={divergence!r}"
+                )
 
         return 1 if failures else 0
     finally:

@@ -220,16 +220,19 @@ whole-grid in-core solve, the solver that keeps the padded volume in memory;
 
 `auto` is the default.  It decides once per run, before grid construction and
 before the first allocation.  It keeps the in-core solve when the estimated
-requirement fits the per-rank budget, and switches to the staged solve when
-that solver is available in the build and its own estimate fits.  The switch
-prints exactly one line on rank 0:
+requirement fits the node memory budget, and switches to the staged solve when
+that solver is available in the build and its own estimate fits.  Both the
+requirement and the capacity are summed over the ranks of the shared-memory
+domain, so the comparison is between node totals.  A rank whose own requirement
+exceeds its own device budget still refuses, even when the node totals fit.
+The switch prints exactly one line on rank 0:
 
 ```
-picBunch: solve mode: auto -> chunked (required <X> GiB, budget <Y> GiB per rank, reason <key>)
+picBunch: solve mode: auto -> chunked (required <X.xxx> GiB, capacity <Y.xxx> GiB over <N> ranks, reason <key>)
 ```
 
 When both modes are infeasible the run refuses, with a message that names the
-required bytes, the available bytes per rank and the available alternatives.
+required bytes, the available node capacity and the available alternatives.
 When the capacity is unknown `auto` keeps the historical in-core behaviour.
 `auto` never falls back to a mode the build cannot run.
 
