@@ -189,7 +189,7 @@ is unchanged.
 
 | key | required | meaning |
 | --- | --- | --- |
-| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"` or `"in-core"`. `none` and `in-core` are the same mode: the solver that keeps the padded volume in memory; `none` is the canonical spelling for "never use the chunked solver". `auto` keeps the in-core solve when the estimated requirement fits the node memory budget and otherwise switches to the staged chunked solve when that solver is available and its own estimate fits. The requirement and the capacity are both summed over the ranks of the shared-memory domain, so the comparison is between node totals. An explicit `--solve-mode` wins over this key. |
+| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"` or `"in-core"`. `none` and `in-core` are the same mode: the solver that keeps the padded volume in memory; `none` is the canonical spelling for "never use the chunked solver". `auto` keeps the in-core solve when the estimated requirement fits the node memory budget and otherwise switches to the staged chunked solve when that solver is available and its own estimate fits. The requirement and the capacity are both summed over the ranks of the shared-memory domain, so the comparison is between node totals, and a rank whose own requirement exceeds its own device budget still refuses, even when the node totals fit. An explicit `--solve-mode` wins over this key. |
 
 ### `[checkpoint]`
 
@@ -304,11 +304,13 @@ canonical spelling for "never use the chunked solver".
 the first allocation. It keeps the in-core solve when the estimated
 requirement fits the node memory budget, and otherwise switches to the staged
 chunked solve when that solver is available and its own estimate fits. Both
-numbers are node totals summed over the ranks of the shared-memory domain. When
-it switches it prints exactly one line on rank 0:
+numbers are node totals summed over the ranks of the shared-memory domain. A
+rank whose own requirement exceeds its own device budget still refuses, even
+when the node totals fit. When it switches it prints exactly one line on
+rank 0:
 
 ```
-picBunch: solve mode: auto -> chunked (required <X> GiB, capacity <Y> GiB over <N> ranks, reason <key>)
+picBunch: solve mode: auto -> chunked (required <X.xxx> GiB, capacity <Y.xxx> GiB over <N> ranks, reason <key>)
 ```
 
 When both modes are infeasible the run refuses, naming the required bytes,
