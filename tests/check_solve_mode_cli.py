@@ -236,7 +236,7 @@ def main():
                         )
                 failures += 1
 
-        bogus = run([binary, "--solve-mode", "bogus"])
+        bogus = run([binary, "--input", input_path, "--solve-mode", "bogus"])
         missing = [word for word in SPELLINGS if word not in bogus.stderr]
         if bogus.returncode != 2:
             print(
@@ -252,7 +252,7 @@ def main():
             print("bogus status=OK exit=2 stderr lists all four spellings")
 
         # ``incore`` was a removed alias; keep it pinned as a rejection.
-        incore = run([binary, "--solve-mode", "incore"])
+        incore = run([binary, "--input", input_path, "--solve-mode", "incore"])
         missing = [word for word in SPELLINGS if word not in incore.stderr]
         if incore.returncode != 2:
             print(
