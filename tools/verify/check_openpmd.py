@@ -127,7 +127,11 @@ def main() -> int:
                         ]
                     )
                     stored = dataset[()]
-                    if not np.array_equal(stored, reference):
+                    # The writer computes the analytic series in C++; the
+                    # reference is the same expression in Python.  Compare to
+                    # round-off instead of bit equality so a different libm or
+                    # compiler cannot fail the layout check.
+                    if not np.allclose(stored, reference, rtol=1e-12, atol=1e-15):
                         worst = float(np.max(np.abs(stored - reference)))
                         fail(f"{record}/{axis}: values differ, max|diff|={worst:.3e}")
 

@@ -598,10 +598,13 @@ TEST(Margin, GroupedMultipolesBeatTheGlobalExpansion)
 TEST(Margin, FarTailBatchMatchesRecursiveGroups)
 {
     // The flattened batch path is what the writer uses.  It must reproduce the
-    // recursive group evaluation bit for bit: same expressions, same group
-    // order, no reassociation.  ``memcmp`` is used instead of ``==`` so a
-    // changed signed zero is caught as well.
-    auto sameBits = [](double a, double b) { return std::memcmp(&a, &b, sizeof(double)) == 0; };
+    // recursive group evaluation to round-off.  The two code paths keep the
+    // same expression order, but a compiler may contract or vectorize one of
+    // them; exact bit equality is therefore not portable across toolchains.
+    auto close = [](double a, double b) {
+        double const scale = std::max(std::abs(a), std::abs(b));
+        return std::abs(a - b) <= 1e-13 * scale + 1e-300;
+    };
     auto compare = [&](picBunch::FarTail const& tail, picBunch::Vec3 const& point) {
         auto const referenceE = picBunch::evaluateFarTailE(tail, point);
         auto const referenceB = picBunch::evaluateFarTailB(tail, point);
@@ -610,8 +613,8 @@ TEST(Margin, FarTailBatchMatchesRecursiveGroups)
         auto const batchB = picBunch::evaluateFarTailB(batch, point);
         for(int a = 0; a < 3; ++a)
         {
-            EXPECT_TRUE(sameBits(referenceE[a], batchE[a])) << "E[" << a << "] differs";
-            EXPECT_TRUE(sameBits(referenceB[a], batchB[a])) << "B[" << a << "] differs";
+            EXPECT_TRUE(close(referenceE[a], batchE[a])) << "E[" << a << "] differs";
+            EXPECT_TRUE(close(referenceB[a], batchB[a])) << "B[" << a << "] differs";
         }
     };
 

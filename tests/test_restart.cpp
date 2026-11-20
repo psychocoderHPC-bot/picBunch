@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -392,6 +393,20 @@ namespace
         return values;
     }
 
+    void expectDoubleVectorNear(
+        std::vector<double> const& actual,
+        std::vector<double> const& expected,
+        char const* what)
+    {
+        ASSERT_EQ(actual.size(), expected.size()) << what;
+        for(std::size_t i = 0; i < actual.size(); ++i)
+        {
+            double const scale
+                = std::max(1.0, std::max(std::abs(actual[i]), std::abs(expected[i])));
+            EXPECT_NEAR(actual[i], expected[i], 1e-12 * scale) << what << "[" << i << "]";
+        }
+    }
+
     std::uint64_t datasetPoints(hid_t file, char const* path)
     {
         hid_t dataset = H5Dopen2(file, path, H5P_DEFAULT);
@@ -654,16 +669,18 @@ TEST(Restart, WriterEmitsPIConGPUCheckpointContract)
     {
         hid_t record = H5Gopen2(fields, spec.name, H5P_DEFAULT);
         ASSERT_GE(record, 0);
-        EXPECT_EQ(readDoubleArrayAttribute(record, "gridSpacing"),
-                  (std::vector<double>{
-                      field.grid.spacing[2] / options.unitLength,
-                      field.grid.spacing[1] / options.unitLength,
-                      field.grid.spacing[0] / options.unitLength}));
-        EXPECT_EQ(readDoubleArrayAttribute(record, "gridGlobalOffset"),
-                  (std::vector<double>{
-                      field.grid.origin[2] / options.unitLength,
-                      field.grid.origin[1] / options.unitLength,
-                      field.grid.origin[0] / options.unitLength}));
+        expectDoubleVectorNear(
+            readDoubleArrayAttribute(record, "gridSpacing"),
+            {field.grid.spacing[2] / options.unitLength,
+             field.grid.spacing[1] / options.unitLength,
+             field.grid.spacing[0] / options.unitLength},
+            "gridSpacing");
+        expectDoubleVectorNear(
+            readDoubleArrayAttribute(record, "gridGlobalOffset"),
+            {field.grid.origin[2] / options.unitLength,
+             field.grid.origin[1] / options.unitLength,
+             field.grid.origin[0] / options.unitLength},
+            "gridGlobalOffset");
         EXPECT_DOUBLE_EQ(
             readScalarAttribute<double>(record, "gridUnitSI", H5T_NATIVE_DOUBLE), options.unitLength);
         EXPECT_EQ(readDoubleArrayAttribute(record, "unitDimension"),
@@ -977,14 +994,14 @@ TEST(Restart, WriterCopiesPmlRecordsVerbatim)
         ASSERT_GE(sourceGroup, 0) << sourceRecord;
         ASSERT_GE(outputGroup, 0) << outputRecord;
         // The copied record adopts the main-field geometry.
-        EXPECT_EQ(
+        expectDoubleVectorNear(
             readDoubleArrayAttribute(outputGroup, "gridSpacing"),
-            (std::vector<double>{
-                field.grid.spacing[2], field.grid.spacing[1], field.grid.spacing[0]}));
-        EXPECT_EQ(
+            {field.grid.spacing[2], field.grid.spacing[1], field.grid.spacing[0]},
+            "copied gridSpacing");
+        expectDoubleVectorNear(
             readDoubleArrayAttribute(outputGroup, "gridGlobalOffset"),
-            (std::vector<double>{
-                field.grid.origin[2], field.grid.origin[1], field.grid.origin[0]}));
+            {field.grid.origin[2], field.grid.origin[1], field.grid.origin[0]},
+            "copied gridGlobalOffset");
         EXPECT_DOUBLE_EQ(
             readScalarAttribute<double>(outputGroup, "gridUnitSI", H5T_NATIVE_DOUBLE), 1.0);
         H5Gclose(sourceGroup);

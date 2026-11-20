@@ -268,15 +268,17 @@ TEST(FastNearConsistency, DeviceMatchesHostOnExactGrid)
     }
 }
 
-//! Host bit-stability pin for the fast evaluator.
+//! Host-stability pin for the fast evaluator.
 //!
 //! The host shape_field is the fallback and the reference the device functor
 //! mirrors.  These are the exact bit patterns emitted by the pre-alpaka-math
 //! base (commit 048ca547, `-O2`, GCC 13.3, host libm) at the near-shell
 //! oracle/golden points; they cover the exact s-space path, the axial
 //! gamma-stretched box, the oblique d-space ray path, the legacy remainder
-//! quadrature and the static branch.  A change of algorithm, threshold,
-//! quadrature order or math backend that moves any host bit fails here.
+//! quadrature and the static branch.  On the reference GCC 13 toolchain a
+//! change of algorithm, threshold, quadrature order or math backend that moves
+//! any bit fails here.  Other compilers use the pin's per-point tolerance
+//! because libm and FMA contraction move the last bits.
 TEST(FastNearConsistency, HostResultsAreBitStable)
 {
     Vec3 const uZero{0.0, 0.0, 0.0};
@@ -323,7 +325,7 @@ TEST(FastNearConsistency, HostResultsAreBitStable)
         {"golden-g100-b", {0.5, 0.5, 0.5}, uOb45G100, 5, 2, 1e-6, {0x1.12c2c8bbdd344p-11, 0x1.e182c3202dc38p-2, 0x1.12c2c62f37344p-11}, {-0x1.547667bb9998dp-2, 0x1.cd781458p-35, 0x1.547667bb9998dp-2}},
     }};
 
-    auto const bits = [](double v) { return std::bit_cast<std::uint64_t>(v); };
+    [[maybe_unused]] auto const bits = [](double v) { return std::bit_cast<std::uint64_t>(v); };
     for(Pin const& p : pins)
     {
         pbfast::Settings s;
@@ -337,8 +339,13 @@ TEST(FastNearConsistency, HostResultsAreBitStable)
         std::array<double, 3> const gotB{B.x, B.y, B.z};
         for(int a = 0; a < 3; ++a)
         {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
             EXPECT_EQ(bits(gotE[a]), bits(p.E[a])) << p.name << " E[" << a << "]";
             EXPECT_EQ(bits(gotB[a]), bits(p.B[a])) << p.name << " B[" << a << "]";
+#else
+            EXPECT_NEAR(gotE[a], p.E[a], p.tolerance) << p.name << " E[" << a << "]";
+            EXPECT_NEAR(gotB[a], p.B[a], p.tolerance) << p.name << " B[" << a << "]";
+#endif
         }
     }
 }

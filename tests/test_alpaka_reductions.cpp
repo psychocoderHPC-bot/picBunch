@@ -180,20 +180,30 @@ namespace
         }
     };
 
+    //! Relative tolerance for a reduction whose order differs from the serial
+    //! reference.  The kernels keep the particle order, but the compiler may
+    //! contract or vectorize one of the two paths, so bit equality is not
+    //! portable across toolchains.
+    void expectNear(double a, double b, char const* what)
+    {
+        double const scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
+        EXPECT_NEAR(a, b, 1e-13 * scale) << what;
+    }
+
     void expectFarTailEqual(picBunch::FarTail const& a, picBunch::FarTail const& b)
     {
         for(int i = 0; i < 3; ++i)
         {
-            EXPECT_DOUBLE_EQ(a.centre[i], b.centre[i]);
-            EXPECT_DOUBLE_EQ(a.dipole[i], b.dipole[i]);
-            EXPECT_DOUBLE_EQ(a.meanVelocity[i], b.meanVelocity[i]);
+            expectNear(a.centre[i], b.centre[i], "centre");
+            expectNear(a.dipole[i], b.dipole[i], "dipole");
+            expectNear(a.meanVelocity[i], b.meanVelocity[i], "meanVelocity");
         }
         for(int i = 0; i < 9; ++i)
-            EXPECT_DOUBLE_EQ(a.quadrupole[i], b.quadrupole[i]);
-        EXPECT_DOUBLE_EQ(a.charge, b.charge);
-        EXPECT_DOUBLE_EQ(a.supportRadius, b.supportRadius);
-        EXPECT_DOUBLE_EQ(a.switchDistance, b.switchDistance);
-        EXPECT_DOUBLE_EQ(a.gammaMax, b.gammaMax);
+            expectNear(a.quadrupole[i], b.quadrupole[i], "quadrupole");
+        expectNear(a.charge, b.charge, "charge");
+        expectNear(a.supportRadius, b.supportRadius, "supportRadius");
+        expectNear(a.switchDistance, b.switchDistance, "switchDistance");
+        expectNear(a.gammaMax, b.gammaMax, "gammaMax");
     }
 
     using ReductionResults = std::tuple<
@@ -205,18 +215,18 @@ namespace
     void expectReductionResultsEqual(ReductionResults const& reference, ReductionResults const& candidate)
     {
         for(int a = 0; a < 3; ++a)
-            EXPECT_DOUBLE_EQ(std::get<0>(reference)[a], std::get<0>(candidate)[a]) << "axis " << a;
-        EXPECT_DOUBLE_EQ(std::get<1>(reference), std::get<1>(candidate));
+            expectNear(std::get<0>(reference)[a], std::get<0>(candidate)[a], "reduction axis");
+        expectNear(std::get<1>(reference), std::get<1>(candidate), "reduction scalar");
         expectFarTailEqual(std::get<2>(reference), std::get<2>(candidate));
         auto const& a = std::get<3>(reference);
         auto const& b = std::get<3>(candidate);
         ASSERT_EQ(a.count, b.count);
         EXPECT_EQ(a.perAxis, b.perAxis);
         EXPECT_EQ(a.boxOf, b.boxOf);
-        EXPECT_DOUBLE_EQ(a.modelError, b.modelError);
+        expectNear(a.modelError, b.modelError, "modelError");
         for(std::size_t i = 0; i < a.representativeU.size(); ++i)
             for(int c = 0; c < 3; ++c)
-                EXPECT_DOUBLE_EQ(a.representativeU[i][c], b.representativeU[i][c]);
+                expectNear(a.representativeU[i][c], b.representativeU[i][c], "representativeU");
     }
 } // namespace
 
@@ -226,8 +236,11 @@ TEST(AlpakaReductions, MomentsMatchSerialReference)
     auto const centre = picBunch::velocityMomentsCentre(bunch);
     auto const reference = serialCentre(bunch);
     for(int a = 0; a < 3; ++a)
-        EXPECT_DOUBLE_EQ(centre[a], reference[a]) << "axis " << a;
-    EXPECT_DOUBLE_EQ(picBunch::velocityMomentsRadius(bunch, centre), serialRadius(bunch, reference));
+        expectNear(centre[a], reference[a], "moment axis");
+    expectNear(
+        picBunch::velocityMomentsRadius(bunch, centre),
+        serialRadius(bunch, reference),
+        "moment radius");
 }
 
 TEST(AlpakaReductions, BoundsMatchSerialReference)

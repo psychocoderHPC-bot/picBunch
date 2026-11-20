@@ -765,8 +765,11 @@ TEST(NearShellAccuracy, DefaultMatchesBaseGolden)
         picBunch::pbfast::shape_field(c.obs, Vec3{}, c.u, 1.0, 1.0, 1.0, s, E, B);
         std::array<double, 6> const got{E.x, E.y, E.z, B.x, B.y, B.z};
         for(int i = 0; i < 6; ++i)
+            // The golden values were captured on GCC 13.  icpx moves the last
+            // bits through a different libm/FMA schedule, so keep the check at
+            // 2e-14 relative rather than pinning one compiler's round-off.
             EXPECT_LT(std::abs(got[i] - c.base[i]),
-                      std::max(std::abs(c.base[i]), 1.0e-300) * 1.0e-14)
+                      std::max(std::abs(c.base[i]), 1.0e-300) * 2.0e-14)
                 << "component " << i;
     }
 }

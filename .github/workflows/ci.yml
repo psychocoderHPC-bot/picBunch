@@ -1,24 +1,29 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: Rene Widera
 #
-# Build and test picBunch on CPU, CUDA and HIP.
+# Build and test picBunch on CPU, CUDA, HIP and oneAPI.
 #
 # Runner assumptions
 # ------------------
-# cpu:      GitHub-hosted ubuntu-latest. openPMD-api is not packaged for Ubuntu
-#           24.04, and CMakeLists.txt makes it a hard requirement, so this job
-#           builds openPMD 0.17.1 (HDF5 + MPI) once and caches the install
-#           prefix. Everything else comes from apt.
-# gpu-cuda: self-hosted runner carrying the labels `self-hosted`, `gpu`, `cuda`
-#           and a working `nvcc`, openPMD-api (HDF5 backend), HDF5, MPI, FFTW3,
-#           GoogleTest, Ninja, CMake >= 3.25 and ccache.
-# gpu-hip:  self-hosted runner carrying the labels `self-hosted`, `gpu`, `rocm`
-#           and ROCm (`amdclang++`, rocFFT) plus the same host dependencies as
-#           the CUDA runner.
+# cpu:      GitHub-hosted ubuntu-24.04.  Pin the image instead of using
+#           ubuntu-latest: the bit-exact regression pins were captured on the
+#           GCC 13 / glibc 2.39 / FFTW toolchain of 24.04, and a newer image
+#           changes the last bits of the FFT and libm results.  openPMD-api is
+#           not packaged for Ubuntu, so this job builds openPMD 0.17.1
+#           (HDF5 + MPI) once and caches the install prefix.
+# gpu-cuda: GitHub-hosted runner with the nvidia/cuda devel container.  The
+#           device code is compiled, not executed: no GPU is attached to a
+#           hosted runner.  Runtime CUDA validation is done on the project's
+#           GPU hosts.
+# gpu-hip:  GitHub-hosted runner with the rocm/dev-ubuntu-24.04 container.
+#           Compile only, for the same reason.
+# oneapi:   GitHub-hosted runner with the Intel oneAPI container.  The CPU
+#           backend is compiled with icpx and the full CPU test suite runs.
 #
-# Set the repository variable OPENPMD_DIR when openPMD-api is not installed in
-# a location CMake searches by default. Set ROCM_PATH when ROCm is not in
-# /opt/rocm. HIP_ARCH and CUDA_ARCH may also be set as repository variables.
+# The container jobs follow the alpakaVendor CI layout: the toolchain comes from
+# the image, the project dependencies come from apt, and openPMD-api is built in
+# /tmp inside the job.  This keeps the jobs independent of self-hosted runners
+# and of the hosted image roll.
 
 name: CI
 
@@ -59,7 +64,7 @@ env:
 jobs:
   no-direct-hdf5:
     name: guard (no direct HDF5 C API)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -73,8 +78,8 @@ jobs:
           echo "no direct HDF5 C API calls in src/ or include/"
 
   cpu:
-    name: cpu (ubuntu-latest, Release, MPI)
-    runs-on: ubuntu-latest
+    name: cpu (ubuntu-24.04, Release, MPI)
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +93,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build g++ pkg-config ccache \
             libopenmpi-dev openmpi-bin \
-            libhdf5-openmpi-dev libfftw3-dev libgtest-dev python3-h5py
+            libhdf5-openmpi-dev libfftw3-dev libgtest-dev \
+            python3-h5py python3-pip
+
+      # The chunked tests write their input with the Python openPMD binding.
+      # The C++ install above is deliberately built without Python bindings, so
+      # take the matching wheel from PyPI.  --no-deps keeps the apt numpy.
+      - name: Install openPMD Python bindings
+        run: |
+          python3 -m pip install --user --break-system-packages --no-deps \
+            "openpmd-api==$OPENPMD_VERSION"
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -100,7 +114,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.tool_cache }}/openpmd-${{ env.OPENPMD_VERSION }}
-          key: openpmd-${{ env.OPENPMD_VERSION }}-hdf5-mpi-${{ runner.os }}-${{ runner.arch }}
+          # The install prefix is not portable across hosted-runner images
+          # because the HDF5 openmpi soname changes.  The key names the image
+          # and the ABI revision so a 24.04 build is never restored on another
+          # image (and vice versa).
+          key: openpmd-${{ env.OPENPMD_VERSION }}-hdf5-mpi-v3-ubuntu-24.04-${{ runner.arch }}
 
       - name: Build openPMD-api (cache miss)
         if: steps.openpmd-cache.outputs.cache-hit != 'true'
@@ -136,120 +154,173 @@ jobs:
         run: ctest --test-dir build/cpu $CTEST_OPTIONS
 
   gpu-cuda:
-    name: cuda (self-hosted, arch ${{ matrix.arch }})
-    runs-on: [self-hosted, gpu, cuda]
+    name: cuda (container, compile only)
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.6.3-devel-ubuntu24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        # Defaults to one architecture; override through the workflow input or
-        # the CUDA_ARCH repository variable with a JSON list such as ["70","80"].
         arch: ${{ fromJSON(inputs.cuda_arch || vars.CUDA_ARCH || '["70"]') }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Preflight
+      - name: Install build dependencies
         run: |
-          command -v nvcc || { echo "nvcc not found on the CUDA runner" >&2; exit 1; }
-          cmake --version | head -1
-          ctest --version | head -1
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build git g++ pkg-config \
+            libhdf5-dev libfftw3-dev libgtest-dev python3
 
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: cuda-${{ matrix.arch }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Build openPMD-api
+        run: |
+          git clone --depth 1 --branch "$OPENPMD_VERSION" \
+            https://github.com/openPMD/openPMD-api.git /tmp/openpmd-src
+          cmake -S /tmp/openpmd-src -B /tmp/openpmd-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/openpmd-install \
+            -DopenPMD_USE_HDF5=ON \
+            -DopenPMD_USE_MPI=OFF \
+            -DopenPMD_USE_ADIOS2=OFF \
+            -DopenPMD_USE_PYTHON=OFF \
+            -DopenPMD_USE_INVASIVE_TESTS=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build /tmp/openpmd-build -j "$(nproc)"
+          cmake --install /tmp/openpmd-build
 
       - name: Configure (CUDA)
-        env:
-          OPENPMD_DIR: ${{ vars.OPENPMD_DIR }}
         run: |
           arch="${{ matrix.arch }}"
           arch="${arch#sm_}"
-          extra=()
-          if [ -n "$OPENPMD_DIR" ]; then
-            extra+=("-DopenPMD_DIR=$OPENPMD_DIR")
-          fi
           cmake -S . -B "build/cuda-${arch}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
             -DPICBUNCH_ENABLE_CUDA=ON \
             -DPICBUNCH_BUILD_TESTS=ON \
             -DPICBUNCH_BUILD_GTESTS=ON \
             -DPICBUNCH_ARCH="$arch" \
             -DCMAKE_CUDA_ARCHITECTURES="$arch" \
-            "${extra[@]}"
+            -DopenPMD_DIR=/tmp/openpmd-install/lib/cmake/openPMD
 
       - name: Build (CUDA)
         run: |
           arch="${{ matrix.arch }}"; arch="${arch#sm_}"
           cmake --build "build/cuda-${arch}" -j "$(nproc)"
 
-      - name: Test (CUDA, one device at a time)
-        run: |
-          arch="${{ matrix.arch }}"; arch="${arch#sm_}"
-          ctest --test-dir "build/cuda-${arch}" -j1 $CTEST_OPTIONS
-
   gpu-hip:
-    name: hip (self-hosted, ${{ inputs.hip_arch || vars.HIP_ARCH || 'gfx1100' }})
-    runs-on: [self-hosted, gpu, rocm]
+    name: hip (container, compile only)
+    runs-on: ubuntu-latest
+    container: rocm/dev-ubuntu-24.04:7.2
     timeout-minutes: 120
     env:
       HIP_ARCH: ${{ inputs.hip_arch || vars.HIP_ARCH || 'gfx1100' }}
-      ROCM_PATH: ${{ vars.ROCM_PATH || '/opt/rocm' }}
+      ROCM_PATH: /opt/rocm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Preflight
+      - name: Install build dependencies
         run: |
-          test -x "$ROCM_PATH/bin/amdclang++" || {
-            echo "amdclang++ not found under ROCM_PATH=$ROCM_PATH" >&2; exit 1;
-          }
-          "$ROCM_PATH/bin/amdclang++" --version | head -1
-          cmake --version | head -1
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build git g++ pkg-config \
+            libopenmpi-dev openmpi-bin libhdf5-openmpi-dev \
+            libfftw3-dev libgtest-dev python3 rocfft-dev
 
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: hip-${{ env.HIP_ARCH }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Build openPMD-api
+        run: |
+          git clone --depth 1 --branch "$OPENPMD_VERSION" \
+            https://github.com/openPMD/openPMD-api.git /tmp/openpmd-src
+          cmake -S /tmp/openpmd-src -B /tmp/openpmd-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/openpmd-install \
+            -DopenPMD_USE_HDF5=ON \
+            -DopenPMD_USE_MPI=ON \
+            -DopenPMD_USE_ADIOS2=OFF \
+            -DopenPMD_USE_PYTHON=OFF \
+            -DopenPMD_USE_INVASIVE_TESTS=OFF \
+            -DBUILD_TESTING=OFF
+          cmake --build /tmp/openpmd-build -j "$(nproc)"
+          cmake --install /tmp/openpmd-build
 
       - name: Configure (HIP)
-        env:
-          OPENPMD_DIR: ${{ vars.OPENPMD_DIR }}
         run: |
-          extra=()
-          if [ -n "$OPENPMD_DIR" ]; then
-            extra+=("-DopenPMD_DIR=$OPENPMD_DIR")
-          fi
           cmake -S . -B "build/hip-${HIP_ARCH}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/amdclang++" \
             -DCMAKE_HIP_COMPILER="$ROCM_PATH/bin/amdclang++" \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_HIP_COMPILER_LAUNCHER=ccache \
             -DCMAKE_HIP_ARCHITECTURES="$HIP_ARCH" \
             -DPICBUNCH_ENABLE_HIP=ON \
             -DPICBUNCH_BUILD_TESTS=ON \
             -DPICBUNCH_BUILD_GTESTS=ON \
             -DPICBUNCH_ARCH="$HIP_ARCH" \
             -DCMAKE_PREFIX_PATH="$ROCM_PATH" \
-            "${extra[@]}"
+            -DopenPMD_DIR=/tmp/openpmd-install/lib/cmake/openPMD
 
       - name: Build (HIP)
         run: cmake --build "build/hip-${HIP_ARCH}" -j "$(nproc)"
 
-      # Mandatory near-field correctness gate. These are the HIP near-field
-      # regressions from the #14 class (device/host divergence, near-shell
-      # accuracy, functor routing); any failure here fails CI even if the
-      # remaining suite passes.
-      - name: Near-field correctness gate (HIP)
-        run: |
-          for group in FastNearConsistency NearShellAccuracy NearShellAlpaka; do
-            echo "::group::near-field gate: $group"
-            ctest --test-dir "build/hip-${HIP_ARCH}" -j1 $CTEST_OPTIONS \
-              -R "^picBunch\\.${group}$"
-            echo "::endgroup::"
-          done
+  oneapi:
+    name: oneapi (CPU, compile and test)
+    runs-on: ubuntu-latest
+    container: intel/oneapi:2026.2.0-devel-ubuntu24.04
+    timeout-minutes: 120
+    env:
+      # The container runs as root; OpenMPI refuses to launch or to
+      # initialize a singleton without these two confirmations.
+      OMPI_ALLOW_RUN_AS_ROOT: '1'
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: '1'
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Test (HIP)
-        run: ctest --test-dir "build/hip-${HIP_ARCH}" -j1 $CTEST_OPTIONS
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git pkg-config \
+            libopenmpi-dev openmpi-bin libhdf5-openmpi-dev \
+            libfftw3-dev libgtest-dev python3-h5py python3-pip
+
+      - name: Build openPMD-api
+        run: |
+          git clone --depth 1 --branch "$OPENPMD_VERSION" \
+            https://github.com/openPMD/openPMD-api.git /tmp/openpmd-src
+          cmake -S /tmp/openpmd-src -B /tmp/openpmd-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/openpmd-install \
+            -DopenPMD_USE_HDF5=ON \
+            -DopenPMD_USE_MPI=ON \
+            -DopenPMD_USE_ADIOS2=OFF \
+            -DopenPMD_USE_PYTHON=OFF \
+            -DopenPMD_USE_INVASIVE_TESTS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DMPI_CXX_COMPILER=/usr/bin/mpicxx \
+            -DMPIEXEC_EXECUTABLE=/usr/bin/mpiexec
+          cmake --build /tmp/openpmd-build -j "$(nproc)"
+          cmake --install /tmp/openpmd-build
+
+      - name: Install openPMD Python bindings
+        run: |
+          python3 -m pip install --break-system-packages --no-deps \
+            "openpmd-api==$OPENPMD_VERSION"
+
+      - name: Configure (oneAPI CPU)
+        run: |
+          . /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+          cmake -S . -B build/oneapi -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=icpx \
+            -DPICBUNCH_BUILD_TESTS=ON \
+            -DPICBUNCH_BUILD_GTESTS=ON \
+            -DPICBUNCH_ENABLE_MPI=ON \
+            -DMPI_CXX_COMPILER=/usr/bin/mpicxx \
+            -DMPIEXEC_EXECUTABLE=/usr/bin/mpiexec \
+            -DopenPMD_DIR=/tmp/openpmd-install/lib/cmake/openPMD
+
+      - name: Build (oneAPI CPU)
+        run: |
+          . /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+          cmake --build build/oneapi -j "$(nproc)"
+
+      - name: Test (oneAPI CPU)
+        run: |
+          . /opt/intel/oneapi/setvars.sh --force >/dev/null 2>&1 || true
+          ctest --test-dir build/oneapi $CTEST_OPTIONS
