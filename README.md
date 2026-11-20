@@ -738,10 +738,10 @@ device. The estimate comes from the padded grid, the FFT layout (replicated or
 distributed), the precision, and the velocity-bin count; buffers are reused across bins,
 so the peak counts the largest bin, not bins times the full grid. The guard sums the
 requirement and the capacity over the ranks of the shared-memory domain and compares the
-two node totals. If the total requirement exceeds the total capacity, the run refuses to
-start with a message naming both totals and the rank count. Select fewer ranks per device
-or a larger device; an override that pins one device per process avoids the shared-device
-estimate.
+two node totals. It also refuses when a rank's own requirement exceeds its own device
+budget, even if the totals fit. The refusal names both totals and the rank count. Select
+fewer ranks per device or a larger device; an override that pins one device per process
+avoids the shared-device estimate.
 
 **MPI limitations.** The bunch is replicated, so particle memory does not fall with rank
 count. Component parallelism saturates at six ranks (one component per rank); beyond that
