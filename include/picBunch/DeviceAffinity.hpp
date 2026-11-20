@@ -24,7 +24,17 @@ namespace picBunch
         int deviceIndex = 0;
         int visibleDeviceCount = 0;
         std::string deviceName;
+        //! True device capacity.  Reporting and the gather wire use this field.
         std::size_t deviceCapacityBytes = 0;
+        /*! Bytes this rank may use on the device.
+         *
+         * Equal to ``deviceCapacityBytes`` unless the test-only budget
+         * override (``PICBUNCH_TEST_MEMORY_BUDGET_BYTES``) is active.  The fit
+         * and the node-total guard read this field, never the reported
+         * capacity, so an override changes the decision without falsifying
+         * the logged or gathered device capacity.
+         */
+        std::size_t deviceBudgetBytes = 0;
         //! Ranks of the shared-memory domain that landed on this device.
         int ranksPerDevice = 1;
         bool overrideRespected = false;

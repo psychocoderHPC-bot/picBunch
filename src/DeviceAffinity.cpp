@@ -53,9 +53,11 @@ namespace picBunch
          * rank count repeats its last value.  Unset, empty or unparsable input
          * falls back to the capacity the backend reported, so it is inert then.
          *
-         * The override belongs at the capacity source, not in the fit: the
-         * automatic decision, the ``mpiSumLocal`` node total and the post
-         * resolution in-core guard then all see one consistent capacity.
+         * The override is read once while the mapping is built and stored in
+         * ``RankDeviceMapping::deviceBudgetBytes``.  The automatic decision,
+         * the ``mpiSumLocal`` node total and the post-resolution in-core guard
+         * then all read that one budget field, while the reported
+         * ``deviceCapacityBytes`` keeps the true device capacity.
          */
         std::size_t deviceCapacityBytesForRank(RankDeviceMapping const& mapping)
         {
@@ -206,9 +208,10 @@ namespace picBunch
         mapping.deviceName = devices[static_cast<std::size_t>(deviceIndex)].name;
         mapping.deviceCapacityBytes
             = devices[static_cast<std::size_t>(deviceIndex)].capacityBytes;
-        // Apply the test-only override where the capacity is first resolved, so
-        // the fit, the node-total sum and the in-core guard agree.
-        mapping.deviceCapacityBytes = deviceCapacityBytesForRank(mapping);
+        // Derive the test-only budget once, from the true capacity, so the fit,
+        // the node-total sum and the in-core guard all read the same value.
+        // Reporting and the gather wire keep ``deviceCapacityBytes``.
+        mapping.deviceBudgetBytes = deviceCapacityBytesForRank(mapping);
         mapping.ranksPerDevice
             = counts.empty() ? 1 : counts[static_cast<std::size_t>(deviceIndex)];
         mapping.overrideRespected = overrideRespected;
@@ -383,12 +386,11 @@ namespace picBunch
     {
         DeviceFit fit;
         fit.requiredBytes = estimateDeviceRequirementBytes(workload);
-        fit.capacityBytes = mapping.deviceCapacityBytes;
-        // The guard compares node totals, so shareBytes only feeds the
-        // automatic mode choice.  It is bounded by the same per-rank capacity:
-        // a zero override means "capacity unknown" and stays unenforced, while
-        // a nonzero override caps the decision budget.
-        fit.shareBytes = std::min(fit.capacityBytes, deviceCapacityBytesForRank(mapping));
+        // Both fields read the budget derived at the mapping source.  A zero
+        // budget means "capacity unknown" and stays unenforced; otherwise it is
+        // the same bytes the node-total guard sums.
+        fit.capacityBytes = mapping.deviceBudgetBytes;
+        fit.shareBytes = mapping.deviceBudgetBytes;
         fit.ranksPerDevice = 1;
         fit.deviceIndex = mapping.deviceIndex;
         fit.rank = mapping.worldRank;
