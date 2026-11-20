@@ -189,7 +189,7 @@ is unchanged.
 
 | key | required | meaning |
 | --- | --- | --- |
-| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"`, `"in-core"` or `"incore"`. `auto` keeps the in-core solve when the per-rank estimate fits and otherwise switches to the staged chunked solve when that path is available and its peak fits. The three in-core spellings force the whole-grid path. An explicit `--solve-mode` wins over this key. |
+| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"` or `"in-core"`. `none` and `in-core` are the same mode: the solver that keeps the padded volume in memory; `none` is the canonical spelling for "never use the chunked solver". `auto` keeps the in-core solve when the estimated requirement fits the per-rank budget and otherwise switches to the staged chunked solve when that solver is available and its own estimate fits. An explicit `--solve-mode` wins over this key. |
 
 ### `[checkpoint]`
 
@@ -295,32 +295,56 @@ count. Particle records and `checkpoints.txt` stay on rank 0.
 
 ## Solve mode and the config path
 
-`--solve-mode` accepts `auto`, `chunked`, `none`, `in-core` and `incore`.
-`none`, `in-core` and `incore` select the whole-grid in-core solve. `auto`
-(default) keeps the in-core solve when the per-rank device estimate fits, and
-otherwise switches to the staged chunked solve when that path is available and
-its peak fits the same per-rank budget. The switch is logged once on rank 0
-with the required and budget bytes and a stable reason key.
+`--solve-mode` accepts exactly `auto`, `chunked`, `none` and `in-core`; any
+other spelling is rejected with exit 2. `none` and `in-core` are the same
+mode: the solver that keeps the padded volume in memory. `none` is the
+canonical spelling for "never use the chunked solver".
+
+`auto` (default) decides once per run, before grid construction and before
+the first allocation. It keeps the in-core solve when the estimated
+requirement fits the per-rank budget, and otherwise switches to the staged
+chunked solve when that solver is available and its own estimate fits. When
+it switches it prints exactly one line on rank 0:
+
+```
+picBunch: solve mode: auto -> chunked (required <X> GiB, available <Y> GiB per rank, reason <key>)
+```
+
+When both modes are infeasible the run refuses, naming the required bytes,
+the available bytes per rank and the available alternatives. When the
+capacity is unknown it keeps the historical in-core behaviour. `auto` never
+selects a mode the build cannot run.
+
+`chunked` runs on any rank count: each MPI rank executes the global staged
+solve and writes only the output z-planes it owns, so the result is the exact
+global transform and matches the distributed in-core reference. The staging
+traffic multiplies with the rank count and the FFT work is not parallelised
+by MPI, so `chunked` is a memory-saving mode, not a speed mode. The in-core
+memory-fit gate no longer refuses an explicit `chunked` run.
+
+The staged solve is host/CPU-only at runtime. On a CUDA or HIP build `auto`
+never selects it, and an explicit `chunked` fails with a message that says
+so; the alternative on a GPU build is `--fft-mode distributed`.
 
 An explicit `--solve-mode` overrides the optional TOML key:
 
 ```toml
 [solve]
-solve_mode = "auto"   # auto|chunked|none; in-core and incore are also accepted
+solve_mode = "auto"   # auto|chunked|none|in-core
 ```
 
-The `--config` path accepts the chunked solve; it no longer keeps the in-core
-path unconditionally. The staged solve is host/CPU-only and single-process and
-stages the global transforms on disk exactly as the direct path does. It is
-not the removed per-slab field approximation: the global z spectrum is
-preserved, so there is still no `accuracy.field_slab_planes` key.
-
-The config path applies the same lowered knobs as the direct path:
-`--chunk-cells`, `--virtual-ranks`, `--staging-dir`, `--keep-staging`,
-`--deterministic-deposit`, `--shape`, `--tolerance` (overrides
-`accuracy.tolerance`), `--input-iteration`, and `--output-iteration` (overrides
-the emitted checkpoint step). See
-[docs/chunked-field-solve.md](chunked-field-solve.md) for the memory model.
+The `--config` path honours `--solve-mode`, `--chunk-cells`,
+`--virtual-ranks`, `--staging-dir`, `--keep-staging`,
+`--deterministic-deposit`, `--shape`, `--input-iteration` and
+`--output-iteration` (overrides the emitted checkpoint step); before this
+wiring the path rejected `chunked` and the other listed flags were accepted
+and silently ignored. The config path writes one collective checkpoint
+through the existing openPMD checkpoint writer; each rank stores only its own
+slab. The staged solve stages the global transforms on disk exactly as the
+direct path does; it is not the removed per-slab field approximation, so
+there is still no `accuracy.field_slab_planes` key. See
+[chunked-field-solve.md](chunked-field-solve.md) for the memory model and the
+per-rank staging layout.
 
 ## Particle patch and records
 

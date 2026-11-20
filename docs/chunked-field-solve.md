@@ -209,27 +209,77 @@ memory ceiling is the N-dependent formula above, not the padded volume.
 ## Switch
 
 ```
---solve-mode auto|chunked|none|in-core|incore [--chunk-cells <N>]
+--solve-mode auto|chunked|none|in-core [--chunk-cells <N>]
             [--virtual-ranks <N>] [--staging-dir <dir>] [--keep-staging]
 ```
 
-`auto` is the default.  It keeps the whole-grid in-core solve when the
-per-rank device estimate fits, and switches to the staged solve when the
-in-core fit fails, the staged path is available, and its peak is within the
-same per-rank budget.  The switch is logged once on rank 0 with the required
-and budget bytes and a stable reason key.  `none`, `in-core` and `incore`
-force the in-core path; `chunked` forces the staged path and is not gated by
-the in-core estimate.  `auto` never falls back to a mode the build cannot run.
+`--solve-mode` accepts exactly `auto`, `chunked`, `none` and `in-core`; any
+other spelling is rejected with exit 2.  `none` and `in-core` select the
+whole-grid in-core solve, the solver that keeps the padded volume in memory;
+`none` is the canonical spelling for "never use the chunked solver".
 
-The staged solve is host/CPU-only and single-process.  It does not combine
-with `--near-shell`, `--velocity-moments` or `--global-grid`.  With `--output`
-every component z-slab is stored through `ChunkedFieldWriter` into one series
-whose datasets have the full global extent from the first `storeChunk`.  With
+`auto` is the default.  It decides once per run, before grid construction and
+before the first allocation.  It keeps the in-core solve when the estimated
+requirement fits the per-rank budget, and switches to the staged solve when
+that solver is available in the build and its own estimate fits.  The switch
+prints exactly one line on rank 0:
+
+```
+picBunch: solve mode: auto -> chunked (required <X> GiB, available <Y> GiB per rank, reason <key>)
+```
+
+When both modes are infeasible the run refuses, with a message that names the
+required bytes, the available bytes per rank and the available alternatives.
+When the capacity is unknown `auto` keeps the historical in-core behaviour.
+`auto` never falls back to a mode the build cannot run.
+
+`chunked` forces the staged path and is not gated by the in-core estimate; a
+large chunked run no longer fails with an in-core estimate for a solver it
+will not use.
+
+### Multi-rank behaviour
+
+`chunked` runs on any rank count.  Each MPI rank executes the global staged
+solve, and only the rank that owns a range of global output z-planes writes
+them, through the existing collective routing.  The written field is the
+exact global transform and matches the distributed in-core reference; it was
+verified bitwise equal on divisible and non-divisible grids, at padding 1 and
+2, with 1, 3 and 4 ranks.  The cost is I/O: each rank performs the full
+staged exchange, so the staging traffic multiplies with the rank count, and
+the FFT work is not parallelised by MPI.  `chunked` is a memory-saving mode,
+not a speed mode.
+
+The staging directory is per rank: `<staging-dir>/rank-<r>` holds rank `r`'s
+exchange files.  `--keep-staging` keeps them for inspection.
+
+The staged solve is host/CPU-only at runtime.  On a CUDA or HIP build `auto`
+never selects it, and an explicit `chunked` fails with a message that says so;
+the alternative on a GPU build is `--fft-mode distributed`.  Making the
+staged solve device-memory-bounded on GPUs is future work.
+
+The staged solve does not combine with `--near-shell`, `--velocity-moments` or
+`--global-grid`.  On the direct `--input`/`--output` path it additionally
+requires an explicit `--grid`, `--origin` and `--cell-size`, a single velocity
+box, and `--output` when there is no checkpoint.  With `--output` the
+single-rank run stores every component z-slab through `ChunkedFieldWriter`
+into one series whose datasets have the full global extent from the first
+`storeChunk`; that streaming writer path is unchanged.  With
 `--restart-format picongpu` the field is accumulated for the existing
 checkpoint writer.
 
-The `--config` path accepts the same `--solve-mode` value and the optional
-TOML key `[solve] solve_mode = "auto|chunked|none"`; an explicit command-line
-value wins over the TOML key.  The former config-path rejection of `chunked`
-is gone, and the lowered knobs (`--chunk-cells`, `--virtual-ranks`,
-`--staging-dir`, `--keep-staging`) are applied on that path too.
+### The config path
+
+The `--config` path honours `--solve-mode`, `--chunk-cells`,
+`--virtual-ranks`, `--staging-dir`, `--keep-staging`,
+`--deterministic-deposit`, `--shape`, `--input-iteration` and
+`--output-iteration`; previously these were accepted and silently ignored,
+and `chunked` was rejected outright.  The optional TOML key
+
+```toml
+[solve]
+solve_mode = "auto"   # auto|chunked|none|in-core
+```
+
+selects the same policy, with an explicit command-line value taking
+precedence.  The config path writes one collective checkpoint through the
+existing openPMD checkpoint writer; each rank stores only its own slab.

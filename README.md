@@ -26,10 +26,11 @@ gates, the near-source limitation and their provenance are recorded in
 - **Chunked low-memory solve:**
   [docs/chunked-field-solve.md](docs/chunked-field-solve.md) describes the
   out-of-core staging passes, the peak-memory formula, the
-  `--solve-mode auto|chunked` policy (auto keeps the in-core solve when it fits
-  and otherwise switches to the staged solve) and the measured production
-  limit. The `--config` path and the optional TOML `[solve] solve_mode` key
-  select the same policy.
+  `--solve-mode auto|chunked|none|in-core` policy (auto decides once per run
+  and keeps the in-core solve when it fits the per-rank budget, and otherwise
+  switches to the staged solve) and the measured production limit. The staged
+  solve runs on any rank count and on the `--config` path; the optional TOML
+  `[solve] solve_mode` key selects the same policy.
 - **Near-shell scaling:** [docs/near-shell-scaling.md](docs/near-shell-scaling.md)
   gives the V100 dense-cloud measurements, the tile 2/tile 4 cost, memory,
   projections and the per-regime recommendation.
