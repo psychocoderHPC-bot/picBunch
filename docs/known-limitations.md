@@ -276,3 +276,20 @@ bound; large-extent users opt in with the flag.
 **Plan.** Keep the CLI/env knob and the per-entry skip. If a future default needs
 to scale with the padded box, derive it from the six-component working set and
 require the caller to confirm the device budget.
+
+## 11. Staged solve is host/CPU-only
+
+**Symptom.** On a CUDA or HIP build the staged (out-of-core) solve is not
+available. `--solve-mode auto` never selects it, and an explicit
+`--solve-mode chunked` fails with `chunked solve is implemented for the
+host/CPU backend only; the staging passes hand host buffers to the FFT
+backend`. A reader of this document on a device build therefore gets no
+warning from the solve-mode policy, which is why this entry exists.
+
+**Evidence.** `src/Compute.cpp` gates the staged solve behind
+`#if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)` and
+throws before any allocation or staging file is touched. The staging passes
+hand host buffers to the FFT backend, which the device builds do not expose.
+The staged solve is implemented for the host/CPU backend only.
+
+**Workaround.** On a multi-GPU node the option to try is --fft-mode distributed: the distributed z-slab FFT is accepted only when the per-rank slab fits the budget, and it computes the same global transform the staged solve would. If it does not fit, lower --fft-padding first. Device-memory-bounded staged solving is not implemented.

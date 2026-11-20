@@ -18,6 +18,7 @@
 #include "picBunch/OpenPMDWriter.hpp"
 #include "picBunch/ChunkedWriter.hpp"
 #include "picBunch/Placement.hpp"
+#include "picBunch/SolveMode.hpp"
 #include "picBunch/Types.hpp"
 
 #include <algorithm>
@@ -41,6 +42,33 @@ namespace
     using picBunch::IVec3;
     using picBunch::UVec3;
     using picBunch::Vec3;
+
+    picBunch::SolveMode solveModeFromText(std::string const& text)
+    {
+        auto const mode = picBunch::parseSolveMode(text);
+        if(!mode)
+            throw std::invalid_argument(
+                "--solve-mode must be 'auto', 'chunked', 'none' or 'in-core' (got '"
+                + text + "')");
+        return *mode;
+    }
+
+    picBunch::Shape shapeFromText(std::string const& text)
+    {
+        if(text == "cic")
+            return picBunch::Shape::CIC;
+        if(text == "pqs")
+            return picBunch::Shape::PQS;
+        return picBunch::Shape::TSC;
+    }
+
+    //! Print one solve-mode decision line, from rank 0 only.
+    void logSolveModeDecision(picBunch::SolveModeDecision const& decision)
+    {
+        if(picBunch::mpiRank() != 0)
+            return;
+        std::fprintf(stderr, "%s\n", picBunch::formatSolveModeDecision(decision).c_str());
+    }
 
     constexpr char const* compiledBackend()
     {
@@ -198,13 +226,19 @@ namespace
             "                        distributed decomposes the padded box by z-slabs\n"
             "                        and transposes with MPI_Alltoallv; auto selects it\n"
             "                        when the padded box exceeds the per-rank limit\n"
-            "  --solve-mode <mode>   auto|chunked (default: auto).  chunked runs the\n"
-            "                        exact global 3-D FFT out of core: one process\n"
-            "                        splits the padded volume into chunks, stages the\n"
-            "                        transposes on disk and streams the output slabs.\n"
-            "                        Peak memory is a few chunk buffers, not the padded\n"
-            "                        volume; requires one rank and --output (or it\n"
-            "                        accumulates for the checkpoint writer)\n"
+            "  --solve-mode <mode>   auto|chunked|none|in-core (default: auto).\n"
+            "                        auto keeps the in-core solve when it fits the\n"
+            "                        per-rank budget and otherwise switches to chunked;\n"
+            "                        it prints the decision and its reason once on\n"
+            "                        rank 0.  none and in-core are synonyms\n"
+            "                        for the in-core path.  chunked runs the exact\n"
+            "                        global 3-D FFT out of core: one process splits the\n"
+            "                        padded volume into chunks, stages the transposes on\n"
+            "                        disk and streams the output slabs.  Peak memory is\n"
+            "                        a few chunk buffers, not the padded volume; the\n"
+            "                        staged solve is host/CPU-only, requires one rank\n"
+            "                        and --output (or accumulates for the checkpoint\n"
+            "                        writer)\n"
             "  --chunk-cells <N>     cells per chunk buffer of the chunked solve\n"
             "                        (default: 4194304); must hold one x-y plane\n"
             "  --virtual-ranks <N>   explicit virtual-rank count for the staged\n"
@@ -255,7 +289,9 @@ namespace
         std::optional<std::string> output;
         std::optional<std::uint64_t> inputIteration;
         std::uint64_t outputIteration = 0;
+        bool outputIterationGiven = false;
         double tolerance = 1e-3;
+        bool toleranceGiven = false;
         unsigned fftPadding = 0; //!< 0 = tolerance policy
         std::optional<std::size_t> fftSpectrumCacheMiB; //!< unset = env/default
         std::string nearShell = "none";
@@ -281,6 +317,7 @@ namespace
         int multipoleGroupCells = 16;
         double maxParticleChunkGb = 0.0;
         std::string solveMode = "auto";
+        bool solveModeGiven = false;
         std::size_t chunkCells = std::size_t{1u} << 22;
         int virtualRanks = 0;
         std::optional<std::string> stagingDir;
@@ -473,9 +510,16 @@ namespace
             else if(option == "--input-iteration")
                 args.inputIteration = parseIteration(value("--input-iteration"), "--input-iteration");
             else if(option == "--output-iteration")
-                args.outputIteration = parseIteration(value("--output-iteration"), "--output-iteration");
+            {
+                args.outputIteration
+                    = parseIteration(value("--output-iteration"), "--output-iteration");
+                args.outputIterationGiven = true;
+            }
             else if(option == "--tolerance")
+            {
                 args.tolerance = parseTolerance(value("--tolerance"));
+                args.toleranceGiven = true;
+            }
             else if(option == "--fft-padding")
             {
                 std::uint64_t const padding
@@ -575,7 +619,10 @@ namespace
             else if(option == "--fft-mode")
                 args.fftMode = value("--fft-mode");
             else if(option == "--solve-mode")
+            {
                 args.solveMode = value("--solve-mode");
+                args.solveModeGiven = true;
+            }
             else if(option == "--chunk-cells")
             {
                 args.chunkCells = static_cast<std::size_t>(
@@ -652,11 +699,10 @@ namespace
             throw std::invalid_argument("--velocity-moments must be 'off', 'auto', '2' or '3'");
         if(args.fftMode != "auto" && args.fftMode != "replicated" && args.fftMode != "distributed")
             throw std::invalid_argument("--fft-mode must be 'auto', 'replicated' or 'distributed'");
-        if(args.solveMode != "auto" && args.solveMode != "chunked")
-            throw std::invalid_argument("--solve-mode must be 'auto' or 'chunked'");
-        if(args.solveMode == "chunked" && picBunch::mpiSize() > 1)
+        if(!picBunch::parseSolveMode(args.solveMode))
             throw std::invalid_argument(
-                "--solve-mode chunked is a single-process path; run it with one rank");
+                "--solve-mode must be 'auto', 'chunked', 'none' or 'in-core' (got '"
+                + args.solveMode + "')");
         if(!(args.nearShellRadius >= 0.0) || !std::isfinite(args.nearShellRadius))
             throw std::invalid_argument("--near-shell-radius must be finite and non-negative");
         // The fast path rejects an explicit tile that leaves the measured
@@ -798,15 +844,23 @@ namespace
 
     int runConfigured(Arguments const& args)
     {
-        if(args.solveMode == "chunked")
-            throw std::invalid_argument(
-                "--solve-mode chunked is supported on the direct --input/--output "
-                "path; the --config path keeps the in-core solve");
         picBunch::Config const config = picBunch::loadConfig(*args.config);
+        // The CLI wins over the optional TOML [solve] table.  The direct path
+        // hands the same spelling to the same parser.
+        picBunch::SolveMode const solveMode = args.solveModeGiven
+            ? solveModeFromText(args.solveMode)
+            : config.solve.solveMode;
         picBunch::MpiParallelContext parallel;
         int const rank = picBunch::mpiRank();
         int const size = picBunch::mpiSize();
         bool const root = rank == 0;
+        // Explicit overrides print their final mode once; an auto decision is
+        // logged by the compute entry point, which owns the grid dimensions.
+        if(root && solveMode != picBunch::SolveMode::Auto)
+        {
+            logSolveModeDecision(
+                picBunch::resolveSolveMode(solveMode, picBunch::DeviceFit{}, 0u, false, size));
+        }
         for(auto const& warning : config.warnings)
             if(root)
                 std::fprintf(stderr, "picBunch: warning: %s\n", warning.c_str());
@@ -849,8 +903,17 @@ namespace
             ? picBunch::FftMode::Replicated
             : (args.fftMode == "distributed") ? picBunch::FftMode::Distributed
                                               : picBunch::FftMode::Auto;
-        options.tolerance = config.accuracy.tolerance;
+        // --tolerance overrides the [accuracy] value when given on the CLI.
+        options.tolerance = args.toleranceGiven ? args.tolerance : config.accuracy.tolerance;
         options.fftPadding = args.fftPadding;
+        options.deterministicDeposit = args.deterministicDeposit;
+        options.shape = shapeFromText(args.shape);
+        options.solveMode = solveMode;
+        options.solveModeResolved = (solveMode != picBunch::SolveMode::Auto);
+        options.chunkCells = args.chunkCells;
+        options.virtualRanks = args.virtualRanks;
+        options.stagingDirectory = args.stagingDir.value_or("");
+        options.keepStaging = args.keepStaging;
         options.cellSize = config.domain.cellSize;
         options.gridSize = config.domain.cells;
         options.gridOrigin = config.domain.origin;
@@ -943,6 +1006,7 @@ namespace
                 : config.picongpu.outputSpecies[s];
             picBunch::BunchSelection selection;
             selection.speciesName = inputSpecies;
+            selection.iteration = args.inputIteration;
 
             // Rank 0 reads and every rank receives the replicated bunch, as on
             // the CLI path.  Publish a root reader error before the first
@@ -1105,7 +1169,8 @@ namespace
         // no full-field allocation is needed on any rank.
 
         picBunch::PicOnGPUWriteOptions restart;
-        restart.step = config.picongpu.step;
+        restart.step = args.outputIterationGiven ? args.outputIteration
+                                                 : config.picongpu.step;
         restart.directory = *args.destination;
         restart.inputFile = args.input;
         restart.inputIteration = inputIteration;
@@ -1235,12 +1300,14 @@ namespace
 
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
+        // The particle-chunked pipeline drives whole-grid fields per chunk;
+        // auto must never turn it into the staged out-of-core solve.
+        options.solveMode = picBunch::SolveMode::InCore;
+        options.solveModeResolved = true;
         options.tolerance = args.tolerance;
         options.fftPadding = args.fftPadding;
         options.deterministicDeposit = args.deterministicDeposit;
-        options.shape = (args.shape == "cic") ? picBunch::Shape::CIC
-            : (args.shape == "pqs") ? picBunch::Shape::PQS
-                                    : picBunch::Shape::TSC;
+        options.shape = shapeFromText(args.shape);
         options.cellSize = *args.cellSize;
         options.gridSize = *args.grid;
         options.gridOrigin = *args.origin;
@@ -1552,6 +1619,16 @@ int main(int argc, char** argv)
         catch(std::exception const& error)
         {
             std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+            // The chunked driver runs collectives (broadcasts, component
+            // reductions, the field writer).  A local return would strand the
+            // peers, so terminate the job the way the top-level handler does.
+            picBunch::mpiAbort(1);
+            return 1;
+        }
+        catch(...)
+        {
+            std::fprintf(stderr, "picBunch: error: unknown exception\n");
+            picBunch::mpiAbort(1);
             return 1;
         }
     }
@@ -1566,6 +1643,15 @@ int main(int argc, char** argv)
         Vec3 globalOriginResolved{0.0, 0.0, 0.0};
         picBunch::MpiParallelContext parallel;
         picBunch::ComputeOptions options;
+        // Every rank parses the same CLI value.  The solve mode is not part of
+        // the MPI options payload in this stage, so set it before the root
+        // setup block instead of relying on the root-only broadcast.
+        options.solveMode = solveModeFromText(args.solveMode);
+        options.solveModeResolved = (options.solveMode != picBunch::SolveMode::Auto);
+        options.chunkCells = args.chunkCells;
+        options.virtualRanks = args.virtualRanks;
+        options.stagingDirectory = args.stagingDir.value_or("");
+        options.keepStaging = args.keepStaging;
 
         std::string rootSetupError;
         if(root)
@@ -1758,13 +1844,15 @@ int main(int argc, char** argv)
                 std::printf(
                     "fft mode: replicated (PIConGPU checkpoint needs the full field)\n");
         }
-        options.solveMode = (args.solveMode == "chunked")
-            ? picBunch::SolveMode::Chunked
-            : picBunch::SolveMode::InCore;
-        options.chunkCells = args.chunkCells;
-        options.virtualRanks = args.virtualRanks;
-        options.stagingDirectory = args.stagingDir.value_or("");
-        options.keepStaging = args.keepStaging;
+        if(root && options.solveMode != picBunch::SolveMode::Auto)
+        {
+            logSolveModeDecision(picBunch::resolveSolveMode(
+                options.solveMode,
+                picBunch::DeviceFit{},
+                0u,
+                false,
+                picBunch::mpiSize()));
+        }
         if(options.solveMode == picBunch::SolveMode::Chunked)
         {
             if(args.globalGrid)
@@ -2098,6 +2186,12 @@ int main(int argc, char** argv)
                     try
                     {
                         computeWithMargin(preferred);
+                    }
+                    catch(picBunch::SolveModeRefusal const&)
+                    {
+                        // A solve-mode refusal is not a padded-node-cap
+                        // problem; keep its distinct type and message.
+                        throw;
                     }
                     catch(std::runtime_error const& error)
                     {

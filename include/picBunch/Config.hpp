@@ -150,6 +150,13 @@ namespace picBunch
             int nearShellExactCells = -2;
         } accuracy;
 
+        struct Solve
+        {
+            //! ``auto`` (default), ``chunked`` or the ``InCore`` spellings.
+            //! Overridden by an explicit command-line ``--solve-mode``.
+            SolveMode solveMode = SolveMode::Auto;
+        } solve;
+
         struct Checkpoint
         {
             //! ``"auto"`` (default), ``"adios2"`` or ``"hdf5"``.  ``auto``

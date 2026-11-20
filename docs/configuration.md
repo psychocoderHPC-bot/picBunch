@@ -185,6 +185,12 @@ message names the axis, the required halo nodes and the halo nodes actually
 available. `tolerance` never selects a factor below 2, so the automatic policy
 is unchanged.
 
+### `[solve]`
+
+| key | required | meaning |
+| --- | --- | --- |
+| `solve_mode` | no | `"auto"` (default), `"chunked"`, `"none"` or `"in-core"`. `none` and `in-core` are the same mode: the solver that keeps the padded volume in memory; `none` is the canonical spelling for "never use the chunked solver". `auto` keeps the in-core solve when the estimated requirement fits the per-rank budget and otherwise switches to the staged chunked solve when that solver is available and its own estimate fits. An explicit `--solve-mode` wins over this key. |
+
 ### `[checkpoint]`
 
 | key | required | meaning |
@@ -287,30 +293,58 @@ datasets, and stores only its own z-slab at its global offset. No rank gathers
 or allocates the full field, and the checkpoint tree is independent of the rank
 count. Particle records and `checkpoints.txt` stay on rank 0.
 
-## Chunked field computation is not supported
+## Solve mode and the config path
 
-picBunch does **not** ship a chunked or slab-tiled field-computation path, and
-there is no `accuracy.field_slab_planes` configuration key. A checkpoint is
-written only from a fully materialised field; the peak device memory is
-therefore the full padded FFT box plus the six output components (about 370
-bytes per grid cell on the reference small case, 400x160x440 cells at 2e-7 m;
-measured 10.5 GiB on the GV100). Host RSS on the same case was 1.6 GiB.
+`--solve-mode` accepts exactly `auto`, `chunked`, `none` and `in-core`; any
+other spelling is rejected with exit 2. `none` and `in-core` are the same
+mode: the solver that keeps the padded volume in memory. `none` is the
+canonical spelling for "never use the chunked solver".
 
-The slab approach was implemented and measured, then removed. Two wrapper bugs
-were fixed first: a wrong `idist` that aliased every z-row, and a batched 2-D
-plan that never transformed z. The slab field still disagreed with the untiled
-reference: the relative E error was 0.45-0.67, and the spectral-curl B path
-overflowed to about `1e307` because the half-spectrum Hermitian symmetry is
-broken on the DC and Nyquist planes. That is a correctness gap, not a tuning
-problem, so the feature is not shippable.
+`auto` (default) decides once per run, before grid construction and before
+the first allocation. It keeps the in-core solve when the estimated
+requirement fits the per-rank budget, and otherwise switches to the staged
+chunked solve when that solver is available and its own estimate fits. When
+it switches it prints exactly one line on rank 0:
 
-The correct future approach is a decomposition that preserves the global z
-spectrum: either a distributed FFT along z with the correct global halo, or an
-overlap-save scheme whose per-slab transform is embedded in the full-plane
-spectrum rather than an independent small transform. Any such path must prove
-all six components against the untiled field to a stated tolerance before it is
-accepted, and it must keep one full-shape record component per field component
-in the checkpoint.
+```
+picBunch: solve mode: auto -> chunked (required <X> GiB, budget <Y> GiB per rank, reason <key>)
+```
+
+When both modes are infeasible the run refuses, naming the required bytes,
+the available bytes per rank and the available alternatives. When the
+capacity is unknown it keeps the historical in-core behaviour. `auto` never
+selects a mode the build cannot run.
+
+`chunked` runs on any rank count: each MPI rank executes the global staged
+solve and writes only the output z-planes it owns, so the result is the exact
+global transform and matches the distributed in-core reference. The staging
+traffic multiplies with the rank count and the FFT work is not parallelised
+by MPI, so `chunked` is a memory-saving mode, not a speed mode. The in-core
+memory-fit gate no longer refuses an explicit `chunked` run.
+
+The staged solve is host/CPU-only at runtime. On a CUDA or HIP build `auto`
+never selects it, and an explicit `chunked` fails with a message that says
+so; the alternative on a GPU build is `--fft-mode distributed`.
+
+An explicit `--solve-mode` overrides the optional TOML key:
+
+```toml
+[solve]
+solve_mode = "auto"   # auto|chunked|none|in-core
+```
+
+The `--config` path honours `--solve-mode`, `--chunk-cells`,
+`--virtual-ranks`, `--staging-dir`, `--keep-staging`,
+`--deterministic-deposit`, `--shape`, `--input-iteration` and
+`--output-iteration` (overrides the emitted checkpoint step); before this
+wiring the path rejected `chunked` and the other listed flags were accepted
+and silently ignored. The config path writes one collective checkpoint
+through the existing openPMD checkpoint writer; each rank stores only its own
+slab. The staged solve stages the global transforms on disk exactly as the
+direct path does; it is not the removed per-slab field approximation, so
+there is still no `accuracy.field_slab_planes` key. See
+[chunked-field-solve.md](chunked-field-solve.md) for the memory model and the
+per-rank staging layout.
 
 ## Particle patch and records
 

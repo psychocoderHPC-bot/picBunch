@@ -638,6 +638,8 @@ namespace picBunch
     //! Field-solve execution path.
     enum class SolveMode
     {
+        //! Pick in-core when it fits the per-rank budget, else the chunked solve.
+        Auto,
         //! Whole-grid FFT in host/device memory (the historical path).
         InCore,
         /*! Out-of-core chunked 3-D FFT with disk-backed transposes.
@@ -772,6 +774,13 @@ namespace picBunch
          *  accumulates into the returned ``Field`` for the checkpoint writer).
          */
         SolveMode solveMode = SolveMode::InCore;
+        /*! Sticky marker that ``solveMode`` is already final.
+         *
+         * ``false`` lets the compute entry point resolve ``Auto`` once.  The
+         * particle-chunked pipeline sets it when it forces ``InCore`` so the
+         * automatic policy can never fire inside that path.
+         */
+        bool solveModeResolved = false;
         //! Cells (not bytes) in the largest chunk buffer; must hold one x-y plane.
         std::size_t chunkCells = std::size_t{1u} << 22;
         /*! Explicit number of virtual ranks for the staged solve.  Zero

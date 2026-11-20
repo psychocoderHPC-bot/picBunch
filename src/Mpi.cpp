@@ -180,6 +180,26 @@ namespace picBunch
 #endif
     }
 
+    void MpiParallelContext::allreduceMin(std::uint64_t& value) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+            MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_UINT64_T, MPI_MIN, MPI_COMM_WORLD);
+#else
+        (void)value;
+#endif
+    }
+
+    void MpiParallelContext::allreduceMax(std::uint64_t& value) const
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+            MPI_Allreduce(MPI_IN_PLACE, &value, 1, MPI_UINT64_T, MPI_MAX, MPI_COMM_WORLD);
+#else
+        (void)value;
+#endif
+    }
+
     void MpiParallelContext::alltoallv(
         double* send,
         int const* sendCounts,
