@@ -1619,6 +1619,16 @@ int main(int argc, char** argv)
         catch(std::exception const& error)
         {
             std::fprintf(stderr, "picBunch: error: %s\n", error.what());
+            // The chunked driver runs collectives (broadcasts, component
+            // reductions, the field writer).  A local return would strand the
+            // peers, so terminate the job the way the top-level handler does.
+            picBunch::mpiAbort(1);
+            return 1;
+        }
+        catch(...)
+        {
+            std::fprintf(stderr, "picBunch: error: unknown exception\n");
+            picBunch::mpiAbort(1);
             return 1;
         }
     }

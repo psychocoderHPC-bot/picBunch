@@ -46,6 +46,25 @@ namespace picBunch
         return std::nullopt;
     }
 
+    /*! Decode the solve-mode value carried by the collective broadcast.
+     *
+     * The wire carries one of the ``SolveMode`` enumerators as a double.  The
+     * ``-1`` refusal sentinel is handled by the caller and is not a legal
+     * mode, so it is rejected here together with every non-integral or
+     * out-of-range value.  Returning ``nullopt`` lets the caller abort on a
+     * corrupt or version-skewed broadcast instead of casting garbage.
+     */
+    inline std::optional<SolveMode> solveModeFromWire(double value)
+    {
+        if(value == static_cast<double>(SolveMode::Auto))
+            return SolveMode::Auto;
+        if(value == static_cast<double>(SolveMode::InCore))
+            return SolveMode::InCore;
+        if(value == static_cast<double>(SolveMode::Chunked))
+            return SolveMode::Chunked;
+        return std::nullopt;
+    }
+
     //! Canonical spelling of a resolved mode (for the decision log).
     inline char const* solveModeName(SolveMode mode)
     {
@@ -84,6 +103,26 @@ namespace picBunch
             * (Mx * My * nz + 2u * nx * My * Mz
                + 2u * std::max<std::size_t>(Mx * nz, Mz * nx));
         return workspace + particleBytes;
+    }
+
+    /*! Peak resident bytes of the staged chunked solve with its output slab.
+     *
+     * ``estimateChunkedRequirementBytes`` covers one virtual-rank solver
+     * workspace and the particle staging.  While the solver is alive the
+     * caller also retains the six-component output slab it just read out, so
+     * the true peak adds ``6 * slabPlanes * planeElems`` doubles.  For a
+     * single rank ``slabPlanes`` is the whole output volume.  Kept pure so the
+     * gate can be unit-tested without a build- or device-dependent path.
+     */
+    inline std::size_t chunkedResidentBytes(
+        std::size_t solverBytes,
+        std::size_t slabPlanes,
+        std::size_t planeElems)
+    {
+        constexpr std::size_t componentCount = 6u;
+        constexpr std::size_t valueBytes = sizeof(double);
+        return solverBytes
+            + componentCount * slabPlanes * planeElems * valueBytes;
     }
 
     //! Outcome of the automatic or explicit solve-mode policy.

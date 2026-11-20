@@ -262,3 +262,58 @@ TEST(SolveMode, ConfigRejectsAnInvalidSolveMode)
         EXPECT_NE(std::string(error.what()).find("solve.solve_mode"), std::string::npos);
     }
 }
+
+TEST(SolveMode, WireValidatorAcceptsOnlyLegalModes)
+{
+    for(picBunch::SolveMode mode : {picBunch::SolveMode::Auto,
+                                     picBunch::SolveMode::InCore,
+                                     picBunch::SolveMode::Chunked})
+    {
+        auto const decoded = picBunch::solveModeFromWire(static_cast<double>(mode));
+        ASSERT_TRUE(decoded.has_value());
+        EXPECT_EQ(*decoded, mode);
+    }
+    // -1 is the refusal sentinel, not a mode; 3 is past the last enumerator.
+    for(double invalid : {-1.0, 3.0, 0.5, 1.0e300})
+        EXPECT_FALSE(picBunch::solveModeFromWire(invalid).has_value());
+}
+
+TEST(SolveMode, ChunkedResidentBytesAddsTheSixComponentSlab)
+{
+    std::size_t const solverBytes = 1000u;
+    std::size_t const slabPlanes = 2u;
+    std::size_t const planeElems = 10u;
+    std::size_t const slabBytes = 6u * slabPlanes * planeElems * sizeof(double);
+    EXPECT_EQ(
+        picBunch::chunkedResidentBytes(solverBytes, slabPlanes, planeElems),
+        solverBytes + slabBytes);
+}
+
+TEST(SolveMode, ChunkedResidentBytesCountsTheWholeVolumeForOneRank)
+{
+    // parSize == 1: one slab is the whole output volume, nz planes of nx*ny.
+    std::size_t const nx = 8u;
+    std::size_t const ny = 6u;
+    std::size_t const nz = 5u;
+    std::size_t const solverBytes = 4096u;
+    std::size_t const expectedSlab = 6u * nz * nx * ny * sizeof(double);
+    EXPECT_EQ(
+        picBunch::chunkedResidentBytes(solverBytes, nz, nx * ny),
+        solverBytes + expectedSlab);
+}
+
+TEST(SolveMode, ChunkedGateRejectsWhenOnlyTheSolverBytesFit)
+{
+    // The old gate compared the solver requirement alone.  These numbers fit
+    // that comparison but exceed the same budget once the output slab is
+    // counted, which is the regression the resident term fixes.
+    std::size_t const solverBytes = 512u;
+    std::size_t const slabPlanes = 3u;
+    std::size_t const planeElems = 8u;
+    std::size_t const slabBytes = 6u * slabPlanes * planeElems * sizeof(double);
+    std::size_t const budget = solverBytes + slabBytes - 1u;
+    EXPECT_LE(solverBytes, budget);
+    EXPECT_GT(
+        picBunch::chunkedResidentBytes(solverBytes, slabPlanes, planeElems),
+        budget);
+}

@@ -2026,6 +2026,20 @@ namespace picBunch
         using KernelCache = KernelSpectrumCache<decltype(device)>;
 
         Idx3 const paddedExtent = grid.paddedSize();
+        // The FFT extents and every downstream extent/index type are 32-bit.
+        // Reject an axis that cannot be represented before the narrowing cast:
+        // the staged chunked path deliberately has no whole-box node ceiling,
+        // so this is the only place that catches a padded axis above 2^32-1.
+        constexpr std::size_t maxRepresentableExtent
+            = std::numeric_limits<std::uint32_t>::max();
+        for(int a = 0; a < 3; ++a)
+            if(paddedExtent[a] > maxRepresentableExtent)
+                throw std::runtime_error(
+                    "computeField: padded FFT extent "
+                    + std::to_string(paddedExtent[a]) + " on axis "
+                    + std::to_string(a) + " exceeds the 32-bit extent limit ("
+                    + std::to_string(maxRepresentableExtent)
+                    + "); reduce the output grid or --fft-padding");
         std::uint32_t const Mx = static_cast<std::uint32_t>(paddedExtent[0]);
         std::uint32_t const My = static_cast<std::uint32_t>(paddedExtent[1]);
         std::uint32_t const Mz = static_cast<std::uint32_t>(paddedExtent[2]);
@@ -2161,10 +2175,50 @@ namespace picBunch
                 static_cast<unsigned>(sizeof(double))};
             DeviceFit const localFit
                 = evaluateDeviceFit(currentRankDeviceMapping(), inCoreWorkload);
+
+            /*! Worst-rank capacity picture.
+             *
+             * ``localFit`` is rank-local: it comes from this rank's device
+             * mapping, so unequal device capacity or ranks-per-device lets one
+             * rank hold a much smaller share than root.  Reducing the required
+             * bytes upward and the budget share downward before the decision
+             * makes every rank resolve from the same pessimistic picture.  A
+             * refusal then reaches every rank instead of leaving one rank to
+             * throw while its peers enter the solve.
+             */
+            auto const reduceFit = [&](DeviceFit const& local) {
+                DeviceFit reduced = local;
+                if(par != nullptr && parSize > 1)
+                {
+                    std::uint64_t required = local.requiredBytes;
+                    std::uint64_t share = local.shareBytes;
+                    par->allreduceMax(required);
+                    par->allreduceMin(share);
+                    reduced.requiredBytes = static_cast<std::size_t>(required);
+                    reduced.shareBytes = static_cast<std::size_t>(share);
+                    reduced.capacityBytes = reduced.shareBytes;
+                    reduced.refused
+                        = reduced.shareBytes > 0u && reduced.requiredBytes > reduced.shareBytes;
+                }
+                return reduced;
+            };
+
             // The staged path keeps the binned particle bookkeeping (``boxOf``
             // plus ``members``, one size_t each) and one virtual-rank
-            // workspace.  The output slab is the deliverable and is budgeted by
-            // the writer, not counted as solver staging.
+            // workspace.  While the solver is alive the caller also retains a
+            // six-component output slab, so the gate must budget it too; for a
+            // single rank that slab is the whole output volume.
+            std::size_t const outputPlane
+                = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy);
+            std::size_t const slabPlanes
+                = parSize > 1
+                ? ((static_cast<std::size_t>(parRank) + 1u)
+                       * static_cast<std::size_t>(outNz))
+                        / static_cast<std::size_t>(parSize)
+                    - (static_cast<std::size_t>(parRank)
+                       * static_cast<std::size_t>(outNz))
+                        / static_cast<std::size_t>(parSize)
+                : static_cast<std::size_t>(outNz);
             auto const chunkedEstimateBytes = [&] {
                 int virtualRanksForEstimate = 1;
                 try
@@ -2185,26 +2239,40 @@ namespace picBunch
                 }
                 std::size_t const particleBytes
                     = bunch.size() * 2u * sizeof(std::size_t);
-                return estimateChunkedRequirementBytes(
-                    Mx,
-                    My,
-                    Mz,
-                    static_cast<std::size_t>(std::max(virtualRanksForEstimate, 1)),
-                    particleBytes);
+                return chunkedResidentBytes(
+                    estimateChunkedRequirementBytes(
+                        Mx,
+                        My,
+                        Mz,
+                        static_cast<std::size_t>(std::max(virtualRanksForEstimate, 1)),
+                        particleBytes),
+                    slabPlanes,
+                    outputPlane);
             };
+
+            DeviceFit fit = reduceFit(localFit);
+            // A grid that only the staged slab path can hold is a legitimate
+            // reason for auto to switch, so fold the in-core node ceiling into
+            // the fit.  It is rank-uniform because the grid and options are.
+            bool const inCoreGeometryFits
+                = !gridCapacityViolation(grid, options, SolveMode::InCore);
+            fit.refused = fit.refused || !inCoreGeometryFits;
+
+            // The staged estimate is reduced the same way so one rank with a
+            // larger bin/particle staging cannot slip past the budget gate and
+            // then throw after its peers entered the solve.
+            std::size_t chunkedBytes = chunkedEstimateBytes();
+            if(par != nullptr && parSize > 1)
+            {
+                std::uint64_t reducedChunked = chunkedBytes;
+                par->allreduceMax(reducedChunked);
+                chunkedBytes = static_cast<std::size_t>(reducedChunked);
+            }
 
             bool const needResolution
                 = !options.solveModeResolved || options.solveMode == SolveMode::Auto;
             if(needResolution)
             {
-                // A grid that only the staged slab path can hold is a
-                // legitimate reason for auto to switch, so fold the in-core
-                // node ceiling into the fit.
-                DeviceFit fit = localFit;
-                bool const inCoreGeometryFits
-                    = !gridCapacityViolation(grid, options, SolveMode::InCore);
-                fit.refused = fit.refused || !inCoreGeometryFits;
-
                 bool const chunkedAvailable = chunkedBackendAvailable
                     && options.nearShell.mode == NearShellOptions::Mode::None
                     && options.velocityMoments.mode == VelocityMomentsOptions::Mode::Off
@@ -2217,7 +2285,7 @@ namespace picBunch
                 SolveModeDecision decision = resolveSolveMode(
                     options.solveMode,
                     fit,
-                    chunkedEstimateBytes(),
+                    chunkedBytes,
                     chunkedAvailable,
                     parSize);
 
@@ -2225,41 +2293,64 @@ namespace picBunch
                 // ranks.  One one-value broadcast of the root decision keeps
                 // the fixed-size options payload and its wire version intact.
                 // A refusal travels as -1 so a refused root cannot strand peers
-                // that would otherwise enter the solve.
+                // that would otherwise enter the solve.  Each rank compares the
+                // received value with its own reduced decision; a disagreement
+                // (or a corrupt wire value) aborts instead of trusting root.
                 if(parSize > 1)
                 {
                     double modeWire = decision.refused
                         ? -1.0
                         : static_cast<double>(decision.mode);
                     mpiBroadcast(&modeWire, 1u, 0);
-                    if(modeWire < 0.0)
+                    bool const rootRefused = modeWire < 0.0;
+                    std::optional<SolveMode> const rootMode
+                        = rootRefused ? std::nullopt : solveModeFromWire(modeWire);
+                    bool const invalidWire = !rootRefused && !rootMode;
+                    bool const disagree = invalidWire
+                        || (rootRefused != decision.refused)
+                        || (!rootRefused && *rootMode != decision.mode);
+                    if(disagree)
                     {
-                        if(decision.refused)
-                            enforceSolveMode(decision);
+                        std::fprintf(
+                            stderr,
+                            "picBunch: solve mode: rank %d resolved %s, but rank 0 "
+                            "broadcast %s; the rank set has divergent capacity or "
+                            "solver state\n",
+                            mpiRank(),
+                            decision.refused ? "refused" : solveModeName(decision.mode),
+                            rootRefused
+                                ? "refused"
+                                : (invalidWire ? "an invalid value"
+                                               : solveModeName(*rootMode)));
+                        mpiAbort(1);
                         throw SolveModeRefusal(
-                            "solve mode: rank 0 refused the automatic solve-mode choice");
+                            "solve mode: ranks resolved different modes or rank 0 "
+                            "broadcast an invalid value");
                     }
-                    decision.mode = static_cast<SolveMode>(static_cast<int>(modeWire));
+                    if(decision.refused)
+                        enforceSolveMode(decision);
+                    if(rootMode)
+                        decision.mode = *rootMode;
                     decision.refused = false;
                 }
                 else if(decision.refused)
                     enforceSolveMode(decision);
 
                 // The command line already logs an explicit override.  Only
-                // the automatic decision is new here, and it is logged once
-                // per process even when several species or the far-tail pass
-                // resolve again.
+                // the automatic decision is new here.  The key remembers which
+                // decision was printed: repeated or concurrent calls do not
+                // race, and a later, different decision still gets logged.
                 if(mpiRank() == 0 && options.solveMode == SolveMode::Auto)
                 {
-                    static bool decisionLogged = false;
-                    if(!decisionLogged)
-                    {
-                        decisionLogged = true;
+                    static std::atomic<int> loggedDecisionKey{-1};
+                    int const decisionKey = decision.refused
+                        ? 100
+                        : static_cast<int>(decision.mode);
+                    if(loggedDecisionKey.exchange(decisionKey) != decisionKey)
                         std::fprintf(
                             stderr,
                             "%s\n",
                             formatSolveModeDecision(decision).c_str());
-                    }
                 }
                 resolvedMode = decision.mode;
             }
@@ -2290,12 +2381,11 @@ namespace picBunch
             }
             else if(resolvedMode == SolveMode::Chunked)
             {
-                std::size_t const chunkedBytes = chunkedEstimateBytes();
-                if(localFit.shareBytes > 0u && chunkedBytes > localFit.shareBytes)
+                if(fit.shareBytes > 0u && chunkedBytes > fit.shareBytes)
                     throw SolveModeRefusal(
                         "solve mode: chunked solve exceeds the per-rank budget: required "
                         + formatSolveModeBytes(chunkedBytes) + " per rank, budget "
-                        + formatSolveModeBytes(localFit.shareBytes)
+                        + formatSolveModeBytes(fit.shareBytes)
                         + " per rank; lower --chunk-cells or use more ranks");
             }
         }
