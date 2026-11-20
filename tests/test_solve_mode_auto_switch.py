@@ -20,7 +20,10 @@ in-core and chunked aggregates, so both ranks must agree on chunked.  Case (e)
 runs four ranks with budgets whose sum lands in the same window and requires
 the chunked field to match the four-rank in-core reference.  Cases (f) and (g)
 exercise the ``[solve] solve_mode`` TOML key: once without a CLI flag and once
-with the CLI override winning.
+with the CLI override winning.  Case (h) gives the two ranks unequal budgets so
+their per-rank decisions differ; the job must abort with the divergence
+message instead of hanging, which exercises the local-bound/disagreement path
+end to end.
 
 The budget is forced with the test-only ``PICBUNCH_TEST_MEMORY_BUDGET_BYTES``
 environment variable (see ``evaluateDeviceFit``).  ``PICBUNCH_TEST_SOLVE_MODE_RANKS``
@@ -91,7 +94,16 @@ def chunked_requirement(grid, padding, particles, chunk_cells, rank_count):
         for r in range(rank_count)
     )
     plane_elems = grid[0] * grid[1]
-    return workspace + particle_bytes + 6 * slab_planes * plane_elems * 8
+    # Six resident output components plus the per-component emitter temporary
+    # of ceil(Mz / virtual_ranks) planes (``nz``), alive with the slab and the
+    # workspace.
+    emitter_planes = nz
+    return (
+        workspace
+        + particle_bytes
+        + 6 * slab_planes * plane_elems * 8
+        + emitter_planes * plane_elems * 8
+    )
 
 
 def chunked_aggregate(grid, padding, particles, chunk_cells, rank_count):
@@ -102,9 +114,15 @@ def chunked_aggregate(grid, padding, particles, chunk_cells, rank_count):
     nx = (mx + ranks - 1) // ranks
     workspace = 16 * (mx * my * nz + 2 * nx * my * mz + 2 * max(mx * nz, mz * nx))
     plane_elems = grid[0] * grid[1]
-    # The per-rank output slabs sum to the whole output volume.
+    # The per-rank output slabs sum to the whole output volume; each rank also
+    # holds its own emitter temporary of ceil(Mz / virtual_ranks) planes.
     slab_total = 6 * grid[2] * plane_elems * 8
-    return rank_count * (workspace + chunked_particle_bytes(particles)) + slab_total
+    emitter_total = rank_count * nz * plane_elems * 8
+    return (
+        rank_count * (workspace + chunked_particle_bytes(particles))
+        + slab_total
+        + emitter_total
+    )
 
 
 def in_core_aggregate(grid, padding, particles, rank_count):
@@ -183,11 +201,28 @@ def rank_decisions(stderr, label):
     return found
 
 
-def run(command, label, env_extra=None):
-    env = os.environ.copy()
+def child_environment(env_extra=None):
+    """Environment for a child run with inherited PICBUNCH_TEST_* removed.
+
+    A stale PICBUNCH_TEST_MEMORY_BUDGET_BYTES in the caller's environment
+    would silently change every case, so scrub the test-only namespace and
+    re-add only the values the case sets explicitly.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
     if env_extra:
         env.update(env_extra)
-    result = subprocess.run(command, text=True, capture_output=True, env=env)
+    return env
+
+
+def run(command, label, env_extra=None):
+    env = child_environment(env_extra)
+    result = subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=600
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{label}: command failed with exit {result.returncode}: "
@@ -197,10 +232,10 @@ def run(command, label, env_extra=None):
 
 
 def run_expect_failure(command, label, env_extra=None):
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-    return subprocess.run(command, text=True, capture_output=True, env=env)
+    env = child_environment(env_extra)
+    return subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=600
+    )
 
 
 def main():
@@ -552,6 +587,71 @@ def main():
             failures += 1
         else:
             print("case g status=OK CLI solve_mode overrides the TOML value")
+
+        # (h) Two ranks with asymmetric budgets: rank 0's budget covers its own
+        # in-core requirement and the node total, so it resolves in-core, while
+        # rank 1's budget does not cover its own in-core requirement, so the
+        # local bound makes it resolve chunked (or refuse).  The root broadcast
+        # then disagrees with rank 1 and the job must abort instead of hanging.
+        # Both budgets keep the node total above the in-core aggregate, so the
+        # aggregate criterion alone would let both ranks run in-core.
+        local_in_core_two = in_core_requirement(
+            GRID, PADDING, N_PARTICLES, 2, distributed=True
+        )
+        large_budget = 4 * local_in_core_two
+        small_budget = chunked_two_total // 2
+        if not local_in_core_two > small_budget:
+            raise SystemExit(
+                "test setup: rank-1 budget "
+                f"{small_budget} does not fall below its local in-core requirement "
+                f"{local_in_core_two}"
+            )
+        if not 2 * local_in_core_two <= large_budget + small_budget:
+            raise SystemExit(
+                "test setup: asymmetric budgets do not keep the node total above "
+                "the in-core aggregate"
+            )
+        if not chunked_two_total <= large_budget + small_budget:
+            raise SystemExit(
+                "test setup: asymmetric budgets do not let rank 1 reach chunked"
+            )
+        destination = case_dir("h_divergent_budgets")
+        try:
+            result = run_expect_failure(
+                mpi_command(
+                    mpiexec,
+                    2,
+                    binary,
+                    [
+                        *common,
+                        "--destination",
+                        destination,
+                        "--staging-dir",
+                        destination + "-staging",
+                    ],
+                ),
+                "case h",
+                {
+                    "PICBUNCH_TEST_MEMORY_BUDGET_BYTES": f"{large_budget},{small_budget}",
+                    "PICBUNCH_TEST_SOLVE_MODE_RANKS": "1",
+                },
+            )
+        except subprocess.TimeoutExpired:
+            print("case h status=FAIL timed out after 600 s (deadlock)")
+            failures += 1
+        else:
+            divergence = "the rank set has divergent capacity or solver state"
+            if result.returncode == 0 or divergence not in result.stderr:
+                print(
+                    f"case h status=FAIL exit={result.returncode} "
+                    f"stderr={failure_tail(result)}"
+                )
+                failures += 1
+            else:
+                print(
+                    f"case h status=OK exit={result.returncode} "
+                    f"message={divergence!r}"
+                )
 
         return 1 if failures else 0
     finally:

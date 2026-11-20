@@ -386,11 +386,16 @@ namespace picBunch
     {
         DeviceFit fit;
         fit.requiredBytes = estimateDeviceRequirementBytes(workload);
-        // Both fields read the budget derived at the mapping source.  A zero
-        // budget means "capacity unknown" and stays unenforced; otherwise it is
-        // the same bytes the node-total guard sums.
-        fit.capacityBytes = mapping.deviceBudgetBytes;
-        fit.shareBytes = mapping.deviceBudgetBytes;
+        // A mapping decoded from a wire that predates ``deviceBudgetBytes`` (or
+        // one built without the field) carries a zero budget.  Falling back to
+        // the real capacity keeps the fit enforced instead of silently
+        // disabling it; a genuinely unknown capacity is still zero and remains
+        // unenforced.
+        std::size_t const decisionBudget = mapping.deviceBudgetBytes != 0u
+            ? mapping.deviceBudgetBytes
+            : mapping.deviceCapacityBytes;
+        fit.decisionBudgetBytes = decisionBudget;
+        fit.shareBytes = decisionBudget;
         fit.ranksPerDevice = 1;
         fit.deviceIndex = mapping.deviceIndex;
         fit.rank = mapping.worldRank;
@@ -407,20 +412,53 @@ namespace picBunch
     {
         DeviceFit fit = evaluateDeviceFit(currentRankDeviceMapping(), workload);
         std::uint64_t totalRequired = static_cast<std::uint64_t>(fit.requiredBytes);
-        std::uint64_t totalCapacity = static_cast<std::uint64_t>(fit.capacityBytes);
+        std::uint64_t totalCapacity = static_cast<std::uint64_t>(fit.decisionBudgetBytes);
         mpiSumLocal(totalRequired, totalCapacity);
         fit.totalRequiredBytes = static_cast<std::size_t>(totalRequired);
         fit.totalCapacityBytes = static_cast<std::size_t>(totalCapacity);
         fit.rankCount = std::max(1, rankLocalSize());
-        fit.refused
+        // The aggregate can hide a rank whose own requirement exceeds its own
+        // device; combine both bounds.  The local term uses only this rank's
+        // values, so it adds no collective.
+        bool const aggregateRefused
             = !totalDeviceMemoryFits(fit.totalRequiredBytes, fit.totalCapacityBytes);
+        fit.refused = deviceFitRefused(
+            fit.requiredBytes,
+            fit.decisionBudgetBytes,
+            fit.totalRequiredBytes,
+            fit.totalCapacityBytes);
         if(fit.refused)
-            fit.refusalMessage = "total estimated device memory "
-                + formatByteCount(fit.totalRequiredBytes) + " over "
-                + std::to_string(fit.rankCount) + " local rank"
-                + (fit.rankCount == 1 ? "" : "s")
-                + " exceeds the total device capacity "
-                + formatByteCount(fit.totalCapacityBytes) + "; refusing to start";
+        {
+            if(aggregateRefused)
+                fit.refusalMessage = "total estimated device memory "
+                    + formatByteCount(fit.totalRequiredBytes) + " over "
+                    + std::to_string(fit.rankCount) + " local rank"
+                    + (fit.rankCount == 1 ? "" : "s")
+                    + " exceeds the total device capacity "
+                    + formatByteCount(fit.totalCapacityBytes) + "; refusing to start";
+            else
+                fit.refusalMessage = "this rank's estimated device memory "
+                    + formatByteCount(fit.requiredBytes)
+                    + " exceeds its device budget "
+                    + formatByteCount(fit.decisionBudgetBytes)
+                    + " even though the local totals fit; refusing to start";
+        }
+        enforceDeviceFit(fit);
+        return fit;
+    }
+
+    DeviceFit enforceLocalDeviceFit(DeviceWorkload const& workload)
+    {
+        DeviceFit fit = evaluateDeviceFit(currentRankDeviceMapping(), workload);
+        fit.totalRequiredBytes = fit.requiredBytes;
+        fit.totalCapacityBytes = fit.decisionBudgetBytes;
+        fit.rankCount = 1;
+        fit.refused
+            = !totalDeviceMemoryFits(fit.requiredBytes, fit.decisionBudgetBytes);
+        if(fit.refused)
+            fit.refusalMessage = "this rank's estimated device memory "
+                + formatByteCount(fit.requiredBytes) + " exceeds its device budget "
+                + formatByteCount(fit.decisionBudgetBytes) + "; refusing to start";
         enforceDeviceFit(fit);
         return fit;
     }

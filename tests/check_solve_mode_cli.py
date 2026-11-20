@@ -126,8 +126,19 @@ def write_input(path, grid=GRID, n=N_PARTICLES, cell=CELL):
         )
 
 
+def child_environment():
+    """Environment with inherited PICBUNCH_TEST_* variables removed."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PICBUNCH_TEST_")
+    }
+
+
 def run(command):
-    return subprocess.run(command, text=True, capture_output=True)
+    return subprocess.run(
+        command, text=True, capture_output=True, env=child_environment()
+    )
 
 
 def is_device_chunked_refusal(result):
