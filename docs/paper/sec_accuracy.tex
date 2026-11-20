@@ -80,7 +80,7 @@ term whose input data are not in the measurement campaign.}
 source & measured magnitude & statement \\
 \midrule
 mesh / deposit & $1.38\times10^{-7}$ ($M\!-\!T$, $\gamma=1$, aspect 1, $d=48$); $2.6\times10^{-4}$ ($\gamma=10$, aspect 1, $d=48$) & Table~\ref{tab:d48}; far-field sweeps of Section~\ref{sec:farfield} \\
-velocity binning & $6.9\times10^{-6}$ relative in the $B_z$ peak ($B=16$ vs $64$, 5\% energy spread); $3.9\times10^{-4}$ relative worst pointwise in $B_z$ for the 5\% energy case; $1.4\%$ worst against the arbiter for the 1\,mrad case (not re-measured) & Appendix~\ref{app:multivel}, Table~\ref{tab:multivel} \\
+velocity binning & $9.5\times10^{-6}$ relative in the $B_z$ peak ($B=16$ vs $64$, 5\% energy spread); $3.1\times10^{-4}$ relative worst pointwise in $B_z$ for the 5\% energy case; $1.4\%$ worst against the arbiter for the 1\,mrad case (H100, not rerun, not comparable) & Appendix~\ref{app:multivel}, Table~\ref{tab:multivel} \\
 near-source quadrature & $3.71\times10^{-4}$ stationary interior; $1.40\times10^{-4}$ moving axial interior; $1.94\times10^{-3}$ moving oblique interior (default observer-cell routing) & Table~\ref{tab:fast} \\
 far tail & $8.53\times10^{-2}$ V/m at the $6R$ switch, $1.87\times10^{-3}$ of the tolerance level; $2.8\times10^{-3}$ V/m worst on the $512^3$ output (rosi\_v100 direct-charge-sum run; comparison data not in the repository, not re-measured) & Appendix~\ref{app:far-tail}, Table~\ref{tab:margin} \\
 output precision & float32 checkpoint: bitwise arrival under PIConGPU, $\max_\mathrm{abs\,diff}=0.0$ after one step; float64 opt-in records a warning attribute & Section~\ref{sec:validation} \\
@@ -90,7 +90,7 @@ output precision & float32 checkpoint: bitwise arrival under PIConGPU, $\max_\ma
 
 The mesh/deposit term dominates in the far field at moderate $\gamma$ and is
 the only term that the mesh alone can reduce. The velocity-binning term is
-$6.9\times10^{-6}$ at the $B_z$ peak and $3.9\times10^{-4}$ at the worst
+$9.5\times10^{-6}$ at the $B_z$ peak and $3.1\times10^{-4}$ at the worst
 pointwise node for the measured spreads at $B=16$, and does not enter the
 single-velocity scope. The near-source quadrature term is the measured
 limit of the fast near backend in the oblique moving case
@@ -123,9 +123,9 @@ $1.4\times10^{-3}$). $M\!-\!T$: mesh vs TSC-convolved continuum;
 $M\!-\!P$: mesh vs point field; $T\!-\!P$: TSC smoothing, mesh-independent.
 At $\gamma=10$, aspect 1 the $M\!-\!P$ vs $M\!-\!T$ gap is the smoothing
 (L2 ratio $58\times$), not the mesh. Measured on \texttt{rosi\_v100}
-(V100) and not re-measured in this campaign, while the $d\le32$ sweeps of
-Section~\ref{sec:farfield} are on JURECA H100, so this $d=48$ table and
-those sweeps are on different hosts).}
+(V100) in an earlier campaign and not re-measured here; the $d\le32$ sweeps
+of Section~\ref{sec:farfield} are the current two-rank V100 campaign, so the
+two share the host class).}
 \label{tab:d48}
 \begin{tabular}{lrrrr}
 \toprule
@@ -203,7 +203,7 @@ $|\mathrm{ref}|\ge10^{-3}$ of the component peak, over the electric
 components $E_x,E_y,E_z$, of the CLI against the TSC-convolved continuum,
 at $d=16$ and $d=32$ cells; the magnetic field is excluded by the floor.
 Order-12 independent continuum reference (refine 3),
-\texttt{jureca-h100}. Single-particle series.}
+\texttt{rosi\_v100} (two MPI ranks). Single-particle series.}
 \label{tab:w4b}
 \begin{tabular}{lll}
 \toprule
@@ -232,9 +232,9 @@ at or below the gate, $h=1$, L2 over the six components, per axis
 direction, worst over the three positive axis directions ($>$48: beyond the
 measured window). $T$: TSC-convolved continuum; $P$: point field. Oblique
 directions are $\sim1.5\times$ larger. Measured on \texttt{rosi\_v100}
-(V100) and not re-measured in this campaign; like Table~\ref{tab:d48} this
-is a V100 value, while the $d\le32$ sweeps of Section~\ref{sec:farfield}
-are on JURECA H100, so the two are on different hosts.}
+(V100) in an earlier campaign and not re-measured here; like
+Table~\ref{tab:d48} it shares the host class with the current two-rank
+$d\le32$ sweeps of Section~\ref{sec:farfield}.}
 \label{tab:crossover}
 \begin{tabular}{lcc|cc|cc}
 \toprule
@@ -280,7 +280,7 @@ absolute error per component at $d=8$ cells for the $h$-comparison.
 \centering
 \small
 \caption{Single-particle mesh error at $d=8$ cells, $96$-cell box, cell
-$10^{-7}$\,m, aspect 1, axial, \texttt{jureca-h100}. Peak-normalised
+$10^{-7}$\,m, aspect 1, axial, \texttt{rosi\_v100} (two MPI ranks). Peak-normalised
 absolute error, worst per component, at $h=1$ and $h=1/4$. The
 $h$-refinement exponent $p$ (error $\sim h^p$) is a three-point fit over
 $h=4,1,1/4$ cells on the $d=2$ ring; it decreases from $1.33$ at
@@ -302,7 +302,7 @@ $\gamma$ & $h=1$ & $h=1/4$ & slope $p$ & note \\
 \includegraphics[width=0.62\linewidth]{figs/F_gamma_err_dist.pdf}
 \caption{Peak-normalised absolute error against distance on log-log axes,
 single particle, $96$-cell box, cell $10^{-7}$\,m, aspect 1, axial,
-\texttt{jureca-h100}. Solid/dashed is $h=1$/$1/4$ and hue is $\gamma=10$
+\texttt{rosi\_v100} (two MPI ranks). Solid/dashed is $h=1$/$1/4$ and hue is $\gamma=10$
 (vermillion), $50$ (purple), $100$ (orange). The plotted distance range is
 $2$ to $8$ cells; larger distances are limited by the finite box size at the
 tested resolution, so they are not shown. At $h=1$ the error exceeds the peak

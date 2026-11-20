@@ -139,3 +139,13 @@ eight groups and the restart exits 0; the copied PML datasets are float32
 and bitwise equal to the source, initialization is $3.986$\,s, and the
 main $E$ and $B$ records are recomputed from the particles and stay
 float32.
+
+\paragraph{Two-rank reproduction.}
+Appendix~\ref{app:reproduction} reruns the campaign with two MPI ranks on
+V100.  The non-near-shell data reproduce.  The near-shell values of this
+paper are the current tile-invariant operator at commit \texttt{b29f55e};
+the earlier H100 values came from the pre-\texttt{e8d082f} per-tile
+local-FFT path and depend on the tile support, so they are not the paper of
+record.  The current values differ at high $\gamma$ and oblique incidence;
+the change is a trade-off, not a uniform improvement
+(Appendix~\ref{app:reproduction}).

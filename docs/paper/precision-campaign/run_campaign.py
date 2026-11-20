@@ -8,9 +8,10 @@ distribution, hires gp sweep, validation slices, large-domain slices and
 multivel; the scaling/performance figures are deliberately absent) and records
 one provenance record per case.
 
-Execution uses two independent pools.  Four GPU workers each own one
-``CUDA_VISIBLE_DEVICES`` slot and pull mesh jobs from a shared work queue, so
-every mesh that is ready runs as soon as a GPU is free.  A separate pool runs
+Execution uses two independent pools.  GPU workers each own one
+``CUDA_VISIBLE_DEVICES`` slot (or one GPU pair with ``--gpu-pairs``) and pull
+mesh jobs from a shared work queue, so every mesh that is ready runs as soon as
+a GPU is free.  A separate pool runs
 the CPU (OpenMP) reference jobs for different cases concurrently; references
 and meshes of the same case start together, because the reference has no
 dependency on the mesh.  A case is reduced once all of its mesh and reference
@@ -27,8 +28,9 @@ Usage on the H100 node::
 
 Every mesh runs in one process pinned with ``CUDA_VISIBLE_DEVICES=<slot>``
 (picBunch has no ``--device`` flag; the CUDA runtime then exposes exactly one
-device per process).  The default reference pool is 8 jobs x 16 OpenMP threads
-(128 of the 144 cores), which leaves headroom for the mesh processes.
+device per process, or one pair when ``--gpu-pairs`` is used).  The default
+reference pool is 8 jobs x 16 OpenMP threads (128 of the 144 cores), which
+leaves headroom for the mesh processes.
 
 A case's estimated wall is ``mesh_s + ref_s + reduce_s`` from ``cases.json``.
 The reference estimate is recalibrated from ``--ref-rate`` (seconds per
@@ -267,9 +269,9 @@ def build_reference(root, case, run, driver, order, max_level, tol, threads):
     return stage + ".npz", cmd
 
 
-def mesh_command(binary, root, run, out_path):
+def mesh_command(args, root, run, out_path):
     mesh = run["mesh"]
-    cmd = [binary, "--input", os.path.join(root, "inputs", run["input"] + ".h5"),
+    cmd = [args.bin, "--input", os.path.join(root, "inputs", run["input"] + ".h5"),
            "--cell-size", ",".join("%g" % v for v in mesh["cell"]),
            "--grid", ",".join(str(int(v)) for v in mesh["grid"]),
            "--origin", ",".join("%g" % v for v in mesh.get("origin", [0, 0, 0])),
@@ -282,7 +284,16 @@ def mesh_command(binary, root, run, out_path):
                 "--near-shell-tile", str(near.get("tile", 4)),
                 "--near-shell-fast-order", str(near.get("fast_order", 5))]
     cmd += list(mesh.get("extra", []))
+    if int(mesh.get("bins", 1)) > 1 and not any(
+            str(item) == "--velocity-bin-edges" for item in mesh.get("extra", [])):
+        # The paper campaign predates the automatic edge rule; its committed
+        # fields use uniform per-axis edges.  Pin that rule for a reproduction.
+        cmd += ["--velocity-bin-edges", args.velocity_bin_edges]
+    if args.mpi_ranks > 1:
+        cmd += ["--fft-mode", "distributed"]
     cmd += ["--output", out_path]
+    if args.mpi_ranks > 1:
+        cmd = [args.mpiexec, "-n", str(args.mpi_ranks)] + cmd
     return cmd
 
 
@@ -368,6 +379,8 @@ def _ref_of(case, run):
 
 
 def _mesh_env(args, slot):
+    # With ``--gpu-pairs`` a slot is the pair string (e.g. ``"0,1"``); without
+    # it the slot is a single int.  Both stringify to the binding we want.
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(slot))
     lib = args.lib_path
     if lib:
@@ -379,12 +392,15 @@ def _mesh_env(args, slot):
 def _case_record(st, args, host, picbunch, spec, outputs, reduce_command):
     case = st["case"]
     slots = sorted(st["mesh_slots"])
-    if len(slots) == 1:
+    devices = sorted(st["mesh_devices"])
+    if len(devices) == 1:
         slot_field = slots[0]
-        binding = "CUDA_VISIBLE_DEVICES=%d" % slots[0]
+        binding = "CUDA_VISIBLE_DEVICES=%s" % devices[0]
+        gpu_pair = devices[0]
     else:
         slot_field = slots
-        binding = "CUDA_VISIBLE_DEVICES=%s" % ",".join(str(s) for s in slots)
+        binding = "CUDA_VISIBLE_DEVICES=%s" % ",".join(devices)
+        gpu_pair = devices
     commands = sorted(st["commands"] + ([reduce_command] if reduce_command else []),
                       key=lambda item: item["stage"])
     refs = st["ref_paths"]
@@ -399,6 +415,7 @@ def _case_record(st, args, host, picbunch, spec, outputs, reduce_command):
         "binary": {"path": args.bin, "sha256": sha256_file(args.bin)},
         "config_sha256": json_sha(case),
         "host": host, "gpu_slot": slot_field, "gpu_binding": binding,
+        "gpu_pair": gpu_pair, "mpi_ranks": args.mpi_ranks,
         "start_utc": st["start_utc"], "end_utc": utcnow(),
         "wall_s": time.time() - st["start_mono"],
         "exit_code": 0 if not st["failures"] else 1,
@@ -510,9 +527,10 @@ def execute(cases, args, log_dir):
 
     The previous launcher bound each case to one slot and ran that slot's mesh
     and reference sequentially, so a GPU idled for every reference.  Here the
-    mesh and reference jobs of every case are independent queue items: four GPU
-    workers each own one ``CUDA_VISIBLE_DEVICES`` slot and pull the next mesh,
-    while a separate pool evaluates references for different cases in parallel.
+    mesh and reference jobs of every case are independent queue items: GPU
+    workers each own one ``CUDA_VISIBLE_DEVICES`` slot (or GPU pair) and pull
+    the next mesh, while a separate pool evaluates references for different
+    cases in parallel.
     A case is reduced once all of its meshes and references have finished.
     """
     root = args.root
@@ -526,8 +544,8 @@ def execute(cases, args, log_dir):
     ref_pending = []
     for case in cases:
         state = {"case": case, "pending": 0, "mesh_paths": {}, "ref_paths": {},
-                 "mesh_slots": set(), "commands": [], "failures": [],
-                 "start_utc": None, "start_mono": None,
+                 "mesh_slots": set(), "mesh_devices": set(), "commands": [],
+                 "failures": [], "start_utc": None, "start_mono": None,
                  "reduce_started": False, "record": None}
         for run in case["runs"]:
             run_lookup[(case["id"], run["name"])] = (case, run)
@@ -565,13 +583,15 @@ def execute(cases, args, log_dir):
                 finalize_case, state, args, lock, host, picbunch))
 
     def finish(case_id, kind, run_name, path, slot, start_utc, start_mono,
-               error, command):
+               error, command, device=None):
         with lock:
             state = states[case_id]
             note_start(state, start_utc, start_mono)
             state["commands"].append(command)
             if slot is not None:
                 state["mesh_slots"].add(slot)
+            if device is not None:
+                state["mesh_devices"].add(device)
             if kind == "mesh":
                 state["mesh_paths"][run_name] = path
             else:
@@ -581,7 +601,14 @@ def execute(cases, args, log_dir):
             state["pending"] -= 1
             maybe_reduce(case_id)
 
-    def gpu_worker(slot):
+    def gpu_worker(index, slot):
+        """``index`` is the worker id used for bookkeeping; ``slot`` the device.
+
+        Without ``--gpu-pairs`` both are the same integer.  With pairs the
+        slot is the pair string (``"0,1"``), so ``CUDA_VISIBLE_DEVICES`` sees
+        the pair while ``gpu_slot`` still records the worker index.
+        """
+        device = str(slot)
         while True:
             item = mesh_jobs.get()
             if item is None:
@@ -591,7 +618,7 @@ def execute(cases, args, log_dir):
             start_utc, start_mono = utcnow(), time.time()
             out_h5 = os.path.join(root, "run", case_id, run_name + ".h5")
             os.makedirs(os.path.dirname(out_h5), exist_ok=True)
-            cmd = mesh_command(args.bin, root, run, out_h5)
+            cmd = mesh_command(args, root, run, out_h5)
             error = None
             try:
                 with open(os.path.join(log_dir, case_id + "__" + run_name + ".mesh.log"),
@@ -603,9 +630,10 @@ def execute(cases, args, log_dir):
                              "exit": procedure.returncode}
             except OSError as exc:
                 error = {"stage": "mesh:" + run_name, "error": str(exc)}
-            finish(case_id, "mesh", run_name, out_h5, slot, start_utc, start_mono,
+            finish(case_id, "mesh", run_name, out_h5, index, start_utc, start_mono,
                    error, {"stage": "mesh:" + run_name, "argv": cmd,
-                           "env": {"CUDA_VISIBLE_DEVICES": str(slot)}})
+                           "env": {"CUDA_VISIBLE_DEVICES": device}},
+                   device=device)
 
     def ref_worker():
         while True:
@@ -634,8 +662,9 @@ def execute(cases, args, log_dir):
                    {"stage": "reference:" + run_name, "argv": cmd,
                     "env": {"OMP_NUM_THREADS": str(args.ref_threads)}})
 
-    gpu_threads = [threading.Thread(target=gpu_worker, args=(slot,), daemon=True)
-                   for slot in range(args.gpus)]
+    gpu_threads = [threading.Thread(target=gpu_worker, args=(index, slot),
+                                    daemon=True)
+                   for index, slot in enumerate(args.worker_slots)]
     ref_threads = [threading.Thread(target=ref_worker, daemon=True)
                    for _ in range(args.ref_workers)]
     for thread in gpu_threads + ref_threads:
@@ -654,6 +683,22 @@ def execute(cases, args, log_dir):
     return [state["record"] for state in states.values() if state["record"]]
 
 
+def validate_gpu_pairs(raw_pairs):
+    """Each ``--gpu-pairs`` value must be two non-negative distinct integers."""
+    for raw in raw_pairs:
+        parts = raw.split(",")
+        if len(parts) != 2:
+            raise SystemExit("--gpu-pairs expects A,B: %r" % raw)
+        try:
+            pair = [int(part) for part in parts]
+        except ValueError:
+            raise SystemExit("--gpu-pairs values must be integers: %r" % raw)
+        if any(value < 0 for value in pair):
+            raise SystemExit("--gpu-pairs values must be non-negative: %r" % raw)
+        if pair[0] == pair[1]:
+            raise SystemExit("--gpu-pairs values must be distinct: %r" % raw)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="/home/ubuntu/picbunch-work-20261112/campaign")
@@ -667,7 +712,28 @@ def main():
     parser.add_argument("--pilot-tol", type=float, default=1e-2)
     parser.add_argument("--ref-rate", type=float, default=2e-5,
                         help="reference seconds per sample-point x source")
-    parser.add_argument("--gpus", type=int, default=4)
+    parser.add_argument("--gpus", type=int, default=4,
+                        help="single-GPU worker slots when --gpu-pairs is absent")
+    parser.add_argument("--mpi-ranks", type=int, default=1,
+                        help="MPI ranks per mesh (default 1)")
+    parser.add_argument("--velocity-bin-edges", default="uniform",
+                        choices=["auto", "adaptive", "uniform", "quantile"],
+                        help="edge rule for cases with --velocity-bins > 1; "
+                             "the paper campaign used uniform (default)")
+    parser.add_argument("--gpu-pairs", action="append", default=[], metavar="A,B",
+                        help="repeatable GPU pair per mesh worker, e.g. "
+                             "--gpu-pairs 0,1 --gpu-pairs 2,3; replaces the "
+                             "--gpus slot list")
+    parser.add_argument("--mpiexec", default="mpiexec",
+                        help="MPI launcher used when --mpi-ranks > 1")
+    parser.add_argument("--cuda-version",
+                        default=os.environ.get("CUDA_VERSION", "13.4.92"),
+                        help="CUDA version recorded in provenance "
+                             "(default: $CUDA_VERSION or 13.4.92)")
+    parser.add_argument("--gcc-version",
+                        default=os.environ.get("GCC_VERSION", "13.3.0"),
+                        help="gcc version recorded in provenance "
+                             "(default: $GCC_VERSION or 13.3.0)")
     parser.add_argument("--ref-workers", type=int, default=8,
                         help="concurrent reference jobs (different cases overlap)")
     parser.add_argument("--ref-threads", type=int, default=16,
@@ -682,6 +748,13 @@ def main():
     parser.add_argument("--build-commit", default="00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
                         help="commit the picBunch binary was built from")
     args = parser.parse_args()
+
+    if args.mpi_ranks < 1:
+        raise SystemExit("--mpi-ranks must be >= 1")
+    if args.gpu_pairs:
+        validate_gpu_pairs(args.gpu_pairs)
+    args.worker_slots = args.gpu_pairs if args.gpu_pairs else list(range(args.gpus))
+    args.gpus = len(args.worker_slots)
 
     doc = load_cases()
     cases = doc["cases"]
@@ -710,10 +783,14 @@ def main():
                     ref = float(est.get("ref_s", 0.0))
                 total = float(est.get("mesh_s", 0)) + max(ref, float(est.get("ref_s", 0))) \
                     + float(est.get("reduce_s", 0))
-                print("%-20s %-10s %8.0f %8.0f %8.0f %8.0f  %d" %
+                # The slot column carries the worker binding: an int for
+                # single-GPU runs (identical to the old index) or ``A,B`` for
+                # a ``--gpu-pairs`` lane.
+                print("%-20s %-10s %8.0f %8.0f %8.0f %8.0f  %s" %
                       (case["id"], case["family"], float(est.get("mesh_s", 0)),
                        max(ref, float(est.get("ref_s", 0))),
-                       float(est.get("reduce_s", 0)), total, index))
+                       float(est.get("reduce_s", 0)), total,
+                       str(args.worker_slots[index])))
         print("\nper-slot estimated wall (s):", ["%.0f" % v for v in loads])
         print("estimated campaign wall (s): %.0f (%.1f h)" % (max(loads), max(loads) / 3600.0))
         print("out-of-scope (not scheduled):", doc["campaign"]["excluded_out_of_scope"])
@@ -728,8 +805,8 @@ def main():
                 ["git", "-C", REPO_ROOT, "rev-parse", "HEAD"], text=True).strip()
         except (OSError, subprocess.CalledProcessError):
             args.git_commit = "unknown"
-    args.versions = {"cuda": os.environ.get("CUDA_VERSION", "13.4.92"),
-                     "gcc": "13.3.0", "openpmd": "0.17.1"}
+    args.versions = {"cuda": args.cuda_version,
+                     "gcc": args.gcc_version, "openpmd": "0.17.1"}
     os.makedirs(args.root, exist_ok=True)
     os.makedirs(os.path.join(args.root, "inputs"), exist_ok=True)
     inputs = sorted({run["input"] for case in cases for run in case["runs"]})
@@ -753,7 +830,10 @@ def main():
     summary = {"wall_s": wall,
                "scheduler": "GPU mesh work queue (one CUDA_VISIBLE_DEVICES slot "
                             "per worker) + concurrent reference pool",
-               "gpus": args.gpus, "ref_workers": args.ref_workers,
+               "gpus": args.gpus, "mpi_ranks": args.mpi_ranks,
+               "gpu_pairs": args.gpu_pairs,
+               "velocity_bin_edges": args.velocity_bin_edges,
+               "ref_workers": args.ref_workers,
                "ref_threads": args.ref_threads,
                "harness_commit": args.git_commit,
                "build_commit": args.build_commit,

@@ -12,7 +12,7 @@ The committed reduced data under `docs/paper/data/` is a legacy copy. Nothing
 in the repository proved that a figure came from a re-run rather than from those
 old arrays. A record binds a figure to its input data by SHA-256 and records the
 environment and command of the measurement. A strict gate then refuses to ship
-a figure unless a fresh H100 run claims it.
+a figure unless a fresh checked measurement claims it.
 
 ## Record fields
 
@@ -23,7 +23,7 @@ invented):
 |---|---|---|
 | `case_id` | string | key in `docs/paper/data/cases.json`; unique across records |
 | `figure_ids` | string[] | figure basenames in `docs/paper/figs` (no `.pdf`) |
-| `measurement_kind` | enum | `fresh-h100`, `fresh-reference`, `legacy-reduced`, or `not-reproduced` |
+| `measurement_kind` | enum | `fresh-h100`, `fresh-v100`, `fresh-reference`, `legacy-reduced`, or `not-reproduced` |
 | `reference_only` | boolean | true when a `fresh-reference` figure plots a recomputed analytic/exact reference rather than a measured PIC field |
 | `generator` | object/null | name -> digest map for the code that generated a fresh reference (driver binary/source, kernel header, reducer); artifacts outside the checkout carry a bare SHA-256 |
 | `command` | string/null | exact command that produced the data |
@@ -51,7 +51,7 @@ recomputed analytic/exact reference, not a GPU measurement. The four
 `val_fluct_*` panels are the order-12 reference computed on a CPU. Such a record
 must set `reference_only: true`, name the CPU host, and list the generator
 digests; the strict gate accepts it only for these reference-only figures. A
-figure that plots a measured PIC field still needs a `fresh-h100` record.
+figure that plots a measured PIC field needs a `fresh-h100` or `fresh-v100` record. `fresh-v100` is the current two-rank V100 campaign of record; `fresh-h100` remains for the H100 scaling/cost campaign and the archived var1b case.
 
 `data_sha256` has at least one entry for every `measurement_kind` except
 `not-reproduced`. A not-reproduced record may be empty: it documents a figure
@@ -81,7 +81,8 @@ checker only verifies a digest that carries a path.
    a figure id; a single record may still list several figure ids for one case.
 
 `--strict` is the final gate. It additionally requires every *data* figure to
-be claimed by a record with `measurement_kind == "fresh-h100"` or by a
+be claimed by a record with `measurement_kind == "fresh-h100"` or
+`"fresh-v100"`, or by a
 `measurement_kind == "fresh-reference"` record with `reference_only: true`.
 Figures listed in [`non_data_figures.json`](non_data_figures.json) (the
 schematic) are exempt. A `fresh-reference` record can never satisfy strict mode

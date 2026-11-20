@@ -151,10 +151,10 @@ instead of shipping.
 | `render_pergamma.py` | `gp_*` HIRES 128^3 single-electron slices | `data/hires/hi_*.npz` | 7 PDF/PNG |
  | `render_scaling.py` | `F_a`, `F_b`, `F_w4b_rel_error`, `F_gamma_err_dist`, `F_multivel_dist`, and `F_mpi_rank_scaling_h100` when its reduced table exists; the V100 `F_mpi_rank_scaling` stays callable but is not in the default set | `data/scaling/matrix.csv`, `data/line/*.csv`, `data/line/multivel_*.npz`, `data/line/h100_mpi_scaling.csv` | 5 PDF/PNG by default, plus the H100 figure once data lands |
 | `run_all.py` | render every included figure and write the assertion log; `--strict` fails when a figure's reduced data is pending | all of the above | 28 PDF/PNG by default, 29 once the H100 table lands, 30 with `--include-unreferenced`, `axis-assertions.txt`, `render-summary.json`, `layout_assertions.json` |
-| `check_provenance.py` | validate provenance records, verify SHA-256 digests, require every figure to be covered or declared not-reproduced; `--strict` requires fresh-h100 or a reference-only fresh-reference record for data figures | `provenance/records/*.json`, `provenance/provenance.schema.json`, `provenance/not_reproduced.json`, `provenance/non_data_figures.json`, `figs/*.pdf` | report; exit code |
+| `check_provenance.py` | validate provenance records, verify SHA-256 digests, require every figure to be covered or declared not-reproduced; `--strict` requires fresh-h100/fresh-v100 or a reference-only fresh-reference record for data figures | `provenance/records/*.json`, `provenance/provenance.schema.json`, `provenance/not_reproduced.json`, `provenance/non_data_figures.json`, `figs/*.pdf` | report; exit code |
 | `make_provenance.py` | emit a schema-valid record for a case from hashed paths and host metadata | `data/cases.json` | `provenance/records/<case>.json` |
 | `compose_mpi_scaling.py` | reduce per-rank H100 campaign CSVs into the single H100 MPI-scaling table | `mpi_g256_r{1,2,4}.csv` | `data/line/h100_mpi_scaling.csv` |
-| `ingest_measurements.py` | ingest fresh campaign outputs into the reduced data and emit `fresh-h100` records; `--plan`/`--check` write nothing | `measurement_map.json`, fresh output root | reduced `data/**`, `provenance/records/*.json` |
+| `ingest_measurements.py` | ingest fresh campaign outputs into the reduced data and emit the case-declared provenance records; `--plan`/`--check` write nothing | `measurement_map.json`, fresh output root | reduced `data/**`, `provenance/records/*.json` |
 | `measurement_map.json` | declarative source file/field -> reduced target mapping and per-case provenance metadata | none | none |
 | `test_ingest_measurements.py` | synthetic proof of complete ingestion, strict gate, missing-source failure, and temp-only writes | temporary synthetic outputs | PASS/FAIL lines, nothing in the tree |
 | `selftest_mpi_h100.py` | synthetic end-to-end smoke test for the composer and the H100 renderer | temporary synthetic CSVs only | PASS/FAIL lines; temp PDF, nothing in the tree |
@@ -236,7 +236,7 @@ python3 docs/paper/scripts/run_all.py --out-dir "$HOME/picbunch-staging" \
 
 `run_all.py --check-provenance` runs the same checker and returns non-zero on a
 gap; `--strict-provenance` additionally demands `measurement_kind=fresh-h100`
-for every data figure, or a `fresh-reference` record with `reference_only:
+or `fresh-v100` for every data figure, or a `fresh-reference` record with `reference_only:
 true` for a figure that plots a freshly recomputed analytic reference, and fails
 if a figure's reduced table is still pending.
 The gate can also be run on its own:
@@ -308,7 +308,7 @@ python3 docs/paper/scripts/ingest_measurements.py --plan
 # 2. validate every source, checksum and renderer key; non-zero if pending
 python3 docs/paper/scripts/ingest_measurements.py --check
 
-# 3. write the ready reduced data and the fresh-h100 records
+# 3. write the ready reduced data and the case-declared provenance records
 python3 docs/paper/scripts/ingest_measurements.py
 
 # 4. render, then run the strict provenance gate
