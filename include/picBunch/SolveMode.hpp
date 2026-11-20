@@ -125,6 +125,24 @@ namespace picBunch
             + componentCount * slabPlanes * planeElems * valueBytes;
     }
 
+    /*! Number of output z-planes owned by ``rank`` in a ``parSize``-way split.
+     *
+     * A single rank owns the whole output volume.  Otherwise the planes
+     * partition into the half-open ranges
+     * ``[rank * outNz / parSize, (rank + 1) * outNz / parSize)``.  The chunked
+     * budget gate and the real output slab allocation share this helper so
+     * the estimate cannot drift from what is allocated.
+     */
+    inline std::size_t slabPlanesForRank(
+        std::size_t rank,
+        std::size_t parSize,
+        std::size_t outNz)
+    {
+        if(parSize <= 1u)
+            return outNz;
+        return ((rank + 1u) * outNz) / parSize - (rank * outNz) / parSize;
+    }
+
     //! Outcome of the automatic or explicit solve-mode policy.
     struct SolveModeDecision
     {
@@ -249,7 +267,9 @@ namespace picBunch
         else if(decision.reason == "capacity-unknown")
             out << " (capacity unknown, reason capacity-unknown)";
         else if(decision.reason == "in-core-fits")
-            out << " (reason in-core-fits)";
+            out << " (required " << formatSolveModeBytes(decision.requiredBytes)
+                << ", budget " << formatSolveModeBytes(decision.budgetBytes)
+                << " per rank, reason in-core-fits)";
         else
             out << " (explicit override, reason " << decision.reason << ")";
         return out.str();

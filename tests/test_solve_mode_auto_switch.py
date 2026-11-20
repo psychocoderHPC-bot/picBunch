@@ -238,7 +238,11 @@ def main():
             {"PICBUNCH_TEST_MEMORY_BUDGET_BYTES": str(large)},
         )
         line, decision = only_decision(result.stderr, "case a")
-        expected_line = "picBunch: solve mode: auto -> in-core (reason in-core-fits)"
+        expected_line = (
+            "picBunch: solve mode: auto -> in-core "
+            f"(required {format_bytes(in_core_one)}, budget {format_bytes(large)} "
+            "per rank, reason in-core-fits)"
+        )
         if line != expected_line:
             print(f"case a status=FAIL decision {line!r} != {expected_line!r}")
             failures += 1

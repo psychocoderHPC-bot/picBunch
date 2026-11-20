@@ -343,3 +343,86 @@ TEST(SolveMode, ChunkedGateRejectsWhenOnlyTheSolverBytesFit)
         picBunch::chunkedResidentBytes(solverBytes, slabPlanes, planeElems),
         budget);
 }
+
+TEST(SolveMode, InCoreFitsDecisionPrintsRequiredAndBudget)
+{
+    // The runtime decision budget is shareBytes = min(capacity, override), so
+    // the end-to-end counterpart is only a genuinely reduced budget while the
+    // override stays below the real capacity.  This unit case passes a
+    // synthetic fit and only pins the formatting numbers.
+    auto const decision = picBunch::resolveSolveMode(
+        picBunch::SolveMode::Auto,
+        makeFit(std::size_t{3} << 30, std::size_t{5} << 30),
+        0u,
+        false,
+        1);
+    EXPECT_EQ(
+        picBunch::formatSolveModeDecision(decision),
+        "picBunch: solve mode: auto -> in-core (required 3.000 GiB, "
+        "budget 5.000 GiB per rank, reason in-core-fits)");
+}
+
+TEST(SolveMode, SlabPlanesForRankSplitsDivisibleVolume)
+{
+    std::size_t const outNz = 12u;
+    std::size_t const parSize = 4u;
+    std::size_t total = 0u;
+    for(std::size_t rank = 0u; rank < parSize; ++rank)
+    {
+        EXPECT_EQ(picBunch::slabPlanesForRank(rank, parSize, outNz), 3u);
+        total += picBunch::slabPlanesForRank(rank, parSize, outNz);
+    }
+    EXPECT_EQ(total, outNz);
+}
+
+TEST(SolveMode, SlabPlanesForRankSplitsNonDivisibleVolume)
+{
+    std::size_t const outNz = 10u;
+    {
+        std::size_t const parSize = 3u;
+        std::size_t const expected[] = {3u, 3u, 4u};
+        std::size_t total = 0u;
+        for(std::size_t rank = 0u; rank < parSize; ++rank)
+        {
+            EXPECT_EQ(
+                picBunch::slabPlanesForRank(rank, parSize, outNz),
+                expected[rank]);
+            total += picBunch::slabPlanesForRank(rank, parSize, outNz);
+        }
+        EXPECT_EQ(total, outNz);
+    }
+    {
+        std::size_t const parSize = 4u;
+        std::size_t const expected[] = {2u, 3u, 2u, 3u};
+        std::size_t total = 0u;
+        for(std::size_t rank = 0u; rank < parSize; ++rank)
+        {
+            EXPECT_EQ(
+                picBunch::slabPlanesForRank(rank, parSize, outNz),
+                expected[rank]);
+            total += picBunch::slabPlanesForRank(rank, parSize, outNz);
+        }
+        EXPECT_EQ(total, outNz);
+    }
+}
+
+TEST(SolveMode, SlabPlanesForRankHandlesMoreRanksThanPlanes)
+{
+    std::size_t const outNz = 2u;
+    std::size_t const parSize = 5u;
+    std::size_t const expected[] = {0u, 0u, 1u, 0u, 1u};
+    std::size_t total = 0u;
+    for(std::size_t rank = 0u; rank < parSize; ++rank)
+    {
+        EXPECT_EQ(
+            picBunch::slabPlanesForRank(rank, parSize, outNz),
+            expected[rank]);
+        total += picBunch::slabPlanesForRank(rank, parSize, outNz);
+    }
+    EXPECT_EQ(total, outNz);
+}
+
+TEST(SolveMode, SlabPlanesForRankOwnsTheWholeVolumeOnOneRank)
+{
+    EXPECT_EQ(picBunch::slabPlanesForRank(0u, 1u, 7u), 7u);
+}

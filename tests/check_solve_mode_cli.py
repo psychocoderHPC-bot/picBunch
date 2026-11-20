@@ -6,7 +6,9 @@
 No MPI is needed.  A tiny deterministic bunch is deposited once per mode; the
 default (no flag), ``auto``, ``none`` and ``in-core`` must all produce the
 same six field components.  ``chunked`` must also run at one rank and match
-the in-core field.  The last three checks cover the CLI contract of the
+the in-core field on a host build; a device build must refuse it with the
+host/CPU-only message, which is treated as the expected outcome.  The last
+three checks cover the CLI contract of the
 option itself: a bogus value exits 2 with all four accepted spellings in its
 stderr, ``incore`` exits 2 as a removed alias, and ``--help`` documents
 exactly the four accepted spellings.
@@ -27,6 +29,13 @@ import numpy as np
 
 TOL = 1.0e-12
 CELL = 1.0e-6
+# The staged chunked solve hands host buffers to the FFT backend, so a
+# CUDA/HIP build refuses it at runtime.  That refusal is the expected result
+# on a device build; any other failure still fails the test.
+DEVICE_CHUNKED_REFUSAL = (
+    "chunked solve is implemented for the host/CPU backend only; "
+    "the staging passes hand host buffers to the FFT backend"
+)
 N_PARTICLES = 128
 Q_E = 1.602176634e-19
 M_E = 9.1093837015e-31
@@ -116,6 +125,14 @@ def run(command):
     return subprocess.run(command, text=True, capture_output=True)
 
 
+def is_device_chunked_refusal(result):
+    """True only for the host/CPU-only refusal a device build must produce."""
+    return (
+        result.returncode != 0
+        and DEVICE_CHUNKED_REFUSAL in (result.stdout + result.stderr)
+    )
+
+
 def failure_tail(result):
     lines = [
         line.strip()
@@ -187,6 +204,7 @@ def main():
         ]
 
         outputs = {}
+        device_chunked_refused = False
         modes = (None, "auto", "none", "in-core", "chunked")
         for mode in modes:
             name = "default" if mode is None else mode
@@ -204,6 +222,14 @@ def main():
             result = run(command)
             label = f"mode={name}"
             if result.returncode != 0:
+                if mode == "chunked" and is_device_chunked_refusal(result):
+                    device_chunked_refused = True
+                    print(
+                        f"run {label} status=EXPECTED-REFUSAL exit={result.returncode} "
+                        "device build refuses chunked by design: "
+                        + DEVICE_CHUNKED_REFUSAL
+                    )
+                    continue
                 print(
                     f"run {label} status=FAIL exit={result.returncode} "
                     + failure_tail(result)
@@ -215,6 +241,12 @@ def main():
 
         reference = outputs.get("default")
         for mode in ("auto", "none", "in-core", "chunked"):
+            if mode == "chunked" and device_chunked_refused:
+                print(
+                    "compare default_vs_chunked status=NOT-APPLICABLE "
+                    "device build refuses chunked by design"
+                )
+                continue
             if reference is None or mode not in outputs:
                 print(f"compare default_vs_{mode} status=SKIP missing run")
                 failures += 1

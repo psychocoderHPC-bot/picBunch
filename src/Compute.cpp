@@ -2216,15 +2216,10 @@ namespace picBunch
             // single rank that slab is the whole output volume.
             std::size_t const outputPlane
                 = static_cast<std::size_t>(outNx) * static_cast<std::size_t>(outNy);
-            std::size_t const slabPlanes
-                = parSize > 1
-                ? ((static_cast<std::size_t>(parRank) + 1u)
-                       * static_cast<std::size_t>(outNz))
-                        / static_cast<std::size_t>(parSize)
-                    - (static_cast<std::size_t>(parRank)
-                       * static_cast<std::size_t>(outNz))
-                        / static_cast<std::size_t>(parSize)
-                : static_cast<std::size_t>(outNz);
+            std::size_t const slabPlanes = slabPlanesForRank(
+                static_cast<std::size_t>(parRank),
+                static_cast<std::size_t>(parSize),
+                static_cast<std::size_t>(outNz));
             auto const chunkedEstimateBytes = [&] {
                 int virtualRanksForEstimate = 1;
                 try
@@ -3464,11 +3459,11 @@ namespace picBunch
             std::size_t const slabBegin
                 = (static_cast<std::size_t>(parRank) * static_cast<std::size_t>(cOutNz))
                 / static_cast<std::size_t>(parSize);
-            std::size_t const slabEnd
-                = ((static_cast<std::size_t>(parRank) + 1u)
-                   * static_cast<std::size_t>(cOutNz))
-                / static_cast<std::size_t>(parSize);
-            std::size_t const slabPlanes = slabEnd - slabBegin;
+            std::size_t const slabPlanes = slabPlanesForRank(
+                static_cast<std::size_t>(parRank),
+                static_cast<std::size_t>(parSize),
+                static_cast<std::size_t>(cOutNz));
+            std::size_t const slabEnd = slabBegin + slabPlanes;
 
             Field chunkedField;
             chunkedField.grid = grid;
