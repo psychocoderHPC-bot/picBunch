@@ -223,11 +223,12 @@ before the first allocation.  It keeps the in-core solve when the estimated
 requirement fits the node memory budget, and switches to the staged solve when
 that solver is available in the build and its own estimate fits.  Both the
 requirement and the capacity are summed over the ranks of the shared-memory
-domain, so the comparison is between node totals.  The switch prints exactly
-one line on rank 0:
+domain, so the comparison is between node totals.  A rank whose own requirement
+exceeds its own device budget still refuses, even when the node totals fit.
+The switch prints exactly one line on rank 0:
 
 ```
-picBunch: solve mode: auto -> chunked (required <X> GiB, capacity <Y> GiB over <N> ranks, reason <key>)
+picBunch: solve mode: auto -> chunked (required <X.xxx> GiB, capacity <Y.xxx> GiB over <N> ranks, reason <key>)
 ```
 
 When both modes are infeasible the run refuses, with a message that names the
