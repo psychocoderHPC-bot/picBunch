@@ -225,7 +225,7 @@ that solver is available in the build and its own estimate fits.  The switch
 prints exactly one line on rank 0:
 
 ```
-picBunch: solve mode: auto -> chunked (required <X> GiB, available <Y> GiB per rank, reason <key>)
+picBunch: solve mode: auto -> chunked (required <X> GiB, budget <Y> GiB per rank, reason <key>)
 ```
 
 When both modes are infeasible the run refuses, with a message that names the

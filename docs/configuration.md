@@ -307,7 +307,7 @@ chunked solve when that solver is available and its own estimate fits. When
 it switches it prints exactly one line on rank 0:
 
 ```
-picBunch: solve mode: auto -> chunked (required <X> GiB, available <Y> GiB per rank, reason <key>)
+picBunch: solve mode: auto -> chunked (required <X> GiB, budget <Y> GiB per rank, reason <key>)
 ```
 
 When both modes are infeasible the run refuses, naming the required bytes,

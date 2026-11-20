@@ -292,7 +292,4 @@ throws before any allocation or staging file is touched. The staging passes
 hand host buffers to the FFT backend, which the device builds do not expose.
 The staged solve is implemented for the host/CPU backend only.
 
-**Workaround.** On a multi-GPU node use `--fft-mode distributed` instead:
-the distributed z-slab FFT keeps the per-rank footprint inside the device
-budget, and the result is the same global transform the staged solve would
-compute. Device-memory-bounded staged solving is not implemented.
+**Workaround.** On a multi-GPU node the option to try is --fft-mode distributed: the distributed z-slab FFT is accepted only when the per-rank slab fits the budget, and it computes the same global transform the staged solve would. If it does not fit, lower --fft-padding first. Device-memory-bounded staged solving is not implemented.
