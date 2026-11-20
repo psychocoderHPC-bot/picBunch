@@ -1,5 +1,11 @@
 # Precision measurement campaign
 
+> **Historical campaign documentation (2026-11-21).** This README describes
+> the pre-`e8d082f` H100 `sm_90` precision campaign that produced the old paper
+> values. It is retained as a record of that campaign. The paper of record is
+> the current `b29f55e` two-rank V100 campaign (Appendix `app:reproduction`);
+> the H100 build below is not the current validated paper build.
+
 This directory re-measures every precision figure of the paper on a fresh
 picBunch build and reduces the raw fields on the measurement node. The
 scaling/performance figures are deliberately out of scope: `F_a`/`F_b`
@@ -35,7 +41,7 @@ refinement level per case match the committed measurement records.
 
 ## Build on the measurement node
 
-The validated command on `jureca-h100` (4x H100 PCIe, CUDA 13.4.92, gcc 13.3,
+The command validated for the historical H100 campaign on `jureca-h100` (4x H100 PCIe, CUDA 13.4.92, gcc 13.3,
 openPMD 0.17.1 with HDF5 and ADIOS2 2.12.1):
 
 ```bash

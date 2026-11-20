@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "picbunch-paper-provenance/1",
   "title": "Paper figure provenance record",
-  "description": "One record documents how a set of paper figures was produced. data_sha256 lists the reduced arrays/CSVs that a renderer consumed; every referenced path is checked against the file on disk. A measurement_kind=not-reproduced record may list no data files while its renderer exists and the campaign data is pending. A measurement_kind=fresh-reference record documents a freshly recomputed analytic/exact reference for a reference-only figure; it must also set reference_only=true and carry host and generator digests. Fields the legacy runs did not record are null.",
+  "description": "One record documents how a set of paper figures was produced. data_sha256 lists the reduced arrays/CSVs that a renderer consumed; every referenced path is checked against the file on disk. A measurement_kind=not-reproduced record may list no data files while its renderer exists and the campaign data is pending. A measurement_kind=fresh-reference record documents a freshly recomputed analytic/exact reference for a reference-only figure; it must also set reference_only=true and carry host and generator digests. fresh-h100 and fresh-v100 are checked campaigns on the named host class; fresh-v100 is the current two-rank V100 campaign of record. Fields the legacy runs did not record are null.",
   "type": "object",
   "required": [
     "case_id", "figure_ids", "measurement_kind", "command",
@@ -16,7 +16,7 @@
     "$schema": {"type": "string"},
     "case_id": {"type": "string", "minLength": 1},
     "figure_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"}},
-    "measurement_kind": {"type": "string", "enum": ["fresh-h100", "fresh-reference", "legacy-reduced", "not-reproduced"]},
+    "measurement_kind": {"type": "string", "enum": ["fresh-h100", "fresh-v100", "fresh-reference", "legacy-reduced", "not-reproduced"]},
     "reference_only": {
       "description": "True when the plotted quantity is a freshly recomputed analytic/exact reference rather than a measured PIC field. Required for measurement_kind=fresh-reference.",
       "type": "boolean"

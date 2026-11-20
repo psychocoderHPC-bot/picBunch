@@ -36,7 +36,8 @@ bunch core, the mesh-only worst per-component plane error is
 $0.12$--$0.415$ for $\gamma=1$ ($E_z$) and $0.116$--$5.33$ for $\gamma=10$
 (minimum $E_y$, x-y; maximum $E_z$, x-y) (Appendix~\ref{app:slices}). The
 opt-in near shell assembles exactly to
-roundoff, and its tile subtraction is not the limiting term: at the
+roundoff, its per-pair subtraction is independent of the tile size, and
+it is not the limiting term: at the
 measured $R=3/4$ radii on the $h=1$ slice grid the residual is the mesh
 contribution outside the shell, not the subtraction. The fast backend
 meets $10^{-3}$ stationary ($3.71\times10^{-4}$ interior) and moving axial
@@ -66,10 +67,12 @@ mesh.
 The scope of the validated measurements is a single shared velocity, or a
 set of binned velocity classes with one convolution per class; the near
 shell needs no binning because each pair carries its own velocity. The
-measured binned behaviour agrees to $6.9\times10^{-6}$ in the $B_z$ peak
-and $1.1\times10^{-3}$ in the small $B_y$ component for the 5\% energy
-spread. The 1\,mrad case is within $1.4\%$ of the arbiter in its original
-full-grid run and is not re-measured here (Appendix~\ref{app:multivel}). The computed quantity is the
+measured binned behaviour agrees to $9.5\times10^{-6}$ in the $B_z$ peak
+of the 5\% energy spread and to $4.0\times10^{-4}$ in the small $B_y$
+component of the $5^\circ$ angular spread. The 1\,mrad case is within
+$1.4\%$ of the arbiter in its original H100 full-grid run; it was not rerun
+with the current binary and is not comparable to the current-code values
+(Appendix~\ref{app:multivel}). The computed quantity is the
 TSC-convolved uniformly-moving point-charge field; the convolution is
 free-space (no boundary condition other than zero fill beyond the far-tail
 switch); and there is no radiation term, because the motion is uniform.

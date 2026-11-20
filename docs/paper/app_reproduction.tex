@@ -1,67 +1,82 @@
-\section{Two-rank reproduction on V100}
+\section{Two-rank reproduction and the tile-invariant near shell}
 \label{app:reproduction}
 
 The precision campaign was rerun at the paper sizes with two MPI ranks per
 case on a node with four V100-SXM2-32GB devices.  Each rank owned one device,
 and two cases ran at a time on the disjoint pairs 0,1 and 2,3.  The binary was
 built from commit \texttt{b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed} with CUDA
-12.6 for \texttt{sm\_70}, OpenMPI 4.1.6, parallel HDF5 1.10.10, ADIOS2 2.9.2
-and openPMD 0.17.1.  The harness is
+12.6 for \texttt{sm\_70}, OpenMPI 4.1.6, parallel HDF5 1.10.10 and openPMD
+0.17.1.  The harness is
 \texttt{docs/paper/precision-campaign/run\_campaign.py} with
-\texttt{--mpi-ranks 2} and one \texttt{--gpu-pairs} entry per worker; it adds
-\texttt{--fft-mode distributed} to every mesh command.  The order-12 exact
-reference driver ran as a single process.  The harness regenerated the
-reference for cases that define one, and the regenerated \texttt{large1} and
-\texttt{hires} arrays are identical to the committed reference arrays.  The
-\texttt{bdata2} comparison uses the committed reference arrays, and the line
-cases use the single-process driver.
-The paper campaign predates the automatic velocity-bin edge rule, so the rerun
-pins \texttt{--velocity-bin-edges uniform} for every case with more than one
-velocity bin.
+\texttt{--mpi-ranks 2}, one \texttt{--gpu-pairs} entry per worker and
+\texttt{--fft-mode distributed}; it pins \texttt{--velocity-bin-edges uniform}
+for every case with more than one velocity bin.  The order-12 exact reference
+driver ran as a single process and reproduces the committed reference arrays.
+The line, hires, large-domain, \texttt{bdata2} and \texttt{multivel} values of
+this paper are this run; the scaling and cost campaigns remain the H100
+measurements of Section~\ref{sec:scaling}.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Two-rank V100 reproduction against the committed data.  The
-\texttt{hires} column is the worst component error on the x-y plane with the
-$5\times5$ source neighbourhood excluded; the \texttt{bdata2} column is the
-maximum peak-normalised slice error over the electric and magnetic
-components.  A dash means not run.}
+\caption{Two-rank V100 reproduction at commit \texttt{b29f55e} against the
+earlier H100 data.  The \texttt{hires} column is the worst component error on
+the x-y plane with the $5\times5$ source neighbourhood excluded; the
+\texttt{bdata2} column is the range of the maximum peak-normalised slice
+error over the six components.  A dash means not run.  The
+\texttt{line-gamma} ring at $48$ cells is a grid-boundary artifact and is not
+used as a validation result.}
 \label{tab:reproduction}
 \begin{tabular}{lrrl}
 \toprule
-probe & committed & two-rank V100 & result \\
+probe & old H100 (pre-\texttt{e8d082f}) & current \texttt{b29f55e} & result \\
 \midrule
-\texttt{line-w4b}, 56 rows & -- & $\max|\Delta|=1.3\times10^{-13}$ & agrees \\
-\texttt{line-gamma}, rings 2 and 8 & -- & $\max|\Delta|=1.3\times10^{-13}$ & agrees \\
-\texttt{line-gamma}, ring 48, $h=0.25$ & $2.49\times10^{-1}$ & $5.3\times10^{-6}$ & smaller \\
-\texttt{large1-g1} and \texttt{g10} & -- & field $|\Delta|\le2\times10^{-10}$ peak & agrees \\
-\texttt{hires}, $\gamma=10$ & $3.505\times10^{-1}$ & $3.066\times10^{-1}$ & agrees \\
-\texttt{hires}, $\gamma=50$ & $1.590$ & $3.442$ & host-sensitive \\
-\texttt{hires}, $\gamma=100$ & $3.490$ & $5.988$ & host-sensitive \\
-\texttt{bdata2-forward} & $0.134$--$0.262$ & $0.195$--$0.307$ & host-sensitive \\
-\texttt{multivel}, binning curve & -- & energy $\le1.0\times10^{-3}$ & agrees \\
-\texttt{var1b-1mrad} & -- & -- & input absent \\
+\texttt{line-w4b}, 56 rows & -- & $\max|\Delta|=1.3\times10^{-13}$ & unchanged \\
+\texttt{line-gamma}, rings 2 and 8 & -- & $\max|\Delta|=1.3\times10^{-13}$ & unchanged \\
+\texttt{large1-g1} and \texttt{g10} & -- & field $|\Delta|\le2\times10^{-10}$ peak & unchanged \\
+\texttt{hires}, $\gamma=10$ & $3.505\times10^{-1}$ & $3.066\times10^{-1}$ & current \\
+\texttt{hires}, $\gamma=50$ & $1.590$ & $3.442$ & trade-off \\
+\texttt{hires}, $\gamma=100$ & $3.490$ & $5.988$ & trade-off \\
+\texttt{bdata2-forward} & $0.102$--$0.262$ & $0.195$--$0.307$ & trade-off \\
+\texttt{bdata2-fluctuation} & $0.072$--$0.261$ & $0.195$--$0.367$ & trade-off \\
+\texttt{var1b-1mrad} & -- & -- & not comparable \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The non-near-shell cases reproduce the committed data.  The two-rank
+The non-near-shell cases reproduce the earlier data: the two-rank
 \texttt{line-w4b} worst relative error changes by at most
-$1.3\times10^{-13}$ over all 56 rows, and \texttt{large1} changes the field by
-at most $2\times10^{-10}$ of its peak.  The outer \texttt{line-gamma} ring at
-$h=0.25$ is $5.3\times10^{-6}$ in the two-rank run against
-$2.49\times10^{-1}$ in the committed data; the inner rings are unchanged.
+$1.3\times10^{-13}$ over all 56 rows, \texttt{large1} changes the field by at
+most $2\times10^{-10}$ of its peak, and the inner \texttt{line-gamma} rings
+are unchanged.
 
-The near-shell differences are confined to cases that use the host evaluator
-(\texttt{--near-shell fast}).  A one-rank control on the same binary
-reproduces the two-rank \texttt{hires} field to $10^{-9}$ relative, so the
-differences are not an MPI decomposition effect.  The host evaluator's
-conditioning at high $\gamma$ and at oblique incidence depends on the host
-math library, and the paper measurements were taken on an H100 node.  We
-therefore retain the H100 near-shell values as the reference and report the
-V100 run as a host-sensitivity check.  The \texttt{multivel} binning curve
-agrees within $1.0\times10^{-3}$ in energy and $7.1\times10^{-2}$ in the
-angular coordinates; its intermediate field arrays are not a paper metric.
+The earlier H100 near-shell values came from a binary before
+\texttt{e8d082f} whose correction was a per-tile local-FFT mesh subtraction.
+The corrected region was the tile support, so the field depended on the tile
+edge; in that path a tile $4$ versus tile $8$ run on the same input differs by
+$82.7\%$ of the peak field.  The current operator evaluates the subtraction per
+(source, node) pair and blends it by observer distance, so the result is
+tile-invariant.  A one-rank control on the current binary reproduces the
+two-rank field to $10^{-9}$ relative, and a tile $4$ versus tile $8$ run
+agrees, so the differences are not an MPI or tile artifact.  The current code
+is the paper of record.
+
+The change is a trade-off, not a uniform improvement.  The far field, the
+inner rings and the large-domain slices are unchanged.  At high $\gamma$ and
+at oblique incidence the current near-shell error is larger in the beamed
+peaks: the worst \texttt{hires} error rises from $1.590$ to $3.442$ at
+$\gamma=50$ and from $3.490$ to $5.988$ at $\gamma=100$, and the
+\texttt{bdata2} electric and magnetic errors rise.  The \texttt{line-gamma}
+ring at $48$ cells, $h=0.25$, is a grid-boundary artifact.  At $\gamma=10$
+its committed value changes from $2.49\times10^{-1}$ to
+$5.31\times10^{-6}$; this is the $\gamma=10$ row only and does not describe
+the other $\gamma$ rows.  The ring sits on the grid boundary in the absorbing
+region, so it is a boundary artifact, not a validation win, and it is excluded
+from Fig.~\ref{fig:gamma-dist} and from the accuracy claims.  The
+\texttt{multivel} peaks change slightly with the current code (Table
+\ref{tab:multivel}).
+
 The archived \texttt{var1b} input is not in the repository, so that case was
-not rerun.
+not rerun.  Its H100 figures and the $1.4\%$ arbiter comparison remain in
+Appendix~\ref{app:multivel} and are marked not comparable to the current-code
+values.

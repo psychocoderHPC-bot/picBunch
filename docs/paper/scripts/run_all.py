@@ -70,7 +70,7 @@ def main(argv=None):
     ap.add_argument("--check-provenance", action="store_true",
                     help="run check_provenance.py after rendering and fail on any gap")
     ap.add_argument("--strict-provenance", action="store_true",
-                    help="with --check-provenance, require fresh-h100 for data figures")
+                    help="with --check-provenance, require fresh-h100/fresh-v100 for data figures")
     ap.add_argument("--strict", action="store_true",
                     help="fail if a rendered figure's reduced data is still pending")
     ap.add_argument("--include-unreferenced", action="store_true",
@@ -119,7 +119,7 @@ def main(argv=None):
             return 1
         print("provenance check PASSED: %d figure(s) covered%s"
               % (prov["figures_claimed"],
-                 " (strict fresh-h100)" if a.strict_provenance else ""))
+                 " (strict fresh-h100/fresh-v100)" if a.strict_provenance else ""))
     strict_data = a.strict or a.strict_provenance
     if pending and strict_data:
         print("strict: %d figure(s) pending reduced data; the pipeline did not "

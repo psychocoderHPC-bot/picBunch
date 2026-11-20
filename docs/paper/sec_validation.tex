@@ -142,6 +142,10 @@ float32.
 
 \paragraph{Two-rank reproduction.}
 Appendix~\ref{app:reproduction} reruns the campaign with two MPI ranks on
-V100.  The non-near-shell data reproduce, with the outer \texttt{line-gamma}
-ring smaller in the two-rank run, while the host near-shell evaluator shows a
-host-dependent spread at high $\gamma$ and oblique incidence.
+V100.  The non-near-shell data reproduce.  The near-shell values of this
+paper are the current tile-invariant operator at commit \texttt{b29f55e};
+the earlier H100 values came from the pre-\texttt{e8d082f} per-tile
+local-FFT path and depend on the tile support, so they are not the paper of
+record.  The current values differ at high $\gamma$ and oblique incidence;
+the change is a trade-off, not a uniform improvement
+(Appendix~\ref{app:reproduction}).

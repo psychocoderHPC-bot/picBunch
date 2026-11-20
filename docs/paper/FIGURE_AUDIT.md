@@ -1,6 +1,11 @@
-Generated file. Regenerate from the renderers' audit data and from PyMuPDF
-measurements of `docs/paper/paper.pdf` and the native PDFs in
-`docs/paper/figs/`; do not hand-edit the table.
+Generated file for the 49-page pre-T7 `docs/paper/paper.pdf`. **Historical,
+not regenerated for the current 50-page PDF.** The T7 follow-up changed the
+current-code raster data and the reproduction appendix, which moved
+`paper.pdf` from 49 to 50 pages. The figure geometry, native page sizes and
+font ladder below were not changed by that work, but this table is not a
+measurement of the current `paper.pdf`. Regenerate from the current
+`paper.pdf` and `docs/paper/figs/` before treating it as current; do not
+hand-edit the table.
 
 ## Contract
 

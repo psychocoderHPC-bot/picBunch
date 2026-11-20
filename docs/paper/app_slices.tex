@@ -35,13 +35,17 @@ The error range is set by the data, from the smallest finite positive error to
 the panel peak, and is marked at the $10^{-3}$ gate. Grey marks cells that are
 not evaluated because the reference field is below threshold; the same grey
 appears in the slice, squared and error panels of a component. The forward case compares the mesh
-plus fast shell against an order-4 adaptive Gauss--Legendre driver. The Lorentz-contracted
+plus fast shell against an order-12 adaptive Gauss--Legendre driver. The Lorentz-contracted
 in-support quadrature of Section~\ref{sec:fastacc} is the present
 reference; it differs from that driver at the few-percent level at the
 closest node, so the in-support error pixels in these panels bound the
 in-support error from above. The dark outline marks the TSC support.
 The quantitative in-support statement is the fast-versus-arbiter $1.6\%$
-at the worst node (Section~\ref{sec:fastacc}). The fluctuation panels show
+at the worst node (Section~\ref{sec:fastacc}).  The current two-rank run
+gives a worst peak-normalised plane error of $0.307$ for the forward case and
+$0.367$ for the fluctuation case, with the smallest of the six component
+errors $0.195$.
+The fluctuation panels show
 the complete reference field; the binned momentum-spread case is carried
 through the multi-velocity path (Appendix~\ref{app:multivel}).
 
@@ -170,7 +174,9 @@ range set by the data from the smallest finite positive error to the panel
 peak and marked at the $10^{-3}$ gate. Grey marks cells that are not
 evaluated because the reference field is below threshold; the same grey
 appears in the slice, squared and error panels of a component. The dark
-outline marks the TSC support. The magnetic block is continued in
+outline marks the TSC support. This is the archived H100 \texttt{var1b}
+measurement; it was not rerun with the current binary and is not comparable
+to the current-code values. The magnetic block is continued in
 Fig.~\ref{fig:val1mrad}.}
 \label{fig:val1mrad}
 \end{figure}
@@ -199,8 +205,9 @@ bunch, which moves along $+x$ ($B_x\equiv0$);
 $x$ is horizontal in the x-y cut and is the beam axis there, while $y$ is
 horizontal in the z-y cut (beam out of plane) and $z$ vertical. Node spacing $h=1$ PIC cell; no near shell.
 Measured on \texttt{rosi\_v100} (V100, v0.9.2; the near-shell numbers in
-the text below this table are the JURECA H100 v0.9.2 runs, so this
-mesh-only table and those near-shell values are on different hosts).
+the text below this table are the JURECA H100 v0.9.2 runs and were not
+re-measured with the current binary, so this mesh-only table and those
+near-shell values are on different hosts and different code versions).
 The $\gamma=1$ reference is stationary (no beam axis) and uses the archived
 tolerance $10^{-4}$ (driver floor $9.075\times10^{-4}$, 14 not converged).}
 \label{tab:slices}
@@ -241,8 +248,11 @@ is measured at the same geometry below.
 \subsection{Near-shell accuracy and cost on the slice geometry}
 \label{app:slices-runs}
 
-On the same $N=1000$, $32\times32\times16$, cell $2\times10^{-7}$\,m
-geometry (the seed-42 mono-energetic bunch of Table~\ref{tab:slices},
+These near-shell numbers are the earlier H100 v0.9.2 runs; they were not
+rerun with the current tile-invariant binary and are not comparable to the
+current-code values.  On the same $N=1000$, $32\times32\times16$, cell
+$2\times10^{-7}$\,m geometry (the seed-42 mono-energetic bunch of
+Table~\ref{tab:slices},
 beam axis $+x$; not the seed-43 $+y$ bunch of
 Fig.~\ref{fig:val1mrad}), the exact near shell was run at the radius the
 envelope case
@@ -306,7 +316,7 @@ the bunch, far above the $10^{-3}$ gate.
 \centering
 \includegraphics[width=\linewidth,trim=0 242.57 0 0,clip]{figs/large_sxy_g10.pdf}
 \caption{Large-domain slices ($\gamma=10$, $128\times128\times64$, cell
-$2\times10^{-7}$\,m, $N=100$, JURECA H100), axial-$x$ geometry: the bunch
+$2\times10^{-7}$\,m, $N=100$, \texttt{rosi\_v100}, two MPI ranks), axial-$x$ geometry: the bunch
 moves along $+x$, so $B_x$, the component along the propagation axis, is
 identically zero. In the x-y cut the beam axis $x$ is horizontal; the z-y
 cut is a transverse view with the beam axis $x$ perpendicular to the page,

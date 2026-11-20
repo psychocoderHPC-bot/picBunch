@@ -24,7 +24,8 @@ Two identity rules close bypasses that the JSON Schema cannot express:
 
 ``--strict`` is the final-gate mode: it additionally requires that every data
 figure (every figure not listed in ``provenance/non_data_figures.json``) is
-claimed by a record with ``measurement_kind == "fresh-h100"`` or by a
+claimed by a record with ``measurement_kind == "fresh-h100"`` or
+``measurement_kind == "fresh-v100"`` (both checked campaigns) or by a
 ``measurement_kind == "fresh-reference"`` record that sets
 ``reference_only: true``.  ``fresh-reference`` documents a freshly recomputed
 analytic/exact reference (for example a CPU order-12 reference) rather than a
@@ -332,7 +333,7 @@ def run(records_dir, figs_dir, schema_path, not_reproduced_path,
                 continue
             claims = figure_claims.get(fig, [])
             fresh = [r for r in claims
-                     if r.get("measurement_kind") == "fresh-h100"
+                     if r.get("measurement_kind") in ("fresh-h100", "fresh-v100")
                      or (r.get("measurement_kind") == "fresh-reference"
                          and r.get("reference_only") is True)]
             if not fresh:
@@ -343,8 +344,9 @@ def run(records_dir, figs_dir, schema_path, not_reproduced_path,
                     detail = "claimed as %s" % ", ".join(kinds)
                 else:
                     detail = "unclaimed"
-                errors.append("strict: data figure %r is not fresh-h100 or a "
-                              "fresh-reference (reference_only) (%s)"
+                errors.append("strict: data figure %r is not fresh-h100, "
+                              "fresh-v100 or a fresh-reference "
+                              "(reference_only) (%s)"
                               % (fig, detail))
 
     summary = {
