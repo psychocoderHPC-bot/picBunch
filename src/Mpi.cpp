@@ -632,6 +632,26 @@ namespace picBunch
         return {local};
     }
 
+    void mpiSumLocal(std::uint64_t& requiredBytes, std::uint64_t& capacityBytes)
+    {
+#if defined(PICBUNCH_ENABLE_MPI)
+        if(initialized() && mpiSize() > 1)
+        {
+            MPI_Comm shared = MPI_COMM_NULL;
+            if(MPI_Comm_split_type(
+                   MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared)
+               == MPI_SUCCESS)
+            {
+                std::uint64_t values[2] = {requiredBytes, capacityBytes};
+                MPI_Allreduce(MPI_IN_PLACE, values, 2, MPI_UINT64_T, MPI_SUM, shared);
+                requiredBytes = values[0];
+                capacityBytes = values[1];
+                MPI_Comm_free(&shared);
+            }
+        }
+#endif
+    }
+
     void mpiBarrier()
     {
 #if defined(PICBUNCH_ENABLE_MPI)
