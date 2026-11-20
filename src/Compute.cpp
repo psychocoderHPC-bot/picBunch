@@ -19,6 +19,8 @@
 #include "picBunch/StagedDistributedFft.hpp"
 #include "picBunch/Readout.hpp"
 #include "picBunch/DeviceAffinity.hpp"
+#include "picBunch/Mpi.hpp"
+#include "picBunch/SolveMode.hpp"
 #include "picBunch/detail/FastNearDevice.hpp"
 #include "picBunch/detail/FieldGuard.hpp"
 #include "picBunch/detail/FftPlanCache.hpp"
@@ -1563,7 +1565,7 @@ namespace picBunch
         return result;
     }
 
-    Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
+    Grid makeGridGeometry(Bunch const& bunch, ComputeOptions const& options)
     {
         if(bunch.size() == 0)
             throw std::runtime_error("makeGrid: empty bunch");
@@ -1758,76 +1760,145 @@ namespace picBunch
             grid.depositHalo[a]
                 = factorHalo >= requiredHalo ? 0u : requiredHalo - factorHalo;
         }
-        Idx3 const paddedExtent = grid.paddedSize();
-
-        // Reject an infeasible grid before the first allocation.  Both the
-        // per-axis and the padded total are checked; the product is formed in
-        // 64-bit with an explicit overflow guard.
-        //
-        // The replicated path keeps the historical whole-box cap.  The
-        // distributed path has no byte-offset limit after the 64-bit extent
-        // fix: its guard is the vendor FFT element ceiling
-        // (kMaxDistributedNodesPerRank), applied to the largest rank.
-        bool const canDistribute = options.parallel && options.parallel->distributed()
-            && options.fftMode != FftMode::Replicated;
-        std::uint64_t padded = 1u;
-        for(int a = 0; a < 3; ++a)
-        {
-            if(grid.n[a] > kMaxNodesPerAxis)
-                throw std::runtime_error(
-                    "makeGrid: output grid " + std::to_string(grid.n[0]) + "x"
-                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
-                    + " is infeasible (per-axis limit " + std::to_string(kMaxNodesPerAxis)
-                    + "); check the input gridSpacing/gridUnitSI or pass --cell-size");
-            std::uint64_t const axisPadded = static_cast<std::uint64_t>(paddedExtent[a]);
-            if(axisPadded != 0u
-               && padded > std::numeric_limits<std::uint64_t>::max() / axisPadded)
-                throw std::runtime_error(
-                    "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
-                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
-                    + " with padding " + std::to_string(padding)
-                    + " is infeasible (node count exceeds the 64-bit range)");
-            padded *= axisPadded;
-        }
-        if(canDistribute)
-        {
-            int const ranks = options.parallel->size;
-            // Balanced z-split: the largest rank holds ceil(padded / ranks).
-            std::uint64_t const perRank
-                = (padded + static_cast<std::uint64_t>(ranks) - 1u)
-                / static_cast<std::uint64_t>(ranks);
-            std::uint64_t const limit
-                = static_cast<std::uint64_t>(detail::kMaxDistributedNodesPerRank);
-            if(perRank > limit)
-                throw std::runtime_error(
-                    "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
-                    + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
-                    + " with padding " + std::to_string(padding)
-                    + " is infeasible: the worst rank of " + std::to_string(ranks)
-                    + " requires " + std::to_string(perRank)
-                    + " padded nodes (worst-rank requirement), above the vendor element ceiling of "
-                    + std::to_string(limit) + " nodes per transform");
-        }
-        else if(options.solveMode == SolveMode::Chunked)
-        {
-            // The staged path has no single-process whole-box allocation: every
-            // phase holds one virtual-rank slab, and DistributedFft3D enforces
-            // the vendor element ceiling for that slab.  The historical
-            // replicated whole-box cap does not apply here.
-        }
-        else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
-            throw std::runtime_error(
-                "makeGrid: padded FFT grid for output grid " + std::to_string(grid.n[0]) + "x"
-                + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
-                + " with padding " + std::to_string(padding)
-                + " is infeasible (limit " + std::to_string(kMaxPaddedNodes)
-                + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size");
         // The deposit halo is a property of the grid, not of the solver path.
-        // Validate it here so every caller (replicated and distributed) fails
-        // before allocating or depositing instead of wrapping charge silently.
+        // Validate it before any caller allocates or deposits, so a grid that
+        // would wrap boundary charge fails with a clear diagnostic.
         validateDepositPadding(grid);
         return grid;
     }
+
+    namespace
+    {
+        /*! Capacity reason for a grid, or nullopt when the mode can hold it.
+         *
+         * The replicated path keeps the historical whole-box cap.  The
+         * distributed path has no byte-offset limit after the 64-bit extent
+         * fix: its guard is the vendor FFT element ceiling applied to the
+         * largest rank.  The staged chunked path holds one virtual-rank slab,
+         * so the whole-box cap does not apply to it.
+         *
+         * The function is pure so the solve-mode policy can ask whether the
+         * in-core geometry fits before the final mode is known.
+         */
+        std::optional<std::string> gridCapacityViolation(
+            Grid const& grid,
+            ComputeOptions const& options,
+            SolveMode solveMode)
+        {
+            bool const canDistribute = options.parallel && options.parallel->distributed()
+                && options.fftMode != FftMode::Replicated;
+            Idx3 const paddedExtent = grid.paddedSize();
+            std::uint64_t padded = 1u;
+            for(int a = 0; a < 3; ++a)
+            {
+                if(grid.n[a] > kMaxNodesPerAxis)
+                    return "makeGrid: output grid " + std::to_string(grid.n[0]) + "x"
+                        + std::to_string(grid.n[1]) + "x" + std::to_string(grid.n[2])
+                        + " is infeasible (per-axis limit "
+                        + std::to_string(kMaxNodesPerAxis)
+                        + "); check the input gridSpacing/gridUnitSI or pass --cell-size";
+                std::uint64_t const axisPadded = static_cast<std::uint64_t>(paddedExtent[a]);
+                if(axisPadded != 0u
+                   && padded > std::numeric_limits<std::uint64_t>::max() / axisPadded)
+                    return "makeGrid: padded FFT grid for output grid "
+                        + std::to_string(grid.n[0]) + "x" + std::to_string(grid.n[1]) + "x"
+                        + std::to_string(grid.n[2]) + " with padding "
+                        + std::to_string(grid.fftPadding)
+                        + " is infeasible (node count exceeds the 64-bit range)";
+                padded *= axisPadded;
+            }
+            if(canDistribute)
+            {
+                int const ranks = options.parallel->size;
+                // Balanced z-split: the largest rank holds ceil(padded / ranks).
+                std::uint64_t const perRank
+                    = (padded + static_cast<std::uint64_t>(ranks) - 1u)
+                    / static_cast<std::uint64_t>(ranks);
+                std::uint64_t const limit
+                    = static_cast<std::uint64_t>(detail::kMaxDistributedNodesPerRank);
+                if(perRank > limit)
+                    return "makeGrid: padded FFT grid for output grid "
+                        + std::to_string(grid.n[0]) + "x" + std::to_string(grid.n[1]) + "x"
+                        + std::to_string(grid.n[2]) + " with padding "
+                        + std::to_string(grid.fftPadding)
+                        + " is infeasible: the worst rank of " + std::to_string(ranks)
+                        + " requires " + std::to_string(perRank)
+                        + " padded nodes (worst-rank requirement), above the vendor element "
+                          "ceiling of "
+                        + std::to_string(limit) + " nodes per transform";
+            }
+            else if(solveMode == SolveMode::Chunked)
+            {
+                // The staged path has no single-process whole-box allocation:
+                // every phase holds one virtual-rank slab, and
+                // DistributedFft3D enforces the vendor element ceiling for it.
+            }
+            else if(padded > static_cast<std::uint64_t>(kMaxPaddedNodes))
+                return "makeGrid: padded FFT grid for output grid "
+                    + std::to_string(grid.n[0]) + "x" + std::to_string(grid.n[1]) + "x"
+                    + std::to_string(grid.n[2]) + " with padding "
+                    + std::to_string(grid.fftPadding) + " is infeasible (limit "
+                    + std::to_string(kMaxPaddedNodes)
+                    + " nodes); check the input gridSpacing/gridUnitSI or pass --cell-size";
+            return std::nullopt;
+        }
+
+        void validateGridCapacity(
+            Grid const& grid,
+            ComputeOptions const& options,
+            SolveMode solveMode)
+        {
+            if(std::optional<std::string> violation
+               = gridCapacityViolation(grid, options, solveMode))
+                throw std::runtime_error(*violation);
+        }
+    } // namespace
+
+    Grid makeGrid(Bunch const& bunch, ComputeOptions const& options)
+    {
+        Grid grid = makeGridGeometry(bunch, options);
+        validateGridCapacity(grid, options, options.solveMode);
+        return grid;
+    }
+
+    namespace
+    {
+        /*! Virtual-rank count of the staged solve, from ``--chunk-cells``.
+         *
+         * Extracted so the solve-mode policy uses the same slab count as the
+         * solver.  The explicit value wins; a value above the padded plane
+         * count on the smaller axis is rejected by the solver.
+         */
+        int deriveChunkedVirtualRanks(
+            ComputeOptions const& options,
+            std::uint32_t Mx,
+            std::uint32_t My,
+            std::uint32_t Mz)
+        {
+            // One virtual rank owns about chunk-cells/(Mx*My) padded z planes.
+            std::uint64_t const planesPerRank = std::max<std::uint64_t>(
+                1u,
+                static_cast<std::uint64_t>(options.chunkCells)
+                    / (static_cast<std::uint64_t>(Mx) * My));
+            std::uint64_t const wanted
+                = (static_cast<std::uint64_t>(Mz) + planesPerRank - 1u) / planesPerRank;
+            int const derivedRanks = static_cast<int>(std::max<std::uint64_t>(
+                1u,
+                std::min<std::uint64_t>(
+                    wanted,
+                    static_cast<std::uint64_t>(std::min(Mx, Mz)))));
+            int virtualRanks = options.virtualRanks > 0
+                ? options.virtualRanks
+                : derivedRanks;
+            if(virtualRanks > static_cast<int>(std::min(Mx, Mz)))
+                throw std::runtime_error(
+                    "chunked solve: --virtual-ranks "
+                    + std::to_string(virtualRanks)
+                    + " exceeds the padded planes on an axis ("
+                    + std::to_string(std::min(Mx, Mz)) + ")");
+            return std::max(virtualRanks, 1);
+        }
+    } // namespace
 
     Field computeField(
         Bunch const& bunch,
@@ -1922,7 +1993,7 @@ namespace picBunch
         // a bunch whose weights and charges cancel to zero has no field.
         double const netCharge = detail::totalCharge(bunch);
 
-        Grid const grid = makeGrid(bunch, options);
+        Grid const grid = makeGridGeometry(bunch, options);
         Field field;
         field.grid = grid;
 
@@ -2066,8 +2137,20 @@ namespace picBunch
                 "computeField: output node count " + std::to_string(outNodes)
                 + " exceeds the 32-bit gathered-index limit");
 
+        // ------------------------------------------------------- solve-mode policy
+        // The padded geometry above is allocation-free, so the automatic policy
+        // decides the mode before the grid-capacity gate applies.  The in-core
+        // estimate reflects the transform this run will actually use: the
+        // replicated-versus-distributed choice was fixed above, before the mode
+        // resolution, so ``useDistributed`` and its rank count are available.
+        SolveMode resolvedMode = options.solveMode;
+#if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
+        constexpr bool chunkedBackendAvailable = false;
+#else
+        constexpr bool chunkedBackendAvailable = true;
+#endif
         {
-            DeviceWorkload const workload{
+            DeviceWorkload const inCoreWorkload{
                 static_cast<std::size_t>(paddedNodes),
                 static_cast<std::size_t>(spectrumCount),
                 outNodes,
@@ -2076,7 +2159,141 @@ namespace picBunch
                 useDistributed ? parSize : 1,
                 useDistributed,
                 static_cast<unsigned>(sizeof(double))};
-            enforceRankDeviceFit(workload);
+            DeviceFit const localFit
+                = evaluateDeviceFit(currentRankDeviceMapping(), inCoreWorkload);
+            // The staged path keeps the binned particle bookkeeping (``boxOf``
+            // plus ``members``, one size_t each) and one virtual-rank
+            // workspace.  The output slab is the deliverable and is budgeted by
+            // the writer, not counted as solver staging.
+            auto const chunkedEstimateBytes = [&] {
+                int virtualRanksForEstimate = 1;
+                try
+                {
+                    virtualRanksForEstimate
+                        = deriveChunkedVirtualRanks(options, Mx, My, Mz);
+                }
+                catch(std::exception const&)
+                {
+                    // The solver rejects the explicit value later with its own
+                    // actionable message; use a clamped count only for the
+                    // estimate so the resolution stays collective.
+                    virtualRanksForEstimate = std::max(
+                        1,
+                        std::min(
+                            options.virtualRanks > 0 ? options.virtualRanks : 1,
+                            static_cast<int>(std::min(Mx, Mz))));
+                }
+                std::size_t const particleBytes
+                    = bunch.size() * 2u * sizeof(std::size_t);
+                return estimateChunkedRequirementBytes(
+                    Mx,
+                    My,
+                    Mz,
+                    static_cast<std::size_t>(std::max(virtualRanksForEstimate, 1)),
+                    particleBytes);
+            };
+
+            bool const needResolution
+                = !options.solveModeResolved || options.solveMode == SolveMode::Auto;
+            if(needResolution)
+            {
+                // A grid that only the staged slab path can hold is a
+                // legitimate reason for auto to switch, so fold the in-core
+                // node ceiling into the fit.
+                DeviceFit fit = localFit;
+                bool const inCoreGeometryFits
+                    = !gridCapacityViolation(grid, options, SolveMode::InCore);
+                fit.refused = fit.refused || !inCoreGeometryFits;
+
+                bool const chunkedAvailable = chunkedBackendAvailable
+                    && options.nearShell.mode == NearShellOptions::Mode::None
+                    && options.velocityMoments.mode == VelocityMomentsOptions::Mode::Off
+                    && options.chunkCells > 0u
+                    && !options.globalGridSize
+                    && (!options.chunkSink || binCount == 1u)
+                    && (options.virtualRanks <= 0
+                        || static_cast<std::uint32_t>(options.virtualRanks)
+                            <= std::min(Mx, Mz));
+                SolveModeDecision decision = resolveSolveMode(
+                    options.solveMode,
+                    fit,
+                    chunkedEstimateBytes(),
+                    chunkedAvailable,
+                    parSize);
+
+                // All ranks must use the same mode now that chunked runs on N
+                // ranks.  One one-value broadcast of the root decision keeps
+                // the fixed-size options payload and its wire version intact.
+                // A refusal travels as -1 so a refused root cannot strand peers
+                // that would otherwise enter the solve.
+                if(parSize > 1)
+                {
+                    double modeWire = decision.refused
+                        ? -1.0
+                        : static_cast<double>(decision.mode);
+                    mpiBroadcast(&modeWire, 1u, 0);
+                    if(modeWire < 0.0)
+                    {
+                        if(decision.refused)
+                            enforceSolveMode(decision);
+                        throw SolveModeRefusal(
+                            "solve mode: rank 0 refused the automatic solve-mode choice");
+                    }
+                    decision.mode = static_cast<SolveMode>(static_cast<int>(modeWire));
+                    decision.refused = false;
+                }
+                else if(decision.refused)
+                    enforceSolveMode(decision);
+
+                if(mpiRank() == 0)
+                {
+                    static bool decisionLogged = false;
+                    if(!decisionLogged)
+                    {
+                        decisionLogged = true;
+                        std::fprintf(
+                            stderr,
+                            "%s\n",
+                            formatSolveModeDecision(decision).c_str());
+                    }
+                }
+                resolvedMode = decision.mode;
+            }
+            else
+                resolvedMode = options.solveMode;
+
+            // Build the grid with the RESOLVED mode, so auto can take the
+            // chunked exemption only after it has legally chosen that path.
+            validateGridCapacity(grid, options, resolvedMode);
+
+            if(resolvedMode == SolveMode::InCore)
+            {
+                try
+                {
+                    enforceRankDeviceFit(inCoreWorkload);
+                }
+                catch(std::runtime_error const& error)
+                {
+                    // The far-tail second pass copies the options with the mode
+                    // already final, so it skips the policy but still lands
+                    // here.  Refuse its larger grid with a distinct type.
+                    throw SolveModeRefusal(
+                        std::string("solve mode: in-core field solve does not fit: ")
+                        + error.what()
+                        + "; use --solve-mode chunked or --fft-mode distributed to "
+                          "lower the per-rank requirement");
+                }
+            }
+            else if(resolvedMode == SolveMode::Chunked)
+            {
+                std::size_t const chunkedBytes = chunkedEstimateBytes();
+                if(localFit.shareBytes > 0u && chunkedBytes > localFit.shareBytes)
+                    throw SolveModeRefusal(
+                        "solve mode: chunked solve exceeds the per-rank budget: required "
+                        + formatSolveModeBytes(chunkedBytes) + " per rank, budget "
+                        + formatSolveModeBytes(localFit.shareBytes)
+                        + " per rank; lower --chunk-cells or use more ranks");
+            }
         }
 
         // Everything a zero-field report needs to identify the run.
@@ -3059,17 +3276,13 @@ namespace picBunch
         // DistributedFft3D supplies the slab split, the x/y/z transforms and
         // the identical pack/unpack arithmetic.  Only the all-to-all slice is
         // staged, so the MPI and staged paths differ in the exchange only.
-        if(options.solveMode == SolveMode::Chunked)
+        if(resolvedMode == SolveMode::Chunked)
         {
 #if defined(PICBUNCH_BACKEND_CUDA) || defined(PICBUNCH_BACKEND_HIP)
             throw std::runtime_error(
                 "chunked solve is implemented for the host/CPU backend only; the "
                 "staging passes hand host buffers to the FFT backend");
 #endif
-            if(parSize != 1)
-                throw std::runtime_error(
-                    "chunked solve is a single-process path; run it with one rank "
-                    "(or use --fft-mode distributed)");
             if(options.nearShell.mode != NearShellOptions::Mode::None)
                 throw std::runtime_error(
                     "chunked solve does not combine with --near-shell; run the near "
@@ -3080,7 +3293,13 @@ namespace picBunch
                     "moment path allocates whole spectra by design");
             if(options.chunkCells == 0u)
                 throw std::runtime_error("chunked solve: --chunk-cells must be positive");
-            if(options.chunkSink && binCount != 1u)
+            // The streaming sink is a single-process writer: it verifies that
+            // the process saw every output plane before it publishes.  On N
+            // ranks each rank owns only its slab, so the returned ``Field``
+            // with ``zSlab`` is routed through the collective writer instead.
+            bool const streamOutput
+                = static_cast<bool>(options.chunkSink) && parSize == 1;
+            if(streamOutput && binCount != 1u)
                 throw std::runtime_error(
                     "chunked solve with a streaming output sink requires a single "
                     "velocity box; an output slab is written once per component");
@@ -3090,31 +3309,8 @@ namespace picBunch
             std::uint32_t const cOutNz = static_cast<std::uint32_t>(grid.n[2]);
             std::size_t const cPlane
                 = static_cast<std::size_t>(cOutNx) * static_cast<std::size_t>(cOutNy);
-            std::size_t const cNodes = cPlane * static_cast<std::size_t>(cOutNz);
 
-            // One virtual rank owns about chunk-cells/(Mx*My) padded z planes.
-            // The rank count is the number of such slabs that tile Mz, capped by
-            // both axes so every rank owns at least one plane.
-            std::uint64_t const planesPerRank = std::max<std::uint64_t>(
-                1u,
-                static_cast<std::uint64_t>(options.chunkCells)
-                    / (static_cast<std::uint64_t>(Mx) * My));
-            std::uint64_t const wanted
-                = (static_cast<std::uint64_t>(Mz) + planesPerRank - 1u) / planesPerRank;
-            int const derivedRanks = static_cast<int>(std::max<std::uint64_t>(
-                1u,
-                std::min<std::uint64_t>(
-                    wanted,
-                    static_cast<std::uint64_t>(std::min(Mx, Mz)))));
-            int virtualRanks = options.virtualRanks > 0
-                ? options.virtualRanks
-                : derivedRanks;
-            if(virtualRanks > static_cast<int>(std::min(Mx, Mz)))
-                throw std::runtime_error(
-                    "chunked solve: --virtual-ranks "
-                    + std::to_string(virtualRanks) + " exceeds the padded planes on an axis ("
-                    + std::to_string(std::min(Mx, Mz)) + ")");
-            virtualRanks = std::max(virtualRanks, 1);
+            int const virtualRanks = deriveChunkedVirtualRanks(options, Mx, My, Mz);
 
             std::string staging = options.stagingDirectory;
             if(staging.empty())
@@ -3123,6 +3319,13 @@ namespace picBunch
                 staging = std::string(tmp != nullptr ? tmp : "/tmp") + "/picbunch-staging-"
                     + std::to_string(static_cast<long long>(::getpid()));
             }
+            // Every rank runs the same global staged transform, so their
+            // staging files must not overlap.  A rank-unique subdirectory keeps
+            // an explicit shared --staging-dir collision-free; a single-rank
+            // run keeps its historical path (the failure-diagnostic tests rely
+            // on it).
+            if(parSize > 1)
+                staging += "/rank-" + std::to_string(parRank);
             std::error_code ec;
             std::filesystem::create_directories(staging, ec);
             if(ec)
@@ -3130,12 +3333,27 @@ namespace picBunch
                     "chunked solve: cannot create staging directory '" + staging
                     + "': " + ec.message());
 
+            // Only the output planes this rank owns are retained.  The global
+            // transform still visits every virtual rank, so the result is the
+            // exact global transform, but peak memory stays one output slab
+            // instead of the whole padded output volume.
+            std::size_t const slabBegin
+                = (static_cast<std::size_t>(parRank) * static_cast<std::size_t>(cOutNz))
+                / static_cast<std::size_t>(parSize);
+            std::size_t const slabEnd
+                = ((static_cast<std::size_t>(parRank) + 1u)
+                   * static_cast<std::size_t>(cOutNz))
+                / static_cast<std::size_t>(parSize);
+            std::size_t const slabPlanes = slabEnd - slabBegin;
+
             Field chunkedField;
             chunkedField.grid = grid;
-            bool const streamOutput = static_cast<bool>(options.chunkSink);
+            chunkedField.zSlab = true;
+            chunkedField.slabOffset = slabBegin;
+            chunkedField.slabCount = slabPlanes;
             if(!streamOutput)
                 for(auto& component : chunkedField.data)
-                    component.assign(cNodes, 0.0);
+                    component.assign(slabPlanes * cPlane, 0.0);
 
             detail::ChunkedSolveStats stats;
             auto const chunkedStart = Clock::now();
@@ -3159,10 +3377,13 @@ namespace picBunch
                 solver.forwardSource(
                     [&](std::uint32_t zOffset, std::uint32_t zCount, Complex* work) {
                         auto const fillStart = Clock::now();
-                        std::memset(
-                            work,
-                            0,
-                            static_cast<std::size_t>(zCount) * My * Mx * sizeof(Complex));
+                        // Value-initialise the Complex slab; memset on this
+                        // non-trivial type trips -Wclass-memaccess under the
+                        // pedantic warning set.
+                        std::fill_n(
+                            reinterpret_cast<double*>(work),
+                            2u * static_cast<std::size_t>(zCount) * My * Mx,
+                            0.0);
                         depositHost(
                             members[b],
                             reinterpret_cast<double*>(work),
@@ -3234,22 +3455,32 @@ namespace picBunch
                         cOutNz,
                         factor,
                         [&](std::size_t zOffset, std::size_t zCount, double const* planes) {
+                            std::size_t const emitBegin = zOffset;
+                            std::size_t const emitEnd = zOffset + zCount;
+                            std::size_t const keepBegin = std::max(emitBegin, slabBegin);
+                            std::size_t const keepEnd = std::min(emitEnd, slabEnd);
+                            if(keepBegin >= keepEnd)
+                                return;
+                            std::size_t const first = keepBegin - emitBegin;
+                            std::size_t const last = keepEnd - emitBegin;
                             if(streamOutput)
                             {
                                 FieldChunk chunk;
                                 chunk.grid = grid;
                                 chunk.component = c;
-                                chunk.zOffset = zOffset;
-                                chunk.zCount = zCount;
-                                chunk.data.assign(planes, planes + zCount * cPlane);
+                                chunk.zOffset = keepBegin;
+                                chunk.zCount = keepEnd - keepBegin;
+                                chunk.data.assign(
+                                    planes + first * cPlane,
+                                    planes + last * cPlane);
                                 options.chunkSink(chunk);
                             }
                             else
                             {
-                                for(std::size_t k = 0; k < zCount; ++k)
+                                for(std::size_t k = first; k < last; ++k)
                                     for(std::size_t l = 0; l < cPlane; ++l)
                                         chunkedField.data[static_cast<std::size_t>(c)]
-                                                         [(zOffset + k) * cPlane + l]
+                                                         [(emitBegin + k - slabBegin) * cPlane + l]
                                             += planes[k * cPlane + l];
                             }
                         });
@@ -3304,10 +3535,19 @@ namespace picBunch
                 static_cast<double>(stats.backWrite) / 1e9,
                 static_cast<double>(stats.backRead) / 1e9);
             if(!streamOutput)
-                detail::abortOnEmptyChargedField(
-                    chunkedField,
-                    netCharge,
-                    guardDescription(chunkedField, "chunked"));
+            {
+                if(parSize > 1)
+                    detail::abortOnEmptyChargedDistributedField(
+                        chunkedField,
+                        netCharge,
+                        guardDescription(chunkedField, "chunked"),
+                        *par);
+                else
+                    detail::abortOnEmptyChargedField(
+                        chunkedField,
+                        netCharge,
+                        guardDescription(chunkedField, "chunked"));
+            }
             return chunkedField;
         }
 
