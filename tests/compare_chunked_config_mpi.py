@@ -198,6 +198,25 @@ def run(command, label):
             f"{label}: command failed with exit {result.returncode}: "
             + failure_tail(result)
         )
+    return result
+
+
+def stderr_tail(result):
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return " | ".join(lines[-5:]) or "no stderr"
+
+
+def require_reason(result, marker, label):
+    """Fail when the run did not log the expected solve-mode reason.
+
+    The reference must resolve in-core and the candidate must honour the hard
+    chunked override.  Without this check a memory-constrained runner could
+    switch the reference to chunked on its own and compare chunked against
+    chunked while still printing OK.
+    """
+    if marker in result.stderr:
+        return None
+    return f"{label}: stderr lacks {marker!r}: " + stderr_tail(result)
 
 
 def _checkpoint(path):
@@ -298,7 +317,7 @@ def main():
                     )
                     os.makedirs(reference, exist_ok=True)
                     try:
-                        run(
+                        result = run(
                             mpi_command(
                                 mpiexec,
                                 ranks,
@@ -309,12 +328,22 @@ def main():
                                     reference,
                                     "--fft-mode",
                                     "distributed",
+                                    "--solve-mode",
+                                    "in-core",
                                 ],
                             ),
                             f"reference {tag} ranks={ranks}",
                         )
                     except RuntimeError as error:
                         print(f"refcheck {tag} ranks=1_vs_{ranks} FAIL {error}")
+                        return 1
+                    mismatch = require_reason(
+                        result,
+                        "reason explicit-in-core",
+                        f"reference {tag} ranks={ranks}",
+                    )
+                    if mismatch is not None:
+                        print(f"refcheck {tag} ranks=1_vs_{ranks} FAIL {mismatch}")
                         return 1
                     references[ranks] = reference
 
@@ -347,7 +376,7 @@ def main():
                         os.makedirs(candidate, exist_ok=True)
                         os.makedirs(staging, exist_ok=True)
                         try:
-                            run(
+                            result = run(
                                 mpi_command(
                                     mpiexec,
                                     ranks,
@@ -368,6 +397,15 @@ def main():
                             )
                         except RuntimeError as error:
                             print(f"case {label} status=FAIL {error}")
+                            failures += 1
+                            if not continue_on_mismatch:
+                                return 1
+                            continue
+                        mismatch = require_reason(
+                            result, "reason explicit-chunked", label
+                        )
+                        if mismatch is not None:
+                            print(f"case {label} status=FAIL {mismatch}")
                             failures += 1
                             if not continue_on_mismatch:
                                 return 1

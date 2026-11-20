@@ -250,6 +250,18 @@ if(PICBUNCH_BUILD_GTESTS)
                     ${CMAKE_CURRENT_BINARY_DIR}
             )
             set_tests_properties(picBunch.ChunkedMpiVsDistributedConfig PROPERTIES TIMEOUT 300)
+
+            # The automatic policy must actually switch on a forced budget,
+            # refuse when neither mode fits, and let the MPI Allreduce
+            # reconcile ranks with unequal per-rank budgets.
+            add_test(
+                NAME picBunch.SolveModeAutoSwitch
+                COMMAND
+                    ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_solve_mode_auto_switch.py
+                    ${MPIEXEC_EXECUTABLE} $<TARGET_FILE:picBunchApp>
+                    ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(picBunch.SolveModeAutoSwitch PROPERTIES TIMEOUT 180)
         endif()
     else()
         add_test(

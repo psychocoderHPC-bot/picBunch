@@ -2173,6 +2173,8 @@ namespace picBunch
                 useDistributed ? parSize : 1,
                 useDistributed,
                 static_cast<unsigned>(sizeof(double))};
+            // The test-only budget override is applied at the capacity source,
+            // so the fit sees the same per-rank capacity in every consumer.
             DeviceFit const localFit
                 = evaluateDeviceFit(currentRankDeviceMapping(), inCoreWorkload);
 
@@ -2197,9 +2199,13 @@ namespace picBunch
                     reduced.requiredBytes = static_cast<std::size_t>(required);
                     reduced.shareBytes = static_cast<std::size_t>(share);
                     reduced.capacityBytes = reduced.shareBytes;
-                    reduced.refused
-                        = reduced.shareBytes > 0u && reduced.requiredBytes > reduced.shareBytes;
                 }
+                // ``evaluateDeviceFit`` no longer refuses: the node-total guard
+                // moved into ``enforceRankDeviceFit``.  The automatic policy
+                // still needs a per-rank refusal here, including the
+                // single-process path that skips the collectives.
+                reduced.refused
+                    = reduced.shareBytes > 0u && reduced.requiredBytes > reduced.shareBytes;
                 return reduced;
             };
 
@@ -2288,6 +2294,30 @@ namespace picBunch
                     chunkedBytes,
                     chunkedAvailable,
                     parSize);
+
+                // Test-only: expose each rank's local decision before the
+                // broadcast so a multi-rank test can prove they agree.
+                {
+                    char const* const logRanks
+                        = std::getenv("PICBUNCH_TEST_SOLVE_MODE_RANKS");
+                    if(logRanks != nullptr && logRanks[0] != '\0'
+                       && options.solveMode == SolveMode::Auto)
+                    {
+                        static std::atomic<int> loggedRankDecisionKey{-1};
+                        int const decisionKey
+                            = decision.refused ? 100 : static_cast<int>(decision.mode);
+                        if(loggedRankDecisionKey.exchange(decisionKey) != decisionKey)
+                        {
+                            constexpr char const* prefix = "picBunch: solve mode: ";
+                            std::string const text = formatSolveModeDecision(decision);
+                            std::fprintf(
+                                stderr,
+                                "picBunch: solve mode: rank %d: %s\n",
+                                mpiRank(),
+                                text.c_str() + std::strlen(prefix));
+                        }
+                    }
+                }
 
                 // All ranks must use the same mode now that chunked runs on N
                 // ranks.  One one-value broadcast of the root decision keeps

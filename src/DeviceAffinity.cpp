@@ -17,6 +17,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,61 @@ namespace picBunch
             if(b > std::numeric_limits<std::size_t>::max() - a)
                 return std::numeric_limits<std::size_t>::max();
             return a + b;
+        }
+
+        /*! Test-only per-rank memory budget override.
+         *
+         * Exists only so tests can force the automatic solve-mode decision on
+         * a machine whose real capacity is too large to switch.  The value is
+         * a byte count, optionally a comma-separated list indexed by MPI rank.
+         * A single value applies to every rank and a list shorter than the
+         * rank count repeats its last value.  Unset, empty or unparsable input
+         * falls back to the capacity the backend reported, so it is inert then.
+         *
+         * The override belongs at the capacity source, not in the fit: the
+         * automatic decision, the ``mpiSumLocal`` node total and the post
+         * resolution in-core guard then all see one consistent capacity.
+         */
+        std::size_t deviceCapacityBytesForRank(RankDeviceMapping const& mapping)
+        {
+            char const* const raw = std::getenv("PICBUNCH_TEST_MEMORY_BUDGET_BYTES");
+            if(raw == nullptr || raw[0] == '\0')
+                return mapping.deviceCapacityBytes;
+            std::vector<std::size_t> budgets;
+            std::string_view text{raw};
+            while(true)
+            {
+                std::size_t const comma = text.find(',');
+                std::string_view token = text.substr(0u, comma);
+                while(!token.empty()
+                      && (token.front() == ' ' || token.front() == '\t'))
+                    token.remove_prefix(1u);
+                while(!token.empty()
+                      && (token.back() == ' ' || token.back() == '\t'))
+                    token.remove_suffix(1u);
+                if(token.empty())
+                    return mapping.deviceCapacityBytes;
+                std::size_t value = 0u;
+                for(char const digit : token)
+                {
+                    if(digit < '0' || digit > '9')
+                        return mapping.deviceCapacityBytes;
+                    std::size_t const next = value * 10u + static_cast<std::size_t>(digit - '0');
+                    if(next < value)
+                        return mapping.deviceCapacityBytes;
+                    value = next;
+                }
+                budgets.push_back(value);
+                if(comma == std::string_view::npos)
+                    break;
+                text.remove_prefix(comma + 1u);
+            }
+            if(budgets.empty())
+                return mapping.deviceCapacityBytes;
+            int const rank = std::max(0, mpiRank());
+            std::size_t const index
+                = std::min(static_cast<std::size_t>(rank), budgets.size() - 1u);
+            return budgets[index];
         }
 
         //! Environment variable that filters devices for the compiled backend.
@@ -150,6 +206,9 @@ namespace picBunch
         mapping.deviceName = devices[static_cast<std::size_t>(deviceIndex)].name;
         mapping.deviceCapacityBytes
             = devices[static_cast<std::size_t>(deviceIndex)].capacityBytes;
+        // Apply the test-only override where the capacity is first resolved, so
+        // the fit, the node-total sum and the in-core guard agree.
+        mapping.deviceCapacityBytes = deviceCapacityBytesForRank(mapping);
         mapping.ranksPerDevice
             = counts.empty() ? 1 : counts[static_cast<std::size_t>(deviceIndex)];
         mapping.overrideRespected = overrideRespected;
@@ -325,8 +384,11 @@ namespace picBunch
         DeviceFit fit;
         fit.requiredBytes = estimateDeviceRequirementBytes(workload);
         fit.capacityBytes = mapping.deviceCapacityBytes;
-        // Kept for the public result shape; the guard uses the node totals.
-        fit.shareBytes = fit.capacityBytes;
+        // The guard compares node totals, so shareBytes only feeds the
+        // automatic mode choice.  It is bounded by the same per-rank capacity:
+        // a zero override means "capacity unknown" and stays unenforced, while
+        // a nonzero override caps the decision budget.
+        fit.shareBytes = std::min(fit.capacityBytes, deviceCapacityBytesForRank(mapping));
         fit.ranksPerDevice = 1;
         fit.deviceIndex = mapping.deviceIndex;
         fit.rank = mapping.worldRank;

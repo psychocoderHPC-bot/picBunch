@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -216,6 +217,31 @@ TEST(SolveMode, EstimateMatchesTheSingleVirtualRankFormula)
     EXPECT_EQ(
         picBunch::estimateChunkedRequirementBytes(Mx, My, Mz, 0u, particles),
         expected);
+}
+
+TEST(SolveMode, EstimateUsesTheCeilSplitForVirtualRanks)
+{
+    // N > 1: nz = ceil(Mz/N) and nx = ceil(Mx/N) are the largest contiguous
+    // split counts, so the bracket is
+    //   Mx*My*nz + 2*nx*My*Mz + 2*max(Mx*nz, Mz*nx).
+    std::size_t const Mx = 13u;
+    std::size_t const My = 11u;
+    std::size_t const Mz = 15u;
+    std::size_t const particles = 321u;
+    for(std::size_t ranks : {2u, 3u, 4u, 5u, 7u})
+    {
+        std::size_t const nz = (Mz + ranks - 1u) / ranks;
+        std::size_t const nx = (Mx + ranks - 1u) / ranks;
+        std::size_t const expected
+            = 16u
+                * (Mx * My * nz + 2u * nx * My * Mz
+                   + 2u * std::max<std::size_t>(Mx * nz, Mz * nx))
+            + particles;
+        SCOPED_TRACE("virtual ranks " + std::to_string(ranks));
+        EXPECT_EQ(
+            picBunch::estimateChunkedRequirementBytes(Mx, My, Mz, ranks, particles),
+            expected);
+    }
 }
 
 TEST(SolveMode, EstimateDoesNotGrowWithVirtualRanks)
