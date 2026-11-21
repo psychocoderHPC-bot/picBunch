@@ -70,6 +70,22 @@ namespace
         std::fprintf(stderr, "%s\n", picBunch::formatSolveModeDecision(decision).c_str());
     }
 
+    char const* nearShellModeName(picBunch::NearShellOptions::Mode mode)
+    {
+        switch(mode)
+        {
+        case picBunch::NearShellOptions::Mode::Exact:
+            return "exact";
+        case picBunch::NearShellOptions::Mode::Fast:
+            return "fast";
+        case picBunch::NearShellOptions::Mode::FastGpu:
+            return "fast-gpu";
+        case picBunch::NearShellOptions::Mode::None:
+        default:
+            return "none";
+        }
+    }
+
     constexpr char const* compiledBackend()
     {
 #if defined(PICBUNCH_BACKEND_CUDA)
@@ -295,11 +311,20 @@ namespace
         unsigned fftPadding = 0; //!< 0 = tolerance policy
         std::optional<std::size_t> fftSpectrumCacheMiB; //!< unset = env/default
         std::string nearShell = "none";
+        //! An explicit --near-shell wins over accuracy.near_shell on the
+        //! --config path.  The defaults must stay distinguishable from an
+        //! explicit value, otherwise ``--near-shell none`` is silently ignored.
+        bool nearShellGiven = false;
         double nearShellRadius = 0.0;
+        bool nearShellRadiusGiven = false;
         std::size_t nearShellTile = 0; //!< 0 = automatic pair-count rule
+        bool nearShellTileGiven = false;
         int nearShellFastOrder = 5;
+        bool nearShellFastOrderGiven = false;
         std::string nearShellObliqueOrder = "auto";
+        bool nearShellObliqueOrderGiven = false;
         int nearShellExactCells = -2;
+        bool nearShellExactCellsGiven = false;
         bool deterministicDeposit = false;
         bool allowFieldTruncation = false;
         std::string backend = "auto";
@@ -533,10 +558,16 @@ namespace
                 args.fftSpectrumCacheMiB
                     = parseIteration(value("--fft-spectrum-cache-mb"), "--fft-spectrum-cache-mb");
             else if(option == "--near-shell")
+            {
                 args.nearShell = value("--near-shell");
+                args.nearShellGiven = true;
+            }
             else if(option == "--near-shell-radius")
+            {
                 args.nearShellRadius
                     = parseTripleDouble(value("--near-shell-radius"), "--near-shell-radius")[0];
+                args.nearShellRadiusGiven = true;
+            }
             else if(option == "--near-shell-tile")
             {
                 auto const text = value("--near-shell-tile");
@@ -544,12 +575,19 @@ namespace
                     args.nearShellTile = 0;
                 else
                     args.nearShellTile = parseIteration(text, "--near-shell-tile");
+                args.nearShellTileGiven = true;
             }
             else if(option == "--near-shell-fast-order")
+            {
                 args.nearShellFastOrder
                     = static_cast<int>(parseIteration(value("--near-shell-fast-order"), "--near-shell-fast-order"));
+                args.nearShellFastOrderGiven = true;
+            }
             else if(option == "--near-shell-oblique-order")
+            {
                 args.nearShellObliqueOrder = value("--near-shell-oblique-order");
+                args.nearShellObliqueOrderGiven = true;
+            }
             else if(option == "--near-shell-exact-cells")
             {
                 std::size_t used = 0;
@@ -567,6 +605,7 @@ namespace
                     throw std::invalid_argument(
                         "--near-shell-exact-cells must be an integer in [-2, 2]");
                 args.nearShellExactCells = cells;
+                args.nearShellExactCellsGiven = true;
             }
             else if(option == "--velocity-bins")
                 args.velocityBins = parseIteration(value("--velocity-bins"), "--velocity-bins");
@@ -917,18 +956,62 @@ namespace
         options.cellSize = config.domain.cellSize;
         options.gridSize = config.domain.cells;
         options.gridOrigin = config.domain.origin;
-        options.nearShell.mode = (config.accuracy.nearShell == "exact")
+        // Every near-shell switch is resolved independently: an explicit CLI
+        // flag wins over its TOML key, an absent flag keeps the TOML value.
+        // This lets ``--near-shell none`` cancel ``accuracy.near_shell``
+        // instead of being silently ignored, and it keeps a TOML radius/tile
+        // when only the mode is given on the command line.
+        std::string const nearShellModeText
+            = args.nearShellGiven ? args.nearShell : config.accuracy.nearShell;
+        options.nearShell.mode = (nearShellModeText == "exact")
             ? picBunch::NearShellOptions::Mode::Exact
-            : (config.accuracy.nearShell == "fast")
+            : (nearShellModeText == "fast")
                 ? picBunch::NearShellOptions::Mode::Fast
-                : (config.accuracy.nearShell == "fast-gpu")
+                : (nearShellModeText == "fast-gpu")
                     ? picBunch::NearShellOptions::Mode::FastGpu
                     : picBunch::NearShellOptions::Mode::None;
-        options.nearShell.fastOrder = config.accuracy.nearShellFastOrder;
-        options.nearShell.fastObliqueOrder = config.accuracy.nearShellObliqueOrder;
-        options.nearShell.radiusCells = config.accuracy.nearShellRadius;
-        options.nearShell.tileNodes = config.accuracy.nearShellTile;
-        options.nearShell.exactCellReach = config.accuracy.nearShellExactCells;
+        options.nearShell.fastOrder = args.nearShellFastOrderGiven
+            ? args.nearShellFastOrder
+            : config.accuracy.nearShellFastOrder;
+        options.nearShell.fastObliqueOrder = args.nearShellObliqueOrderGiven
+            ? ((args.nearShellObliqueOrder == "auto") ? 0 : std::stoi(args.nearShellObliqueOrder))
+            : config.accuracy.nearShellObliqueOrder;
+        options.nearShell.radiusCells = args.nearShellRadiusGiven
+            ? args.nearShellRadius
+            : config.accuracy.nearShellRadius;
+        options.nearShell.tileNodes = args.nearShellTileGiven
+            ? args.nearShellTile
+            : config.accuracy.nearShellTile;
+        options.nearShell.exactCellReach = args.nearShellExactCellsGiven
+            ? args.nearShellExactCells
+            : config.accuracy.nearShellExactCells;
+        // The tile bounds are the only cross-source invariant: a TOML tile is
+        // validated against the TOML mode and radius, a CLI tile against the
+        // CLI values.  Resolving them independently can pair a tile from one
+        // source with a mode or radius from the other, so re-check the result.
+        if((options.nearShell.mode == picBunch::NearShellOptions::Mode::Fast
+            || options.nearShell.mode == picBunch::NearShellOptions::Mode::FastGpu)
+           && options.nearShell.tileNodes != 0u)
+        {
+            if(options.nearShell.radiusCells > 0.0
+               && static_cast<double>(options.nearShell.tileNodes)
+                   > 2.0 * options.nearShell.radiusCells)
+                throw std::invalid_argument(
+                    "--near-shell-tile " + std::to_string(options.nearShell.tileNodes)
+                    + " exceeds twice --near-shell-radius "
+                    + std::to_string(options.nearShell.radiusCells)
+                    + " (the shell diameter, "
+                    + std::to_string(2.0 * options.nearShell.radiusCells)
+                    + " nodes); the tile half-width must not exceed the radius. Use "
+                      "--near-shell-tile auto or raise --near-shell-radius");
+            if(options.nearShell.tileNodes > picBunch::kMaxExplicitNearShellTile)
+                throw std::invalid_argument(
+                    "--near-shell-tile " + std::to_string(options.nearShell.tileNodes)
+                    + " exceeds the documented maximum "
+                    + std::to_string(picBunch::kMaxExplicitNearShellTile)
+                    + " nodes; the validated campaigns cover tiles 2 and 4 and tile 8 is "
+                      "the first measured spike case. Use --near-shell-tile auto");
+        }
         // The velocity-box policy is the same advanced CLI switch as in the
         // legacy path.  The config path defaults to auto, which for a
         // gamma >> 10 beam can exceed the box cap; --velocity-bins /
@@ -984,6 +1067,24 @@ namespace
                 "fft mode: %s (%d rank%s; auto uses the distributed z-slab transform "
                 "for any multi-rank run)\n",
                 args.fftMode.c_str(), size, size == 1 ? "" : "s");
+            // An explicit --near-shell is logged with the resolved mode, so
+            // the override is visible.  A run without the flag keeps the
+            // previous output.
+            if(args.nearShellGiven)
+            {
+                if(options.nearShell.tileNodes == 0u)
+                    std::printf(
+                        "near shell: mode=%s R=%.3g PIC cells tile=auto (the compute "
+                        "stage logs the chosen edge)\n",
+                        nearShellModeName(options.nearShell.mode),
+                        picBunch::resolveNearShellRadius(options, options.nearShell));
+                else
+                    std::printf(
+                        "near shell: mode=%s R=%.3g PIC cells tile=%zu nodes\n",
+                        nearShellModeName(options.nearShell.mode),
+                        picBunch::resolveNearShellRadius(options, options.nearShell),
+                        options.nearShell.tileNodes);
+            }
         }
 
         // One bunch per species entry.  Positions are placed with the same

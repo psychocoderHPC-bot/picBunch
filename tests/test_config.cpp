@@ -6,6 +6,8 @@
 #include "picBunch/Placement.hpp"
 #include "picBunch/Types.hpp"
 
+#include <openPMD/openPMD.hpp>
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -1037,6 +1039,62 @@ namespace
         }
         return result;
     }
+
+    //! Tiny openPMD particle input for the configured-path CLI regression.
+    //!
+    //! Two electrons sit well inside the configured 16^3 grid.  The layout is
+    //! the reader contract: position/momentum/weighting/charge/mass with the
+    //! required unit dimensions.
+    void writeNearShellCliInput(std::filesystem::path const& path)
+    {
+        constexpr std::size_t count = 2u;
+        std::array<double, count> px{4.0e-6, 12.0e-6};
+        std::array<double, count> py{8.0e-6, 8.0e-6};
+        std::array<double, count> pz{8.0e-6, 8.0e-6};
+        std::array<double, count> ux{};
+        std::array<double, count> uy{};
+        std::array<double, count> uz{1.0, 1.0};
+        std::array<double, count> weight{1.0, 1.0};
+        std::array<double, count> charge{-picBunch::kElementaryCharge, -picBunch::kElementaryCharge};
+        std::array<double, count> mass{picBunch::kElectronMass, picBunch::kElectronMass};
+
+        openPMD::Series series(path.string(), openPMD::Access::CREATE);
+        auto& species = series.iterations[0].particles["electrons"];
+        species["position"].setUnitDimension({{openPMD::UnitDimension::L, 1.0}});
+        species["momentum"].setUnitDimension(
+            {{openPMD::UnitDimension::L, 1.0},
+             {openPMD::UnitDimension::M, 1.0},
+             {openPMD::UnitDimension::T, -1.0}});
+        species["charge"].setUnitDimension(
+            {{openPMD::UnitDimension::T, 1.0},
+             {openPMD::UnitDimension::I, 1.0}});
+        species["mass"].setUnitDimension({{openPMD::UnitDimension::M, 1.0}});
+        auto bind = [count](openPMD::RecordComponent& component, double const* values, double unitSI) {
+            component.resetDataset(openPMD::Dataset(
+                openPMD::determineDatatype<double>(),
+                openPMD::Extent{static_cast<openPMD::Extent::value_type>(count)}));
+            component.storeChunkRaw(
+                values,
+                openPMD::Offset{0},
+                openPMD::Extent{static_cast<openPMD::Extent::value_type>(count)});
+            component.setUnitSI(unitSI);
+        };
+        char const* const axes = "xyz";
+        double* const positions[3] = {px.data(), py.data(), pz.data()};
+        double* const momenta[3] = {ux.data(), uy.data(), uz.data()};
+        for(int a = 0; a < 3; ++a)
+        {
+            bind(species["position"][std::string(1, axes[a])], positions[a], 1.0);
+            bind(
+                species["momentum"][std::string(1, axes[a])],
+                momenta[a],
+                picBunch::kElectronMass * picBunch::kSpeedOfLight);
+        }
+        bind(species["weighting"], weight.data(), 1.0);
+        bind(species["charge"], charge.data(), 1.0);
+        bind(species["mass"], mass.data(), 1.0);
+        series.flush();
+    }
 } // namespace
 
 TEST(Config, CliReportsMissingValueInsteadOfSwallowingNextFlag)
@@ -1116,4 +1174,79 @@ TEST(Config, CliAcceptsInlineValueThatStartsWithDoubleDash)
     EXPECT_EQ(result.output.find("requires a value"), std::string::npos)
         << result.output;
     EXPECT_NE(result.status, 2) << result.output;
+}
+
+TEST(Config, CliNearShellNoneOverridesConfiguredNearShell)
+{
+    // Issue #68: the configured path used to assign the near-shell mode only
+    // from accuracy.near_shell, so an explicit ``--near-shell none`` on the
+    // same command line was ignored and the TOML fast path still ran.  The
+    // resolved mode must follow the CLI, and the companion TOML values must
+    // stay untouched because no companion flag was given.
+    ConfigTest fixture;
+    auto const input = fixture.directory / "near-shell-cli-input.h5";
+    writeNearShellCliInput(input);
+    auto const config = fixture.write(
+        "near-shell-cli.toml",
+        R"(
+[picongpu]
+delta_t = 1.0e-15
+cell_size = [1.0e-6, 1.0e-6, 1.0e-6]
+base_density = 1.0e24
+typical_particles_per_cell = 2
+step = 0
+precision = "float32"
+species = "electrons"
+
+[domain]
+cells = [16, 16, 16]
+origin = [0.0, 0.0, 0.0]
+cell_size = [1.0e-6, 1.0e-6, 1.0e-6]
+
+[placement]
+patch = "domain"
+center = "none"
+
+[accuracy]
+tolerance = 1.0e-3
+near_shell = "fast-gpu"
+near_shell_radius = 3.0
+near_shell_tile = 4
+)");
+    auto const destination = fixture.directory / "near-shell-cli-out";
+    std::string const arguments = "--input \"" + input.string() + "\" --config \"" + config
+        + "\" --destination \"" + destination.string()
+        + "\" --velocity-bins 1 --near-shell none";
+    auto const result = runCli(arguments);
+    EXPECT_EQ(result.status, 0) << result.output;
+    EXPECT_NE(result.output.find("near shell: mode=none"), std::string::npos)
+        << result.output;
+    for(char const* forbidden : {"mode=fast-gpu", "mode=fast", "mode=exact"})
+        EXPECT_EQ(result.output.find(forbidden), std::string::npos) << result.output;
+
+    // A companion flag wins over its TOML key while an absent companion keeps
+    // the TOML value: --near-shell-radius 5 replaces near_shell_radius, and
+    // the configured tile 4 stays because --near-shell-tile was not given.
+    auto const companionDestination = fixture.directory / "near-shell-cli-out-companions";
+    std::string const companionArguments = "--input \"" + input.string() + "\" --config \""
+        + config + "\" --destination \"" + companionDestination.string()
+        + "\" --velocity-bins 1 --near-shell fast-gpu --near-shell-radius 5";
+    auto const companionResult = runCli(companionArguments);
+    EXPECT_EQ(companionResult.status, 0) << companionResult.output;
+    EXPECT_NE(
+        companionResult.output.find("near shell: mode=fast-gpu R=5 PIC cells tile=4 nodes"),
+        std::string::npos)
+        << companionResult.output;
+
+    // A TOML mode can make a CLI tile effective.  The resolved pair must still
+    // satisfy the fast-path bounds instead of bypassing the per-source checks.
+    auto const boundDestination = fixture.directory / "near-shell-cli-out-bounds";
+    std::string const boundArguments = "--input \"" + input.string() + "\" --config \""
+        + config + "\" --destination \"" + boundDestination.string()
+        + "\" --velocity-bins 1 --near-shell-tile 8 --near-shell-radius 5";
+    auto const boundResult = runCli(boundArguments);
+    EXPECT_EQ(boundResult.status, 1) << boundResult.output;
+    EXPECT_NE(
+        boundResult.output.find("exceeds the documented maximum 4"), std::string::npos)
+        << boundResult.output;
 }
