@@ -76,7 +76,7 @@ particles in a $20$-cell box is $51.9$\,ms on one H100 of
 JURECA H100 (compute-only, median of nine repeats). An opt-in near
 shell replaces the mesh inside the TSC support with a closed-form evaluator,
 assembles exactly to roundoff, and is bitwise independent of the MPI rank
-count. The method writes a float32 openPMD checkpoint that restarts under a
+count and of the tile size. The method writes a float32 openPMD checkpoint that restarts under a
 stock PIConGPU.
 \end{abstract}
 
@@ -98,6 +98,7 @@ stock PIConGPU.
 \input{app_slices}
 \clearpage
 \input{app_multivel}
+\input{app_reproduction}
 
 % Flush pending appendix floats before the reference list so the figure
 % numbers stay in order and the bibliography is the last block.

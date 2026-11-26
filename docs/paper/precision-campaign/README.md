@@ -1,5 +1,11 @@
 # Precision measurement campaign
 
+> **Historical campaign documentation (2026-11-21).** This README describes
+> the pre-`e8d082f` H100 `sm_90` precision campaign that produced the old paper
+> values. It is retained as a record of that campaign. The paper of record is
+> the current `b29f55e` two-rank V100 campaign (Appendix `app:reproduction`);
+> the H100 build below is not the current validated paper build.
+
 This directory re-measures every precision figure of the paper on a fresh
 picBunch build and reduces the raw fields on the measurement node. The
 scaling/performance figures are deliberately out of scope: `F_a`/`F_b`
@@ -35,7 +41,7 @@ refinement level per case match the committed measurement records.
 
 ## Build on the measurement node
 
-The validated command on `jureca-h100` (4x H100 PCIe, CUDA 13.4.92, gcc 13.3,
+The command validated for the historical H100 campaign on `jureca-h100` (4x H100 PCIe, CUDA 13.4.92, gcc 13.3,
 openPMD 0.17.1 with HDF5 and ADIOS2 2.12.1):
 
 ```bash
@@ -87,6 +93,34 @@ docs/paper/precision-campaign/reference/build_reference.sh \
 
 Write each run into a **new** attempt directory. The campaign roots are
 append-only: do not reuse a root whose `prov/index.jsonl` already holds a run.
+
+### 2-rank rosi run (two lanes)
+
+`--mpi-ranks 2` prefixes each mesh argv with `mpiexec -n 2` and inserts
+`--fft-mode distributed` before `--output`. Split the four GPUs into two lanes
+with `--gpu-pairs`, one pair per worker. Give each lane its own append-only
+root and `--ref-workers 4`, so the two lanes share the CPU instead of each
+assuming all of it:
+
+```bash
+# lane A
+./run_campaign.py --root <attempt-A> --bin build/paper/picBunch \
+  --mpi-ranks 2 --gpu-pairs 0,1 --ref-workers 4 \
+  --only line-w4b,hires-g10
+
+# lane B
+./run_campaign.py --root <attempt-B> --bin build/paper/picBunch \
+  --mpi-ranks 2 --gpu-pairs 2,3 --ref-workers 4 \
+  --only line-gamma,var1b-1mrad
+```
+
+Each lane writes its own `prov/index.jsonl`; do not point both lanes at the
+same root. `--estimate` works with pairs and prints the pair in the `slot`
+column.
+
+Cases with more than one velocity bin pin `--velocity-bin-edges uniform` by
+default, matching the paper campaign; pass another rule explicitly when a case
+needs it. The rule is recorded in the provenance record.
 
 The driver writes a private tree under `--root`:
 

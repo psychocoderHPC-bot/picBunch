@@ -1486,5 +1486,6 @@
    "data_key": "external/not re-measured",
    "reason": "External rosi_v100 whole-field table; not re-measured."
   }
- ]
+ ],
+ "superseded_note": "Records the pre-e8d082f H100 campaign (build 00fb8f7) that produced the old paper values. The paper of record is the current b29f55e two-rank V100 campaign; these values are historical."
 }

@@ -226,7 +226,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--case-id", required=True)
     ap.add_argument("--measurement-kind", default="fresh-h100",
-                    choices=["fresh-h100", "fresh-reference",
+                    choices=["fresh-h100", "fresh-v100", "fresh-reference",
                              "legacy-reduced", "not-reproduced"])
     ap.add_argument("--reference-only", action="store_true",
                     help="the figure plots a freshly recomputed reference, not "

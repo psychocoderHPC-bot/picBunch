@@ -17,27 +17,24 @@
         "val_fluct_xy",
         "val_fluct_zy"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 1254536,
           "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
-          "sha256": "5ebaca8c1e18a84a68d49b8bfc4c832446dd8020f8f4f672188665d9942607ba"
-        },
-        {
-          "bytes": 2301,
-          "path": "docs/paper/data/bdata2/forward_sources.npz",
-          "sha256": "51d70af46ff968eee54ada490accabc047718197e6e2e770ad3b0f95572ca5a9"
+          "sha256": "987be207be6a24efafca8b5e3eb34f1dd653a9c4e6c6d4ed649cc18c426c2674"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "bdata2-forward": {
       "config": {
@@ -56,27 +53,28 @@
         "val_forward_xy",
         "val_forward_zy"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 1254508,
           "path": "docs/paper/data/bdata2/forward_slice.npz",
-          "sha256": "7deb979d90f780031864719f6a071d7a00eec26579a0f0865486fe325a741e2c"
+          "sha256": "bb12fbc69572574a7b40d0ab16db40e588e1d8ac1f5f4ac82df7c4bbdbb54cc1"
         },
         {
-          "bytes": 2301,
           "path": "docs/paper/data/bdata2/forward_sources.npz",
-          "sha256": "51d70af46ff968eee54ada490accabc047718197e6e2e770ad3b0f95572ca5a9"
+          "sha256": "9d621ee8df7b4cd231d19e7564794f46aef6a12fb3424912c438ce37a63c1890"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "h100-mpi-scaling": {
       "config": {
@@ -132,22 +130,24 @@
       "figures": [
         "gp_g10"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999364,
           "path": "docs/paper/data/hires/hi_g10.npz",
-          "sha256": "0c82545c94ae600e414e71a1baf673b743bce443373f93dca63af98cbf122b3f"
+          "sha256": "4163604b71f947f27c39654db1346ce5788bc0ccb2c0b2e42f43afd198a546d1"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g100": {
       "config": {
@@ -169,22 +169,24 @@
       "figures": [
         "gp_g100"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g100.npz",
-          "sha256": "a8231c2a7d7f16c5b498d560f3ad0c91c9af3041969579435b15e7d7ffaa0e31"
+          "sha256": "c9253b9483676d82b8a9d10e5a9cf7b5a0be2b7a71574392040f496bda9045bd"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g1p0": {
       "config": {
@@ -206,22 +208,24 @@
       "figures": [
         "gp_g1p0"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p0.npz",
-          "sha256": "c9b2127a231342401ecb58fa002e69cfae3d091f12c070463bf532bbcca14188"
+          "sha256": "22e4e2fbb040f95263bb9e8778c6a373c7a6cab26c1373c4763227b245abbedd"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g1p1": {
       "config": {
@@ -243,22 +247,24 @@
       "figures": [
         "gp_g1p1"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p1.npz",
-          "sha256": "35a904eb59a7e96870b984fc45354c4c3af5fc77d7b29c39b68e34dee1de07c3"
+          "sha256": "e13f5be47dab34c074e613779d1653341629d8d05e97ccf7b06c171de4e8db4f"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g1p5": {
       "config": {
@@ -280,22 +286,24 @@
       "figures": [
         "gp_g1p5"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g1p5.npz",
-          "sha256": "f58121209aca76b28170a43d4e21e8f6111d3c6c07c0d315e0686a85fcf44dc7"
+          "sha256": "b61c198703a57be9216d2dfdf8aa814d88e07c92f2bf9f229049f6dd22dee876"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g2p0": {
       "config": {
@@ -317,22 +325,24 @@
       "figures": [
         "gp_g2p0"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999368,
           "path": "docs/paper/data/hires/hi_g2p0.npz",
-          "sha256": "09de7cd21d46d2c37fcf0e3256f61a4909cebbd077720f149e5d401034e59b40"
+          "sha256": "46b1b94adc55b7de754a80b3318d02dd7d2650a8683039cce5a90b7ceff43a8a"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "hires-g50": {
       "config": {
@@ -354,22 +364,24 @@
       "figures": [
         "gp_g50"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "y",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 2999364,
           "path": "docs/paper/data/hires/hi_g50.npz",
-          "sha256": "f4fb880464d33829f72c38137de2a208d602d04a9c80b3d3e95adcf33140f00d"
+          "sha256": "af94b72efe5582984579f30e3bd10ef4b9da0617cc42cf8783239dea19e18127"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "large1-g1": {
       "config": {
@@ -387,22 +399,24 @@
         "large_sxy_g1",
         "large_szy_g1"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "stationary",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 3706140,
           "path": "docs/paper/data/large1/slices_g1.npz",
-          "sha256": "54d7942561bb6cdc61680771c9db01eb8e36fbdfa312fe9137e40b53cac2a9e9"
+          "sha256": "446cfe6457aeca149d5554dac45c25129744a5839b7134042e2bd8389a4f88c9"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "large1-g10": {
       "config": {
@@ -420,22 +434,24 @@
         "large_sxy_g10",
         "large_szy_g10"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "x",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": 42,
       "source_data": [
         {
-          "bytes": 3706108,
           "path": "docs/paper/data/large1/slices_g10.npz",
-          "sha256": "8f501a9d93d4fe700d72fffd44b1e39543f1d75c7584cad68bccb4129862ea4a"
+          "sha256": "8ebdbcedffb9ba5a35ce01d8265ec6023b195f564112adf2846bfc87475a8583"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "line-gamma-error": {
       "config": {
@@ -457,22 +473,24 @@
       "figures": [
         "F_gamma_err_dist"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1 and 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields. T12d correction: per-ring peak normalisation (reducer 5343a97); the d=8/d=48 errors replace the too-small all-ring values.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1 and 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator. The d=48 ring is a grid-boundary artifact; it is not plotted and is not used as a validation result.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "n/a",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 596,
           "path": "docs/paper/data/line/gamma_err_dist.csv",
-          "sha256": "657bc01a7d0296eb9585ffcf9d5c7919dcd3c54da34932fc2864f03ead6f1484"
+          "sha256": "4a15b7f73340d1918380eac4ea3d32913576fc6cbd232e8bdc667fafec53cfa9"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "line-mpi": {
       "config": {
@@ -519,60 +537,51 @@
       "figures": [
         "F_multivel_dist"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1 and 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1 and 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator. multivel_peaks.csv is a legacy comparison artifact, not a paper metric, and is not part of the current-code provenance.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "n/a",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": [
         100,
         103
       ],
       "source_data": [
         {
-          "bytes": 40986,
           "path": "docs/paper/data/line/multivel_energy.npz",
           "sha256": "eb6e35546606b79d2ea3b8917f0538263173ca431443c782131d8543ad15212c"
         },
         {
-          "bytes": 40986,
           "path": "docs/paper/data/line/multivel_angular.npz",
           "sha256": "7a9be45833dad3fdb2e766ad483ba00b790254269fe984b64677fdf503cfceb4"
         },
         {
-          "bytes": 384,
           "path": "docs/paper/data/line/multivel_binning.csv",
-          "sha256": "388c539fc4ed25f50f8866e63670fc646ba563b9d350c6192126dab0c1e60813"
+          "sha256": "564efe7e4ebf1a2c0b24ccf38f1d8ac497f70dabee7777ab6ed4e44eeabe45ab"
         },
         {
-          "bytes": 617,
-          "path": "docs/paper/data/line/multivel_peaks.csv",
-          "sha256": "4fdf502c1a5d5599f67ece2e52866254c33bbfff349bd1701295fe8207db1f4e"
-        },
-        {
-          "bytes": 10041978,
-          "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
-          "sha256": "21467ebdad4bd99a29788db0ec41935e1d9f159a78498fdffa9d771e551f82c0"
-        },
-        {
-          "bytes": 10042252,
-          "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
-          "sha256": "322d9cbc7390441a2b2f927aa2ebc0972f4f65ac53467e7eb08141e93b7e658f"
-        },
-        {
-          "bytes": 12061637,
           "path": "docs/paper/data/line/multivel_fields_a5_b16.npz",
-          "sha256": "fac874df0a3cd692a154a2dad89336319e4fa61786d485e198790dce5711e7cd"
+          "sha256": "37b785aa1803c6ee265f024cdcf56e3ada3130d03d91493327ea268996b77f7a"
         },
         {
-          "bytes": 12071682,
           "path": "docs/paper/data/line/multivel_fields_a5_b64.npz",
-          "sha256": "b27a2f4e130c4a7ecfb5f2e53c826d1cf3cff30149c5999fbfe4f6fde71e67c7"
+          "sha256": "2ac547256f0ec50510cb6b170cac1c81e7c0ae9ba03f44ae9611239c575cfd6a"
+        },
+        {
+          "path": "docs/paper/data/line/multivel_fields_e5_b16.npz",
+          "sha256": "45a73fe8aab0ea20935d2a522b134a04b4d064b44f46c02532d85373b8b8b679"
+        },
+        {
+          "path": "docs/paper/data/line/multivel_fields_e5_b64.npz",
+          "sha256": "06f8be44850688bf22f28af04c48aa028179f60b800eada05c1d34ab81579a57"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "line-w4b": {
       "config": {
@@ -602,22 +611,24 @@
       "figures": [
         "F_w4b_rel_error"
       ],
-      "gpu_model": "NVIDIA H100 PCIe 80 GB",
-      "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+      "gpu_model": "4x Tesla V100-SXM2-32GB",
+      "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1 and 2,3",
       "io_backend": "hdf5",
-      "measurement_kind": "fresh-h100",
-      "note": "Fresh campaign-20261112-t5b data on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96. Reduced data carry additive bunch_* keys taken from the run input that produced the fields.",
-      "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
+      "measurement_kind": "fresh-v100",
+      "note": "Current-code two-rank V100 campaign: commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, 2 MPI ranks on GPU pair 0,1 and 2,3, uniform velocity-bin edges where more than one bin is used. The near-shell values are the tile-invariant current operator.",
+      "picbunch_version": "picBunch build b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed (binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331), two MPI ranks",
       "propagation_axis": "n/a",
-      "provenance": "fresh-h100",
+      "provenance": "fresh-v100",
       "seed": null,
       "source_data": [
         {
-          "bytes": 7522,
           "path": "docs/paper/data/line/w4b_rel_error.csv",
-          "sha256": "15daa5c743cfd51853887e3fd6fc70b8b96421e3d1f526c101fedeecd43ba8b1"
+          "sha256": "9d42a4e918dd181e8fea270516cd11bcd936a9c83a402b9a92d22f50093676da"
         }
-      ]
+      ],
+      "cuda_version": "12.6.3",
+      "openpmd_version": "0.17.1",
+      "adios2_version": "2.9.2"
     },
     "scaling-cost": {
       "config": {
@@ -666,7 +677,7 @@
       "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
       "io_backend": "hdf5",
       "measurement_kind": "fresh-h100",
-      "note": "Fresh var1b re-run from the recovered authoritative input (bunch_1mrad_200.h5, sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c) on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7, case harness commit f27d3d3. The fresh reduced slice carries bunch_* keys and reproduces the committed peaks to <=7.1e-16 with identical argmax nodes. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
+      "note": "Archived H100 var1b measurement; not rerun with the current two-rank V100 binary and not comparable to the current-code values. Fresh var1b re-run from the recovered authoritative input (bunch_1mrad_200.h5, sha256 d6f644a3a14457d3b8b37fab52c606f58ac15f832d18089655192b9e03c4634c) on jureca-h100, 4x H100 PCIe 80 GB; build commit 00fb8f7, case harness commit f27d3d3. The fresh reduced slice carries bunch_* keys and reproduces the committed peaks to <=7.1e-16 with identical argmax nodes. Near-source caveat: the campaign ReferenceKernel differs from the committed indfield.py within r<=2 cells (<=9.6e-4 of the E peak outside, 2-15% of peak at source nodes).",
       "picbunch_version": "picBunch build 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4 (binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6)",
       "propagation_axis": "y",
       "provenance": "fresh-h100",

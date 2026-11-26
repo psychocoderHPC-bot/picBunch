@@ -25,7 +25,7 @@ The opt-in near shell assembles exactly to roundoff and its fast backend
 meets $10^{-3}$ stationary and moving axial, with the moving oblique
 interior at $1.94\times10^{-3}$, the measured limit. The MPI compute is a
 component-parallel mesh and a tile-parallel near shell, bitwise identical
-at $1/2/4$ ranks on JURECA H100 (four H100 PCIe), with the
+at $1/2/4$ ranks on JURECA H100 (four H100 PCIe) and independent of the tile size, with the
 distributed FFT reaching a $3.73\times$ speedup and the total (mesh stage
 plus writer) a $2.52\times$ speedup at four ranks; the BP5 writer scales
 sub-linearly, to $1.30\times$ from one to four ranks. The measured sub-cell

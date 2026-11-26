@@ -1,3 +1,8 @@
+> **Superseded (2026-11-21).** This file records the pre-`e8d082f` H100 campaign
+> (build `00fb8f7`) that produced the old paper values. The paper of record is the
+> current `b29f55e` two-rank V100 campaign (Appendix `app:reproduction`); the values
+> here are historical and are not the current paper values.
+
 # NUMBERS - fresh precision values
 
 Fresh campaign data: jureca-h100, 4x H100 PCIe 80 GB, build `00fb8f7`, harness `f8d7f2b`, binary `717212e`.

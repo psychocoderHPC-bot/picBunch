@@ -1,50 +1,40 @@
 {
-  "adios2_version": "2.12.1",
+  "adios2_version": "2.9.2",
   "axis_rule": "y",
   "binary_sha256": {
-    "sha256": "717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6"
+    "sha256": "0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331"
   },
   "case_id": "bdata2-fluctuation",
-  "command": "CUDA_VISIBLE_DEVICES=1 build/paper/picBunch --input /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-fluctuation.h5 --cell-size 1e-07,1e-07,1e-07 --grid 64,64,64 --origin 0,0,0 --velocity-bins 64 --tolerance 1e-3 --shape tsc --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --output /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/run/bdata2-fluctuation/main.h5 ; /usr/bin/python3 /home/ubuntu/picbunch-work-20261112/pb/docs/paper/precision-campaign/reduce_slices.py --spec /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/work/bdata2-fluctuation/reduce_spec.json ; OMP_NUM_THREADS=16 /home/ubuntu/picbunch-work-20261112/campaign/bin/exact_field_driver --samples /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/inputs/bdata2-fluctuation.sources.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-fluctuation__main.points.bin /home/ubuntu/picbunch-work-20261112/campaign-20261112-t5b/ref/bdata2-fluctuation__main.bin 0.001 1e-07 1e-07 1e-07 5 12",
+  "command": "docs/paper/precision-campaign/run_campaign.py --mpi-ranks 2 --gpu-pairs 0,1 --velocity-bin-edges uniform --build-commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed --git-commit 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e --only bdata2-forward,bdata2-fluctuation; mesh: mpiexec -n 2 build/paper/picBunch --near-shell fast --near-shell-radius 3 --near-shell-tile 4 --near-shell-fast-order 5 --fft-mode distributed; reduce: reduce_slices.py rules with the committed bdata2 reference planes",
   "config_sha256": {
-    "sha256": "fb9f844b89ab1c35730737fcdd9ee6621cc617f583fc5ba156eae27475e91381"
+    "path": "docs/paper/precision-campaign/cases.json",
+    "sha256": "a3d7f36af74a5bf0e2f4be4842581948b64b1baa38f0af99bfaf025179aaf277"
   },
-  "cuda_version": "13.4.2",
+  "cuda_version": "12.6.3",
   "data_sha256": [
     {
       "path": "docs/paper/data/bdata2/fluctuation_slice.npz",
-      "sha256": "5ebaca8c1e18a84a68d49b8bfc4c832446dd8020f8f4f672188665d9942607ba"
-    },
-    {
-      "path": "docs/paper/data/bdata2/forward_sources.npz",
-      "sha256": "51d70af46ff968eee54ada490accabc047718197e6e2e770ad3b0f95572ca5a9"
+      "sha256": "987be207be6a24efafca8b5e3eb34f1dd653a9c4e6c6d4ed649cc18c426c2674"
     }
   ],
-  "end_utc": "2026-11-12T12:47:45Z",
+  "end_utc": "2026-11-20T23:07:28Z",
   "figure_ids": [
     "val_fluct_xy",
     "val_fluct_zy"
   ],
-  "generator": {
-    "reducer": {
-      "path": "docs/paper/precision-campaign/reduce_slices.py",
-      "sha256": "8add57aa3551c151c358428e76ae4a53bd7a579b6a9043afc1b9109da2092f3f"
-    }
-  },
-  "git_commit": "00fb8f7fb22a53748636c70e32bbdb8dd85c23c4",
-  "gpu_model": "NVIDIA H100 PCIe 80 GB",
-  "host": "jureca-h100 (jrc0880), 4x H100 PCIe 80 GB",
+  "git_commit": "b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed",
+  "gpu_model": "4x Tesla V100-SXM2-32GB",
+  "host": "rosi_v100 (gv001), 2 MPI ranks, GPU pair 0,1",
   "io_backend": "hdf5",
-  "measurement_kind": "fresh-h100",
-  "notes": "Fresh campaign-20261112-t5b re-reduction on jureca-h100, 4x H100 PCIe 80 GB (case bound to CUDA_VISIBLE_DEVICES=1). Build commit 00fb8f7fb22a53748636c70e32bbdb8dd85c23c4, harness commit f8d7f2befd103185f547342e3165485ad7062b96, binary sha256 717212ed4ad0be862f6b65ab2d2b7d9ace914fda2aeec6a4c8a4f2167e7808e6. The reduced data carry additive bunch_* keys taken from the actual run input that produced the fields. GPUs used: 4x NVIDIA H100 PCIe 80 GB; this case ran on CUDA_VISIBLE_DEVICES=1.",
+  "measurement_kind": "fresh-v100",
+  "notes": "Current-code two-rank V100 campaign for the momentum-spread bdata2 case. Build commit b29f55ed4ee787f19e5a74eb8bd7e3a3e84b53ed, harness 1596f7ac77fa6c2f4a56409cb2f54964c9ad121e, binary sha256 0803c3c0b9633bb38382e8204a1abe9bbdd0568ca27d0d785b70d94dff373331. 2 MPI ranks on GPU pair 0,1; distributed FFT; uniform velocity-bin edges (64 bins for the fluctuation case). The pic field is the current tile-invariant near-shell operator. The reference is the committed order-12 bdata2 reference plane set; it was not regenerated. Because the committed xy and zy arrays differ on their intersection, the reduction applies the existing reduce_slices.py error, valid-mask, bunch-block and plane rules per committed plane instead of a single scattered cube. Current 6-decimal metrics (peak-normalised, worst over both planes and the six components): Ex 0.307206, Ey 0.252427, Ez 0.280094, Bx 0.194520, By 0.254131 (xy) / 0.367302 (zy), Bz 0.211583. Plane intersection-line caveat: the committed xy and zy reference arrays differ on their intersection line (x=32, z=32); the reduction applies the reduce_slices rules per committed plane, so each plane uses its own committed reference and the reported worst is over both planes.",
   "openpmd_version": "0.17.1",
-  "reference_only": false,
   "repeats": 1,
   "script_sha256": {
     "path": "docs/paper/precision-campaign/reduce_slices.py",
     "sha256": "8add57aa3551c151c358428e76ae4a53bd7a579b6a9043afc1b9109da2092f3f"
   },
   "seed": 42,
-  "start_utc": "2026-11-12T12:37:33Z",
+  "start_utc": "2026-11-20T22:41:03Z",
   "statistic": "single"
 }

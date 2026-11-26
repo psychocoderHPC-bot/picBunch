@@ -6,7 +6,7 @@ The renderers under ``docs/paper/scripts/render_*.py`` consume reduced files in
 ``legacy-reduced`` file with a fresh measurement: it reads the campaign outputs
 from a configurable root, applies the declarative transform in
 ``measurement_map.json``, validates the exact keys and column headers the
-renderers read, and emits a ``fresh-h100`` provenance record with
+renderers read, and emits a ``fresh-h100`` (or case-declared ``fresh-v100``) provenance record with
 ``make_provenance.py``.
 
 The measurement root has no built-in default: pass ``--measurement-root DIR``
@@ -23,7 +23,7 @@ Usage::
     # validate without writing; non-zero if any figure is missing its source
     python3 docs/paper/scripts/ingest_measurements.py --check
 
-    # ingest every ready case and emit fresh-h100 records; non-zero if any
+    # ingest every ready case and emit its declared provenance records; non-zero if any
     # case is still pending
     python3 docs/paper/scripts/ingest_measurements.py
 
@@ -669,7 +669,8 @@ def _check_source(entry, root, case_id=None):
     if (source.get("root", "measurement") == "repo"
             and case_id in REPO_SOURCED_CASES and expected != canonical):
         expected = canonical
-    path = _resolve(root, source["path"])
+    base = REPO_ROOT if source.get("root", "measurement") == "repo" else root
+    path = _resolve(base, source["path"])
     if not os.path.isfile(path):
         return path, "missing source " + source["path"]
     if expected:
@@ -708,7 +709,7 @@ def _emit_record(case_id, prov, data_paths, records_dir):
     binary = prov.get("binary", {})
     args = [sys.executable, MAKE_PROVENANCE,
             "--case-id", case_id,
-            "--measurement-kind", "fresh-h100",
+            "--measurement-kind", prov.get("measurement_kind", "fresh-h100"),
             "--command", prov["command"],
             "--host", prov["host"],
             "--gpu-model", prov["gpu_model"],
@@ -839,7 +840,7 @@ def run(a):
               "untouched for pending cases" % (len(ready), len(pending)),
               file=sys.stderr)
         return 0 if a.allow_partial else 1
-    print("ingest: wrote %d target(s) for %d case(s) and emitted fresh-h100 "
+    print("ingest: wrote %d target(s) for %d case(s) and emitted provenance "
           "records" % (written, len(ready)))
     return 0
 

@@ -9,14 +9,17 @@ $2$, $10$, $50$ and $100$. Each figure is one velocity case, with $y$
 horizontal and increasing left to right, and its rows are labelled with
 $\gamma$, $\beta$ and the particle count $N=1$. Table~\ref{tab:gpvalid}
 lists the measured worst relative errors over the plane with the $5\times5$
-nodes around the source excluded: $3.779\times10^{-3}$,
-$3.747\times10^{-3}$, $2.578\times10^{-3}$, $7.078\times10^{-3}$,
-$3.505\times10^{-1}$, $1.590$ and $3.490$ in velocity order. The
-corresponding full-plane values that include the source-coincident node are
+nodes around the source excluded: $6.838\times10^{-4}$,
+$8.913\times10^{-4}$, $2.578\times10^{-3}$, $7.078\times10^{-3}$,
+$3.066\times10^{-1}$, $3.442$ and $5.988$ in velocity order. The
+corresponding full-plane values are
 $7.010\times10^{-2}$, $6.745\times10^{-2}$, $7.726\times10^{-2}$,
-$9.569\times10^{-2}$, $0.6740$, $7.095$ and $4.263$; that node is a
-singular point of the legacy reference (Section~\ref{sec:accuracy}), so the
-full-plane column bounds the old reference, not the accuracy of the mesh. The
+$9.569\times10^{-2}$, $0.6740$, $7.095$ and $5.988$. The source-coincident
+node is a singular point of the legacy reference
+(Section~\ref{sec:accuracy}), so the full-plane column bounds the old
+reference there, not the accuracy of the mesh; at $\gamma=100$ the plane
+maximum is instead $E_x$ away from the source, and the source-coincident
+$E_z$ value is $4.263$. The
 error grows with $\gamma$ because the field is compressed into a fraction of
 a cell: at $\gamma=50$ and $\gamma=100$ the Lorentz pancake is thinner than
 the mesh spacing, so those cases show the geometric sub-cell limit of the
@@ -43,13 +46,13 @@ excluded; the last column includes the source-coincident node. The committed
 \toprule
 $\gamma$ & $\beta$ & worst, $5\times5$ excluded & full plane \\
 \midrule
-1.0   & 0       & $3.779\times10^{-3}$ & $7.010\times10^{-2}$ \\
-1.1   & 0.4166  & $3.747\times10^{-3}$ & $6.745\times10^{-2}$ \\
+1.0   & 0       & $6.838\times10^{-4}$ & $7.010\times10^{-2}$ \\
+1.1   & 0.4166  & $8.913\times10^{-4}$ & $6.745\times10^{-2}$ \\
 1.5   & 0.7454  & $2.578\times10^{-3}$ & $7.726\times10^{-2}$ \\
 2.0   & 0.8660  & $7.078\times10^{-3}$ & $9.569\times10^{-2}$ \\
-10    & 0.9950  & $3.505\times10^{-1}$ & $0.6740$ \\
-50    & 0.99980 & $1.590$ & $7.095$ \\
-100   & 0.99995 & $3.490$ & $4.263$ \\
+10    & 0.9950  & $3.066\times10^{-1}$ & $0.6740$ \\
+50    & 0.99980 & $3.442$ & $7.095$ \\
+100   & 0.99995 & $5.988$ & $5.988$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -72,8 +75,8 @@ is shown as four fully masked boxes: all three reference magnetic components
 (and $B^2$) are identically zero at $\beta=0$, so the relative magnetic error
 is undefined. The $B$ field panels are fully masked for the same reason; the
 worst component error is
-$3.779\times10^{-3}$ with the $5\times5$ source neighbourhood excluded
-($7.010\times10^{-2}$ including the source node).}
+$6.838\times10^{-4}$ with the $5\times5$ source neighbourhood excluded
+($7.010\times10^{-2}$ full plane, including the source node).}
 \label{fig:gp1}
 \end{figure}
 
@@ -97,7 +100,7 @@ as Fig.~\ref{fig:gp1}. The $B_y$ error panel is shown fully masked because
 the reference $B_y$ is identically zero for $+y$ motion, so its relative error
 is undefined; grey marks cells that are not evaluated because the reference
 field is below threshold. The worst component error is
-$3.747\times10^{-3}$ ($6.745\times10^{-2}$ including the source node).}
+$8.913\times10^{-4}$ ($6.745\times10^{-2}$ full plane, including the source node).}
 \label{fig:gp1p1}
 \end{figure}
 
@@ -119,7 +122,7 @@ $\beta=0.7454$ ($\gamma=1.5$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1}; grey marks cells that are not evaluated because the
 reference field is below threshold. The worst component error is
-$2.578\times10^{-3}$ ($7.726\times10^{-2}$ including the source node).}
+$2.578\times10^{-3}$ ($7.726\times10^{-2}$ full plane, including the source node).}
 \label{fig:gp1p5}
 \end{figure}
 
@@ -141,7 +144,7 @@ $\beta=0.8660$ ($\gamma=2.0$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1}; grey marks cells that are not evaluated because the
 reference field is below threshold. The worst component error is
-$7.078\times10^{-3}$ ($9.569\times10^{-2}$ including the source node).}
+$7.078\times10^{-3}$ ($9.569\times10^{-2}$ full plane, including the source node).}
 \label{fig:gp2}
 \end{figure}
 
@@ -163,7 +166,7 @@ $\beta=0.9950$ ($\gamma=10$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1}; grey marks cells that are not evaluated because the
 reference field is below threshold. The worst component error is
-$3.505\times10^{-1}$ ($0.6740$ including the source node).}
+$3.066\times10^{-1}$ ($0.6740$ full plane, including the source node).}
 \label{fig:gp10}
 \end{figure}
 
@@ -185,7 +188,7 @@ $\beta=0.99980$ ($\gamma=50$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1}; grey marks cells that are not evaluated because the
 reference field is below threshold. The worst component error is
-$1.590$ ($7.095$ including the source node).}
+$3.442$ ($7.095$ full plane, including the source node).}
 \label{fig:gp50}
 \end{figure}
 
@@ -207,7 +210,7 @@ $\beta=0.99995$ ($\gamma=100$) on the $128^3$ grid, cell
 $5\times10^{-8}$\,m, with the same field, colour-bar and error conventions
 as Fig.~\ref{fig:gp1}; grey marks cells that are not evaluated because the
 reference field is below threshold. The worst component error is
-$3.490$ ($4.263$ including the source node).}
+$5.988$ ($5.988$ full plane; the source-coincident node is $4.263$).}
 \label{fig:gp100}
 \end{figure}
 
